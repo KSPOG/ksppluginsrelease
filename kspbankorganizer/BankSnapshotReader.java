@@ -5,11 +5,13 @@ import java.util.Comparator;
 import java.util.List;
 import javax.inject.Inject;
 import net.runelite.api.Client;
+import net.runelite.api.Item;
+import net.runelite.api.ItemContainer;
+import net.runelite.api.gameval.InventoryID;
 import net.runelite.api.ItemComposition;
 import net.runelite.api.Varbits;
 import net.runelite.client.game.ItemManager;
 import net.runelite.client.plugins.microbot.Microbot;
-import net.runelite.client.plugins.microbot.util.bank.Rs2Bank;
 import net.runelite.client.plugins.microbot.util.inventory.Rs2ItemModel;
 
 /**
@@ -48,12 +50,37 @@ final class BankSnapshotReader
 
     private BankSnapshot readOnClientThread()
     {
-        if (!Rs2Bank.isOpen())
+        // Read the live BANK item container directly. Rs2Bank.bankItems() is a
+        // mirrored cache and can legitimately lag the already-visible bank UI by
+        // a tick. The organizer must be able to Preview/Scan an already-open bank
+        // without depending on that cache or on nearest-bank pathfinding.
+        ItemContainer bankContainer = client.getItemContainer(InventoryID.BANK);
+        if (bankContainer == null)
         {
-            throw new IllegalStateException("Open your bank before running the organizer.");
+            throw new IllegalStateException("Bank interface is open, but the live bank item container is not ready yet.");
         }
 
-        List<Rs2ItemModel> bankItems = new ArrayList<>(Rs2Bank.bankItems());
+        List<Rs2ItemModel> bankItems = new ArrayList<>();
+        Item[] items = bankContainer.getItems();
+        if (items != null)
+        {
+            for (int slot = 0; slot < items.length; slot++)
+            {
+                Item item = items[slot];
+                if (item == null || item.getId() == -1)
+                {
+                    continue;
+                }
+
+                ItemComposition composition = client.getItemDefinition(item.getId());
+                if (composition == null || composition.getPlaceholderTemplateId() > 0)
+                {
+                    continue;
+                }
+
+                bankItems.add(new Rs2ItemModel(item, composition, slot));
+            }
+        }
         bankItems.sort(Comparator.comparingInt(Rs2ItemModel::getSlot));
 
         int[] tabCounts = readTabCounts();

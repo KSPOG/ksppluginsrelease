@@ -50,30 +50,40 @@ final class BankActuator
 
     boolean ensureBankOpen()
     {
-        // Microbot's Rs2Bank.isOpen() is the authoritative bank-open check used
-        // throughout the bank API. The widget tree can be one or more ticks ahead
-        // of the bank mirror, so treat "bank open" and "bank UI ready" separately.
-        if (!isRs2BankOpen())
+        // Do not use nearest-bank/pathfinding when the bank interface is already
+        // on screen. The live RuneLite widget tree is the authoritative UI signal.
+        if (isBankUiOpenOnClient())
         {
-            if (!Rs2Bank.openBank() && !isRs2BankOpen())
-            {
-                return false;
-            }
-
-            if (!Global.sleepUntil(this::isRs2BankOpen, 5000))
-            {
-                return false;
-            }
+            // Give the bank container a short settling window, but do not require
+            // rearrangement controls for Preview/Scan. Those controls are only
+            // needed later when Organize actually starts moving items.
+            Global.sleepUntil(this::isLiveBankItemWidgetPresent, 2000);
+            return true;
         }
 
-        // The bank can report open before the item container and rearrangement
-        // controls have finished being laid out. Wait for the actual controls.
-        return Global.sleepUntil(() ->
-            isRs2BankOpen()
-                && isLiveBankItemWidgetPresent()
-                && (isWidgetVisibleOnClient(BANK_SWAP_BUTTON_CHILD_ID)
-                    || isWidgetVisibleOnClient(BANK_INSERT_BUTTON_CHILD_ID)),
-            5000);
+        // Only attempt Rs2Bank.openBank() when the bank UI is genuinely closed.
+        if (!Rs2Bank.openBank() && !isBankUiOpenOnClient())
+        {
+            return false;
+        }
+
+        return Global.sleepUntil(this::isBankUiOpenOnClient, 5000);
+    }
+
+    private boolean isBankUiOpenOnClient()
+    {
+        return Microbot.getClientThread().runOnClientThreadOptional(() ->
+        {
+            // Bankmain.UNIVERSE (12:1) is the same root used by Rs2Bank.isOpen(),
+            // but reading it directly avoids a race with the Microbot bank mirror.
+            Widget universe = client.getWidget(BANK_GROUP_ID, 1);
+            if (universe == null || universe.isHidden())
+            {
+                return false;
+            }
+            Rectangle bounds = universe.getBounds();
+            return bounds != null && bounds.width > 0 && bounds.height > 0;
+        }).orElse(false);
     }
 
     private boolean isRs2BankOpen()
