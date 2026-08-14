@@ -8,6 +8,7 @@ import java.util.Map;
 import javax.inject.Inject;
 import net.runelite.api.ItemComposition;
 import net.runelite.api.widgets.WidgetItem;
+import net.runelite.api.gameval.InterfaceID;
 import net.runelite.client.plugins.microbot.Microbot;
 import net.runelite.client.ui.overlay.WidgetItemOverlay;
 
@@ -34,21 +35,39 @@ final class KspBankOrganizerItemOverlay extends WidgetItemOverlay
         this.engine = engine;
         this.categorizer = new AutoCategorizer();
         this.categorizer.configure(config);
+
+        // Register the bank item interface when the overlay is constructed.
+        // WidgetItemOverlay then supplies real canvas-space WidgetItem bounds.
+        showOnBank();
     }
 
     /**
-     * Register the bank item interface with RuneLite's WidgetItemOverlay.
-     * WidgetItemOverlay exposes showOnBank() as protected, so the plugin
-     * lifecycle delegates through this public package-facing method.
+     * Kept for compatibility with older plugin lifecycle code.
+     * Registration is already performed by the constructor.
      */
     void enableBankItems()
     {
-        showOnBank();
+        // Intentionally empty.
     }
 
     @Override
     public void renderItemOverlay(Graphics2D graphics, int itemId, WidgetItem widgetItem)
     {
+        // WidgetItemOverlay can receive WidgetItems from several interfaces.
+        // Restrict rendering to the actual bank item container; otherwise
+        // inventory-side WidgetItems can be drawn at unrelated coordinates.
+        if (widgetItem == null || widgetItem.getWidget() == null)
+        {
+            return;
+        }
+
+        int parentId = widgetItem.getWidget().getId();
+        if (parentId != InterfaceID.Bankmain.ITEMS
+            && parentId != InterfaceID.SharedBank.ITEMS)
+        {
+            return;
+        }
+
         if (!config.showOverlay() || !config.showCategoryBoxes())
         {
             return;
