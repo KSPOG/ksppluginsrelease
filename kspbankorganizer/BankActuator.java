@@ -50,11 +50,29 @@ final class BankActuator
 
     boolean ensureBankOpen()
     {
-        if (Rs2Bank.isOpen())
+        if (!Rs2Bank.isOpen())
         {
-            return true;
+            if (!Rs2Bank.openBank())
+            {
+                return false;
+            }
+
+            // Rs2Bank.isOpen() can become true before the bank interface has
+            // finished being constructed/rendered.  Do not touch bank widgets
+            // until the actual bank controls are present.
+            if (!Global.sleepUntil(Rs2Bank::isOpen, 5000))
+            {
+                return false;
+            }
         }
-        return Rs2Bank.openBank() && Global.sleepUntil(Rs2Bank::isOpen, 5000);
+
+        // Wait for the graphical bank interface, not merely the logical
+        // isOpen() state.  The rearrange buttons are part of the bank bottom
+        // widget and can appear a few client ticks after the bank opens.
+        return Global.sleepUntil(() ->
+            Rs2Widget.isWidgetVisible(BANK_GROUP_ID, BANK_SWAP_BUTTON_CHILD_ID)
+                || Rs2Widget.isWidgetVisible(BANK_GROUP_ID, BANK_INSERT_BUTTON_CHILD_ID),
+            5000);
     }
 
     boolean isBankInsertMode()
@@ -94,24 +112,39 @@ final class BankActuator
         int childId = insert ? BANK_INSERT_BUTTON_CHILD_ID : BANK_SWAP_BUTTON_CHILD_ID;
         String targetName = insert ? "Insert" : "Swap";
 
-        if (!Rs2Widget.isWidgetVisible(BANK_GROUP_ID, childId))
+        // The bank can report isOpen() before the bottom controls are rendered.
+        // Wait for the specific target control instead of failing immediately.
+        boolean controlReady = Global.sleepUntil(
+            () -> Rs2Widget.isWidgetVisible(BANK_GROUP_ID, childId),
+            5000);
+        if (!controlReady)
         {
             return ActuatorResult.fail(
                 "Bank " + targetName + " control " + BANK_GROUP_ID + ":" + childId
-                    + " is not visible. Current mode=" + current + ".");
+                    + " did not become visible within 5 seconds. Current mode=" + bankRearrangeMode() + ".");
         }
 
-        for (int attempt = 1; attempt <= 3; attempt++)
+        for (int attempt = 1; attempt <= 5; attempt++)
         {
             if (Thread.currentThread().isInterrupted())
             {
                 return ActuatorResult.fail("Interrupted while switching bank rearrangement mode.");
             }
 
+            // Re-check visibility before every attempt because the bank can
+            // rebuild the widget tree after a click.
+            if (!Rs2Widget.isWidgetVisible(BANK_GROUP_ID, childId))
+            {
+                if (!Global.sleepUntil(() -> Rs2Widget.isWidgetVisible(BANK_GROUP_ID, childId), 2000))
+                {
+                    continue;
+                }
+            }
+
             boolean clicked = Rs2Widget.clickWidget(BANK_GROUP_ID, childId);
             if (!clicked)
             {
-                Global.sleep(100);
+                Global.sleep(200);
                 continue;
             }
 
@@ -131,7 +164,7 @@ final class BankActuator
 
         return ActuatorResult.fail(
             "Could not switch bank rearrange mode to " + targetName
-                + " after 3 attempts. Current mode=" + bankRearrangeMode()
+                + " after 5 attempts. Current mode=" + bankRearrangeMode()
                 + ". Expected widget=" + BANK_GROUP_ID + ":" + childId + ".");
     }
 
