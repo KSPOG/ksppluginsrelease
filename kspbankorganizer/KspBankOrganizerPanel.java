@@ -100,19 +100,23 @@ final class KspBankOrganizerPanel extends PluginPanel
         content.add(Box.createVerticalStrut(3));
 
         JPanel mappings = section("Tab Mappings");
-        JPanel grid = new JPanel(new GridLayout(3, 3, 2, 2));
+        JPanel grid = new JPanel(new GridLayout(9, 1, 0, 0));
         grid.setOpaque(false);
         grid.setAlignmentX(Component.LEFT_ALIGNMENT);
-        grid.setMaximumSize(new Dimension(Integer.MAX_VALUE, 78));
-        grid.add(mappingCell("Teleports", config.teleportsTarget(), ItemCategory.TELEPORTS));
-        grid.add(mappingCell("Combat", config.gearTarget(), ItemCategory.GEAR));
-        grid.add(mappingCell("Potions", config.potionsTarget(), ItemCategory.POTIONS));
-        grid.add(mappingCell("Food", config.foodTarget(), ItemCategory.FOOD));
-        grid.add(mappingCell("Skilling", config.skillingTarget(), ItemCategory.SKILLING));
-        grid.add(mappingCell("Materials", config.materialsTarget(), ItemCategory.RAW_MATERIALS));
-        grid.add(mappingCell("High Alch", config.highAlchTarget(), ItemCategory.HIGH_ALCH));
-        grid.add(mappingCell("Currency", config.currencyTarget(), ItemCategory.CURRENCY));
-        grid.add(mappingCell("Quest/Misc", config.questMiscTarget(), ItemCategory.QUEST_MISC));
+        grid.setMaximumSize(new Dimension(Integer.MAX_VALUE, 135));
+
+        // Display mappings in physical tab order (1 -> 9). A single readable
+        // column prevents the category names and tab numbers from being
+        // compressed into unreadable three-column cells in the narrow sidebar.
+        grid.add(mappingCell("Tab 1", "Teleports", config.teleportsTarget(), ItemCategory.TELEPORTS));
+        grid.add(mappingCell("Tab 2", "Combat", config.gearTarget(), ItemCategory.GEAR));
+        grid.add(mappingCell("Tab 3", "Potions", config.potionsTarget(), ItemCategory.POTIONS));
+        grid.add(mappingCell("Tab 4", "Food", config.foodTarget(), ItemCategory.FOOD));
+        grid.add(mappingCell("Tab 5", "Skilling", config.skillingTarget(), ItemCategory.SKILLING));
+        grid.add(mappingCell("Tab 6", "Materials", config.materialsTarget(), ItemCategory.RAW_MATERIALS));
+        grid.add(mappingCell("Tab 7", "High Alch", config.highAlchTarget(), ItemCategory.HIGH_ALCH));
+        grid.add(mappingCell("Tab 8", "Currency", config.currencyTarget(), ItemCategory.CURRENCY));
+        grid.add(mappingCell("Tab 9", "Quest/Misc", config.questMiscTarget(), ItemCategory.QUEST_MISC));
         mappings.add(grid);
 
         JLabel compactNote = new JLabel("Empty category tabs are skipped automatically.");
@@ -219,23 +223,30 @@ final class KspBankOrganizerPanel extends PluginPanel
         return row;
     }
 
-    private static JPanel mappingCell(String name, BankTarget target, ItemCategory category)
+    private static JPanel mappingCell(String tabLabel, String name, BankTarget target, ItemCategory category)
     {
-        JPanel cell = new JPanel(new BorderLayout(2, 0));
+        JPanel cell = new JPanel(new BorderLayout(8, 0));
         cell.setOpaque(false);
         cell.setBorder(BorderFactory.createEmptyBorder(0, 1, 0, 1));
+        cell.setMaximumSize(new Dimension(Integer.MAX_VALUE, 15));
 
-        JLabel left = new JLabel(name);
-        left.setForeground(category.getColor());
-        left.setFont(FontManager.getRunescapeSmallFont().deriveFont(9f));
+        JLabel tab = new JLabel(tabLabel);
+        tab.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
+        tab.setFont(FontManager.getRunescapeSmallFont().deriveFont(9f));
+        tab.setPreferredSize(new Dimension(34, 15));
 
-        JLabel right = new JLabel(shortTarget(target));
-        right.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
-        right.setFont(FontManager.getRunescapeSmallFont().deriveFont(9f));
-        right.setHorizontalAlignment(JLabel.RIGHT);
+        JLabel categoryLabel = new JLabel(name);
+        categoryLabel.setForeground(category.getColor());
+        categoryLabel.setFont(FontManager.getRunescapeSmallFont().deriveFont(9f));
 
-        cell.add(left, BorderLayout.WEST);
-        cell.add(right, BorderLayout.EAST);
+        JLabel targetLabel = new JLabel(shortTarget(target));
+        targetLabel.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
+        targetLabel.setFont(FontManager.getRunescapeSmallFont().deriveFont(9f));
+        targetLabel.setHorizontalAlignment(JLabel.RIGHT);
+
+        cell.add(tab, BorderLayout.WEST);
+        cell.add(categoryLabel, BorderLayout.CENTER);
+        cell.add(targetLabel, BorderLayout.EAST);
         return cell;
     }
 

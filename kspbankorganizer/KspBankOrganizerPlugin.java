@@ -33,7 +33,7 @@ import net.runelite.client.ui.overlay.OverlayManager;
 @Slf4j
 public class KspBankOrganizerPlugin extends Plugin
 {
-    public static final String version = "1.1.4";
+    public static final String version = "1.1.7";
 
     @Inject
     private KspBankOrganizerConfig config;
@@ -46,6 +46,9 @@ public class KspBankOrganizerPlugin extends Plugin
 
     @Inject
     private KspBankOrganizerOverlay overlay;
+
+    @Inject
+    private KspBankOrganizerItemOverlay itemOverlay;
 
     @Inject
     private ClientToolbar clientToolbar;
@@ -65,6 +68,8 @@ public class KspBankOrganizerPlugin extends Plugin
     protected void startUp()
     {
         overlayManager.add(overlay);
+        overlayManager.add(itemOverlay);
+        itemOverlay.enableBankItems();
         executor = Executors.newSingleThreadExecutor(runnable -> {
             Thread thread = new Thread(runnable, "ksp-bank-organizer");
             thread.setDaemon(true);
@@ -86,6 +91,7 @@ public class KspBankOrganizerPlugin extends Plugin
         }
         removeSidePanel();
         overlayManager.remove(overlay);
+        overlayManager.remove(itemOverlay);
         log.info("KSP Bank Organizer disabled.");
     }
 
