@@ -80,6 +80,13 @@ final class BankOrganizerEngine
             int baselineCount = initial.stackCount();
             Map<Integer, Integer> baselineQuantities = quantityMap(initial);
 
+            setPhase("Preparing bank rearrangement");
+            BankActuator.ActuatorResult swapMode = actuator.ensureBankSwapMode();
+            if (!swapMode.success())
+            {
+                return fail(swapMode.message());
+            }
+
             setPhase("Moving categories");
             String movementError = executeCategoryMoves(plan, config, baselineCount, baselineQuantities);
             if (movementError != null)
@@ -89,6 +96,12 @@ final class BankOrganizerEngine
 
             if (config.sortWithinTabs())
             {
+                BankActuator.ActuatorResult insertMode = actuator.ensureBankInsertMode();
+                if (!insertMode.success())
+                {
+                    return fail(insertMode.message());
+                }
+
                 setPhase("Smart sorting");
                 String sortError = sortConfiguredTabs(plan, config, baselineCount, baselineQuantities);
                 if (sortError != null)
@@ -124,17 +137,79 @@ final class BankOrganizerEngine
 
     private List<PlannedItem> buildPlan(BankSnapshot snapshot, KspBankOrganizerConfig config)
     {
-        List<PlannedItem> plan = new ArrayList<>();
+        List<PlannedItem> raw = new ArrayList<>();
         Map<Integer, ItemCategory> categories = new HashMap<>();
-        Map<Integer, Integer> targets = new HashMap<>();
 
+        // First classify everything without assigning physical tab numbers.
+        Map<ItemCategory, Integer> categoryConfiguredTarget = new EnumMap<>(ItemCategory.class);
         for (BankSnapshot.BankStack stack : snapshot.items())
         {
             ItemCategory category = categorizer.categorize(stack);
-            int target = targetFor(category, config);
-            plan.add(new PlannedItem(stack.itemId(), stack.name(), category, target));
+            int configuredTarget = targetFor(category, config);
+            categoryConfiguredTarget.putIfAbsent(category, configuredTarget);
             categories.put(stack.itemId(), category);
-            targets.put(stack.itemId(), target);
+            raw.add(new PlannedItem(stack.itemId(), stack.name(), category, configuredTarget));
+        }
+
+        // OSRS cannot create an empty tab gap. Treat configured tab numbers as
+        // category ordering priorities and compact only populated categories
+        // into sequential physical tabs. Main/Ignore remain fixed.
+        List<ItemCategory> populatedTabCategories = new ArrayList<>();
+        for (ItemCategory category : ItemCategory.values())
+        {
+            int target = categoryConfiguredTarget.getOrDefault(category, -1);
+            if (target > 0)
+            {
+                populatedTabCategories.add(category);
+            }
+        }
+        populatedTabCategories.sort(Comparator
+            .comparingInt((ItemCategory c) -> categoryConfiguredTarget.getOrDefault(c, Integer.MAX_VALUE))
+            .thenComparingInt(Enum::ordinal));
+
+        Map<ItemCategory, Integer> effectiveTargets = new EnumMap<>(ItemCategory.class);
+        int nextPhysicalTab = 1;
+        for (ItemCategory category : populatedTabCategories)
+        {
+            // Only categories actually present in the bank need a physical tab.
+            boolean populated = false;
+            for (PlannedItem item : raw)
+            {
+                if (item.category() == category)
+                {
+                    populated = true;
+                    break;
+                }
+            }
+            if (populated)
+            {
+                effectiveTargets.put(category, nextPhysicalTab++);
+            }
+        }
+
+        List<PlannedItem> plan = new ArrayList<>(raw.size());
+        Map<Integer, Integer> targets = new HashMap<>();
+        for (PlannedItem item : raw)
+        {
+            int configuredTarget = item.targetTab();
+            int effectiveTarget;
+            if (configuredTarget < 0)
+            {
+                effectiveTarget = -1;
+            }
+            else if (configuredTarget == 0)
+            {
+                effectiveTarget = 0;
+            }
+            else
+            {
+                effectiveTarget = effectiveTargets.getOrDefault(item.category(), configuredTarget);
+            }
+
+            PlannedItem resolved = new PlannedItem(
+                item.itemId(), item.name(), item.category(), effectiveTarget);
+            plan.add(resolved);
+            targets.put(item.itemId(), effectiveTarget);
         }
 
         categoriesById = Collections.unmodifiableMap(categories);

@@ -12,6 +12,11 @@ public enum OperationMode
         this.displayName = displayName;
     }
 
+    public String displayName()
+    {
+        return displayName;
+    }
+
     @Override
     public String toString()
     {

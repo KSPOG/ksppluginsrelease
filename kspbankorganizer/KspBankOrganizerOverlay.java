@@ -27,7 +27,6 @@ final class KspBankOrganizerOverlay extends OverlayPanel
         this.config = config;
         this.engine = engine;
         setPosition(OverlayPosition.TOP_LEFT);
-        setNaughty();
     }
 
     @Override
@@ -48,7 +47,7 @@ final class KspBankOrganizerOverlay extends OverlayPanel
             .text("KSP Bank Organizer v" + KspBankOrganizerPlugin.version)
             .color(Color.GREEN)
             .build());
-        panelComponent.getChildren().add(LineComponent.builder().left("Mode").right(engine.activeMode().toString()).build());
+        panelComponent.getChildren().add(LineComponent.builder().left("Mode").right(engine.phase().equals("Idle") ? "Ready" : engine.activeMode().displayName()).build());
         panelComponent.getChildren().add(LineComponent.builder().left("Phase").right(engine.phase()).build());
         panelComponent.getChildren().add(LineComponent.builder().left("Stacks planned").right(String.valueOf(engine.plannedCount())).build());
         panelComponent.getChildren().add(LineComponent.builder().left("Misplaced").right(String.valueOf(engine.misplacedCount())).build());

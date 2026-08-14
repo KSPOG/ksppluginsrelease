@@ -22,6 +22,7 @@ import net.runelite.client.plugins.microbot.util.widget.Rs2Widget;
 final class BankActuator
 {
     private static final int BANK_GROUP_ID = 12;
+    private static final int BANK_SWAP_BUTTON_CHILD_ID = 17;
     private static final int BANK_INSERT_BUTTON_CHILD_ID = 19;
     private static final int BANK_TAB_CONTAINER_DYNAMIC_MAIN_INDEX = 10;
 
@@ -56,158 +57,88 @@ final class BankActuator
         return Rs2Bank.openBank() && Global.sleepUntil(Rs2Bank::isOpen, 5000);
     }
 
+    boolean isBankInsertMode()
+    {
+        return bankRearrangeMode() == 1;
+    }
+
+    boolean isBankSwapMode()
+    {
+        return bankRearrangeMode() == 0;
+    }
+
     ActuatorResult ensureBankInsertMode()
+    {
+        return ensureBankRearrangeMode(true);
+    }
+
+    ActuatorResult ensureBankSwapMode()
+    {
+        return ensureBankRearrangeMode(false);
+    }
+
+    private ActuatorResult ensureBankRearrangeMode(boolean insert)
     {
         if (!ensureBankOpen())
         {
             return ActuatorResult.fail("Bank is not open.");
         }
 
-        int mode = bankRearrangeMode();
-        if (mode == 1)
+        int desired = insert ? 1 : 0;
+        int current = bankRearrangeMode();
+        if (current == desired)
         {
-            return ActuatorResult.ok("Bank rearrange mode is already Insert.");
+            return ActuatorResult.ok("Bank rearrange mode is already " + (insert ? "Insert" : "Swap") + ".");
         }
 
-        // Do not rely on a hard-coded 12:19 widget. The bank interface has
-        // changed across RuneLite/OSRS revisions and the insert/swap control
-        // can be exposed as a nested/dynamic child. Locate the live control by
-        // its operation text on the client thread, then invoke that exact widget.
-        InsertInvokeState invokeState = Microbot.getClientThread().runOnClientThreadOptional(() ->
-        {
-            Widget insertButton = findBankRearrangeWidget();
-            if (insertButton == null)
-            {
-                return InsertInvokeState.MISSING;
-            }
+        int childId = insert ? BANK_INSERT_BUTTON_CHILD_ID : BANK_SWAP_BUTTON_CHILD_ID;
+        String targetName = insert ? "Insert" : "Swap";
 
-            Rectangle bounds = insertButton.getBounds();
-            if (!validCanvasRectangleOnClientThread(bounds))
-            {
-                return InsertInvokeState.OUTSIDE_CANVAS;
-            }
-
-            Rs2Widget.clickWidgetFast(insertButton);
-            return InsertInvokeState.INVOKED;
-        }).orElse(InsertInvokeState.CLIENT_THREAD_FAILED);
-
-        if (invokeState == InsertInvokeState.MISSING)
+        if (!Rs2Widget.isWidgetVisible(BANK_GROUP_ID, childId))
         {
             return ActuatorResult.fail(
-                "Could not find the live bank Insert/Swap control. Expected bank group 12, "
-                + "but no visible widget with an Insert/Swap action was present.");
-        }
-        if (invokeState == InsertInvokeState.OUTSIDE_CANVAS)
-        {
-            return ActuatorResult.fail("Bank Insert/Swap control bounds were outside the canvas; refusing interaction.");
-        }
-        if (invokeState != InsertInvokeState.INVOKED)
-        {
-            return ActuatorResult.fail("Could not invoke the bank Insert/Swap control on the client thread.");
+                "Bank " + targetName + " control " + BANK_GROUP_ID + ":" + childId
+                    + " is not visible. Current mode=" + current + ".");
         }
 
-        return Global.sleepUntil(() -> bankRearrangeMode() == 1, 2500)
-            ? ActuatorResult.ok("Bank rearrange mode set to Insert.")
-            : ActuatorResult.fail(
-                "Bank rearrange mode did not switch to Insert after invoking the live Insert/Swap control. Current mode="
-                    + bankRearrangeMode());
+        for (int attempt = 1; attempt <= 3; attempt++)
+        {
+            if (Thread.currentThread().isInterrupted())
+            {
+                return ActuatorResult.fail("Interrupted while switching bank rearrangement mode.");
+            }
+
+            boolean clicked = Rs2Widget.clickWidget(BANK_GROUP_ID, childId);
+            if (!clicked)
+            {
+                Global.sleep(100);
+                continue;
+            }
+
+            if (Global.sleepUntil(() -> bankRearrangeMode() == desired, 1500))
+            {
+                return ActuatorResult.ok("Bank rearrange mode set to " + targetName + ".");
+            }
+
+            // Re-read the state before retrying. Do not blindly click if another
+            // action already changed the mode.
+            if (bankRearrangeMode() == desired)
+            {
+                return ActuatorResult.ok("Bank rearrange mode set to " + targetName + ".");
+            }
+            Global.sleep(120);
+        }
+
+        return ActuatorResult.fail(
+            "Could not switch bank rearrange mode to " + targetName
+                + " after 3 attempts. Current mode=" + bankRearrangeMode()
+                + ". Expected widget=" + BANK_GROUP_ID + ":" + childId + ".");
     }
 
-    /**
-     * Finds the live bank rearrange button without assuming a fixed child ID.
-     * RuneLite's bank interface may expose the control as a static, dynamic,
-     * or nested widget. All widget access remains on the client thread.
-     */
-    private Widget findBankRearrangeWidget()
-    {
-        Widget root = client.getWidget(BANK_GROUP_ID, 0);
-        if (root == null)
-        {
-            return null;
-        }
-
-        Set<Widget> visited = new HashSet<>();
-        Widget result = findRearrangeWidgetRecursive(root, visited, 0);
-        if (result != null)
-        {
-            return result;
-        }
-
-        // Keep the old direct IDs as a fallback for builds where the operation
-        // text is not exposed on the widget.
-        for (int childId : new int[] {BANK_INSERT_BUTTON_CHILD_ID, 17})
-        {
-            Widget widget = client.getWidget(BANK_GROUP_ID, childId);
-            if (widget != null && !widget.isHidden() && validCanvasRectangleOnClientThread(widget.getBounds()))
-            {
-                return widget;
-            }
-        }
-        return null;
-    }
-
-    private Widget findRearrangeWidgetRecursive(Widget widget, Set<Widget> visited, int depth)
-    {
-        if (widget == null || depth > 6 || !visited.add(widget))
-        {
-            return null;
-        }
-
-        if (!widget.isHidden() && validCanvasRectangleOnClientThread(widget.getBounds()))
-        {
-            String[] actions = widget.getActions();
-            if (actions != null)
-            {
-                boolean rearrangeAction = false;
-                for (String action : actions)
-                {
-                    if (action == null)
-                    {
-                        continue;
-                    }
-                    String normalized = action.trim().toLowerCase();
-                    if (normalized.equals("insert") || normalized.equals("swap")
-                        || normalized.contains("insert mode") || normalized.contains("swap mode"))
-                    {
-                        rearrangeAction = true;
-                        break;
-                    }
-                }
-                if (rearrangeAction)
-                {
-                    return widget;
-                }
-            }
-        }
-
-        Widget[] children = widget.getChildren();
-        if (children != null)
-        {
-            for (Widget child : children)
-            {
-                Widget found = findRearrangeWidgetRecursive(child, visited, depth + 1);
-                if (found != null)
-                {
-                    return found;
-                }
-            }
-        }
-
-        Widget[] dynamicChildren = widget.getDynamicChildren();
-        if (dynamicChildren != null)
-        {
-            for (Widget child : dynamicChildren)
-            {
-                Widget found = findRearrangeWidgetRecursive(child, visited, depth + 1);
-                if (found != null)
-                {
-                    return found;
-                }
-            }
-        }
-        return null;
-    }
-
+    // Bank rearrangement controls are fixed in the live bank interface used by
+    // the current Microbot/RuneLite build: 12:17 = Swap and 12:19 = Insert.
+    // Use Rs2Widget's client-thread-aware lookup/click path instead of recursively
+    // selecting an arbitrary widget whose action happens to contain "swap".
     ActuatorResult openTab(int tabIndex)
     {
         if (!ensureBankOpen())

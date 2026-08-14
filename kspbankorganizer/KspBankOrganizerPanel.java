@@ -12,7 +12,7 @@ import javax.swing.BoxLayout;
 import javax.swing.JButton;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
-import javax.swing.JScrollPane;
+import javax.swing.JTextArea;
 import javax.swing.SwingUtilities;
 import javax.swing.Timer;
 import javax.swing.border.EmptyBorder;
@@ -20,7 +20,7 @@ import net.runelite.client.ui.ColorScheme;
 import net.runelite.client.ui.FontManager;
 import net.runelite.client.ui.PluginPanel;
 
-/** RuneLite sidebar for controlling and monitoring the bank organizer. */
+/** Compact RuneLite sidebar for controlling and monitoring the bank organizer. */
 final class KspBankOrganizerPanel extends PluginPanel
 {
     private static final Color ACCENT = new Color(80, 220, 120);
@@ -36,7 +36,7 @@ final class KspBankOrganizerPanel extends PluginPanel
     private final JLabel misplacedValue = valueLabel();
     private final JLabel movedValue = valueLabel();
     private final JLabel sortedValue = valueLabel();
-    private final JLabel messageValue = new JLabel("Idle");
+    private final JTextArea messageValue = new JTextArea();
 
     private final JButton previewButton = new JButton("Preview / Scan Bank");
     private final JButton organizeButton = new JButton("Organize Bank");
@@ -56,11 +56,11 @@ final class KspBankOrganizerPanel extends PluginPanel
         JPanel content = new JPanel();
         content.setLayout(new BoxLayout(content, BoxLayout.Y_AXIS));
         content.setBackground(ColorScheme.DARK_GRAY_COLOR);
-        content.setBorder(new EmptyBorder(8, 8, 8, 8));
+        content.setBorder(new EmptyBorder(5, 5, 5, 5));
 
         JLabel title = new JLabel("KSP Bank Organizer");
         title.setForeground(ACCENT);
-        title.setFont(FontManager.getRunescapeBoldFont().deriveFont(18f));
+        title.setFont(FontManager.getRunescapeBoldFont().deriveFont(16f));
         title.setAlignmentX(Component.LEFT_ALIGNMENT);
         content.add(title);
 
@@ -69,12 +69,12 @@ final class KspBankOrganizerPanel extends PluginPanel
         version.setFont(FontManager.getRunescapeSmallFont());
         version.setAlignmentX(Component.LEFT_ALIGNMENT);
         content.add(version);
-        content.add(Box.createVerticalStrut(8));
+        content.add(Box.createVerticalStrut(3));
 
         JPanel actions = section("Actions");
-        configureWideButton(previewButton);
-        configureWideButton(organizeButton);
-        configureWideButton(stopButton);
+        configureButton(previewButton);
+        configureButton(organizeButton);
+        configureButton(stopButton);
         stopButton.setBackground(DANGER);
 
         previewButton.addActionListener(e -> plugin.startRun(OperationMode.PREVIEW));
@@ -82,12 +82,12 @@ final class KspBankOrganizerPanel extends PluginPanel
         stopButton.addActionListener(e -> plugin.stopRun());
 
         actions.add(previewButton);
-        actions.add(Box.createVerticalStrut(4));
+        actions.add(Box.createVerticalStrut(2));
         actions.add(organizeButton);
-        actions.add(Box.createVerticalStrut(4));
+        actions.add(Box.createVerticalStrut(2));
         actions.add(stopButton);
         content.add(actions);
-        content.add(Box.createVerticalStrut(6));
+        content.add(Box.createVerticalStrut(3));
 
         JPanel status = section("Status");
         status.add(row("Mode", modeValue));
@@ -97,34 +97,50 @@ final class KspBankOrganizerPanel extends PluginPanel
         status.add(row("Moved", movedValue));
         status.add(row("Sort moves", sortedValue));
         content.add(status);
-        content.add(Box.createVerticalStrut(6));
+        content.add(Box.createVerticalStrut(3));
 
         JPanel mappings = section("Tab Mappings");
-        mappings.add(mappingRow("Teleports", config.teleportsTarget(), ItemCategory.TELEPORTS));
-        mappings.add(mappingRow("Combat", config.gearTarget(), ItemCategory.GEAR));
-        mappings.add(mappingRow("Potions", config.potionsTarget(), ItemCategory.POTIONS));
-        mappings.add(mappingRow("Food", config.foodTarget(), ItemCategory.FOOD));
-        mappings.add(mappingRow("Skilling", config.skillingTarget(), ItemCategory.SKILLING));
-        mappings.add(mappingRow("Materials", config.materialsTarget(), ItemCategory.RAW_MATERIALS));
-        mappings.add(mappingRow("High Alch", config.highAlchTarget(), ItemCategory.HIGH_ALCH));
-        mappings.add(mappingRow("Currency", config.currencyTarget(), ItemCategory.CURRENCY));
-        mappings.add(mappingRow("Quest/Misc", config.questMiscTarget(), ItemCategory.QUEST_MISC));
+        JPanel grid = new JPanel(new GridLayout(3, 3, 2, 2));
+        grid.setOpaque(false);
+        grid.setAlignmentX(Component.LEFT_ALIGNMENT);
+        grid.setMaximumSize(new Dimension(Integer.MAX_VALUE, 78));
+        grid.add(mappingCell("Teleports", config.teleportsTarget(), ItemCategory.TELEPORTS));
+        grid.add(mappingCell("Combat", config.gearTarget(), ItemCategory.GEAR));
+        grid.add(mappingCell("Potions", config.potionsTarget(), ItemCategory.POTIONS));
+        grid.add(mappingCell("Food", config.foodTarget(), ItemCategory.FOOD));
+        grid.add(mappingCell("Skilling", config.skillingTarget(), ItemCategory.SKILLING));
+        grid.add(mappingCell("Materials", config.materialsTarget(), ItemCategory.RAW_MATERIALS));
+        grid.add(mappingCell("High Alch", config.highAlchTarget(), ItemCategory.HIGH_ALCH));
+        grid.add(mappingCell("Currency", config.currencyTarget(), ItemCategory.CURRENCY));
+        grid.add(mappingCell("Quest/Misc", config.questMiscTarget(), ItemCategory.QUEST_MISC));
+        mappings.add(grid);
+
+        JLabel compactNote = new JLabel("Empty category tabs are skipped automatically.");
+        compactNote.setForeground(ColorScheme.GRAY);
+        compactNote.setFont(FontManager.getRunescapeSmallFont().deriveFont(9f));
+        compactNote.setAlignmentX(Component.LEFT_ALIGNMENT);
+        mappings.add(Box.createVerticalStrut(2));
+        mappings.add(compactNote);
+
         content.add(mappings);
-        content.add(Box.createVerticalStrut(6));
+        content.add(Box.createVerticalStrut(3));
 
         JPanel result = section("Last Result");
         messageValue.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
         messageValue.setFont(FontManager.getRunescapeSmallFont());
-        messageValue.setVerticalAlignment(JLabel.TOP);
+        messageValue.setLineWrap(true);
+        messageValue.setWrapStyleWord(true);
+        messageValue.setEditable(false);
+        messageValue.setFocusable(false);
+        messageValue.setOpaque(false);
+        messageValue.setRows(3);
         messageValue.setAlignmentX(Component.LEFT_ALIGNMENT);
         result.add(messageValue);
         content.add(result);
 
-        JScrollPane scroll = new JScrollPane(content);
-        scroll.setBorder(BorderFactory.createEmptyBorder());
-        scroll.setBackground(ColorScheme.DARK_GRAY_COLOR);
-        scroll.getVerticalScrollBar().setUnitIncrement(16);
-        add(scroll, BorderLayout.CENTER);
+        // Deliberately no JScrollPane: the complete control surface is sized to
+        // fit the normal RuneLite plugin sidebar.
+        add(content, BorderLayout.NORTH);
 
         refreshTimer = new Timer(250, e -> refresh());
         refreshTimer.start();
@@ -145,7 +161,7 @@ final class KspBankOrganizerPanel extends PluginPanel
         }
 
         boolean running = plugin.isRunActive();
-        modeValue.setText(engine.activeMode().toString());
+        modeValue.setText(running ? engine.activeMode().displayName() : "Ready");
         phaseValue.setText(engine.phase());
         plannedValue.setText(String.valueOf(engine.plannedCount()));
         misplacedValue.setText(String.valueOf(engine.misplacedCount()));
@@ -157,7 +173,10 @@ final class KspBankOrganizerPanel extends PluginPanel
         {
             message = running ? "Organizer is running..." : "Idle";
         }
-        messageValue.setText("<html><body style='width:205px'>" + escapeHtml(message) + "</body></html>");
+        messageValue.setText(message);
+        messageValue.setForeground(messageLooksLikeError(message)
+            ? new Color(255, 125, 125)
+            : ColorScheme.LIGHT_GRAY_COLOR);
 
         previewButton.setEnabled(!running);
         organizeButton.setEnabled(!running);
@@ -171,7 +190,7 @@ final class KspBankOrganizerPanel extends PluginPanel
         panel.setBackground(ColorScheme.DARKER_GRAY_COLOR);
         panel.setBorder(BorderFactory.createCompoundBorder(
             BorderFactory.createMatteBorder(1, 0, 0, 0, ColorScheme.MEDIUM_GRAY_COLOR),
-            new EmptyBorder(6, 6, 6, 6)));
+            new EmptyBorder(4, 4, 4, 4)));
         panel.setAlignmentX(Component.LEFT_ALIGNMENT);
 
         JLabel label = new JLabel(title);
@@ -179,15 +198,15 @@ final class KspBankOrganizerPanel extends PluginPanel
         label.setFont(FontManager.getRunescapeSmallFont().deriveFont(Font.BOLD));
         label.setAlignmentX(Component.LEFT_ALIGNMENT);
         panel.add(label);
-        panel.add(Box.createVerticalStrut(4));
+        panel.add(Box.createVerticalStrut(2));
         return panel;
     }
 
     private static JPanel row(String leftText, JLabel right)
     {
-        JPanel row = new JPanel(new BorderLayout(6, 0));
+        JPanel row = new JPanel(new BorderLayout(4, 0));
         row.setOpaque(false);
-        row.setMaximumSize(new Dimension(Integer.MAX_VALUE, 21));
+        row.setMaximumSize(new Dimension(Integer.MAX_VALUE, 17));
         row.setAlignmentX(Component.LEFT_ALIGNMENT);
 
         JLabel left = new JLabel(leftText);
@@ -200,24 +219,31 @@ final class KspBankOrganizerPanel extends PluginPanel
         return row;
     }
 
-    private static JPanel mappingRow(String name, BankTarget target, ItemCategory category)
+    private static JPanel mappingCell(String name, BankTarget target, ItemCategory category)
     {
-        JPanel row = new JPanel(new BorderLayout(6, 0));
-        row.setOpaque(false);
-        row.setMaximumSize(new Dimension(Integer.MAX_VALUE, 21));
-        row.setAlignmentX(Component.LEFT_ALIGNMENT);
+        JPanel cell = new JPanel(new BorderLayout(2, 0));
+        cell.setOpaque(false);
+        cell.setBorder(BorderFactory.createEmptyBorder(0, 1, 0, 1));
 
-        JLabel left = new JLabel("● " + name);
+        JLabel left = new JLabel(name);
         left.setForeground(category.getColor());
-        left.setFont(FontManager.getRunescapeSmallFont());
+        left.setFont(FontManager.getRunescapeSmallFont().deriveFont(9f));
 
-        JLabel right = new JLabel(target.toString());
+        JLabel right = new JLabel(shortTarget(target));
         right.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
-        right.setFont(FontManager.getRunescapeSmallFont());
+        right.setFont(FontManager.getRunescapeSmallFont().deriveFont(9f));
+        right.setHorizontalAlignment(JLabel.RIGHT);
 
-        row.add(left, BorderLayout.WEST);
-        row.add(right, BorderLayout.EAST);
-        return row;
+        cell.add(left, BorderLayout.WEST);
+        cell.add(right, BorderLayout.EAST);
+        return cell;
+    }
+
+    private static String shortTarget(BankTarget target)
+    {
+        if (target == null) return "-";
+        int tab = target.getTabIndex();
+        return tab < 0 ? "Ignore" : tab == 0 ? "Main" : "Tab " + tab;
     }
 
     private static JLabel valueLabel()
@@ -228,18 +254,22 @@ final class KspBankOrganizerPanel extends PluginPanel
         return label;
     }
 
-    private static void configureWideButton(JButton button)
+    private static void configureButton(JButton button)
     {
         button.setFocusPainted(false);
         button.setFont(FontManager.getRunescapeSmallFont());
         button.setAlignmentX(Component.LEFT_ALIGNMENT);
-        button.setMaximumSize(new Dimension(Integer.MAX_VALUE, 30));
+        button.setMaximumSize(new Dimension(Integer.MAX_VALUE, 25));
+        button.setPreferredSize(new Dimension(0, 25));
     }
 
-    private static String escapeHtml(String text)
+    private static boolean messageLooksLikeError(String message)
     {
-        return text.replace("&", "&amp;")
-            .replace("<", "&lt;")
-            .replace(">", "&gt;");
+        String lower = message.toLowerCase();
+        return lower.contains("could not")
+            || lower.contains("cannot")
+            || lower.contains("failed")
+            || lower.contains("error")
+            || lower.contains("stopped");
     }
 }
