@@ -71,12 +71,6 @@ final class BankOrganizerEngine
                 return RunResult.ok(lastMessage, movedCount, sortedCount);
             }
 
-            BankActuator.ActuatorResult insertMode = actuator.ensureBankInsertMode();
-            if (!insertMode.success())
-            {
-                return fail(insertMode.message());
-            }
-
             int baselineCount = initial.stackCount();
             Map<Integer, Integer> baselineQuantities = quantityMap(initial);
 

@@ -19,7 +19,7 @@ import net.runelite.client.ui.NavigationButton;
 import net.runelite.client.ui.overlay.OverlayManager;
 
 @PluginDescriptor(
-        name = PluginConstants.KSP + "Bank Organizer",
+        name = PluginConstants.KSP +"Bank Organizer",
     description = "Automatically categorizes, moves and smart-sorts real OSRS bank tabs.",
     tags = {"bank", "organizer", "sort", "tabs", "ksp"},
     authors = {"KSP"},

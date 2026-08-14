@@ -116,7 +116,7 @@ final class KspBankOrganizerPanel extends PluginPanel
         mappings.add(grid);
 
         JLabel compactNote = new JLabel("Empty category tabs are skipped automatically.");
-        compactNote.setForeground(ColorScheme.GRAY);
+        compactNote.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
         compactNote.setFont(FontManager.getRunescapeSmallFont().deriveFont(9f));
         compactNote.setAlignmentX(Component.LEFT_ALIGNMENT);
         mappings.add(Box.createVerticalStrut(2));
