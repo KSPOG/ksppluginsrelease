@@ -1,0 +1,24 @@
+package net.runelite.client.plugins.microbot.kspmadcow;
+
+public enum KspMadCowState {
+    STARTING,
+    BANKING,
+    MINIGAME_TELEPORTING,
+    USING_REFRESHMENT_POOL,
+    CHARGING_COWBELL,
+    EQUIPPING_MOOLETA,
+    USING_POTION,
+    RESTORING_PRAYER,
+    MANAGING_PRAYERS,
+    TRAVELLING,
+    ENTERING_INSTANCE,
+    FIGHTING,
+    HEALING,
+    DODGING,
+    BURYING_BONES,
+    LOOTING,
+    WAITING_FOR_RESPAWN,
+    LEAVING_INSTANCE,
+    ERROR,
+    STOPPED
+}
