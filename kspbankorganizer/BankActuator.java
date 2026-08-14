@@ -50,44 +50,62 @@ final class BankActuator
 
     boolean ensureBankOpen()
     {
-        // Do not rely solely on Rs2Bank.isOpen(). In the current RuneLite/Microbot
-        // bank interface, the live Bankmain interface can already exist while
-        // Rs2Bank's higher-level state has not caught up. The widget tree is the
-        // authoritative signal for this actuator.
-        if (!isLiveBankInterfacePresent())
+        // Microbot's Rs2Bank.isOpen() is the authoritative bank-open check used
+        // throughout the bank API. The widget tree can be one or more ticks ahead
+        // of the bank mirror, so treat "bank open" and "bank UI ready" separately.
+        if (!isRs2BankOpen())
         {
-            if (!Rs2Bank.openBank())
+            if (!Rs2Bank.openBank() && !isRs2BankOpen())
             {
-                // A bank may have opened between the initial check and openBank().
-                if (!isLiveBankInterfacePresent())
-                {
-                    return false;
-                }
+                return false;
             }
 
-            if (!Global.sleepUntil(this::isLiveBankInterfacePresent, 5000))
+            if (!Global.sleepUntil(this::isRs2BankOpen, 5000))
             {
                 return false;
             }
         }
 
-        // The bank root can exist one or more client ticks before its children
-        // are laid out. Wait for the actual item container and rearrange controls.
+        // The bank can report open before the item container and rearrangement
+        // controls have finished being laid out. Wait for the actual controls.
         return Global.sleepUntil(() ->
-            isLiveBankInterfacePresent()
+            isRs2BankOpen()
                 && isLiveBankItemWidgetPresent()
                 && (isWidgetVisibleOnClient(BANK_SWAP_BUTTON_CHILD_ID)
                     || isWidgetVisibleOnClient(BANK_INSERT_BUTTON_CHILD_ID)),
             5000);
     }
 
-    private boolean isLiveBankInterfacePresent()
+    private boolean isRs2BankOpen()
     {
+        try
+        {
+            if (Rs2Bank.isOpen())
+            {
+                return true;
+            }
+        }
+        catch (Throwable ignored)
+        {
+            // Fall through to the direct widget check. This keeps the organizer
+            // usable during the short period where Rs2Bank is synchronizing.
+        }
+
         return Microbot.getClientThread().runOnClientThreadOptional(() ->
         {
-            Widget root = client.getWidget(BANK_GROUP_ID, 0);
-            return root != null && !root.isHidden();
+            // Rs2Bank.isOpen() currently resolves Bankmain.UNIVERSE (12:1).
+            Widget universe = client.getWidget(BANK_GROUP_ID, 1);
+            return universe != null
+                && !universe.isHidden()
+                && universe.getBounds() != null
+                && universe.getBounds().width > 0
+                && universe.getBounds().height > 0;
         }).orElse(false);
+    }
+
+    private boolean isLiveBankInterfacePresent()
+    {
+        return isRs2BankOpen();
     }
 
     private boolean isLiveBankItemWidgetPresent()
