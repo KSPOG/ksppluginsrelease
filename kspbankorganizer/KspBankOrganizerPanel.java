@@ -103,7 +103,7 @@ final class KspBankOrganizerPanel extends PluginPanel
         JPanel grid = new JPanel(new GridLayout(9, 1, 0, 0));
         grid.setOpaque(false);
         grid.setAlignmentX(Component.LEFT_ALIGNMENT);
-        grid.setMaximumSize(new Dimension(Integer.MAX_VALUE, 162));
+        grid.setMaximumSize(new Dimension(Integer.MAX_VALUE, 180));
 
         // Display mappings in physical tab order (1 -> 9). A single readable
         // column prevents the category names and tab numbers from being
@@ -121,7 +121,7 @@ final class KspBankOrganizerPanel extends PluginPanel
 
         JLabel compactNote = new JLabel("Empty category tabs are skipped automatically.");
         compactNote.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
-        compactNote.setFont(FontManager.getRunescapeSmallFont().deriveFont(10f));
+        compactNote.setFont(FontManager.getRunescapeSmallFont().deriveFont(10.5f));
         compactNote.setAlignmentX(Component.LEFT_ALIGNMENT);
         mappings.add(Box.createVerticalStrut(2));
         mappings.add(compactNote);
@@ -228,20 +228,20 @@ final class KspBankOrganizerPanel extends PluginPanel
         JPanel cell = new JPanel(new BorderLayout(8, 0));
         cell.setOpaque(false);
         cell.setBorder(BorderFactory.createEmptyBorder(0, 1, 0, 1));
-        cell.setMaximumSize(new Dimension(Integer.MAX_VALUE, 18));
+        cell.setMaximumSize(new Dimension(Integer.MAX_VALUE, 20));
 
         JLabel tab = new JLabel(tabLabel);
         tab.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
-        tab.setFont(FontManager.getRunescapeSmallFont().deriveFont(11f));
-        tab.setPreferredSize(new Dimension(38, 18));
+        tab.setFont(FontManager.getRunescapeFont().deriveFont(12f));
+        tab.setPreferredSize(new Dimension(42, 20));
 
         JLabel categoryLabel = new JLabel(name);
         categoryLabel.setForeground(category.getColor());
-        categoryLabel.setFont(FontManager.getRunescapeSmallFont().deriveFont(11f));
+        categoryLabel.setFont(FontManager.getRunescapeFont().deriveFont(12f));
 
         JLabel targetLabel = new JLabel(shortTarget(target));
         targetLabel.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
-        targetLabel.setFont(FontManager.getRunescapeSmallFont().deriveFont(11f));
+        targetLabel.setFont(FontManager.getRunescapeFont().deriveFont(12f));
         targetLabel.setHorizontalAlignment(JLabel.RIGHT);
 
         cell.add(tab, BorderLayout.WEST);

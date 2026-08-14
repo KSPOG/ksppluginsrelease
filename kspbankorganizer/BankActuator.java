@@ -50,29 +50,79 @@ final class BankActuator
 
     boolean ensureBankOpen()
     {
-        if (!Rs2Bank.isOpen())
+        // Do not rely solely on Rs2Bank.isOpen(). In the current RuneLite/Microbot
+        // bank interface, the live Bankmain interface can already exist while
+        // Rs2Bank's higher-level state has not caught up. The widget tree is the
+        // authoritative signal for this actuator.
+        if (!isLiveBankInterfacePresent())
         {
             if (!Rs2Bank.openBank())
             {
-                return false;
+                // A bank may have opened between the initial check and openBank().
+                if (!isLiveBankInterfacePresent())
+                {
+                    return false;
+                }
             }
 
-            // Rs2Bank.isOpen() can become true before the bank interface has
-            // finished being constructed/rendered.  Do not touch bank widgets
-            // until the actual bank controls are present.
-            if (!Global.sleepUntil(Rs2Bank::isOpen, 5000))
+            if (!Global.sleepUntil(this::isLiveBankInterfacePresent, 5000))
             {
                 return false;
             }
         }
 
-        // Wait for the graphical bank interface, not merely the logical
-        // isOpen() state.  The rearrange buttons are part of the bank bottom
-        // widget and can appear a few client ticks after the bank opens.
+        // The bank root can exist one or more client ticks before its children
+        // are laid out. Wait for the actual item container and rearrange controls.
         return Global.sleepUntil(() ->
-            Rs2Widget.isWidgetVisible(BANK_GROUP_ID, BANK_SWAP_BUTTON_CHILD_ID)
-                || Rs2Widget.isWidgetVisible(BANK_GROUP_ID, BANK_INSERT_BUTTON_CHILD_ID),
+            isLiveBankInterfacePresent()
+                && isLiveBankItemWidgetPresent()
+                && (isWidgetVisibleOnClient(BANK_SWAP_BUTTON_CHILD_ID)
+                    || isWidgetVisibleOnClient(BANK_INSERT_BUTTON_CHILD_ID)),
             5000);
+    }
+
+    private boolean isLiveBankInterfacePresent()
+    {
+        return Microbot.getClientThread().runOnClientThreadOptional(() ->
+        {
+            Widget root = client.getWidget(BANK_GROUP_ID, 0);
+            return root != null && !root.isHidden();
+        }).orElse(false);
+    }
+
+    private boolean isLiveBankItemWidgetPresent()
+    {
+        return Microbot.getClientThread().runOnClientThreadOptional(() ->
+        {
+            // Current Bankmain layout exposes the actual item widget at 12:12.
+            // Keep the container fallback because some builds expose 12:9 first.
+            Widget items = client.getWidget(BANK_GROUP_ID, 12);
+            if (items != null && !items.isHidden())
+            {
+                return items.getBounds() != null && items.getBounds().width > 0 && items.getBounds().height > 0;
+            }
+
+            Widget container = client.getWidget(BANK_GROUP_ID, 9);
+            return container != null
+                && !container.isHidden()
+                && container.getBounds() != null
+                && container.getBounds().width > 0
+                && container.getBounds().height > 0;
+        }).orElse(false);
+    }
+
+    private boolean isWidgetVisibleOnClient(int childId)
+    {
+        return Microbot.getClientThread().runOnClientThreadOptional(() ->
+        {
+            Widget widget = client.getWidget(BANK_GROUP_ID, childId);
+            if (widget == null || widget.isHidden())
+            {
+                return false;
+            }
+            Rectangle bounds = widget.getBounds();
+            return bounds != null && bounds.width > 0 && bounds.height > 0;
+        }).orElse(false);
     }
 
     boolean isBankInsertMode()
@@ -115,7 +165,7 @@ final class BankActuator
         // The bank can report isOpen() before the bottom controls are rendered.
         // Wait for the specific target control instead of failing immediately.
         boolean controlReady = Global.sleepUntil(
-            () -> Rs2Widget.isWidgetVisible(BANK_GROUP_ID, childId),
+            () -> isWidgetVisibleOnClient(childId),
             5000);
         if (!controlReady)
         {
@@ -133,9 +183,9 @@ final class BankActuator
 
             // Re-check visibility before every attempt because the bank can
             // rebuild the widget tree after a click.
-            if (!Rs2Widget.isWidgetVisible(BANK_GROUP_ID, childId))
+            if (!isWidgetVisibleOnClient(childId))
             {
-                if (!Global.sleepUntil(() -> Rs2Widget.isWidgetVisible(BANK_GROUP_ID, childId), 2000))
+                if (!Global.sleepUntil(() -> isWidgetVisibleOnClient(childId), 2000))
                 {
                     continue;
                 }
