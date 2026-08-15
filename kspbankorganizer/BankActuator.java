@@ -138,17 +138,76 @@ final class BankActuator
         }).orElse(false);
     }
 
-    private boolean isWidgetVisibleOnClient(int childId)
+    private boolean isRearrangeControlReadyOnClient(boolean insert)
     {
         return Microbot.getClientThread().runOnClientThreadOptional(() ->
         {
-            Widget widget = client.getWidget(BANK_GROUP_ID, childId);
+            Widget widget = client.getWidget(BANK_GROUP_ID, BANK_REARRANGE_BUTTON_CHILD_ID);
             if (widget == null || widget.isHidden())
             {
                 return false;
             }
+
+            // The bank uses ONE SWAP/INSERT toggle at 12:17. Its action changes
+            // with the current mode. Do not require a separate 12:19 widget and
+            // do not reject the control merely because getBounds() is temporarily
+            // unavailable during a bank-widget rebuild.
+            String[] actions = widget.getActions();
+            if (actions == null)
+            {
+                return false;
+            }
+
+            String wanted = insert ? "insert" : "swap";
+            for (String action : actions)
+            {
+                if (action != null && action.toLowerCase(java.util.Locale.ROOT).contains(wanted))
+                {
+                    return true;
+                }
+            }
+            return false;
+        }).orElse(false);
+    }
+
+    private boolean clickRearrangeControlOnClient(boolean insert)
+    {
+        return Microbot.getClientThread().runOnClientThreadOptional(() ->
+        {
+            Widget widget = client.getWidget(BANK_GROUP_ID, BANK_REARRANGE_BUTTON_CHILD_ID);
+            if (widget == null || widget.isHidden())
+            {
+                return false;
+            }
+
+            String[] actions = widget.getActions();
+            String wanted = insert ? "insert" : "swap";
+            boolean matchingAction = false;
+            if (actions != null)
+            {
+                for (String action : actions)
+                {
+                    if (action != null && action.toLowerCase(java.util.Locale.ROOT).contains(wanted))
+                    {
+                        matchingAction = true;
+                        break;
+                    }
+                }
+            }
+
+            if (!matchingAction)
+            {
+                return false;
+            }
+
             Rectangle bounds = widget.getBounds();
-            return bounds != null && bounds.width > 0 && bounds.height > 0;
+            if (bounds == null || bounds.width <= 0 || bounds.height <= 0)
+            {
+                return false;
+            }
+
+            Microbot.getMouse().click(bounds);
+            return true;
         }).orElse(false);
     }
 
@@ -189,16 +248,17 @@ final class BankActuator
         int childId = BANK_REARRANGE_BUTTON_CHILD_ID;
         String targetName = insert ? "Insert" : "Swap";
 
-        // The bank can report isOpen() before the bottom controls are rendered.
-        // Wait for the specific target control instead of failing immediately.
+        // 12:17 is a single toggle. Wait for the actual action exposed by the
+        // live widget rather than merely checking bounds.
         boolean controlReady = Global.sleepUntil(
-            () -> isWidgetVisibleOnClient(childId),
+            () -> isRearrangeControlReadyOnClient(insert),
             5000);
         if (!controlReady)
         {
             return ActuatorResult.fail(
-                "Bank " + targetName + " control " + BANK_GROUP_ID + ":" + childId
-                    + " did not become visible within 5 seconds. Current mode=" + bankRearrangeMode() + ".");
+                "Bank rearrange toggle " + BANK_GROUP_ID + ":" + childId
+                    + " did not expose the '" + targetName + "' action within 5 seconds. Current mode="
+                    + bankRearrangeMode() + ".");
         }
 
         for (int attempt = 1; attempt <= 5; attempt++)
@@ -208,17 +268,15 @@ final class BankActuator
                 return ActuatorResult.fail("Interrupted while switching bank rearrangement mode.");
             }
 
-            // Re-check visibility before every attempt because the bank can
-            // rebuild the widget tree after a click.
-            if (!isWidgetVisibleOnClient(childId))
+            if (!isRearrangeControlReadyOnClient(insert))
             {
-                if (!Global.sleepUntil(() -> isWidgetVisibleOnClient(childId), 2000))
+                if (!Global.sleepUntil(() -> isRearrangeControlReadyOnClient(insert), 1500))
                 {
                     continue;
                 }
             }
 
-            boolean clicked = Rs2Widget.clickWidget(BANK_GROUP_ID, childId);
+            boolean clicked = clickRearrangeControlOnClient(insert);
             if (!clicked)
             {
                 Global.sleep(200);
@@ -230,19 +288,18 @@ final class BankActuator
                 return ActuatorResult.ok("Bank rearrange mode set to " + targetName + ".");
             }
 
-            // Re-read the state before retrying. Do not blindly click if another
-            // action already changed the mode.
             if (bankRearrangeMode() == desired)
             {
                 return ActuatorResult.ok("Bank rearrange mode set to " + targetName + ".");
             }
+
             Global.sleep(120);
         }
 
         return ActuatorResult.fail(
             "Could not switch bank rearrange mode to " + targetName
                 + " after 5 attempts. Current mode=" + bankRearrangeMode()
-                + ". Expected widget=" + BANK_GROUP_ID + ":" + childId + ".");
+                + ". Toggle widget=" + BANK_GROUP_ID + ":" + childId + ".");
     }
 
     // Bank rearrangement uses one live toggle in the bank interface: 12:17.
