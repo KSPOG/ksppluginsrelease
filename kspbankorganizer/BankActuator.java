@@ -22,7 +22,7 @@ import net.runelite.client.plugins.microbot.util.widget.Rs2Widget;
 final class BankActuator
 {
     private static final int BANK_GROUP_ID = 12;
-    private static final int BANK_REARRANGE_BUTTON_CHILD_ID = 17;
+    private static final int BANK_REARRANGE_BUTTON_CHILD_ID = 23;
     private static final int BANK_TAB_CONTAINER_DYNAMIC_MAIN_INDEX = 10;
 
     private static final int[] TAB_COUNT_VARBITS = {
@@ -148,7 +148,7 @@ final class BankActuator
                 return false;
             }
 
-            // The bank uses ONE SWAP/INSERT toggle at 12:17. Its action changes
+            // The bank uses ONE SWAP/INSERT toggle at 12:23. Its action changes
             // with the current mode. Do not require a separate 12:19 widget and
             // do not reject the control merely because getBounds() is temporarily
             // unavailable during a bank-widget rebuild.
@@ -248,7 +248,7 @@ final class BankActuator
         int childId = BANK_REARRANGE_BUTTON_CHILD_ID;
         String targetName = insert ? "Insert" : "Swap";
 
-        // 12:17 is a single toggle. Wait for the actual action exposed by the
+        // 12:23 is the single Bankmain.SWAP_INSERT toggle. Wait for the actual action exposed by the
         // live widget rather than merely checking bounds.
         boolean controlReady = Global.sleepUntil(
             () -> isRearrangeControlReadyOnClient(insert),
@@ -302,7 +302,7 @@ final class BankActuator
                 + ". Toggle widget=" + BANK_GROUP_ID + ":" + childId + ".");
     }
 
-    // Bank rearrangement uses one live toggle in the bank interface: 12:17.
+    // Bank rearrangement uses one live toggle in the bank interface: 12:23.
     // Its action changes with BANK_REARRANGE_MODE, so there is no separate
     // There is no separate Insert control.
     // Use Rs2Widget's client-thread-aware lookup/click path instead of recursively
