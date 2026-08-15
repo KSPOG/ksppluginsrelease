@@ -7,12 +7,17 @@ import java.util.List;
 import java.util.Set;
 import javax.inject.Inject;
 import net.runelite.api.Client;
+import net.runelite.api.MenuAction;
+import net.runelite.api.NPC;
+import net.runelite.api.NPCComposition;
 import net.runelite.api.Varbits;
 import net.runelite.api.widgets.Widget;
 import net.runelite.client.plugins.microbot.Microbot;
 import net.runelite.client.plugins.microbot.util.Global;
 import net.runelite.client.plugins.microbot.util.bank.Rs2Bank;
 import net.runelite.client.plugins.microbot.util.inventory.Rs2ItemModel;
+import net.runelite.client.plugins.microbot.util.menu.NewMenuEntry;
+import net.runelite.client.plugins.microbot.util.misc.Rs2UiHelper;
 import net.runelite.client.plugins.microbot.util.widget.Rs2Widget;
 
 /**
@@ -24,8 +29,8 @@ final class BankActuator
     private static final int BANK_GROUP_ID = 12;
     private static final int BANK_REARRANGE_BUTTON_CHILD_ID = 23;
     private static final int BANK_TAB_CONTAINER_DYNAMIC_MAIN_INDEX = 10;
-    private static final int BANK_OPEN_ATTEMPTS = 3;
-    private static final int BANK_OPEN_CONFIRM_TIMEOUT_MS = 5000;
+    private static final int BANK_OPEN_CONFIRM_TIMEOUT_MS = 3500;
+    private static final int NEARBY_BANKER_DISTANCE = 15;
 
     private static final int[] TAB_COUNT_VARBITS = {
         Varbits.BANK_TAB_ONE_COUNT,
@@ -62,21 +67,123 @@ final class BankActuator
             return true;
         }
 
-        // Rs2Bank.openBank() can issue a walk-and-interact request before it can
-        // report success. The organizer is a one-shot operation, so do not turn
-        // that transient false return into a terminal failure while the player is
-        // arriving at the selected booth. Confirm the real UI postcondition after
-        // each request and retry only while it remains closed.
-        for (int attempt = 0; attempt < BANK_OPEN_ATTEMPTS; attempt++)
+        // Prefer a live Banker in the current scene. The replay reached two bankers
+        // near the player after the generic helper had already committed to a more
+        // distant booth, causing the booth interaction to time out before its bank
+        // widget appeared. Invoke the actual Banker menu action when one is nearby.
+        if (openNearbyBanker()
+            && Global.sleepUntil(this::isBankUiOpenOnClient, BANK_OPEN_CONFIRM_TIMEOUT_MS))
         {
-            Rs2Bank.openBank();
-            if (Global.sleepUntil(this::isBankUiOpenOnClient, BANK_OPEN_CONFIRM_TIMEOUT_MS))
-            {
-                return true;
-            }
+            return true;
         }
 
-        return isBankUiOpenOnClient();
+        // Rs2Bank.openBank() may begin walking and return false before the bank is
+        // reachable. Do not repeatedly call it while that local approach is active:
+        // another generic click can replace the route. After a bounded UI check,
+        // prefer a Banker that entered the local scene; otherwise give the original
+        // request one further postcondition window to complete.
+        Rs2Bank.openBank();
+        if (Global.sleepUntil(this::isBankUiOpenOnClient, BANK_OPEN_CONFIRM_TIMEOUT_MS))
+        {
+            return true;
+        }
+        openNearbyBanker();
+        return Global.sleepUntil(this::isBankUiOpenOnClient, BANK_OPEN_CONFIRM_TIMEOUT_MS);
+    }
+
+    private boolean openNearbyBanker()
+    {
+        return Microbot.getClientThread().runOnClientThreadOptional(() ->
+        {
+            if (client.getLocalPlayer() == null || client.getLocalPlayer().getWorldLocation() == null
+                || client.getTopLevelWorldView() == null)
+            {
+                return false;
+            }
+
+            NPC nearest = null;
+            int nearestActionIndex = -1;
+            int nearestDistance = Integer.MAX_VALUE;
+            for (NPC npc : client.getTopLevelWorldView().npcs())
+            {
+                if (npc == null || npc.getWorldLocation() == null || npc.getName() == null
+                    || !"Banker".equalsIgnoreCase(npc.getName()))
+                {
+                    continue;
+                }
+
+                int actionIndex = bankActionIndex(npc);
+                int distance = client.getLocalPlayer().getWorldLocation().distanceTo2D(npc.getWorldLocation());
+                if (actionIndex < 0 || distance > NEARBY_BANKER_DISTANCE || distance >= nearestDistance)
+                {
+                    continue;
+                }
+                nearest = npc;
+                nearestActionIndex = actionIndex;
+                nearestDistance = distance;
+            }
+
+            if (nearest == null)
+            {
+                return false;
+            }
+
+            MenuAction action = npcMenuAction(nearestActionIndex);
+            if (action == null)
+            {
+                return false;
+            }
+            Rectangle clickbox = Rs2UiHelper.getActorClickbox(nearest);
+            if (clickbox == null)
+            {
+                clickbox = new Rectangle(1, 1, 1, 1);
+            }
+            Microbot.doInvoke(new NewMenuEntry()
+                .option("Bank")
+                .target(nearest.getName())
+                .identifier(nearest.getIndex())
+                .type(action)
+                .param0(0)
+                .param1(0)
+                .itemId(-1), clickbox);
+            return true;
+        }).orElse(false);
+    }
+
+    private static int bankActionIndex(NPC npc)
+    {
+        NPCComposition[] compositions = {
+            npc.getTransformedComposition(), npc.getComposition()
+        };
+        for (NPCComposition composition : compositions)
+        {
+            if (composition == null || composition.getActions() == null)
+            {
+                continue;
+            }
+            String[] actions = composition.getActions();
+            for (int index = 0; index < Math.min(actions.length, 5); index++)
+            {
+                if ("Bank".equalsIgnoreCase(actions[index]))
+                {
+                    return index;
+                }
+            }
+        }
+        return -1;
+    }
+
+    private static MenuAction npcMenuAction(int index)
+    {
+        switch (index)
+        {
+            case 0: return MenuAction.NPC_FIRST_OPTION;
+            case 1: return MenuAction.NPC_SECOND_OPTION;
+            case 2: return MenuAction.NPC_THIRD_OPTION;
+            case 3: return MenuAction.NPC_FOURTH_OPTION;
+            case 4: return MenuAction.NPC_FIFTH_OPTION;
+            default: return null;
+        }
     }
 
     private boolean isBankUiOpenOnClient()
