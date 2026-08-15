@@ -24,6 +24,8 @@ final class BankActuator
     private static final int BANK_GROUP_ID = 12;
     private static final int BANK_REARRANGE_BUTTON_CHILD_ID = 23;
     private static final int BANK_TAB_CONTAINER_DYNAMIC_MAIN_INDEX = 10;
+    private static final int BANK_OPEN_ATTEMPTS = 3;
+    private static final int BANK_OPEN_CONFIRM_TIMEOUT_MS = 5000;
 
     private static final int[] TAB_COUNT_VARBITS = {
         Varbits.BANK_TAB_ONE_COUNT,
@@ -60,13 +62,21 @@ final class BankActuator
             return true;
         }
 
-        // Only attempt Rs2Bank.openBank() when the bank UI is genuinely closed.
-        if (!Rs2Bank.openBank() && !isBankUiOpenOnClient())
+        // Rs2Bank.openBank() can issue a walk-and-interact request before it can
+        // report success. The organizer is a one-shot operation, so do not turn
+        // that transient false return into a terminal failure while the player is
+        // arriving at the selected booth. Confirm the real UI postcondition after
+        // each request and retry only while it remains closed.
+        for (int attempt = 0; attempt < BANK_OPEN_ATTEMPTS; attempt++)
         {
-            return false;
+            Rs2Bank.openBank();
+            if (Global.sleepUntil(this::isBankUiOpenOnClient, BANK_OPEN_CONFIRM_TIMEOUT_MS))
+            {
+                return true;
+            }
         }
 
-        return Global.sleepUntil(this::isBankUiOpenOnClient, 5000);
+        return isBankUiOpenOnClient();
     }
 
     private boolean isBankUiOpenOnClient()
