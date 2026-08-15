@@ -150,10 +150,12 @@ final class BankActuator
         }).orElse(false);
     }
 
-    private static int bankActionIndex(NPC npc)
+    private int bankActionIndex(NPC npc)
     {
         NPCComposition[] compositions = {
-            npc.getTransformedComposition(), npc.getComposition()
+            npc.getTransformedComposition(),
+            npc.getComposition(),
+            client.getNpcDefinition(npc.getId())
         };
         for (NPCComposition composition : compositions)
         {
