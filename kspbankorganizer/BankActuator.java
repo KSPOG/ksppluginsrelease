@@ -22,8 +22,7 @@ import net.runelite.client.plugins.microbot.util.widget.Rs2Widget;
 final class BankActuator
 {
     private static final int BANK_GROUP_ID = 12;
-    private static final int BANK_SWAP_BUTTON_CHILD_ID = 17;
-    private static final int BANK_INSERT_BUTTON_CHILD_ID = 19;
+    private static final int BANK_REARRANGE_BUTTON_CHILD_ID = 17;
     private static final int BANK_TAB_CONTAINER_DYNAMIC_MAIN_INDEX = 10;
 
     private static final int[] TAB_COUNT_VARBITS = {
@@ -187,7 +186,7 @@ final class BankActuator
             return ActuatorResult.ok("Bank rearrange mode is already " + (insert ? "Insert" : "Swap") + ".");
         }
 
-        int childId = insert ? BANK_INSERT_BUTTON_CHILD_ID : BANK_SWAP_BUTTON_CHILD_ID;
+        int childId = BANK_REARRANGE_BUTTON_CHILD_ID;
         String targetName = insert ? "Insert" : "Swap";
 
         // The bank can report isOpen() before the bottom controls are rendered.
@@ -246,8 +245,9 @@ final class BankActuator
                 + ". Expected widget=" + BANK_GROUP_ID + ":" + childId + ".");
     }
 
-    // Bank rearrangement controls are fixed in the live bank interface used by
-    // the current Microbot/RuneLite build: 12:17 = Swap and 12:19 = Insert.
+    // Bank rearrangement uses one live toggle in the bank interface: 12:17.
+    // Its action changes with BANK_REARRANGE_MODE, so there is no separate
+    // There is no separate Insert control.
     // Use Rs2Widget's client-thread-aware lookup/click path instead of recursively
     // selecting an arbitrary widget whose action happens to contain "swap".
     ActuatorResult openTab(int tabIndex)
