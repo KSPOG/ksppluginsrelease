@@ -106,8 +106,7 @@ final class BankActuator
             int nearestDistance = Integer.MAX_VALUE;
             for (NPC npc : client.getTopLevelWorldView().npcs())
             {
-                if (npc == null || npc.getWorldLocation() == null || npc.getName() == null
-                    || !"Banker".equalsIgnoreCase(npc.getName()))
+                if (npc == null || npc.getWorldLocation() == null)
                 {
                     continue;
                 }
