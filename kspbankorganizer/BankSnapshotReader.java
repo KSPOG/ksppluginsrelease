@@ -101,10 +101,7 @@ final class BankSnapshotReader
                 item.getQuantity(),
                 item.getSlot(),
                 index,
-                // Tab-count varbits include placeholder positions. Preserve the
-                // live container slot for ownership calculation even though
-                // placeholders are omitted from the organizer plan.
-                tabForIndex(item.getSlot(), tabCounts),
+                tabForIndex(index, tabCounts),
                 composition.isStackable(),
                 composition.isTradeable(),
                 composition.isGeTradeable(),

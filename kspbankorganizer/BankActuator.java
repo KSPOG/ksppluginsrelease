@@ -1,6 +1,7 @@
 package net.runelite.client.plugins.microbot.kspbankorganizer;
 
 import java.awt.Rectangle;
+import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
@@ -11,6 +12,7 @@ import net.runelite.api.widgets.Widget;
 import net.runelite.client.plugins.microbot.Microbot;
 import net.runelite.client.plugins.microbot.util.Global;
 import net.runelite.client.plugins.microbot.util.bank.Rs2Bank;
+import net.runelite.client.plugins.microbot.util.inventory.Rs2ItemModel;
 import net.runelite.client.plugins.microbot.util.widget.Rs2Widget;
 
 /**
@@ -354,21 +356,21 @@ final class BankActuator
         {
             return open;
         }
-        BankSnapshot.BankStack item = stackByItemId(safeSnapshot(), itemId);
+        Rs2ItemModel item = findBankItem(itemId);
         if (item == null)
         {
             return ActuatorResult.fail("Could not find item " + itemId + " in the bank.");
         }
-        if (!scrollBankToSlotSafe(item.slot()))
+        if (!scrollBankToSlotSafe(item.getSlot()))
         {
             return ActuatorResult.fail("Could not scroll source item into view.");
         }
-        DragBounds bounds = itemToTabBounds(item.slot(), BANK_TAB_CONTAINER_DYNAMIC_MAIN_INDEX);
+        DragBounds bounds = itemToTabBounds(item.getSlot(), BANK_TAB_CONTAINER_DYNAMIC_MAIN_INDEX);
         if (bounds == null)
         {
             return ActuatorResult.fail("Source or main-tab bounds were unavailable/outside the canvas.");
         }
-        int quantity = item.quantity();
+        int quantity = item.getQuantity();
         Microbot.drag(bounds.source(), bounds.target());
         boolean verified = Global.sleepUntil(() -> {
             BankSnapshot.BankStack moved = stackByItemId(safeSnapshot(), itemId);
@@ -392,21 +394,21 @@ final class BankActuator
         {
             return open;
         }
-        BankSnapshot.BankStack item = stackByItemId(safeSnapshot(), itemId);
+        Rs2ItemModel item = findBankItem(itemId);
         if (item == null)
         {
             return ActuatorResult.fail("Could not find item " + itemId + " in the bank.");
         }
-        if (!scrollBankToSlotSafe(item.slot()))
+        if (!scrollBankToSlotSafe(item.getSlot()))
         {
             return ActuatorResult.fail("Could not scroll source item into view.");
         }
-        DragBounds bounds = itemToTabBounds(item.slot(), BANK_TAB_CONTAINER_DYNAMIC_MAIN_INDEX + targetTab);
+        DragBounds bounds = itemToTabBounds(item.getSlot(), BANK_TAB_CONTAINER_DYNAMIC_MAIN_INDEX + targetTab);
         if (bounds == null)
         {
             return ActuatorResult.fail("Source or destination-tab bounds were unavailable/outside the canvas.");
         }
-        int quantity = item.quantity();
+        int quantity = item.getQuantity();
         Microbot.drag(bounds.source(), bounds.target());
         boolean verified = Global.sleepUntil(() -> {
             BankSnapshot.BankStack moved = stackByItemId(safeSnapshot(), itemId);
@@ -429,21 +431,21 @@ final class BankActuator
         {
             return ActuatorResult.fail("All nine real bank tabs already exist.");
         }
-        BankSnapshot.BankStack item = stackByItemId(safeSnapshot(), itemId);
+        Rs2ItemModel item = findBankItem(itemId);
         if (item == null)
         {
             return ActuatorResult.fail("Could not find item " + itemId + " in the bank.");
         }
-        if (!scrollBankToSlotSafe(item.slot()))
+        if (!scrollBankToSlotSafe(item.getSlot()))
         {
             return ActuatorResult.fail("Could not scroll source item into view.");
         }
-        DragBounds bounds = itemToTabBounds(item.slot(), BANK_TAB_CONTAINER_DYNAMIC_MAIN_INDEX + newTab);
+        DragBounds bounds = itemToTabBounds(item.getSlot(), BANK_TAB_CONTAINER_DYNAMIC_MAIN_INDEX + newTab);
         if (bounds == null)
         {
             return ActuatorResult.fail("Source or new-tab bounds were unavailable/outside the canvas.");
         }
-        int quantity = item.quantity();
+        int quantity = item.getQuantity();
         Microbot.drag(bounds.source(), bounds.target());
         boolean verified = Global.sleepUntil(() -> {
             BankSnapshot.BankStack moved = stackByItemId(safeSnapshot(), itemId);
@@ -496,6 +498,14 @@ final class BankActuator
     {
         return Microbot.getClientThread().runOnClientThreadOptional(
             () -> client.getVarbitValue(Varbits.BANK_REARRANGE_MODE)).orElse(-1);
+    }
+
+    private static Rs2ItemModel findBankItem(int itemId)
+    {
+        return Rs2Bank.bankItems().stream()
+            .filter(item -> item.getId() == itemId)
+            .min(Comparator.comparingInt(Rs2ItemModel::getSlot))
+            .orElse(null);
     }
 
     private int currentTab()
