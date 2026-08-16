@@ -7,11 +7,13 @@ import net.runelite.api.GrandExchangeOfferState;
 import net.runelite.api.Item;
 import net.runelite.api.ItemComposition;
 import net.runelite.api.ItemContainer;
+import net.runelite.api.MenuAction;
 import net.runelite.api.Player;
 import net.runelite.api.gameval.InterfaceID;
 import net.runelite.api.gameval.InventoryID;
 import net.runelite.api.gameval.ItemID;
 import net.runelite.api.gameval.VarClientID;
+import net.runelite.api.gameval.VarbitID;
 import net.runelite.api.widgets.Widget;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.plugins.microbot.Microbot;
@@ -20,10 +22,13 @@ import net.runelite.client.plugins.microbot.util.bank.Rs2Bank;
 import net.runelite.client.plugins.microbot.util.grandexchange.Rs2GrandExchange;
 import net.runelite.client.plugins.microbot.util.grandexchange.GrandExchangeSlots;
 import net.runelite.client.plugins.microbot.util.inventory.Rs2Inventory;
+import net.runelite.client.plugins.microbot.util.inventory.Rs2ItemModel;
 import net.runelite.client.plugins.microbot.util.keyboard.Rs2Keyboard;
+import net.runelite.client.plugins.microbot.util.menu.NewMenuEntry;
 import net.runelite.client.plugins.microbot.util.player.Rs2Player;
 import net.runelite.client.plugins.microbot.util.widget.Rs2Widget;
 
+import java.awt.Rectangle;
 import java.awt.event.KeyEvent;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -1365,7 +1370,7 @@ public class F2PProcessingFactoryScript extends Script
         int expectedTarget = expectedBefore + quantity;
 
         status = "Withdrawing " + quantity + " x " + itemName;
-        boolean invoked = Rs2Bank.withdrawX(itemName, quantity, true);
+        boolean invoked = invokeExactMainBankWithdrawX(itemName, quantity);
         boolean reachedTarget = invoked && sleepUntil(
             () -> inventoryCountExactName(itemName) >= expectedTarget,
             INVENTORY_CHANGE_TIMEOUT_MILLIS
@@ -1432,7 +1437,7 @@ public class F2PProcessingFactoryScript extends Script
         {
             int beforeOne = inventoryCountExactName(itemName);
             int slotsBeforeOne = Rs2Inventory.count();
-            if (!Rs2Bank.withdrawOne(itemName, true))
+            if (!invokeExactMainBankWithdrawOne(itemName))
             {
                 log.error("Factory exact-name Withdraw-1 could not be invoked for {}", itemName);
                 return false;
@@ -2103,7 +2108,7 @@ public class F2PProcessingFactoryScript extends Script
                 return;
             }
 
-            if (!Rs2Bank.withdrawAll(outputName, true))
+            if (!invokeExactMainBankWithdrawAll(outputName))
             {
                 finishOrReevaluate("Unable to Withdraw-all exact output for sale: " + outputName);
                 return;
@@ -2982,11 +2987,248 @@ public class F2PProcessingFactoryScript extends Script
 
         int withdraw = (int) Math.min(Integer.MAX_VALUE, required);
         Rs2Bank.depositAll();
-        Rs2Bank.withdrawX(coinsId, withdraw);
+        boolean coinsWithdrawInvoked = invokeExactMainBankWithdrawX("Coins", withdraw);
+        if (!coinsWithdrawInvoked)
+        {
+            status = "Unable to withdraw Coins from main bank tab";
+            return false;
+        }
         return sleepUntil(
             () -> inventoryCount(coinsId) >= withdraw,
             INVENTORY_CHANGE_TIMEOUT_MILLIS
         );
+    }
+
+
+    /**
+     * Resolves the live bank widget for an exact item while the main bank tab is
+     * open. Rs2Bank's normal withdraw path can open the item's custom bank tab
+     * and then reuse the absolute bank slot as a dynamic-child index. With
+     * custom tabs that can point at a different visible item. The Factory avoids
+     * that path by staying on the main tab and resolving the live widget by item
+     * id before constructing the menu entry.
+     */
+    private BankWidgetTarget resolveExactMainBankTarget(String itemName)
+    {
+        if (itemName == null || itemName.isBlank() || !Rs2Bank.isOpen())
+        {
+            return null;
+        }
+
+        if (!Rs2Bank.isMainTabOpen())
+        {
+            if (!Rs2Bank.openMainTab()
+                || !sleepUntil(Rs2Bank::isMainTabOpen, 2_000))
+            {
+                log.error("Factory could not open main bank tab for {}", itemName);
+                return null;
+            }
+        }
+
+        Rs2ItemModel cached = Rs2Bank.getBankItem(itemName, true);
+        if (cached == null)
+        {
+            log.error("Factory exact bank item not found in mirror: {}", itemName);
+            return null;
+        }
+
+        int expectedId = cached.getId();
+        List<Widget> widgets = Rs2Bank.getItems();
+        int liveSlot = -1;
+        Widget liveWidget = null;
+
+        for (int i = 0; i < widgets.size(); i++)
+        {
+            Widget widget = widgets.get(i);
+            if (widget != null && widget.getItemId() == expectedId)
+            {
+                liveSlot = i;
+                liveWidget = widget;
+                break;
+            }
+        }
+
+        if (liveSlot < 0 || liveWidget == null)
+        {
+            log.error(
+                "Factory could not map exact bank item to live main-tab widget: item={} id={} cachedSlot={} widgetCount={}",
+                itemName,
+                expectedId,
+                cached.getSlot(),
+                widgets.size()
+            );
+            return null;
+        }
+
+        if (liveSlot != cached.getSlot())
+        {
+            log.warn(
+                "Factory corrected bank slot mismatch item={} id={} cachedSlot={} liveSlot={}",
+                itemName,
+                expectedId,
+                cached.getSlot(),
+                liveSlot
+            );
+        }
+
+        if (!Rs2Bank.scrollBankToSlot(liveSlot))
+        {
+            log.error("Factory could not scroll bank to {} at slot {}", itemName, liveSlot);
+            return null;
+        }
+
+        // Re-read the widget after scrolling because its bounds can change.
+        widgets = Rs2Bank.getItems();
+        if (liveSlot >= widgets.size())
+        {
+            return null;
+        }
+        liveWidget = widgets.get(liveSlot);
+        if (liveWidget == null || liveWidget.getItemId() != expectedId)
+        {
+            log.error(
+                "Factory bank widget changed during scroll item={} id={} slot={} liveItemId={}",
+                itemName,
+                expectedId,
+                liveSlot,
+                liveWidget == null ? -1 : liveWidget.getItemId()
+            );
+            return null;
+        }
+
+        Rectangle bounds = liveWidget.getBounds();
+        if (bounds == null || bounds.width <= 0 || bounds.height <= 0)
+        {
+            log.error("Factory bank widget has invalid bounds item={} slot={} bounds={}", itemName, liveSlot, bounds);
+            return null;
+        }
+
+        return new BankWidgetTarget(itemName, expectedId, liveSlot, bounds);
+    }
+
+    private boolean invokeExactMainBankWithdrawOne(String itemName)
+    {
+        BankWidgetTarget target = resolveExactMainBankTarget(itemName);
+        if (target == null)
+        {
+            return false;
+        }
+
+        int selected = Microbot.getVarbitValue(VarbitID.BANK_QUANTITY_TYPE);
+        int identifier = selected == 0 ? 1 : 2;
+        invokeBankTarget(target, identifier);
+        return true;
+    }
+
+    private boolean invokeExactMainBankWithdrawAll(String itemName)
+    {
+        BankWidgetTarget target = resolveExactMainBankTarget(itemName);
+        if (target == null)
+        {
+            return false;
+        }
+
+        int selected = Microbot.getVarbitValue(VarbitID.BANK_QUANTITY_TYPE);
+        int identifier = selected == 4 ? 1 : 7;
+        invokeBankTarget(target, identifier);
+        return true;
+    }
+
+    private boolean invokeExactMainBankWithdrawX(String itemName, int amount)
+    {
+        if (amount <= 0)
+        {
+            return true;
+        }
+
+        BankWidgetTarget target = resolveExactMainBankTarget(itemName);
+        if (target == null)
+        {
+            return false;
+        }
+
+        int selected = Microbot.getVarbitValue(VarbitID.BANK_QUANTITY_TYPE);
+        int configuredX = Microbot.getVarbitValue(VarbitID.BANK_REQUESTEDQUANTITY);
+        boolean hasX = configuredX > 0;
+
+        if (hasX && configuredX == amount)
+        {
+            int identifier;
+            switch (selected)
+            {
+                case 0:
+                case 1:
+                case 2:
+                case 4:
+                    identifier = 5;
+                    break;
+                case 3:
+                    identifier = 1;
+                    break;
+                default:
+                    log.error("Factory encountered unknown bank quantity type {}", selected);
+                    return false;
+            }
+
+            invokeBankTarget(target, identifier);
+            return true;
+        }
+
+        // Bank-container Withdraw-X prompt is identifier 6 when X is not already
+        // the requested amount. This mirrors Rs2Bank.handleAmount(), but without
+        // its custom-tab slot remapping.
+        invokeBankTarget(target, 6);
+
+        boolean promptVisible = sleepUntil(() -> {
+            Widget widget = Rs2Widget.getWidget(162, 43);
+            return widget != null && "Enter amount:".equalsIgnoreCase(widget.getText());
+        }, 2_500);
+
+        if (!promptVisible)
+        {
+            log.error(
+                "Factory Withdraw-X prompt did not open item={} id={} slot={} amount={}",
+                target.itemName,
+                target.itemId,
+                target.slot,
+                amount
+            );
+            return false;
+        }
+
+        Rs2Keyboard.typeString(String.valueOf(amount));
+        Rs2Keyboard.enter();
+        return true;
+    }
+
+    private void invokeBankTarget(BankWidgetTarget target, int identifier)
+    {
+        Microbot.doInvoke(
+            new NewMenuEntry()
+                .param0(target.slot)
+                .param1(Rs2Bank.BANK_ITEM_CONTAINER)
+                .opcode(MenuAction.CC_OP.getId())
+                .identifier(identifier)
+                .itemId(target.itemId)
+                .target(target.itemName),
+            target.bounds
+        );
+    }
+
+    private static final class BankWidgetTarget
+    {
+        private final String itemName;
+        private final int itemId;
+        private final int slot;
+        private final Rectangle bounds;
+
+        private BankWidgetTarget(String itemName, int itemId, int slot, Rectangle bounds)
+        {
+            this.itemName = itemName;
+            this.itemId = itemId;
+            this.slot = slot;
+            this.bounds = bounds;
+        }
     }
 
     private boolean ensureBankOpen()
