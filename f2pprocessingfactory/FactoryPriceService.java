@@ -42,14 +42,11 @@ public final class FactoryPriceService
         int itemId = Rs2ItemManager.getItemIdByName(itemName.trim(), false);
         if (itemId <= 0)
         {
-            try
-            {
-                itemId = Microbot.getRs2ItemManager().getItemId(itemName.trim());
-            }
-            catch (Exception ignored)
-            {
-                itemId = -1;
-            }
+            // Factory recipes use canonical item names. Never accept the first fuzzy
+            // RuneLite search result here: caching a near/incorrect match can make
+            // banking and GE actions target an unrelated item for the rest of the run.
+            log.warn("Factory exact item resolution failed for '{}'", itemName.trim());
+            return -1;
         }
 
         if (itemId > 0)

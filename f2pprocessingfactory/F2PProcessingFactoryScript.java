@@ -56,6 +56,8 @@ public class F2PProcessingFactoryScript extends Script
     private static final long WATCHDOG_STUCK_EDITOR_TIMEOUT_MILLIS = 8_000L;
     private static final long FACTORY_HEARTBEAT_INTERVAL_MILLIS = 30_000L;
     private static final long GE_OWNERSHIP_RECOVERY_WINDOW_MILLIS = 30_000L;
+    private static final int MAX_BANK_SINGLE_WITHDRAW_FALLBACK = 28;
+    private static final int BANK_SINGLE_WITHDRAW_VERIFY_TIMEOUT_MILLIS = 2_000;
 
     private F2PProcessingFactoryConfig config;
     private FactoryPriceService priceService;
@@ -1317,17 +1319,189 @@ public class F2PProcessingFactoryScript extends Script
                 return;
             }
 
-            Rs2Bank.withdrawX(itemId, quantity);
-            sleepUntil(
-                () -> inventoryCount(itemId) >= quantity,
-                INVENTORY_CHANGE_TIMEOUT_MILLIS
-            );
+            if (!withdrawProcessingInputSafely(input, itemId, quantity))
+            {
+                state = FactoryState.STOPPED;
+                status = "Stopped: safe bank withdrawal failed for " + input.getItemName()
+                    + "; check bank layout/log before restarting";
+                log.error(
+                    "Factory bank-withdraw safety stop recipe={} expectedItem={} itemId={} quantity={}",
+                    activeRecipe.getDisplayName(),
+                    input.getItemName(),
+                    itemId,
+                    quantity
+                );
+                return;
+            }
         }
 
         Rs2Bank.closeBank();
         sleepUntil(() -> !Rs2Bank.isOpen(), BANK_OPEN_TIMEOUT_MILLIS);
         state = FactoryState.PROCESSING;
         status = "Processing " + activeRecipe.getDisplayName();
+    }
+
+    /**
+     * Withdraws a processing input by exact recipe name and verifies that the expected
+     * item actually entered the inventory. This deliberately does not trust an ID-only
+     * bank lookup: a stale/misaligned bank row must never make the factory keep clicking
+     * a different item (the failure observed with Wooden shield in v1.0.37).
+     *
+     * The normal path still uses Withdraw-X for speed. If that action produces no
+     * inventory change, a bounded exact-name Withdraw-1 fallback is attempted. If a
+     * different inventory item appears, or the expected item still cannot be obtained,
+     * the caller stops the Factory instead of retrying forever.
+     */
+    private boolean withdrawProcessingInputSafely(RecipeInput input, int resolvedItemId, int quantity)
+    {
+        if (input == null || quantity <= 0)
+        {
+            return quantity <= 0;
+        }
+
+        String itemName = input.getItemName();
+        int expectedBefore = inventoryCountExactName(itemName);
+        int inventorySlotsBefore = Rs2Inventory.count();
+        int expectedTarget = expectedBefore + quantity;
+
+        status = "Withdrawing " + quantity + " x " + itemName;
+        boolean invoked = Rs2Bank.withdrawX(itemName, quantity, true);
+        boolean reachedTarget = invoked && sleepUntil(
+            () -> inventoryCountExactName(itemName) >= expectedTarget,
+            INVENTORY_CHANGE_TIMEOUT_MILLIS
+        );
+
+        int expectedAfterX = inventoryCountExactName(itemName);
+        int inventorySlotsAfterX = Rs2Inventory.count();
+        log.info(
+            "Factory bank withdraw-X recipe={} expectedItem={} itemId={} requested={} before={} after={} invoked={} verified={}",
+            activeRecipe == null ? "none" : activeRecipe.getDisplayName(),
+            itemName,
+            resolvedItemId,
+            quantity,
+            expectedBefore,
+            expectedAfterX,
+            invoked,
+            reachedTarget
+        );
+
+        if (reachedTarget)
+        {
+            return true;
+        }
+
+        // If something entered the inventory but it was not the requested recipe item,
+        // do not issue another bank action. This is the hard safety guard against the
+        // wrong-bank-row loop seen in the recording.
+        if (expectedAfterX <= expectedBefore && inventorySlotsAfterX != inventorySlotsBefore)
+        {
+            log.error(
+                "Factory bank withdrawal targeted an unexpected item; expected={} itemId={} slotsBefore={} slotsAfter={}",
+                itemName,
+                resolvedItemId,
+                inventorySlotsBefore,
+                inventorySlotsAfterX
+            );
+            return false;
+        }
+
+        int remaining = Math.max(0, expectedTarget - expectedAfterX);
+        if (remaining <= 0)
+        {
+            return true;
+        }
+        if (remaining > MAX_BANK_SINGLE_WITHDRAW_FALLBACK)
+        {
+            log.error(
+                "Factory bank withdrawal fallback refused for {}: remaining {} exceeds safe limit {}",
+                itemName,
+                remaining,
+                MAX_BANK_SINGLE_WITHDRAW_FALLBACK
+            );
+            return false;
+        }
+
+        status = "Retrying exact bank withdrawal: " + itemName + " x " + remaining;
+        log.warn(
+            "Factory Withdraw-X verification failed for {}; using bounded exact-name Withdraw-1 fallback for {} item(s)",
+            itemName,
+            remaining
+        );
+
+        for (int i = 0; i < remaining; i++)
+        {
+            int beforeOne = inventoryCountExactName(itemName);
+            int slotsBeforeOne = Rs2Inventory.count();
+            if (!Rs2Bank.withdrawOne(itemName, true))
+            {
+                log.error("Factory exact-name Withdraw-1 could not be invoked for {}", itemName);
+                return false;
+            }
+
+            boolean oneVerified = sleepUntil(
+                () -> inventoryCountExactName(itemName) > beforeOne,
+                BANK_SINGLE_WITHDRAW_VERIFY_TIMEOUT_MILLIS
+            );
+            if (!oneVerified)
+            {
+                int afterOne = inventoryCountExactName(itemName);
+                int slotsAfterOne = Rs2Inventory.count();
+                if (afterOne <= beforeOne && slotsAfterOne != slotsBeforeOne)
+                {
+                    log.error(
+                        "Factory exact-name Withdraw-1 changed inventory with the wrong item; expected={} itemId={} attempt={}/{}",
+                        itemName,
+                        resolvedItemId,
+                        i + 1,
+                        remaining
+                    );
+                }
+                else
+                {
+                    log.error(
+                        "Factory exact-name Withdraw-1 made no verified progress; expected={} itemId={} attempt={}/{}",
+                        itemName,
+                        resolvedItemId,
+                        i + 1,
+                        remaining
+                    );
+                }
+                return false;
+            }
+        }
+
+        int finalCount = inventoryCountExactName(itemName);
+        boolean success = finalCount >= expectedTarget;
+        log.info(
+            "Factory bank withdrawal fallback complete expectedItem={} itemId={} target={} final={} success={}",
+            itemName,
+            resolvedItemId,
+            expectedTarget,
+            finalCount,
+            success
+        );
+        return success;
+    }
+
+    private int inventoryCountExactName(String itemName)
+    {
+        if (itemName == null || itemName.isBlank())
+        {
+            return 0;
+        }
+
+        try
+        {
+            return Rs2Inventory.all().stream()
+                .filter(item -> item != null && item.getName() != null && item.getName().equalsIgnoreCase(itemName))
+                .mapToInt(item -> Math.max(1, item.getQuantity()))
+                .sum();
+        }
+        catch (Exception ex)
+        {
+            log.warn("Unable to count exact inventory item {}: {}", itemName, safeMessage(ex));
+            return 0;
+        }
     }
 
     private void processInventory()
@@ -1929,9 +2103,9 @@ public class F2PProcessingFactoryScript extends Script
                 return;
             }
 
-            if (!Rs2Bank.withdrawAll(outputId))
+            if (!Rs2Bank.withdrawAll(outputName, true))
             {
-                finishOrReevaluate("Unable to Withdraw-all output for sale");
+                finishOrReevaluate("Unable to Withdraw-all exact output for sale: " + outputName);
                 return;
             }
 
