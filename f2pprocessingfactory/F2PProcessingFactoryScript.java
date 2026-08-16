@@ -376,6 +376,7 @@ public class F2PProcessingFactoryScript extends Script
         List<CyclePlan> viablePlans = new ArrayList<>();
         long shortestLimitReset = Long.MAX_VALUE;
         boolean anyProfitableQuote = false;
+        ProfitQuote fixedRecipeQuote = null;
 
         for (FactoryRecipe recipe : candidates)
         {
@@ -387,7 +388,21 @@ public class F2PProcessingFactoryScript extends Script
             }
 
             ProfitQuote quote = priceService.quote(recipe, config);
-            if (!quote.isValid() || quote.getProfitPerUnit() <= 0 || !quote.meets(config))
+            boolean fixedSelected = config.mode() == FactoryMode.FIXED_RECIPE
+                && recipe == config.fixedRecipe();
+            if (fixedSelected)
+            {
+                fixedRecipeQuote = quote;
+            }
+
+            // Profit/ROI thresholds are an Automatic-mode recipe-selection policy.
+            // In Fixed Recipe mode the user has already chosen which recipe to run,
+            // so a positive-profit quote is allowed even when it is below those
+            // ranking thresholds. We still refuse a currently negative/zero-profit
+            // purchase rather than silently burning capital.
+            if (!quote.isValid()
+                || quote.getProfitPerUnit() <= 0
+                || (!fixedSelected && !quote.meets(config)))
             {
                 log.debug("Skipping {}: {}", recipe, quote.isValid()
                     ? (quote.getProfitPerUnit() <= 0
@@ -395,6 +410,16 @@ public class F2PProcessingFactoryScript extends Script
                         : "margin below configured minimum")
                     : quote.getError());
                 continue;
+            }
+
+            if (fixedSelected && !quote.meets(config))
+            {
+                log.info(
+                    "Fixed recipe {} is below Automatic-mode margin thresholds (profit/unit={}, ROI={}%) but remains selected",
+                    recipe,
+                    quote.getProfitPerUnit(),
+                    String.format("%.2f", quote.getRoiPercent())
+                );
             }
 
             anyProfitableQuote = true;
@@ -444,6 +469,20 @@ public class F2PProcessingFactoryScript extends Script
                     observedCoinTotal,
                     config.cashReserve()
                 ));
+            }
+            else if (config.mode() == FactoryMode.FIXED_RECIPE && fixedRecipeQuote != null)
+            {
+                if (!fixedRecipeQuote.isValid())
+                {
+                    waitForMarket("Fixed recipe price unavailable: " + fixedRecipeQuote.getError());
+                }
+                else
+                {
+                    waitForMarket(String.format(
+                        "Fixed recipe currently unprofitable: %,d gp/unit",
+                        fixedRecipeQuote.getProfitPerUnit()
+                    ));
+                }
             }
             else
             {
