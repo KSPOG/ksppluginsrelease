@@ -220,13 +220,11 @@ public final class FactoryPriceService
 
     public int getBuyOfferPrice(int itemId, int markupPercent, int retryAttempt)
     {
-        // Factory profitability and execution must use the same deterministic price
-        // basis. Microbot's adaptive helper applies an additional +10% when the
-        // latest Wiki high-volume sample is below 100. That sample is a very short
-        // market window and can be below 100 even for highly liquid processing
-        // ingredients such as Ranarr weed, making profitable recipes appear deeply
-        // unprofitable. Factory handles aggressiveness itself through bounded retries.
-        int marketPrice = getInstantBuyPrice(itemId);
+        // Profitability and execution use the same deterministic BUY basis. Start
+        // from the Wiki bid/low side and apply only the configured markup plus the
+        // bounded retry premium. Crossing immediately from Wiki high plus markup
+        // double-counts aggressiveness and can incorrectly reject processing margins.
+        int marketPrice = getInitialBuyBasisPrice(itemId);
         if (marketPrice <= 0)
         {
             return marketPrice;
@@ -240,10 +238,10 @@ public final class FactoryPriceService
 
     public int getSellOfferPrice(int itemId, int discountPercent, int retryAttempt)
     {
-        // Do not use Rs2GrandExchange#getAdaptiveSellPrice here. Its low-volume
-        // branch applies an extra -5% to the Wiki low price, which both corrupts
-        // Factory's profitability gate and can unnecessarily dump finished output.
-        int marketPrice = getInstantSellPrice(itemId);
+        // Start from the Wiki ask/high side and apply only the configured discount
+        // plus the bounded retry discount. Starting from Wiki low and discounting
+        // again crosses the spread twice and undervalues the finished output.
+        int marketPrice = getInitialSellBasisPrice(itemId);
         if (marketPrice <= 0)
         {
             return marketPrice;
@@ -272,14 +270,29 @@ public final class FactoryPriceService
         return Math.max(1, unknownLimitFallback);
     }
 
-    private int getInstantBuyPrice(int itemId)
+    /**
+     * Initial Factory BUYs should start from the current bid side, not the ask side.
+     * Microbot's WikiPrice names are execution-oriented: buyPrice is Wiki "high"
+     * (the price paid by an instant buyer / current ask) while sellPrice is Wiki
+     * "low" (the price received by an instant seller / current bid). For a BUY
+     * offer we therefore start from sellPrice and apply the configured markup.
+     * Repricing can become more aggressive later if the offer stalls.
+     */
+    private int getInitialBuyBasisPrice(int itemId)
     {
         try
         {
             WikiPrice price = Rs2GrandExchange.getRealTimePrices(itemId);
-            if (price != null && price.buyPrice > 0)
+            if (price != null)
             {
-                return price.buyPrice;
+                if (price.sellPrice > 0)
+                {
+                    return price.sellPrice;
+                }
+                if (price.buyPrice > 0)
+                {
+                    return price.buyPrice;
+                }
             }
         }
         catch (Exception ignored)
@@ -289,14 +302,26 @@ public final class FactoryPriceService
         return Microbot.getRs2ItemManager().getGEPrice(itemId);
     }
 
-    private int getInstantSellPrice(int itemId)
+    /**
+     * Initial Factory SELLs should start from the current ask side. Using Wiki high
+     * here and applying the configured discount gives a competitive sell offer
+     * without unnecessarily crossing the whole spread.
+     */
+    private int getInitialSellBasisPrice(int itemId)
     {
         try
         {
             WikiPrice price = Rs2GrandExchange.getRealTimePrices(itemId);
-            if (price != null && price.sellPrice > 0)
+            if (price != null)
             {
-                return price.sellPrice;
+                if (price.buyPrice > 0)
+                {
+                    return price.buyPrice;
+                }
+                if (price.sellPrice > 0)
+                {
+                    return price.sellPrice;
+                }
             }
         }
         catch (Exception ignored)
