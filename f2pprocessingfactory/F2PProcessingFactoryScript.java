@@ -54,6 +54,8 @@ public class F2PProcessingFactoryScript extends Script
     private static final int MAX_PROGRESS_WATCHDOG_RETRIES = 3;
     private static final long WATCHDOG_MIN_RETRY_GAP_MILLIS = 1_500L;
     private static final long WATCHDOG_STUCK_EDITOR_TIMEOUT_MILLIS = 8_000L;
+    private static final long FACTORY_HEARTBEAT_INTERVAL_MILLIS = 30_000L;
+    private static final long GE_OWNERSHIP_RECOVERY_WINDOW_MILLIS = 30_000L;
 
     private F2PProcessingFactoryConfig config;
     private FactoryPriceService priceService;
@@ -99,6 +101,7 @@ public class F2PProcessingFactoryScript extends Script
      */
     private final Map<GrandExchangeSlots, Integer> factorySellOfferItemIds = new HashMap<>();
     private final Map<Integer, Integer> sellPriceRetryByItem = new HashMap<>();
+    private final Map<Integer, Long> pendingFactorySellPlacements = new HashMap<>();
     /**
      * Outputs whose sale retry policy was exhausted are temporarily market-blocked.
      * Their unsold remainder is collected back to the bank, then the factory moves
@@ -116,6 +119,8 @@ public class F2PProcessingFactoryScript extends Script
     private volatile long watchdogLastRetryAt;
     private volatile int watchdogRetryCount;
     private volatile String watchdogLastRecovery = "Idle";
+    private volatile long lastHeartbeatAt;
+    private volatile boolean fatalRuntimeError;
 
     public boolean run(
         F2PProcessingFactoryConfig config,
@@ -158,19 +163,40 @@ public class F2PProcessingFactoryScript extends Script
         this.factorySellOfferPrices.clear();
         this.factorySellOfferItemIds.clear();
         this.sellPriceRetryByItem.clear();
+        this.pendingFactorySellPlacements.clear();
         this.sellMarketBlockedUntil.clear();
         this.sellRetryPolicyExhaustedThisCall = false;
+        this.lastHeartbeatAt = 0L;
+        this.fatalRuntimeError = false;
         resetProgressWatchdog();
 
         mainScheduledFuture = scheduledExecutorService.scheduleWithFixedDelay(() ->
         {
             try
             {
+                if (fatalRuntimeError)
+                {
+                    return;
+                }
                 if (!super.run() || !Microbot.isLoggedIn())
                 {
                     return;
                 }
                 tick();
+            }
+            catch (LinkageError error)
+            {
+                fatalRuntimeError = true;
+                state = FactoryState.STOPPED;
+                status = "Fatal runtime API error: " + safeMessage(error) + "; reload Factory after updating";
+                log.error("KSP AIO Factory fatal runtime linkage failure; actions stopped until reload", error);
+            }
+            catch (AssertionError error)
+            {
+                fatalRuntimeError = true;
+                state = FactoryState.STOPPED;
+                status = "Fatal runtime assertion: " + safeMessage(error) + "; reload Factory";
+                log.error("KSP AIO Factory fatal assertion failure; actions stopped until reload", error);
             }
             catch (Exception ex)
             {
@@ -184,6 +210,8 @@ public class F2PProcessingFactoryScript extends Script
 
     private void tick()
     {
+        logHeartbeatIfDue();
+
         if (antiban != null && antiban.beforeTick(state))
         {
             // Anti-ban pauses are intentional and must never be interpreted as a
@@ -778,8 +806,18 @@ public class F2PProcessingFactoryScript extends Script
             return;
         }
 
-        Rs2GrandExchange.collectAllToBank();
-        sleep(400, 800);
+        // Every factory-owned BUY offer has already been collected by exact slot
+        // before its purchase quantity is removed. Never use Collect-all here: a
+        // completed player offer may be present in another GE slot.
+        if (!factoryBuyOfferSlots.isEmpty())
+        {
+            waitingForExistingGeOffer = true;
+            status = "Waiting for factory input offers to be collected";
+            state = FactoryState.BUYING_INPUTS;
+            return;
+        }
+
+        sleep(250, 450);
         FactoryGrandExchangeInvoker.closeExchangeWithoutMouse();
 
         state = FactoryState.OPENING_BANK;
@@ -886,6 +924,15 @@ public class F2PProcessingFactoryScript extends Script
             }
 
             clearGePlacementBackoff();
+
+            // BUY requests explicitly target this slot in Microbot. Claim it as soon
+            // as processOffer confirms success so a delayed client-array update cannot
+            // make the Factory forget ownership of its own offer.
+            factoryBuyOfferSlots.add(slot);
+            factoryBuyOfferPrices.put(slot, candidate.price);
+            factoryBuyOfferRetries.put(slot, candidate.retry);
+            buyPriceRetryByItem.putIfAbsent(candidate.itemId, candidate.retry);
+
             GrandExchangeSlots actualSlot = waitForOfferSlot(candidate.itemId, false, slot);
             if (actualSlot == null)
             {
@@ -894,10 +941,7 @@ public class F2PProcessingFactoryScript extends Script
                 return;
             }
 
-            factoryBuyOfferSlots.add(actualSlot);
-            factoryBuyOfferPrices.put(actualSlot, candidate.price);
-            factoryBuyOfferRetries.put(actualSlot, candidate.retry);
-            buyPriceRetryByItem.putIfAbsent(candidate.itemId, candidate.retry);
+            migrateTrackedFactoryBuySlot(slot, actualSlot);
             placed++;
         }
 
@@ -926,8 +970,8 @@ public class F2PProcessingFactoryScript extends Script
             return 0;
         }
 
-        // A single Collect-all click can collect several completed parallel input
-        // offers. Consume those already-accounted credits before placing anything new.
+        // Exact-slot collection can finish several completed parallel input offers.
+        // Consume those already-accounted credits before placing anything new.
         int collectedCredit = consumePendingBuyCredit(itemId, requestedQuantity);
         if (collectedCredit > 0)
         {
@@ -935,10 +979,9 @@ public class F2PProcessingFactoryScript extends Script
             return collectedCredit;
         }
 
-        // If every factory-owned parallel BUY is already terminal, press the GE
-        // Collect button before inspecting individual slots. This snapshots and
-        // credits every completed slot atomically so a Collect-all cannot cause a
-        // second purchase of an item that was collected in the same click.
+        // If every factory-owned parallel BUY is already terminal, collect each
+        // tracked slot before inspecting individual slots. Each successful collection
+        // is credited independently, so unrelated GE offers remain untouched.
         if (collectTrackedFactoryBuyOffersIfReady())
         {
             collectedCredit = consumePendingBuyCredit(itemId, requestedQuantity);
@@ -976,20 +1019,20 @@ public class F2PProcessingFactoryScript extends Script
 
             if (!factoryOwned)
             {
-                // Observe pre-existing player offers without modifying them. Collect
-                // this exact non-factory offer so it cannot disturb the factory's
-                // parallel Collect-all accounting.
+                // Strict ownership boundary: an offer that was not created and tracked
+                // by this Factory run is read-only. This also protects player offers
+                // after a source-loader reload, where in-memory ownership is reset.
+                waitingForExistingGeOffer = true;
                 if (offer != null && isFinishedBuyState(offer.getState()))
                 {
-                    Rs2GrandExchange.collectOffer(existingOffer, true);
-                    sleepUntil(() -> Rs2GrandExchange.isSlotAvailable(existingOffer), 4_000);
-                    int credited = Math.min(requestedQuantity, filled);
-                    status = "Collected existing " + itemName + " offer (" + filled + "/" + total + ")";
-                    return credited;
+                    status = "Existing completed " + itemName
+                        + " buy is not Factory-owned; collect it manually";
                 }
-
-                waitingForExistingGeOffer = true;
-                status = "Waiting for existing " + itemName + " offer (" + filled + "/" + total + ")";
+                else
+                {
+                    status = "Waiting for existing non-Factory " + itemName
+                        + " buy (" + filled + "/" + total + ")";
+                }
                 return 0;
             }
 
@@ -1053,8 +1096,8 @@ public class F2PProcessingFactoryScript extends Script
             }
 
             // Maximum reprices reached. Cancel this exact slot without collecting;
-            // Collect-all is intentionally deferred until every tracked input offer
-            // is terminal so one click can be accounted for atomically.
+            // exact-slot collection is deferred until every tracked input offer is
+            // terminal so parallel input accounting remains deterministic.
             if (!FactoryGrandExchangeInvoker.cancelOfferWithoutCollect(existingOffer, itemId))
             {
                 waitingForExistingGeOffer = true;
@@ -1119,19 +1162,22 @@ public class F2PProcessingFactoryScript extends Script
 
         clearGePlacementBackoff();
 
+        factoryBuyOfferSlots.add(reservedSlot);
+        factoryBuyOfferPrices.put(reservedSlot, price);
+        factoryBuyOfferRetries.put(reservedSlot, retry);
+        buyPriceRetryByItem.putIfAbsent(itemId, retry);
+
         GrandExchangeSlots slot = waitForOfferSlot(itemId, false, reservedSlot);
         if (slot == null)
         {
             waitingForExistingGeOffer = true;
             status = "Offer placed; waiting for GE slot sync: " + itemName;
-            log.warn("Could not identify newly placed buy offer for {} by item ID {}", itemName, itemId);
+            log.warn("Could not identify newly placed buy offer for {} by item ID {}; preserving ownership claim on {}",
+                itemName, itemId, reservedSlot);
             return 0;
         }
 
-        factoryBuyOfferSlots.add(slot);
-        factoryBuyOfferPrices.put(slot, price);
-        factoryBuyOfferRetries.put(slot, retry);
-        buyPriceRetryByItem.putIfAbsent(itemId, retry);
+        migrateTrackedFactoryBuySlot(reservedSlot, slot);
 
         OfferWaitResult result = waitForOfferResult(
             slot,
@@ -2002,25 +2048,35 @@ public class F2PProcessingFactoryScript extends Script
             int filled = offer == null ? 0 : Math.max(0, offer.getQuantitySold());
             int total = offer == null ? requestedQuantity : Math.max(1, offer.getTotalQuantity());
             boolean factoryOwned = factorySellOfferSlots.contains(existingOffer);
-            if (factoryOwned)
+            if (!factoryOwned && hasPendingFactorySellPlacement(itemId))
+            {
+                factorySellOfferSlots.add(existingOffer);
+                factorySellOfferPrices.put(existingOffer, offer == null ? 1 : Math.max(1, offer.getPrice()));
+                factorySellOfferItemIds.put(existingOffer, itemId);
+                pendingFactorySellPlacements.remove(itemId);
+                factoryOwned = true;
+                log.info("Recovered delayed Factory SELL ownership for itemId {} in slot {}", itemId, existingOffer);
+            }
+            else if (factoryOwned)
             {
                 factorySellOfferItemIds.put(existingOffer, itemId);
             }
 
             if (!factoryOwned)
             {
-                // Never alter a pre-existing player sale. If it has finished, use the
-                // GE Collect button so its slot is clean before the factory proceeds.
+                // Strict ownership boundary: never collect, cancel, modify, or account
+                // a sale that was not created by this Factory run.
+                waitingForExistingGeOffer = true;
                 if (offer != null && isFinishedSellState(offer.getState()))
                 {
-                    collectCompletedOfferWithButton(existingOffer, "existing " + itemName + " sale");
-                    status = "Collected existing " + itemName + " sale; preparing current batch";
+                    status = "Existing completed " + itemName
+                        + " sale is not Factory-owned; collect it manually";
                 }
                 else
                 {
-                    status = "Waiting for existing " + itemName + " sale (" + filled + "/" + total + ")";
+                    status = "Waiting for existing non-Factory " + itemName
+                        + " sale (" + filled + "/" + total + ")";
                 }
-                waitingForExistingGeOffer = true;
                 return 0;
             }
 
@@ -2039,7 +2095,7 @@ public class F2PProcessingFactoryScript extends Script
 
             if (result.completed || result.cancelled)
             {
-                if (!collectCompletedOfferWithButton(existingOffer, itemName + " sale"))
+                if (!collectFactorySellOffer(existingOffer, itemName + " sale"))
                 {
                     waitingForExistingGeOffer = true;
                     return 0;
@@ -2099,7 +2155,7 @@ public class F2PProcessingFactoryScript extends Script
                 {
                     soldThisOffer = Math.max(soldThisOffer, cancelledOffer.getQuantitySold());
                 }
-                if (!collectCompletedOfferWithButton(existingOffer, itemName + " cancelled sale"))
+                if (!collectFactorySellOffer(existingOffer, itemName + " cancelled sale"))
                 {
                     waitingForExistingGeOffer = true;
                     return 0;
@@ -2173,16 +2229,22 @@ public class F2PProcessingFactoryScript extends Script
         }
 
         clearGePlacementBackoff();
+        pendingFactorySellPlacements.put(
+            itemId,
+            System.currentTimeMillis() + GE_OWNERSHIP_RECOVERY_WINDOW_MILLIS
+        );
 
         GrandExchangeSlots slot = waitForOfferSlot(itemId, true, reservedSlot);
         if (slot == null)
         {
             waitingForExistingGeOffer = true;
             status = "Sale placed; waiting for GE slot sync: " + itemName;
-            log.warn("Could not identify newly placed sell offer for {} by item ID {}", itemName, itemId);
+            log.warn("Could not identify newly placed sell offer for {} by item ID {}; preserving short ownership recovery claim",
+                itemName, itemId);
             return 0;
         }
 
+        pendingFactorySellPlacements.remove(itemId);
         factorySellOfferSlots.add(slot);
         factorySellOfferPrices.put(slot, price);
         factorySellOfferItemIds.put(slot, itemId);
@@ -2200,7 +2262,7 @@ public class F2PProcessingFactoryScript extends Script
         int soldThisOffer = Math.max(0, result.filledQuantity);
         if (result.completed || result.cancelled)
         {
-            if (!collectCompletedOfferWithButton(slot, itemName + " sale"))
+            if (!collectFactorySellOffer(slot, itemName + " sale"))
             {
                 waitingForExistingGeOffer = true;
                 return 0;
@@ -2257,7 +2319,7 @@ public class F2PProcessingFactoryScript extends Script
             {
                 soldThisOffer = Math.max(soldThisOffer, cancelledOffer.getQuantitySold());
             }
-            if (!collectCompletedOfferWithButton(slot, itemName + " cancelled sale"))
+            if (!collectFactorySellOffer(slot, itemName + " cancelled sale"))
             {
                 waitingForExistingGeOffer = true;
                 return 0;
@@ -2821,40 +2883,13 @@ public class F2PProcessingFactoryScript extends Script
             }
         }
 
-        // A completed unrelated/player offer may be collected by its exact slot to
-        // free capacity without disturbing factory-owned BUY/SELL accounting.
-        for (GrandExchangeSlots slot : GrandExchangeSlots.values())
-        {
-            if (slot.ordinal() >= 3
-                || factoryBuyOfferSlots.contains(slot)
-                || factorySellOfferSlots.contains(slot))
-            {
-                continue;
-            }
-
-            GrandExchangeOffer offer = getOffer(slot);
-            if (offer == null)
-            {
-                continue;
-            }
-            GrandExchangeOfferState offerState = offer.getState();
-            if (!isFinishedBuyState(offerState) && !isFinishedSellState(offerState))
-            {
-                continue;
-            }
-
-            Rs2GrandExchange.collectOffer(slot, true);
-            sleepUntil(() -> Rs2GrandExchange.isSlotAvailable(slot), 3_000);
-            if (Rs2GrandExchange.getAvailableSlotsCount() > 0)
-            {
-                return true;
-            }
-        }
-
+        // Do not free GE capacity by touching unrelated/player offers. A slot is
+        // usable by the Factory only if it is already empty or if a Factory-owned
+        // terminal offer was collected above.
         waitingForGeSlot = true;
         status = !factoryBuyOfferSlots.isEmpty()
-            ? "All available GE slots occupied; waiting for parallel input offers"
-            : "All available GE slots occupied; waiting";
+            ? "All available GE slots occupied; waiting for Factory input offers"
+            : "All available GE slots occupied by non-Factory offers; clear a slot manually";
         return false;
     }
 
@@ -2899,6 +2934,43 @@ public class F2PProcessingFactoryScript extends Script
             }
         }
         return null;
+    }
+
+    private void migrateTrackedFactoryBuySlot(GrandExchangeSlots expectedSlot, GrandExchangeSlots actualSlot)
+    {
+        if (expectedSlot == null || actualSlot == null || expectedSlot == actualSlot)
+        {
+            return;
+        }
+
+        Integer price = factoryBuyOfferPrices.remove(expectedSlot);
+        Integer retry = factoryBuyOfferRetries.remove(expectedSlot);
+        factoryBuyOfferSlots.remove(expectedSlot);
+        factoryBuyOfferSlots.add(actualSlot);
+        if (price != null)
+        {
+            factoryBuyOfferPrices.put(actualSlot, price);
+        }
+        if (retry != null)
+        {
+            factoryBuyOfferRetries.put(actualSlot, retry);
+        }
+        log.info("Migrated Factory BUY ownership from expected slot {} to synced slot {}", expectedSlot, actualSlot);
+    }
+
+    private boolean hasPendingFactorySellPlacement(int itemId)
+    {
+        Long expiresAt = pendingFactorySellPlacements.get(itemId);
+        if (expiresAt == null)
+        {
+            return false;
+        }
+        if (System.currentTimeMillis() > expiresAt)
+        {
+            pendingFactorySellPlacements.remove(itemId);
+            return false;
+        }
+        return true;
     }
 
     private GrandExchangeSlots findTrackedFactorySellOfferSlot(int itemId)
@@ -3069,9 +3141,9 @@ public class F2PProcessingFactoryScript extends Script
     }
 
     /**
-     * Press the GE Collect button only when every factory-owned input offer is in
-     * BOUGHT/CANCELLED_BUY. Snapshot every slot first because Collect-all may clear
-     * several parallel offers in one click; each item's fill is credited afterward.
+     * Collect factory-owned input offers only by their exact GE slots. All tracked
+     * BUY offers must be terminal before collection begins, preserving parallel-buy
+     * accounting without ever invoking the global Collect-all button.
      */
     private boolean collectTrackedFactoryBuyOffersIfReady()
     {
@@ -3101,23 +3173,21 @@ public class F2PProcessingFactoryScript extends Script
             return false;
         }
 
-        status = "All input offers finished; using GE Collect button";
-        if (!Rs2GrandExchange.collectAllToBank())
-        {
-            status = "GE Collect button failed for completed input offers";
-            return false;
-        }
-
-        boolean cleared = sleepUntil(() -> completed.stream()
-            .allMatch(snapshot -> Rs2GrandExchange.isSlotAvailable(snapshot.slot)), 5_000);
-        if (!cleared)
-        {
-            status = "Waiting for collected input GE slots to clear";
-            return false;
-        }
-
         for (CompletedBuySnapshot snapshot : completed)
         {
+            status = "Collecting Factory input offer from " + snapshot.slot;
+            if (!Rs2GrandExchange.collectOffer(snapshot.slot, true))
+            {
+                status = "Failed to collect Factory input offer from " + snapshot.slot;
+                return false;
+            }
+
+            if (!sleepUntil(() -> Rs2GrandExchange.isSlotAvailable(snapshot.slot), 5_000))
+            {
+                status = "Waiting for Factory input slot to clear: " + snapshot.slot;
+                return false;
+            }
+
             if (snapshot.quantity > 0)
             {
                 pendingCollectedBuyCredits.merge(snapshot.itemId, snapshot.quantity, Integer::sum);
@@ -3136,19 +3206,20 @@ public class F2PProcessingFactoryScript extends Script
         return true;
     }
 
-    private boolean collectCompletedOfferWithButton(GrandExchangeSlots slot, String description)
+    private boolean collectFactorySellOffer(GrandExchangeSlots slot, String description)
     {
-        status = "Collecting " + description;
-        if (!Rs2GrandExchange.collectAllToBank())
+        if (slot == null || !factorySellOfferSlots.contains(slot))
         {
-            status = "GE Collect button failed for " + description;
+            status = "Refusing to collect non-Factory GE offer: " + description;
+            log.warn("Refusing GE collection for unowned slot {} ({})", slot, description);
             return false;
         }
 
-        if (slot == null)
+        status = "Collecting " + description + " from " + slot;
+        if (!Rs2GrandExchange.collectOffer(slot, true))
         {
-            sleep(300, 600);
-            return true;
+            status = "GE slot collection failed for " + description;
+            return false;
         }
 
         boolean cleared = sleepUntil(() -> Rs2GrandExchange.isSlotAvailable(slot), 5_000);
@@ -3943,15 +4014,32 @@ public class F2PProcessingFactoryScript extends Script
         factorySellOfferPrices.clear();
         factorySellOfferItemIds.clear();
         sellPriceRetryByItem.clear();
+        pendingFactorySellPlacements.clear();
         sellRetryPolicyExhaustedThisCall = false;
         state = FactoryState.OPENING_BANK;
         status = "Starting next cycle";
         resetProgressWatchdog();
     }
 
-    private static String safeMessage(Exception ex)
+    private void logHeartbeatIfDue()
     {
-        return ex.getMessage() == null ? ex.getClass().getSimpleName() : ex.getMessage();
+        long now = System.currentTimeMillis();
+        if (now - lastHeartbeatAt < FACTORY_HEARTBEAT_INTERVAL_MILLIS)
+        {
+            return;
+        }
+
+        lastHeartbeatAt = now;
+        String recipeName = activeRecipe == null ? "none" : activeRecipe.getDisplayName();
+        log.info(
+            "KSP AIO Factory heartbeat state={} status=\"{}\" recipe={} factoryBuySlots={} factorySellSlots={}",
+            state, status, recipeName, factoryBuyOfferSlots.size(), factorySellOfferSlots.size()
+        );
+    }
+
+    private static String safeMessage(Throwable error)
+    {
+        return error.getMessage() == null ? error.getClass().getSimpleName() : error.getMessage();
     }
 
     public FactoryState getState()
@@ -4069,12 +4157,15 @@ public class F2PProcessingFactoryScript extends Script
         factorySellOfferPrices.clear();
         factorySellOfferItemIds.clear();
         sellPriceRetryByItem.clear();
+        pendingFactorySellPlacements.clear();
         watchdogState = FactoryState.STOPPED;
         watchdogFingerprint = "";
         watchdogLastProgressAt = 0L;
         watchdogLastRetryAt = 0L;
         watchdogRetryCount = 0;
         watchdogLastRecovery = "Stopped";
+        lastHeartbeatAt = 0L;
+        fatalRuntimeError = false;
         if (antiban != null)
         {
             antiban.reset();
