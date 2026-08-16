@@ -423,14 +423,7 @@ public class F2PProcessingFactoryScript extends Script
             selected = viablePlans.stream()
                 .filter(plan -> plan.recipe == config.fixedRecipe())
                 .findFirst()
-                .orElseGet(() ->
-                {
-                    if (config.limitExhaustedAction() == LimitExhaustedAction.SWITCH_RECIPE)
-                    {
-                        return selectBestPlan(viablePlans);
-                    }
-                    return null;
-                });
+                .orElse(null);
         }
         else
         {
@@ -464,10 +457,10 @@ public class F2PProcessingFactoryScript extends Script
     private boolean startExistingBankBacklog()
     {
         List<CyclePlan> stockPlans = new ArrayList<>();
-        // Backlog cleanup is intentionally broader than the normal candidate list.
-        // Even Fixed mode must finish already-owned processable stock before it
-        // commits new coins to its configured recipe.
-        for (FactoryRecipe recipe : FactoryRecipe.values())
+        // Fixed mode is a hard recipe boundary: never process banked inputs from a
+        // different recipe because that would eventually cause unrelated outputs
+        // to be sold. Automatic mode may still drain any eligible recipe backlog.
+        for (FactoryRecipe recipe : getModeScopedRecipes())
         {
             if (!isRecipeEligibleForAccount(recipe))
             {
@@ -512,7 +505,7 @@ public class F2PProcessingFactoryScript extends Script
                 selected = stockPlans.stream()
                     .filter(plan -> plan.recipe == config.fixedRecipe())
                     .findFirst()
-                    .orElseGet(() -> selectBestBacklogPlan(stockPlans));
+                    .orElse(null);
             }
             else
             {
@@ -592,7 +585,10 @@ public class F2PProcessingFactoryScript extends Script
         ExistingOutputBacklog best = null;
         Set<String> seenOutputs = new HashSet<>();
 
-        for (FactoryRecipe recipe : FactoryRecipe.values())
+        // Only inspect outputs belonging to recipes that the current mode is
+        // allowed to trade. In Fixed mode this is exactly one recipe, including
+        // only that recipe's declared container/byproduct outputs.
+        for (FactoryRecipe recipe : getModeScopedRecipes())
         {
             if (!isRecipeEligibleForAccount(recipe))
             {
@@ -622,8 +618,6 @@ public class F2PProcessingFactoryScript extends Script
                     continue;
                 }
 
-                // In fixed mode, the fixed recipe's own output/byproducts win
-                // immediately. Automatic mode drains the largest finished stack.
                 ExistingOutputBacklog candidate = new ExistingOutputBacklog(recipe, outputName, quantity);
                 if (config.mode() == FactoryMode.FIXED_RECIPE && recipe == config.fixedRecipe())
                 {
@@ -2501,39 +2495,37 @@ public class F2PProcessingFactoryScript extends Script
 
     private List<FactoryRecipe> buildCandidateList()
     {
-        // Every supported output is part of the automatic pool by default.
-        // Skill requirements remain the hard eligibility gate; profitability,
-        // affordability, liquidity/buy limits, and configured margin thresholds
-        // decide whether the recipe is actually selected.
-        if (config.mode() == FactoryMode.FIXED_RECIPE)
-        {
-            List<FactoryRecipe> recipes = new ArrayList<>();
-            FactoryRecipe fixed = config.fixedRecipe();
-            if (isRecipeEligibleForAccount(fixed))
-            {
-                recipes.add(fixed);
-            }
-            if (config.limitExhaustedAction() == LimitExhaustedAction.SWITCH_RECIPE)
-            {
-                for (FactoryRecipe recipe : FactoryRecipe.values())
-                {
-                    if (recipe != fixed && isRecipeEligibleForAccount(recipe))
-                    {
-                        recipes.add(recipe);
-                    }
-                }
-            }
-            return recipes;
-        }
-
+        // Mode scope is applied before profitability/affordability evaluation.
+        // Fixed mode therefore cannot leak into another recipe because of a GE
+        // limit, existing bank stock, or a temporarily unattractive market.
         List<FactoryRecipe> recipes = new ArrayList<>();
-        for (FactoryRecipe recipe : FactoryRecipe.values())
+        for (FactoryRecipe recipe : getModeScopedRecipes())
         {
             if (isRecipeEligibleForAccount(recipe))
             {
                 recipes.add(recipe);
             }
         }
+        return recipes;
+    }
+
+    /**
+     * Returns the complete recipe scope the current operating mode may process or
+     * trade. Fixed Recipe mode is intentionally strict: exactly the configured
+     * recipe is returned and SWITCH_RECIPE is not permitted to widen that scope.
+     */
+    private List<FactoryRecipe> getModeScopedRecipes()
+    {
+        if (config != null && config.mode() == FactoryMode.FIXED_RECIPE)
+        {
+            FactoryRecipe fixed = config.fixedRecipe();
+            return fixed == null
+                ? Collections.emptyList()
+                : Collections.singletonList(fixed);
+        }
+
+        List<FactoryRecipe> recipes = new ArrayList<>();
+        Collections.addAll(recipes, FactoryRecipe.values());
         return recipes;
     }
 
