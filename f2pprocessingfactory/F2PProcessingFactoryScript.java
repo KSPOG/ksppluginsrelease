@@ -9,6 +9,7 @@ import net.runelite.api.ItemComposition;
 import net.runelite.api.ItemContainer;
 import net.runelite.api.MenuAction;
 import net.runelite.api.Player;
+import net.runelite.api.WorldType;
 import net.runelite.api.gameval.InterfaceID;
 import net.runelite.api.gameval.InventoryID;
 import net.runelite.api.gameval.ItemID;
@@ -360,7 +361,7 @@ public class F2PProcessingFactoryScript extends Script
         List<FactoryRecipe> candidates = buildCandidateList();
         if (candidates.isEmpty())
         {
-            waitForMarket("No supported recipes meet the account's membership/skill requirements");
+            waitForMarket(buildEligibilityFailureStatus());
             return;
         }
 
@@ -2815,11 +2816,48 @@ public class F2PProcessingFactoryScript extends Script
         {
             return false;
         }
-        if (recipe.isMembersOnly() && (!membersAccount || !memberWorld))
+
+        // For an already logged-in player the current world is authoritative for
+        // whether members-only content is usable. Microbot's Rs2Player.isMember()
+        // currently reads ACCOUNT_CREDIT, which can be zero/stale even while the
+        // account is demonstrably logged into a members world. Requiring both
+        // signals incorrectly rejected members-only fixed recipes such as Ranarr
+        // potion (unf) before profitability was even evaluated.
+        if (recipe.isMembersOnly() && !memberWorld)
         {
             return false;
         }
         return hasRequiredSkill(recipe);
+    }
+
+    private String buildEligibilityFailureStatus()
+    {
+        if (config != null && config.mode() == FactoryMode.FIXED_RECIPE)
+        {
+            FactoryRecipe fixed = config.fixedRecipe();
+            if (fixed != null)
+            {
+                if (fixed.isMembersOnly() && !memberWorld)
+                {
+                    return fixed.getDisplayName() + " requires a members world";
+                }
+
+                int detectedLevel = getRequiredSkillLevel(fixed);
+                if (detectedLevel < fixed.getRequiredLevel())
+                {
+                    return String.format(
+                        "%s requires %d %s (detected %d)",
+                        fixed.getDisplayName(),
+                        fixed.getRequiredLevel(),
+                        fixed.getRequiredSkill().name(),
+                        Math.max(0, detectedLevel)
+                    );
+                }
+
+                return "Unable to validate fixed recipe eligibility: " + fixed.getDisplayName();
+            }
+        }
+        return "No supported recipes meet the account's membership/skill requirements";
     }
 
     /**
@@ -2866,6 +2904,14 @@ public class F2PProcessingFactoryScript extends Script
 
     private boolean detectMembersAccount()
     {
+        // A player cannot be logged into a members world without membership. Use
+        // detectMemberWorld() here so the direct client world flags are preferred
+        // over Microbot's external world-service lookup.
+        if (detectMemberWorld())
+        {
+            return true;
+        }
+
         try
         {
             return Rs2Player.isMember();
@@ -2879,6 +2925,26 @@ public class F2PProcessingFactoryScript extends Script
 
     private boolean detectMemberWorld()
     {
+        // Prefer the logged-in client's own world flags. This does not depend on
+        // the external world-service list, so transient proxy/world-service failures
+        // cannot make a members world look like F2P to the Factory.
+        try
+        {
+            Boolean direct = Microbot.getClientThread().runOnClientThreadOptional(() ->
+            {
+                Set<WorldType> worldTypes = Microbot.getClient().getWorldType();
+                return worldTypes != null && worldTypes.contains(WorldType.MEMBERS);
+            }).orElse(null);
+            if (direct != null)
+            {
+                return direct;
+            }
+        }
+        catch (Exception ex)
+        {
+            log.debug("Unable to read client world type directly: {}", ex.getMessage());
+        }
+
         try
         {
             return Rs2Player.isInMemberWorld();
@@ -2892,16 +2958,27 @@ public class F2PProcessingFactoryScript extends Script
 
     private boolean hasRequiredSkill(FactoryRecipe recipe)
     {
+        return getRequiredSkillLevel(recipe) >= recipe.getRequiredLevel();
+    }
+
+    private int getRequiredSkillLevel(FactoryRecipe recipe)
+    {
+        if (recipe == null || recipe.getRequiredSkill() == null)
+        {
+            return -1;
+        }
         try
         {
             Integer level = Microbot.getClientThread().runOnClientThreadOptional(
                 () -> Microbot.getClient().getRealSkillLevel(recipe.getRequiredSkill())
             ).orElse(null);
-            return level != null && level >= recipe.getRequiredLevel();
+            return level == null ? -1 : level;
         }
         catch (Exception ex)
         {
-            return false;
+            log.debug("Unable to read {} level for {}: {}",
+                recipe.getRequiredSkill(), recipe.getDisplayName(), ex.getMessage());
+            return -1;
         }
     }
 

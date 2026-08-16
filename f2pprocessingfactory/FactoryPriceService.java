@@ -1,6 +1,7 @@
 package net.runelite.client.plugins.microbot.f2pprocessingfactory;
 
 import lombok.extern.slf4j.Slf4j;
+import net.runelite.api.WorldType;
 import net.runelite.api.gameval.ItemID;
 import net.runelite.client.plugins.microbot.Microbot;
 import net.runelite.client.plugins.microbot.util.grandexchange.Rs2GrandExchange;
@@ -164,6 +165,35 @@ public final class FactoryPriceService
 
     private boolean isMembersAccount()
     {
+        try
+        {
+            Boolean directMemberWorld = Microbot.getClientThread().runOnClientThreadOptional(() ->
+            {
+                java.util.Set<WorldType> worldTypes = Microbot.getClient().getWorldType();
+                return worldTypes != null && worldTypes.contains(WorldType.MEMBERS);
+            }).orElse(null);
+            if (Boolean.TRUE.equals(directMemberWorld))
+            {
+                return true;
+            }
+        }
+        catch (Exception ex)
+        {
+            log.debug("Unable to read client world type for pricing eligibility: {}", ex.getMessage());
+        }
+
+        try
+        {
+            if (Rs2Player.isInMemberWorld())
+            {
+                return true;
+            }
+        }
+        catch (Exception ex)
+        {
+            log.debug("Unable to use member-world service signal for pricing eligibility: {}", ex.getMessage());
+        }
+
         try
         {
             return Rs2Player.isMember();
