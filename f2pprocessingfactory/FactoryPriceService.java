@@ -153,7 +153,20 @@ public final class FactoryPriceService
                 : profitLong < Integer.MIN_VALUE ? Integer.MIN_VALUE : (int) profitLong;
             double roi = inputCost <= 0 ? 0.0 : (profit * 100.0) / inputCost;
 
-            return ProfitQuote.valid(recipe, inputPrices, outputPrice, inputCost, tax, profit, roi);
+            ProfitQuote quote = ProfitQuote.valid(
+                recipe, inputPrices, outputPrice, inputCost, tax, profit, roi
+            );
+            log.info(
+                "Factory quote {}: inputs={} inputCost={} outputPrice={} tax={} profit={} ROI={}%",
+                recipe,
+                inputPrices,
+                inputCost,
+                outputPrice,
+                tax,
+                profit,
+                String.format("%.2f", roi)
+            );
+            return quote;
         }
         catch (Exception ex)
         {
@@ -207,55 +220,39 @@ public final class FactoryPriceService
 
     public int getBuyOfferPrice(int itemId, int markupPercent, int retryAttempt)
     {
-        double basePercentage = 1.0 + (Math.max(0, markupPercent) / 100.0);
-        try
-        {
-            int adaptivePrice = Rs2GrandExchange.getAdaptiveBuyPrice(itemId, basePercentage, retryAttempt);
-            if (adaptivePrice > 0)
-            {
-                return adaptivePrice;
-            }
-        }
-        catch (Exception ignored)
-        {
-            // Fall through to local calculation.
-        }
-
+        // Factory profitability and execution must use the same deterministic price
+        // basis. Microbot's adaptive helper applies an additional +10% when the
+        // latest Wiki high-volume sample is below 100. That sample is a very short
+        // market window and can be below 100 even for highly liquid processing
+        // ingredients such as Ranarr weed, making profitable recipes appear deeply
+        // unprofitable. Factory handles aggressiveness itself through bounded retries.
         int marketPrice = getInstantBuyPrice(itemId);
         if (marketPrice <= 0)
         {
             return marketPrice;
         }
-        double retryMultiplier = 1.0 + ((Math.max(0, markupPercent) + (retryAttempt * 2.0)) / 100.0);
-        return Math.max(1, (int) Math.ceil(marketPrice * retryMultiplier));
+
+        double effectiveMarkupPercent = Math.max(0, markupPercent)
+            + (Math.max(0, retryAttempt) * 2.0);
+        double multiplier = 1.0 + (effectiveMarkupPercent / 100.0);
+        return Math.max(1, (int) Math.ceil(marketPrice * multiplier));
     }
 
     public int getSellOfferPrice(int itemId, int discountPercent, int retryAttempt)
     {
-        double basePercentage = Math.max(0.01, 1.0 - (Math.max(0, discountPercent) / 100.0));
-        try
-        {
-            int adaptivePrice = Rs2GrandExchange.getAdaptiveSellPrice(itemId, basePercentage, retryAttempt);
-            if (adaptivePrice > 0)
-            {
-                return adaptivePrice;
-            }
-        }
-        catch (Exception ignored)
-        {
-            // Fall through to local calculation.
-        }
-
+        // Do not use Rs2GrandExchange#getAdaptiveSellPrice here. Its low-volume
+        // branch applies an extra -5% to the Wiki low price, which both corrupts
+        // Factory's profitability gate and can unnecessarily dump finished output.
         int marketPrice = getInstantSellPrice(itemId);
         if (marketPrice <= 0)
         {
             return marketPrice;
         }
-        double retryMultiplier = Math.max(
-            0.01,
-            1.0 - ((Math.max(0, discountPercent) + (retryAttempt * 2.0)) / 100.0)
-        );
-        return Math.max(1, (int) Math.floor(marketPrice * retryMultiplier));
+
+        double effectiveDiscountPercent = Math.max(0, discountPercent)
+            + (Math.max(0, retryAttempt) * 2.0);
+        double multiplier = Math.max(0.01, 1.0 - (effectiveDiscountPercent / 100.0));
+        return Math.max(1, (int) Math.floor(marketPrice * multiplier));
     }
 
     public int getTradeLimit(int itemId, int unknownLimitFallback)

@@ -24,7 +24,7 @@ import javax.inject.Inject;
 @Slf4j
 public class F2PProcessingFactoryPlugin extends Plugin
 {
-    public static final String VERSION = "1.0.41";
+    public static final String VERSION = "1.0.42";
 
     @Inject
     private F2PProcessingFactoryConfig config;
