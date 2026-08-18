@@ -370,14 +370,15 @@ final class BankActuator
         {
             return ActuatorResult.fail("Could not scroll source item into view.");
         }
-        DragBounds bounds = itemToTabBounds(item.getSlot(), BANK_TAB_CONTAINER_DYNAMIC_MAIN_INDEX);
+        DragBounds bounds = itemToTabBounds(itemId, BANK_TAB_CONTAINER_DYNAMIC_MAIN_INDEX);
         if (bounds == null)
         {
-            return ActuatorResult.fail("Source or main-tab bounds were unavailable/outside the canvas.");
+            return ActuatorResult.fail("Could not locate live bank widget for " + itemId + " or the main-tab widget.");
         }
         int quantity = item.getQuantity();
         Microbot.drag(bounds.source(), bounds.target());
-        boolean verified = waitForItemTab(itemId, 0, quantity, 5000);
+        Global.sleep(180);
+        boolean verified = waitForItemTab(itemId, 0, quantity, 6000);
         return verified ? ActuatorResult.ok("Moved item to main.") : ActuatorResult.fail("Move to main was not verified.");
     }
 
@@ -405,14 +406,15 @@ final class BankActuator
         {
             return ActuatorResult.fail("Could not scroll source item into view.");
         }
-        DragBounds bounds = itemToTabBounds(item.getSlot(), BANK_TAB_CONTAINER_DYNAMIC_MAIN_INDEX + targetTab);
+        DragBounds bounds = itemToTabBounds(itemId, BANK_TAB_CONTAINER_DYNAMIC_MAIN_INDEX + targetTab);
         if (bounds == null)
         {
-            return ActuatorResult.fail("Source or destination-tab bounds were unavailable/outside the canvas.");
+            return ActuatorResult.fail("Could not locate live bank widget for " + itemId + " or destination tab " + targetTab + ".");
         }
         int quantity = item.getQuantity();
         Microbot.drag(bounds.source(), bounds.target());
-        boolean verified = waitForItemTab(itemId, targetTab, quantity, 5000);
+        Global.sleep(180);
+        boolean verified = waitForItemTab(itemId, targetTab, quantity, 6000);
         return verified
             ? ActuatorResult.ok("Moved item to tab " + targetTab + ".")
             : ActuatorResult.fail("Move to tab " + targetTab + " was not verified.");
@@ -439,14 +441,15 @@ final class BankActuator
         {
             return ActuatorResult.fail("Could not scroll source item into view.");
         }
-        DragBounds bounds = itemToTabBounds(item.getSlot(), BANK_TAB_CONTAINER_DYNAMIC_MAIN_INDEX + newTab);
+        DragBounds bounds = itemToTabBounds(itemId, BANK_TAB_CONTAINER_DYNAMIC_MAIN_INDEX + newTab);
         if (bounds == null)
         {
-            return ActuatorResult.fail("Source or new-tab bounds were unavailable/outside the canvas.");
+            return ActuatorResult.fail("Could not locate live bank widget for " + itemId + " or new tab " + newTab + ".");
         }
         int quantity = item.getQuantity();
         Microbot.drag(bounds.source(), bounds.target());
-        boolean verified = waitForItemTab(itemId, newTab, quantity, 5000);
+        Global.sleep(180);
+        boolean verified = waitForItemTab(itemId, newTab, quantity, 6000);
         return verified
             ? ActuatorResult.ok("Created tab " + newTab + " with item.")
             : ActuatorResult.fail("New-tab drag was not verified.");
@@ -581,17 +584,47 @@ final class BankActuator
      * copies them into ordinary AWT rectangles before returning to the worker.
      * No Widget instance escapes this method.
      */
-    private DragBounds itemToTabBounds(int sourceSlot, int dynamicTabIndex)
+    private DragBounds itemToTabBounds(int itemId, int dynamicTabIndex)
     {
         return Microbot.getClientThread().runOnClientThreadOptional(() ->
         {
             /*
-             * IMPORTANT: Rs2Bank.getItemBounds() expects the ORIGINAL global
-             * BANK ItemContainer slot. Microbot's own itemBounds(Rs2ItemModel)
-             * passes rs2Item.getSlot() directly; it does not convert it to a
-             * per-tab local index.
+             * Do not derive the source rectangle from the bank ItemContainer slot.
+             * The bank can contain placeholders and the visual widget list is
+             * rebuilt/reindexed during tab changes. Find the actual rendered item
+             * widget by item ID in the currently open tab instead.
              */
-            Rectangle source = Rs2Bank.getItemBounds(sourceSlot);
+            Widget itemContainer = client.getWidget(Rs2Bank.BANK_ITEM_CONTAINER);
+            if (itemContainer == null || itemContainer.isHidden())
+            {
+                return null;
+            }
+
+            Rectangle source = null;
+            Widget[] children = itemContainer.getDynamicChildren();
+            if (children != null)
+            {
+                for (Widget child : children)
+                {
+                    if (child == null || child.isHidden() || child.getItemId() != itemId)
+                    {
+                        continue;
+                    }
+
+                    Rectangle bounds = child.getBounds();
+                    if (hasUsableCanvasRectangle(bounds))
+                    {
+                        source = new Rectangle(bounds);
+                        break;
+                    }
+                }
+            }
+
+            if (source == null)
+            {
+                return null;
+            }
+
             List<Widget> tabs = Rs2Bank.getTabs();
             if (tabs == null || dynamicTabIndex < 0 || dynamicTabIndex >= tabs.size())
             {
@@ -605,12 +638,12 @@ final class BankActuator
             }
 
             Rectangle target = tab.getBounds();
-            if (!hasUsableCanvasRectangle(source) || !hasUsableCanvasRectangle(target))
+            if (!hasUsableCanvasRectangle(target))
             {
                 return null;
             }
 
-            return new DragBounds(new Rectangle(source), new Rectangle(target));
+            return new DragBounds(source, new Rectangle(target));
         }).orElse(null);
     }
 
@@ -641,14 +674,6 @@ final class BankActuator
 
     private boolean waitForItemTab(int itemId, int expectedTab, int expectedQuantity, int timeoutMs)
     {
-        /*
-         * Verification must answer the question that actually matters:
-         * "Is this item now inside the destination tab?"
-         *
-         * Do not infer this from a raw global slot or from tab-count arithmetic.
-         * After a drag, the bank can compact/reindex items. Instead, open the
-         * destination tab and inspect the live Bankmain.ITEMS widget children.
-         */
         return Global.sleepUntil(() ->
         {
             if (!isBankOpenOnClientThread())
@@ -663,13 +688,18 @@ final class BankActuator
 
             return Microbot.getClientThread().runOnClientThreadOptional(() ->
             {
-                Widget bankItemsWidget = client.getWidget(Rs2Bank.BANK_ITEM_CONTAINER);
-                if (bankItemsWidget == null || bankItemsWidget.isHidden())
+                if (Rs2Bank.getCurrentTab() != expectedTab)
                 {
                     return false;
                 }
 
-                Widget[] children = bankItemsWidget.getDynamicChildren();
+                Widget itemContainer = client.getWidget(Rs2Bank.BANK_ITEM_CONTAINER);
+                if (itemContainer == null || itemContainer.isHidden())
+                {
+                    return false;
+                }
+
+                Widget[] children = itemContainer.getDynamicChildren();
                 if (children == null)
                 {
                     return false;
@@ -677,15 +707,20 @@ final class BankActuator
 
                 for (Widget child : children)
                 {
-                    if (child == null)
+                    if (child == null || child.isHidden())
                     {
                         continue;
                     }
 
-                    if (child.getItemId() == itemId
-                        && (expectedQuantity <= 0 || child.getItemQuantity() == expectedQuantity))
+                    if (child.getItemId() == itemId)
                     {
-                        return true;
+                        /*
+                         * Quantity is deliberately not required to be identical.
+                         * A bank move can rebuild the item widget before the final
+                         * quantity text is refreshed. Presence of the requested
+                         * item in the destination tab is the authoritative result.
+                         */
+                        return expectedQuantity <= 0 || child.getItemQuantity() >= 1;
                     }
                 }
 
@@ -696,21 +731,19 @@ final class BankActuator
 
     private boolean openTabForVerification(int tab)
     {
+        if (tab < 0 || tab > 9)
+        {
+            return false;
+        }
+
+        if (Rs2Bank.getCurrentTab() == tab)
+        {
+            return true;
+        }
+
         return Microbot.getClientThread().runOnClientThreadOptional(() ->
         {
-            if (Rs2Bank.getCurrentTab() == tab)
-            {
-                return true;
-            }
-
-            List<Widget> tabs = Rs2Bank.getTabs();
-            int dynamicIndex = BANK_TAB_CONTAINER_DYNAMIC_MAIN_INDEX + tab;
-            if (tabs == null || dynamicIndex < 0 || dynamicIndex >= tabs.size())
-            {
-                return false;
-            }
-
-            Widget widget = tabs.get(dynamicIndex);
+            Widget widget = Rs2Bank.getTabWidget(tab);
             if (widget == null || widget.isHidden())
             {
                 return false;

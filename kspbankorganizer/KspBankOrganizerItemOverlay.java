@@ -53,6 +53,19 @@ final class KspBankOrganizerItemOverlay extends WidgetItemOverlay
     @Override
     public void renderItemOverlay(Graphics2D graphics, int itemId, WidgetItem widgetItem)
     {
+        try
+        {
+            renderItemOverlaySafe(graphics, itemId, widgetItem);
+        }
+        catch (Throwable ignored)
+        {
+            // WidgetItemOverlay is rendered every frame. Never allow a transient
+            // bank-widget rebuild to propagate an exception into OverlayRenderer.
+        }
+    }
+
+    private void renderItemOverlaySafe(Graphics2D graphics, int itemId, WidgetItem widgetItem)
+    {
         // WidgetItemOverlay can receive WidgetItems from several interfaces.
         // Restrict rendering to the actual bank item container; otherwise
         // inventory-side WidgetItems can be drawn at unrelated coordinates.
@@ -61,7 +74,18 @@ final class KspBankOrganizerItemOverlay extends WidgetItemOverlay
             return;
         }
 
-        int parentId = widgetItem.getWidget().getId();
+        /*
+         * WidgetItem#getWidget() is the individual item widget. The bank
+         * interface is its parent. Checking the item widget's own id was the
+         * reason the overlay renderer kept throwing NPEs/placing nothing.
+         */
+        net.runelite.api.widgets.Widget parent = widgetItem.getWidget().getParent();
+        if (parent == null)
+        {
+            return;
+        }
+
+        int parentId = parent.getId();
         if (parentId != InterfaceID.Bankmain.ITEMS
             && parentId != InterfaceID.SharedBank.ITEMS)
         {
