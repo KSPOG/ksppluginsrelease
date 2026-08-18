@@ -115,6 +115,7 @@ public class F2PProcessingFactoryScript extends Script
      * Their unsold remainder is collected back to the bank, then the factory moves
      * on instead of sitting in WAITING_FOR_MARKET with an empty Grand Exchange.
      */
+    private final Map<Integer, Long> buyMarketBlockedUntil = new HashMap<>();
     private final Map<Integer, Long> sellMarketBlockedUntil = new HashMap<>();
     private boolean sellRetryPolicyExhaustedThisCall;
 
@@ -172,6 +173,7 @@ public class F2PProcessingFactoryScript extends Script
         this.factorySellOfferItemIds.clear();
         this.sellPriceRetryByItem.clear();
         this.pendingFactorySellPlacements.clear();
+        this.buyMarketBlockedUntil.clear();
         this.sellMarketBlockedUntil.clear();
         this.sellRetryPolicyExhaustedThisCall = false;
         this.lastHeartbeatAt = 0L;
@@ -849,6 +851,20 @@ public class F2PProcessingFactoryScript extends Script
 
         if (!activePlan.purchaseQuantities.isEmpty())
         {
+            List<String> blockedPurchases = getMarketBlockedOutstandingPurchases();
+            if (!blockedPurchases.isEmpty()
+                && blockedPurchases.size() == activePlan.purchaseQuantities.size()
+                && factoryBuyOfferSlots.isEmpty())
+            {
+                long shortestCooldown = getShortestBuyMarketCooldownMillis();
+                waitingUntil = System.currentTimeMillis() + Math.max(1_000L, shortestCooldown);
+                state = FactoryState.WAITING_FOR_MARKET;
+                status = "Buy retries exhausted; waiting for market recheck: "
+                    + String.join(", ", blockedPurchases);
+                clearGeWaitFlags();
+                return;
+            }
+
             state = FactoryState.BUYING_INPUTS;
             return;
         }
@@ -893,6 +909,14 @@ public class F2PProcessingFactoryScript extends Script
             int requested = Math.max(0, entry.getValue());
             int itemId = priceService.getItemId(itemName);
             if (requested <= 0 || itemId <= 0)
+            {
+                continue;
+            }
+
+            // A BUY that exhausted its configured reprice policy is temporarily
+            // market-blocked. Do not immediately recreate the same max-priced
+            // offer on the next tick; wait for a fresh market recheck instead.
+            if (isBuyMarketBlocked(itemId) && findMatchingOfferSlot(itemId, false) == null)
             {
                 continue;
             }
@@ -1014,6 +1038,16 @@ public class F2PProcessingFactoryScript extends Script
         int itemId = priceService.getItemId(itemName);
         if (itemId <= 0 || requestedQuantity <= 0)
         {
+            return 0;
+        }
+
+        // Once the maximum BUY reprice policy has been exhausted, pause this item
+        // until the market recheck expires. A live Factory offer is still allowed
+        // to finish/collect; only creation of another replacement offer is blocked.
+        if (isBuyMarketBlocked(itemId) && findTrackedFactoryBuyOfferSlot(itemId) == null)
+        {
+            waitingForExistingGeOffer = true;
+            status = "Buy market cooling down: " + itemName + " (" + buyMarketBlockedSeconds(itemId) + "s)";
             return 0;
         }
 
@@ -1163,6 +1197,14 @@ public class F2PProcessingFactoryScript extends Script
                 status = "Waiting for cancelled buy offer state: " + itemName;
                 return 0;
             }
+
+            markBuyMarketBlocked(itemId);
+            log.info(
+                "Buy retry policy exhausted for {}; pausing replacement offers for {}s",
+                itemName,
+                buyMarketBlockedSeconds(itemId)
+            );
+
             if (collectTrackedFactoryBuyOffersIfReady())
             {
                 return consumePendingBuyCredit(itemId, requestedQuantity);
@@ -1301,6 +1343,14 @@ public class F2PProcessingFactoryScript extends Script
             status = "Waiting for cancelled buy offer state: " + itemName;
             return 0;
         }
+
+        markBuyMarketBlocked(itemId);
+        log.info(
+            "Buy retry policy exhausted for {}; pausing replacement offers for {}s",
+            itemName,
+            buyMarketBlockedSeconds(itemId)
+        );
+
         if (collectTrackedFactoryBuyOffersIfReady())
         {
             return consumePendingBuyCredit(itemId, requestedQuantity);
@@ -4425,6 +4475,89 @@ public class F2PProcessingFactoryScript extends Script
                 status = "Waiting for buy-limit capacity";
                 break;
         }
+    }
+
+    private void markBuyMarketBlocked(int itemId)
+    {
+        if (itemId <= 0)
+        {
+            return;
+        }
+        long cooldown = TimeUnit.MINUTES.toMillis(Math.max(1, config.reevaluateMinutes()));
+        buyMarketBlockedUntil.put(itemId, System.currentTimeMillis() + cooldown);
+    }
+
+    private boolean isBuyMarketBlocked(int itemId)
+    {
+        if (itemId <= 0)
+        {
+            return false;
+        }
+        Long until = buyMarketBlockedUntil.get(itemId);
+        if (until == null)
+        {
+            return false;
+        }
+        if (System.currentTimeMillis() >= until)
+        {
+            buyMarketBlockedUntil.remove(itemId);
+            // A fresh market window gets a fresh retry budget.
+            buyPriceRetryByItem.remove(itemId);
+            return false;
+        }
+        return true;
+    }
+
+    private long buyMarketBlockedSeconds(int itemId)
+    {
+        Long until = buyMarketBlockedUntil.get(itemId);
+        if (until == null)
+        {
+            return 0L;
+        }
+        long remaining = Math.max(0L, until - System.currentTimeMillis());
+        return Math.max(1L, (remaining + 999L) / 1_000L);
+    }
+
+    private List<String> getMarketBlockedOutstandingPurchases()
+    {
+        List<String> blocked = new ArrayList<>();
+        if (activePlan == null)
+        {
+            return blocked;
+        }
+
+        for (Map.Entry<String, Integer> entry : activePlan.purchaseQuantities.entrySet())
+        {
+            if (entry.getValue() == null || entry.getValue() <= 0)
+            {
+                continue;
+            }
+            int itemId = priceService.getItemId(entry.getKey());
+            if (itemId > 0
+                && isBuyMarketBlocked(itemId)
+                && findMatchingOfferSlot(itemId, false) == null)
+            {
+                blocked.add(entry.getKey());
+            }
+        }
+        return blocked;
+    }
+
+    private long getShortestBuyMarketCooldownMillis()
+    {
+        long now = System.currentTimeMillis();
+        long shortest = Long.MAX_VALUE;
+        for (Long until : buyMarketBlockedUntil.values())
+        {
+            if (until != null && until > now)
+            {
+                shortest = Math.min(shortest, until - now);
+            }
+        }
+        return shortest == Long.MAX_VALUE
+            ? TimeUnit.MINUTES.toMillis(Math.max(1, config.reevaluateMinutes()))
+            : shortest;
     }
 
     private void markSellMarketBlocked(int itemId)
