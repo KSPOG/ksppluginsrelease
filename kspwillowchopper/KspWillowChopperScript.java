@@ -51,6 +51,20 @@ public class KspWillowChopperScript extends Script {
     private final AtomicBoolean immediateRetargetQueued = new AtomicBoolean(false);
     private final Object targetInteractionLock = new Object();
 
+    // Same event-driven invalidation for the campfire target. A Forester's
+    // Campfire can morph to a different object ID or disappear while logs are
+    // being processed. Do not wait for the five-second burn-progress timeout:
+    // reacquire the replacement immediately and repeat the interaction.
+    private volatile WorldPoint activeCampfireLocation;
+    private volatile int activeCampfireObjectId = -1;
+    private volatile WorldPoint invalidatedCampfireLocation;
+    private volatile int invalidatedCampfireObjectId = -1;
+    private volatile boolean immediateCampfireRetargetRequested;
+    private volatile int immediateCampfireRetargetAttempts;
+    private volatile boolean burnModeEnabled;
+    private final AtomicBoolean immediateCampfireRetargetQueued = new AtomicBoolean(false);
+    private final Object campfireInteractionLock = new Object();
+
     private long startTimeMillis;
     private int startWoodcuttingXp;
     private int startFiremakingXp;
@@ -93,6 +107,14 @@ public class KspWillowChopperScript extends Script {
         immediateRetargetRequested = false;
         immediateRetargetAttempts = 0;
         immediateRetargetQueued.set(false);
+        activeCampfireLocation = null;
+        activeCampfireObjectId = -1;
+        invalidatedCampfireLocation = null;
+        invalidatedCampfireObjectId = -1;
+        immediateCampfireRetargetRequested = false;
+        immediateCampfireRetargetAttempts = 0;
+        immediateCampfireRetargetQueued.set(false);
+        burnModeEnabled = !config.bankLogs() && activeTree.isCampfireBurnable();
         sessionStarted = true;
         status = "Starting";
 
@@ -132,11 +154,14 @@ public class KspWillowChopperScript extends Script {
                     return;
                 }
 
+                burnModeEnabled = !config.bankLogs() && activeTree.isCampfireBurnable();
+
                 if (config.bankLogs()) {
                     burningActive = false;
                     lastBurnResourceCount = -1;
                     suppressedResourceLoss = 0;
                     campfireNearby = false;
+                    clearActiveCampfireTarget();
 
                     if (Rs2Inventory.isFull()) {
                         handleDirectBanking();
@@ -174,6 +199,13 @@ public class KspWillowChopperScript extends Script {
         immediateRetargetRequested = false;
         immediateRetargetAttempts = 0;
         immediateRetargetQueued.set(false);
+        burnModeEnabled = false;
+        clearActiveCampfireTarget();
+        invalidatedCampfireLocation = null;
+        invalidatedCampfireObjectId = -1;
+        immediateCampfireRetargetRequested = false;
+        immediateCampfireRetargetAttempts = 0;
+        immediateCampfireRetargetQueued.set(false);
         status = "Idle";
     }
 
@@ -197,6 +229,11 @@ public class KspWillowChopperScript extends Script {
         activeTargetObjectId = -1;
         immediateRetargetRequested = false;
         immediateRetargetAttempts = 0;
+        clearActiveCampfireTarget();
+        invalidatedCampfireLocation = null;
+        invalidatedCampfireObjectId = -1;
+        immediateCampfireRetargetRequested = false;
+        immediateCampfireRetargetAttempts = 0;
         status = "Tree changed to " + activeTree;
     }
 
@@ -242,6 +279,14 @@ public class KspWillowChopperScript extends Script {
 
     private void handleBurnMode() {
         trackResourceInventoryChanges(true);
+
+        // If the campfire changed while another activity temporarily had priority
+        // (for example a Forestry blocking event), resume the pending immediate
+        // reacquire as soon as burn mode regains control.
+        if (immediateCampfireRetargetRequested) {
+            queueImmediateCampfireRetarget(0L);
+            return;
+        }
 
         int resourceId = activeTree.getResourceId();
         Rs2TileObjectModel fire = findCampfire(Rs2Player.getWorldLocation(), 15);
@@ -344,6 +389,11 @@ public class KspWillowChopperScript extends Script {
             trackResourceInventoryChanges(true);
             campfiresLit++;
             campfireNearby = true;
+            Rs2TileObjectModel createdFire = findCampfire(Rs2Player.getWorldLocation(), 15);
+            if (createdFire != null) {
+                activeCampfireLocation = createdFire.getWorldLocation();
+                activeCampfireObjectId = createdFire.getId();
+            }
             lastBurnResourceCount = Rs2Inventory.count(resourceId);
             lastBurnProgressMillis = System.currentTimeMillis();
             status = "Campfire created";
@@ -359,31 +409,59 @@ public class KspWillowChopperScript extends Script {
     }
 
     private void startCampfireBurn(Rs2TileObjectModel fire) {
-        int resourceId = activeTree.getResourceId();
-        if (fire == null || !Rs2Inventory.hasItem(resourceId)) {
-            return;
+        startCampfireBurn(fire, false);
+    }
+
+    private boolean startCampfireBurn(Rs2TileObjectModel fire, boolean forceImmediate) {
+        synchronized (campfireInteractionLock) {
+            int resourceId = activeTree.getResourceId();
+            if (fire == null || !Rs2Inventory.hasItem(resourceId) || !burnModeEnabled) {
+                return false;
+            }
+
+            // For the first couple of event-driven retries, refuse the exact object
+            // that just despawned. The tile-object cache can trail the event by a
+            // few milliseconds and otherwise hand us the stale object again.
+            if (forceImmediate
+                    && immediateCampfireRetargetAttempts <= 2
+                    && invalidatedCampfireLocation != null
+                    && invalidatedCampfireLocation.equals(fire.getWorldLocation())
+                    && invalidatedCampfireObjectId == fire.getId()) {
+                return false;
+            }
+
+            activeCampfireLocation = fire.getWorldLocation();
+            activeCampfireObjectId = fire.getId();
+            campfireNearby = true;
+
+            int count = Rs2Inventory.count(resourceId);
+            status = forceImmediate
+                    ? "Campfire changed - repeating burn"
+                    : "Adding " + activeTree.getResourceName() + " to campfire";
+
+            Rs2Inventory.use(resourceId);
+            if (!sleepUntil(Rs2Inventory::isItemSelected, 2000)) {
+                status = "Selecting " + activeTree.getResourceName();
+                return false;
+            }
+
+            Rs2GameObject.interact(fire);
+            if (!sleepUntil(() -> Rs2Widget.getWidget(BURN_INTERFACE_WIDGET) != null, 5000)) {
+                status = forceImmediate ? "Campfire changed - retrying" : "Waiting for Burn dialog";
+                return false;
+            }
+
+            Rs2Keyboard.keyPress(KeyEvent.VK_SPACE);
+            burningActive = true;
+            lastBurnResourceCount = count;
+            lastBurnProgressMillis = System.currentTimeMillis();
+            immediateCampfireRetargetRequested = false;
+            immediateCampfireRetargetAttempts = 0;
+            invalidatedCampfireLocation = null;
+            invalidatedCampfireObjectId = -1;
+            status = "Burning " + activeTree.getResourceName();
+            return true;
         }
-
-        int count = Rs2Inventory.count(resourceId);
-        status = "Adding " + activeTree.getResourceName() + " to campfire";
-
-        Rs2Inventory.use(resourceId);
-        if (!sleepUntil(Rs2Inventory::isItemSelected, 2000)) {
-            status = "Selecting " + activeTree.getResourceName();
-            return;
-        }
-
-        Rs2GameObject.interact(fire);
-        if (!sleepUntil(() -> Rs2Widget.getWidget(BURN_INTERFACE_WIDGET) != null, 5000)) {
-            status = "Waiting for Burn dialog";
-            return;
-        }
-
-        Rs2Keyboard.keyPress(KeyEvent.VK_SPACE);
-        burningActive = true;
-        lastBurnResourceCount = count;
-        lastBurnProgressMillis = System.currentTimeMillis();
-        status = "Burning " + activeTree.getResourceName();
     }
 
     private void trackBurnProgress() {
@@ -505,6 +583,7 @@ public class KspWillowChopperScript extends Script {
             return;
         }
         notifyTargetObjectTransition(object.getWorldLocation(), object.getId(), false);
+        notifyCampfireObjectTransition(object.getWorldLocation(), object.getId(), false);
     }
 
     public void notifyGameObjectDespawned(GameObject object) {
@@ -512,6 +591,7 @@ public class KspWillowChopperScript extends Script {
             return;
         }
         notifyTargetObjectTransition(object.getWorldLocation(), object.getId(), true);
+        notifyCampfireObjectTransition(object.getWorldLocation(), object.getId(), true);
     }
 
     private void notifyTargetObjectTransition(WorldPoint location, int objectId, boolean despawned) {
@@ -580,6 +660,102 @@ public class KspWillowChopperScript extends Script {
                 }
             }
         }, Math.max(0L, delayMillis), TimeUnit.MILLISECONDS);
+    }
+
+    private void notifyCampfireObjectTransition(WorldPoint location, int objectId, boolean despawned) {
+        WorldPoint targetLocation = activeCampfireLocation;
+        int targetId = activeCampfireObjectId;
+
+        if (!sessionStarted
+                || !burnModeEnabled
+                || targetLocation == null
+                || location == null
+                || !targetLocation.equals(location)
+                || targetId < 0) {
+            return;
+        }
+
+        boolean currentCampfireRemoved = despawned && objectId == targetId;
+        boolean sameTileMorphedToDifferentId = !despawned && objectId != targetId;
+        if (!currentCampfireRemoved && !sameTileMorphedToDifferentId) {
+            return;
+        }
+
+        invalidatedCampfireLocation = targetLocation;
+        invalidatedCampfireObjectId = targetId;
+        immediateCampfireRetargetRequested = true;
+        immediateCampfireRetargetAttempts = 0;
+        burningActive = false;
+        lastBurnResourceCount = Rs2Inventory.count(activeTree.getResourceId());
+        lastBurnProgressMillis = 0L;
+        status = currentCampfireRemoved
+                ? "Campfire disappeared - reacquiring"
+                : "Campfire ID changed - reacquiring";
+        queueImmediateCampfireRetarget(20L);
+    }
+
+    private void queueImmediateCampfireRetarget(long delayMillis) {
+        if (!sessionStarted || !burnModeEnabled || !immediateCampfireRetargetRequested) {
+            return;
+        }
+
+        if (!immediateCampfireRetargetQueued.compareAndSet(false, true)) {
+            return;
+        }
+
+        scheduledExecutorService.schedule(() -> {
+            boolean retry = false;
+            try {
+                if (!sessionStarted
+                        || !burnModeEnabled
+                        || !immediateCampfireRetargetRequested
+                        || !Microbot.isLoggedIn()) {
+                    return;
+                }
+
+                if (Rs2Bank.isOpen()
+                        || plugin.getCurrentForestryEvent() != KspForestryEvent.NONE
+                        || !Rs2Inventory.hasItem(activeTree.getResourceId())) {
+                    return;
+                }
+
+                immediateCampfireRetargetAttempts++;
+                Rs2TileObjectModel replacement = findCampfire(Rs2Player.getWorldLocation(), 15);
+
+                if (replacement != null) {
+                    boolean restarted = startCampfireBurn(replacement, true);
+                    retry = !restarted
+                            && immediateCampfireRetargetRequested
+                            && immediateCampfireRetargetAttempts < 8;
+                } else if (immediateCampfireRetargetAttempts < 6) {
+                    // Give the scene cache a very short window to expose a morph
+                    // replacement before deciding the campfire truly vanished.
+                    retry = true;
+                } else {
+                    // No replacement object exists: repeat the overall campfire
+                    // workflow by creating a fresh one, as requested.
+                    immediateCampfireRetargetRequested = false;
+                    clearActiveCampfireTarget();
+                    burningActive = false;
+                    status = "Campfire gone - creating another";
+                    createCampfire();
+                }
+            } catch (Exception ex) {
+                Microbot.logStackTrace("KspWillowChopperScript campfire retarget", ex);
+            } finally {
+                immediateCampfireRetargetQueued.set(false);
+                if (retry) {
+                    queueImmediateCampfireRetarget(60L);
+                } else if (immediateCampfireRetargetAttempts >= 8) {
+                    immediateCampfireRetargetRequested = false;
+                }
+            }
+        }, Math.max(0L, delayMillis), TimeUnit.MILLISECONDS);
+    }
+
+    private void clearActiveCampfireTarget() {
+        activeCampfireLocation = null;
+        activeCampfireObjectId = -1;
     }
 
     private Rs2TileObjectModel findCampfire(WorldPoint anchor, int radius) {
