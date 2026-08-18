@@ -8,7 +8,8 @@ import net.runelite.client.plugins.microbot.Microbot;
 import net.runelite.client.plugins.microbot.kspwillowchopper.KspForestryEvent;
 import net.runelite.client.plugins.microbot.kspwillowchopper.KspWillowChopperPlugin;
 import net.runelite.client.plugins.microbot.util.player.Rs2Player;
-import net.runelite.client.plugins.microbot.util.walker.Rs2Walker;
+
+import java.awt.Polygon;
 
 import static net.runelite.client.plugins.microbot.util.Global.sleepUntil;
 
@@ -31,7 +32,6 @@ public class KspLeprechaunEvent implements BlockingEvent {
     @Override
     public boolean execute() {
         plugin.setCurrentForestryEvent(KspForestryEvent.LEPRECHAUN);
-        Rs2Walker.setTarget(null);
 
         /*
          * The verified behavior is to use End of Rainbow tiles for the temporary boost.
@@ -49,8 +49,15 @@ public class KspLeprechaunEvent implements BlockingEvent {
             }
 
             if (!Rs2Player.getWorldLocation().equals(rainbow.getWorldLocation())) {
-                Rs2Walker.walkFastCanvas(rainbow.getWorldLocation());
-                sleepUntil(() -> Rs2Player.getWorldLocation().equals(rainbow.getWorldLocation()), 5000);
+                if (rainbow.getMinimapLocation() != null) {
+                    Microbot.getMouse().click(rainbow.getMinimapLocation());
+                } else {
+                    Polygon poly = rainbow.getCanvasTilePoly();
+                    if (poly != null) {
+                        Microbot.getMouse().click(poly.getBounds());
+                    }
+                }
+                sleepUntil(() -> Rs2Player.getWorldLocation().equals(rainbow.getWorldLocation()) || !validate(), 2500);
             } else {
                 sleepUntil(() -> false, 350);
             }

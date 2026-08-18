@@ -8,7 +8,8 @@ import net.runelite.client.plugins.microbot.kspwillowchopper.KspForestryEvent;
 import net.runelite.client.plugins.microbot.kspwillowchopper.KspWillowChopperPlugin;
 import net.runelite.client.plugins.microbot.util.npc.Rs2NpcModel;
 import net.runelite.client.plugins.microbot.util.player.Rs2Player;
-import net.runelite.client.plugins.microbot.util.walker.Rs2Walker;
+
+import java.awt.Polygon;
 
 import java.util.List;
 
@@ -33,7 +34,6 @@ public class KspRitualEvent implements BlockingEvent {
     @Override
     public boolean execute() {
         plugin.setCurrentForestryEvent(KspForestryEvent.ENCHANTMENT_RITUAL);
-        Rs2Walker.setTarget(null);
         plugin.ensureInventorySpace(1);
 
         while (validate()) {
@@ -44,8 +44,15 @@ public class KspRitualEvent implements BlockingEvent {
             }
 
             if (!Rs2Player.getWorldLocation().equals(target.getWorldLocation())) {
-                Rs2Walker.walkFastCanvas(target.getWorldLocation());
-                sleepUntil(() -> Rs2Player.getWorldLocation().equals(target.getWorldLocation()), 5000);
+                if (target.getMinimapLocation() != null) {
+                    Microbot.getMouse().click(target.getMinimapLocation());
+                } else {
+                    Polygon poly = target.getCanvasTilePoly();
+                    if (poly != null) {
+                        Microbot.getMouse().click(poly.getBounds());
+                    }
+                }
+                sleepUntil(() -> Rs2Player.getWorldLocation().equals(target.getWorldLocation()) || !validate(), 2500);
             } else {
                 sleepUntil(() -> false, 400);
             }

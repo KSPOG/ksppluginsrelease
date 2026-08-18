@@ -10,7 +10,6 @@ import net.runelite.client.plugins.microbot.kspwillowchopper.KspForestryEvent;
 import net.runelite.client.plugins.microbot.kspwillowchopper.KspWillowChopperPlugin;
 import net.runelite.client.plugins.microbot.util.gameobject.Rs2GameObject;
 import net.runelite.client.plugins.microbot.util.player.Rs2Player;
-import net.runelite.client.plugins.microbot.util.walker.Rs2Walker;
 
 import static net.runelite.client.plugins.microbot.util.Global.sleepUntil;
 
@@ -49,7 +48,6 @@ public class KspRootEvent implements BlockingEvent {
     @Override
     public boolean execute() {
         plugin.setCurrentForestryEvent(KspForestryEvent.RISING_ROOTS);
-        Rs2Walker.setTarget(null);
 
         while (validate()) {
             var root = plugin.rs2TileObjectCache.query()

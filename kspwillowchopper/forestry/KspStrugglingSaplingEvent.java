@@ -13,7 +13,6 @@ import net.runelite.client.plugins.microbot.kspwillowchopper.KspWillowChopperPlu
 import net.runelite.client.plugins.microbot.util.gameobject.Rs2GameObject;
 import net.runelite.client.plugins.microbot.util.inventory.Rs2Inventory;
 import net.runelite.client.plugins.microbot.util.player.Rs2Player;
-import net.runelite.client.plugins.microbot.util.walker.Rs2Walker;
 
 import java.util.HashSet;
 import java.util.List;
@@ -71,7 +70,6 @@ public class KspStrugglingSaplingEvent implements BlockingEvent {
     @Override
     public boolean execute() {
         plugin.setCurrentForestryEvent(KspForestryEvent.STRUGGLING_SAPLING);
-        Rs2Walker.setTarget(null);
 
         if (!plugin.ensureInventorySpace(5)) {
             return true;

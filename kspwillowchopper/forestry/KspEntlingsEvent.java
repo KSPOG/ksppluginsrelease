@@ -9,7 +9,6 @@ import net.runelite.client.plugins.microbot.api.npc.models.Rs2NpcModel;
 import net.runelite.client.plugins.microbot.kspwillowchopper.KspForestryEvent;
 import net.runelite.client.plugins.microbot.kspwillowchopper.KspWillowChopperPlugin;
 import net.runelite.client.plugins.microbot.util.player.Rs2Player;
-import net.runelite.client.plugins.microbot.util.walker.Rs2Walker;
 
 import java.util.Comparator;
 
@@ -33,7 +32,6 @@ public class KspEntlingsEvent implements BlockingEvent {
     @Override
     public boolean execute() {
         plugin.setCurrentForestryEvent(KspForestryEvent.FRIENDLY_ENTLINGS);
-        Rs2Walker.setTarget(null);
 
         if (!plugin.ensureInventorySpace(2)) {
             return true;

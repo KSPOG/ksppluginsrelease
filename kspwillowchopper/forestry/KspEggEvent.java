@@ -11,7 +11,6 @@ import net.runelite.client.plugins.microbot.kspwillowchopper.KspWillowChopperPlu
 import net.runelite.client.plugins.microbot.util.dialogues.Rs2Dialogue;
 import net.runelite.client.plugins.microbot.util.inventory.Rs2Inventory;
 import net.runelite.client.plugins.microbot.util.player.Rs2Player;
-import net.runelite.client.plugins.microbot.util.walker.Rs2Walker;
 
 import java.util.Comparator;
 import java.util.stream.Collectors;
@@ -37,7 +36,6 @@ public class KspEggEvent implements BlockingEvent {
     @Override
     public boolean execute() {
         plugin.setCurrentForestryEvent(KspForestryEvent.PHEASANT);
-        Rs2Walker.setTarget(null);
 
         if (Rs2Inventory.isFull()) {
             if (!plugin.ensureInventorySpace(1)) {

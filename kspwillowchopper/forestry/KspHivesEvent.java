@@ -10,7 +10,6 @@ import net.runelite.client.plugins.microbot.kspwillowchopper.KspWillowChopperPlu
 import net.runelite.client.plugins.microbot.util.inventory.Rs2Inventory;
 import net.runelite.client.plugins.microbot.util.keyboard.Rs2Keyboard;
 import net.runelite.client.plugins.microbot.util.player.Rs2Player;
-import net.runelite.client.plugins.microbot.util.walker.Rs2Walker;
 import net.runelite.client.plugins.microbot.util.widget.Rs2Widget;
 
 import java.awt.event.KeyEvent;
@@ -47,7 +46,6 @@ public class KspHivesEvent implements BlockingEvent {
     public boolean execute() {
         plugin.setCurrentForestryEvent(KspForestryEvent.BEEHIVE);
         completed.clear();
-        Rs2Walker.setTarget(null);
 
         while (validate()) {
             if (Rs2Widget.findWidget("How many logs would you like to add", null, false) != null) {

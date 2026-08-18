@@ -7,7 +7,6 @@ import net.runelite.client.plugins.microbot.Microbot;
 import net.runelite.client.plugins.microbot.kspwillowchopper.KspForestryEvent;
 import net.runelite.client.plugins.microbot.kspwillowchopper.KspWillowChopperPlugin;
 import net.runelite.client.plugins.microbot.util.player.Rs2Player;
-import net.runelite.client.plugins.microbot.util.walker.Rs2Walker;
 
 import static net.runelite.client.plugins.microbot.util.Global.sleepUntil;
 
@@ -31,7 +30,6 @@ public class KspFlowersEvent implements BlockingEvent {
     @Override
     public boolean execute() {
         plugin.setCurrentForestryEvent(KspForestryEvent.FLOWERING_TREE);
-        Rs2Walker.setTarget(null);
         plugin.ensureInventorySpace(3);
 
         while (validate()) {
