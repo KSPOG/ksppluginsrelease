@@ -1,4 +1,4 @@
-# KSP Willow Chopper v1.0.0
+# KSP Willow Chopper v1.0.1
 
 Package: `net.runelite.client.plugins.microbot.kspwillowchopper`
 
@@ -53,3 +53,9 @@ The optimal stage 1 / 2 / 3 ingredient combination is learned from the game's me
 - Firemaking XP gained + XP/hour
 - anima-infused bark gained
 - learned Struggling Sapling combination
+
+
+## v1.0.1 overlay fix
+- Fixed overlay using a different injected script instance.
+- Script is now a singleton so the overlay reads the live running state.
+- Runtime and XP panels now stay at 0 until a real session starts.

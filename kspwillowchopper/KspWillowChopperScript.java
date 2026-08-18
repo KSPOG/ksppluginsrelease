@@ -19,10 +19,12 @@ import net.runelite.client.plugins.microbot.util.walker.Rs2Walker;
 import net.runelite.client.plugins.microbot.util.widget.Rs2Widget;
 
 import javax.inject.Inject;
+import javax.inject.Singleton;
 import java.awt.event.KeyEvent;
 import java.util.concurrent.TimeUnit;
 
 @Slf4j
+@Singleton
 public class KspWillowChopperScript extends Script {
     public static final int WILLOW_LOG_ID = ItemID.WILLOW_LOGS;
     private static final int TINDERBOX_ID = ItemID.TINDERBOX;
@@ -32,9 +34,10 @@ public class KspWillowChopperScript extends Script {
 
     private final KspWillowChopperPlugin plugin;
 
-    private volatile String status = "Starting";
+    private volatile String status = "Idle";
     private volatile boolean campfireNearby;
     private volatile boolean burningActive;
+    private volatile boolean sessionStarted;
 
     private long startTimeMillis;
     private int startWoodcuttingXp;
@@ -62,6 +65,7 @@ public class KspWillowChopperScript extends Script {
         lastBurnLogCount = -1;
         burningActive = false;
         campfireNearby = false;
+        sessionStarted = true;
         status = "Starting";
 
         mainScheduledFuture = scheduledExecutorService.scheduleWithFixedDelay(() -> {
@@ -71,7 +75,6 @@ public class KspWillowChopperScript extends Script {
                     return;
                 }
 
-                // BlockingEventManager integration: Forestry takes control while an event is valid.
                 if (!super.run()) {
                     if (plugin.getCurrentForestryEvent() != KspForestryEvent.NONE) {
                         status = "Forestry: " + plugin.getCurrentForestryEvent();
@@ -115,6 +118,15 @@ public class KspWillowChopperScript extends Script {
         return true;
     }
 
+    @Override
+    public void shutdown() {
+        super.shutdown();
+        sessionStarted = false;
+        burningActive = false;
+        campfireNearby = false;
+        status = "Idle";
+    }
+
     private boolean hasAxe() {
         return Rs2Inventory.hasItem("axe") || Rs2Equipment.isWearing("axe");
     }
@@ -123,7 +135,6 @@ public class KspWillowChopperScript extends Script {
         status = "Opening bank directly";
         int before = Rs2Inventory.count(WILLOW_LOG_ID);
 
-        // Deliberately do not call walkToBankAndUseBank / Rs2Walker here.
         if (!Rs2Bank.openBank()) {
             status = "Nearby bank not clickable";
             return;
@@ -144,7 +155,6 @@ public class KspWillowChopperScript extends Script {
         Rs2Bank.closeBank();
         sleepUntil(() -> !Rs2Bank.isOpen(), 3000);
 
-        // Requested behavior: directly click the loaded tree itself after banking.
         status = "Clicking willow directly";
         clickWillowDirect();
     }
@@ -179,9 +189,7 @@ public class KspWillowChopperScript extends Script {
         }
 
         if (!Rs2Inventory.isFull()) {
-            if (fire == null
-                    && !Rs2Inventory.hasItem(TINDERBOX_ID)
-                    && Rs2Inventory.emptySlotCount() <= 1) {
+            if (fire == null && !Rs2Inventory.hasItem(TINDERBOX_ID) && Rs2Inventory.emptySlotCount() <= 1) {
                 ensureTinderbox();
                 return;
             }
@@ -392,9 +400,10 @@ public class KspWillowChopperScript extends Script {
     public String getStatus() { return status; }
     public boolean isCampfireNearby() { return campfireNearby; }
     public boolean isBurningActive() { return burningActive; }
-    public long getStartTimeMillis() { return startTimeMillis; }
-    public int getStartWoodcuttingXp() { return startWoodcuttingXp; }
-    public int getStartFiremakingXp() { return startFiremakingXp; }
+    public boolean hasSessionStarted() { return sessionStarted && startTimeMillis > 0; }
+    public long getRuntimeMillis() { return hasSessionStarted() ? Math.max(0L, System.currentTimeMillis() - startTimeMillis) : 0L; }
+    public int getWoodcuttingXpGained() { return Math.max(0, skillXp(Skill.WOODCUTTING) - startWoodcuttingXp); }
+    public int getFiremakingXpGained() { return Math.max(0, skillXp(Skill.FIREMAKING) - startFiremakingXp); }
     public int getLogsBanked() { return logsBanked; }
     public int getLogsBurned() { return logsBurned; }
     public int getCampfiresLit() { return campfiresLit; }

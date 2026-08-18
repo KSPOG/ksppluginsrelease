@@ -45,7 +45,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 @PluginDescriptor(
-       name = PluginConstants.KSP + "Chopper",
+        name = PluginConstants.KSP + "Chopper",
         description = "Direct willow chopping with bank or Forester's Campfire log handling and Forestry events.",
         tags = {"willow", "woodcutting", "firemaking", "forestry", "ksp", "microbot"},
         authors = {"KSP"},
@@ -56,7 +56,7 @@ import java.util.regex.Pattern;
 )
 @Slf4j
 public class KspWillowChopperPlugin extends Plugin {
-    public static final String VERSION = "1.0.0";
+    public static final String VERSION = "1.0.1";
 
     private static final Pattern ANIMA_BARK_PATTERN =
             Pattern.compile("You've been awarded <col=[0-9a-f]+>(\\d+) Anima-infused bark</col>\\.");
