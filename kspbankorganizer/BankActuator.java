@@ -18,7 +18,6 @@ import net.runelite.client.plugins.microbot.Microbot;
 import net.runelite.client.plugins.microbot.util.Global;
 import net.runelite.client.plugins.microbot.util.bank.Rs2Bank;
 import net.runelite.client.plugins.microbot.util.inventory.Rs2ItemModel;
-import net.runelite.client.plugins.microbot.util.widget.Rs2Widget;
 
 /**
  * Real-bank movement primitive. The widget IDs and drag flow mirror the current
@@ -28,7 +27,6 @@ final class BankActuator
 {
     private static final int BANK_GROUP_ID = 12;
     private static final int BANK_REARRANGE_BUTTON_CHILD_ID = 23;
-    private static final int BANK_TAB_CONTAINER_DYNAMIC_MAIN_INDEX = 10;
 
     private static final int[] TAB_COUNT_VARBITS = {
         Varbits.BANK_TAB_ONE_COUNT,
@@ -370,7 +368,7 @@ final class BankActuator
         {
             return ActuatorResult.fail("Could not scroll source item into view.");
         }
-        DragBounds bounds = itemToTabBounds(itemId, BANK_TAB_CONTAINER_DYNAMIC_MAIN_INDEX);
+        DragBounds bounds = itemToTabBounds(itemId, 0);
         if (bounds == null)
         {
             return ActuatorResult.fail("Could not locate live bank widget for " + itemId + " or the main-tab widget.");
@@ -406,7 +404,7 @@ final class BankActuator
         {
             return ActuatorResult.fail("Could not scroll source item into view.");
         }
-        DragBounds bounds = itemToTabBounds(itemId, BANK_TAB_CONTAINER_DYNAMIC_MAIN_INDEX + targetTab);
+        DragBounds bounds = itemToTabBounds(itemId, targetTab);
         if (bounds == null)
         {
             return ActuatorResult.fail("Could not locate live bank widget for " + itemId + " or destination tab " + targetTab + ".");
@@ -441,7 +439,7 @@ final class BankActuator
         {
             return ActuatorResult.fail("Could not scroll source item into view.");
         }
-        DragBounds bounds = itemToTabBounds(itemId, BANK_TAB_CONTAINER_DYNAMIC_MAIN_INDEX + newTab);
+        DragBounds bounds = itemToTabBounds(itemId, newTab);
         if (bounds == null)
         {
             return ActuatorResult.fail("Could not locate live bank widget for " + itemId + " or new tab " + newTab + ".");
@@ -550,20 +548,24 @@ final class BankActuator
     {
         return Microbot.getClientThread().runOnClientThreadOptional(() ->
         {
-            List<Widget> tabs = Rs2Bank.getTabs();
-            int dynamicIndex = BANK_TAB_CONTAINER_DYNAMIC_MAIN_INDEX + tabIndex;
-            if (tabs == null || dynamicIndex < 0 || dynamicIndex >= tabs.size())
-            {
-                return false;
-            }
-
-            Widget tab = tabs.get(dynamicIndex);
+            /*
+             * Do not index Rs2Bank.getTabs() directly. The returned list is a
+             * dynamic widget collection and its list position is not the same
+             * thing as the logical bank-tab number. getTabWidget(tabIndex)
+             * resolves the actual Bankmain tab widget for the requested tab.
+             */
+            Widget tab = Rs2Bank.getTabWidget(tabIndex);
             if (tab == null || tab.isHidden() || !hasUsableCanvasRectangle(tab.getBounds()))
             {
                 return false;
             }
 
-            Rs2Widget.clickWidgetFast(tab, dynamicIndex);
+            /*
+             * Use the same live widget bounds + mouse path used by the
+             * verification path below. This avoids depending on the dynamic
+             * child index/identifier of Bankmain's tab container.
+             */
+            Microbot.getMouse().click(new Rectangle(tab.getBounds()));
             return true;
         }).orElse(false);
     }
@@ -625,13 +627,14 @@ final class BankActuator
                 return null;
             }
 
-            List<Widget> tabs = Rs2Bank.getTabs();
-            if (tabs == null || dynamicTabIndex < 0 || dynamicTabIndex >= tabs.size())
-            {
-                return null;
-            }
-
-            Widget tab = tabs.get(dynamicTabIndex);
+            /*
+             * dynamicTabIndex is now the logical bank tab number (0 = main,
+             * 1..9 = real tabs). Resolve it through Rs2Bank instead of using
+             * a hard-coded offset into getTabs(). This is critical because
+             * getTabs() exposes the live dynamic widget list, whose list index
+             * can change independently of the logical tab number.
+             */
+            Widget tab = Rs2Bank.getTabWidget(dynamicTabIndex);
             if (tab == null || tab.isHidden())
             {
                 return null;
