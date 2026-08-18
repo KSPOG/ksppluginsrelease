@@ -46,8 +46,8 @@ import java.util.regex.Pattern;
 
 @PluginDescriptor(
         name = PluginConstants.KSP + "Chopper",
-        description = "Direct willow chopping with bank or Forester's Campfire log handling and Forestry events.",
-        tags = {"willow", "woodcutting", "firemaking", "forestry", "ksp", "microbot"},
+        description = "Direct Chopping with bank or Forester's Campfire log handling and Forestry events.",
+        tags = {"woodcutting", "firemaking", "forestry", "ksp", "microbot"},
         authors = {"KSP"},
         version = KspWillowChopperPlugin.VERSION,
         minClientVersion = "2.1.32",

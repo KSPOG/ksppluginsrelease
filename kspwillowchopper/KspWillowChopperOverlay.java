@@ -50,7 +50,7 @@ public class KspWillowChopperOverlay extends OverlayPanel {
             panelComponent.getChildren().clear();
 
             panelComponent.getChildren().add(TitleComponent.builder()
-                    .text("KSP Willow Chopper v" + KspWillowChopperPlugin.VERSION)
+                    .text("KSP Chopper v" + KspWillowChopperPlugin.VERSION)
                     .color(TITLE)
                     .build());
 
