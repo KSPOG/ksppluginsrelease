@@ -7,7 +7,6 @@ import net.runelite.client.plugins.microbot.BlockingEventPriority;
 import net.runelite.client.plugins.microbot.Microbot;
 import net.runelite.client.plugins.microbot.kspwillowchopper.KspForestryEvent;
 import net.runelite.client.plugins.microbot.kspwillowchopper.KspWillowChopperPlugin;
-import net.runelite.client.plugins.microbot.kspwillowchopper.KspWillowChopperScript;
 import net.runelite.client.plugins.microbot.util.inventory.Rs2Inventory;
 import net.runelite.client.plugins.microbot.util.keyboard.Rs2Keyboard;
 import net.runelite.client.plugins.microbot.util.player.Rs2Player;
@@ -39,7 +38,9 @@ public class KspHivesEvent implements BlockingEvent {
                 .toList()
                 .isEmpty();
 
-        return hiveExists && Rs2Inventory.count(KspWillowChopperScript.WILLOW_LOG_ID) > 1;
+        return hiveExists
+                && plugin.isSelectedResourceCampfireBurnable()
+                && Rs2Inventory.count(plugin.getSelectedResourceId()) > 1;
     }
 
     @Override
@@ -63,7 +64,7 @@ public class KspHivesEvent implements BlockingEvent {
 
             if (hive == null) break;
 
-            int before = Rs2Inventory.count(KspWillowChopperScript.WILLOW_LOG_ID);
+            int before = Rs2Inventory.count(plugin.getSelectedResourceId());
             if (before <= 1) break;
 
             if (hive.click("Build")) {

@@ -56,7 +56,7 @@ import java.util.regex.Pattern;
 )
 @Slf4j
 public class KspWillowChopperPlugin extends Plugin {
-    public static final String VERSION = "1.1.1";
+    public static final String VERSION = "1.1.2";
 
     private static final Pattern ANIMA_BARK_PATTERN =
             Pattern.compile("You've been awarded <col=[0-9a-f]+>(\\d+) Anima-infused bark</col>\\.");
@@ -289,15 +289,33 @@ public class KspWillowChopperPlugin extends Plugin {
         }
 
         int needed = requiredSlots - free;
-        int availableLogs = Rs2Inventory.count(KspWillowChopperScript.WILLOW_LOG_ID);
-        int toDrop = Math.min(needed, availableLogs);
+        KspTree tree = getSelectedTree();
+        int availableResources = Rs2Inventory.count(tree.getResourceId());
+        int toDrop = Math.min(needed, availableResources);
 
         if (toDrop <= 0) {
             return false;
         }
 
-        Rs2Inventory.dropAmount("Willow logs", toDrop, InteractOrder.EFFICIENT_ROW);
+        Rs2Inventory.dropAmount(tree.getResourceName(), toDrop, InteractOrder.EFFICIENT_ROW);
         return Rs2Inventory.emptySlotCount() >= requiredSlots;
+    }
+
+    public KspTree getSelectedTree() {
+        KspTree selected = config == null ? null : config.tree();
+        return selected == null ? KspTree.WILLOW : selected;
+    }
+
+    public int getSelectedResourceId() {
+        return getSelectedTree().getResourceId();
+    }
+
+    public String getSelectedResourceName() {
+        return getSelectedTree().getResourceName();
+    }
+
+    public boolean isSelectedResourceCampfireBurnable() {
+        return getSelectedTree().isCampfireBurnable();
     }
 
     public void incrementForestryEventCompleted() {

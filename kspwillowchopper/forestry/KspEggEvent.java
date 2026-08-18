@@ -8,7 +8,6 @@ import net.runelite.client.plugins.microbot.BlockingEventPriority;
 import net.runelite.client.plugins.microbot.Microbot;
 import net.runelite.client.plugins.microbot.kspwillowchopper.KspForestryEvent;
 import net.runelite.client.plugins.microbot.kspwillowchopper.KspWillowChopperPlugin;
-import net.runelite.client.plugins.microbot.kspwillowchopper.KspWillowChopperScript;
 import net.runelite.client.plugins.microbot.util.dialogues.Rs2Dialogue;
 import net.runelite.client.plugins.microbot.util.inventory.Rs2Inventory;
 import net.runelite.client.plugins.microbot.util.player.Rs2Player;
@@ -41,7 +40,9 @@ public class KspEggEvent implements BlockingEvent {
         Rs2Walker.setTarget(null);
 
         if (Rs2Inventory.isFull()) {
-            Rs2Inventory.drop(KspWillowChopperScript.WILLOW_LOG_ID);
+            if (!plugin.ensureInventorySpace(1)) {
+                return false;
+            }
             sleepUntil(() -> !Rs2Inventory.isFull(), 3000);
         }
 
