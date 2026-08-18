@@ -26,7 +26,6 @@ import java.util.concurrent.TimeUnit;
 @Slf4j
 @Singleton
 public class KspWillowChopperScript extends Script {
-    public static final int WILLOW_LOG_ID = ItemID.WILLOW_LOGS;
     private static final int TINDERBOX_ID = ItemID.TINDERBOX;
     private static final int BURN_INTERFACE_WIDGET = 17694735;
     private static final int FIRE_ID = ObjectID.FIRE;
@@ -38,21 +37,23 @@ public class KspWillowChopperScript extends Script {
     private volatile boolean campfireNearby;
     private volatile boolean burningActive;
     private volatile boolean sessionStarted;
+    private volatile KspTree activeTree = KspTree.WILLOW;
 
     private long startTimeMillis;
     private int startWoodcuttingXp;
     private int startFiremakingXp;
     private int startWoodcuttingLevel;
     private int startFiremakingLevel;
-    private int logsBanked;
-    private int logsBurned;
+    private int resourcesChopped;
+    private int resourcesBanked;
+    private int resourcesBurned;
     private int campfiresLit;
 
-    private int lastBurnLogCount = -1;
-    private int lastObservedWillowCount = -1;
-    private int suppressedWillowLoss = 0;
+    private int lastBurnResourceCount = -1;
+    private int lastObservedResourceCount = -1;
+    private int suppressedResourceLoss = 0;
     private long lastBurnProgressMillis = 0L;
-    private long lastWillowClickMillis = 0L;
+    private long lastTreeClickMillis = 0L;
 
     @Inject
     public KspWillowChopperScript(KspWillowChopperPlugin plugin) {
@@ -65,14 +66,16 @@ public class KspWillowChopperScript extends Script {
         startFiremakingXp = skillXp(Skill.FIREMAKING);
         startWoodcuttingLevel = skillLevel(Skill.WOODCUTTING);
         startFiremakingLevel = skillLevel(Skill.FIREMAKING);
-        logsBanked = 0;
-        logsBurned = 0;
+        resourcesChopped = 0;
+        resourcesBanked = 0;
+        resourcesBurned = 0;
         campfiresLit = 0;
-        lastBurnLogCount = -1;
-        lastObservedWillowCount = -1;
-        suppressedWillowLoss = 0;
+        lastBurnResourceCount = -1;
+        lastObservedResourceCount = -1;
+        suppressedResourceLoss = 0;
         burningActive = false;
         campfireNearby = false;
+        activeTree = safeTree(config.tree());
         sessionStarted = true;
         status = "Starting";
 
@@ -83,7 +86,11 @@ public class KspWillowChopperScript extends Script {
                     return;
                 }
 
+                KspTree selectedTree = safeTree(config.tree());
+                syncSelectedTree(selectedTree);
+
                 if (!super.run()) {
+                    syncResourceBaseline();
                     if (plugin.getCurrentForestryEvent() != KspForestryEvent.NONE) {
                         status = "Forestry: " + plugin.getCurrentForestryEvent();
                     }
@@ -92,10 +99,14 @@ public class KspWillowChopperScript extends Script {
 
                 if (plugin.getCurrentForestryEvent() != KspForestryEvent.NONE) {
                     plugin.setCurrentForestryEvent(KspForestryEvent.NONE);
+                    syncResourceBaseline();
                 }
 
-                if (Rs2Player.getRealSkillLevel(Skill.WOODCUTTING) < 30) {
-                    status = "Need 30 Woodcutting";
+                trackResourceInventoryChanges(!config.bankLogs());
+
+                int wcLevel = Rs2Player.getRealSkillLevel(Skill.WOODCUTTING);
+                if (wcLevel < activeTree.getWoodcuttingLevel()) {
+                    status = "Need " + activeTree.getWoodcuttingLevel() + " Woodcutting";
                     return;
                 }
 
@@ -106,17 +117,22 @@ public class KspWillowChopperScript extends Script {
 
                 if (config.bankLogs()) {
                     burningActive = false;
-                    lastBurnLogCount = -1;
-                    lastObservedWillowCount = Rs2Inventory.count(WILLOW_LOG_ID);
-                    suppressedWillowLoss = 0;
+                    lastBurnResourceCount = -1;
+                    suppressedResourceLoss = 0;
                     campfireNearby = false;
 
                     if (Rs2Inventory.isFull()) {
                         handleDirectBanking();
                     } else {
-                        clickWillowDirect();
+                        clickSelectedTreeDirect();
                     }
                 } else {
+                    if (!activeTree.isCampfireBurnable()) {
+                        burningActive = false;
+                        campfireNearby = false;
+                        status = activeTree.getResourceName() + " cannot be burned; enable Bank resources";
+                        return;
+                    }
                     handleBurnMode();
                 }
             } catch (Exception ex) {
@@ -134,9 +150,34 @@ public class KspWillowChopperScript extends Script {
         sessionStarted = false;
         burningActive = false;
         campfireNearby = false;
-        lastObservedWillowCount = -1;
-        suppressedWillowLoss = 0;
+        lastObservedResourceCount = -1;
+        suppressedResourceLoss = 0;
         status = "Idle";
+    }
+
+    private KspTree safeTree(KspTree tree) {
+        return tree == null ? KspTree.WILLOW : tree;
+    }
+
+    private void syncSelectedTree(KspTree selectedTree) {
+        if (selectedTree == activeTree) {
+            return;
+        }
+
+        activeTree = selectedTree;
+        burningActive = false;
+        campfireNearby = false;
+        lastBurnResourceCount = -1;
+        suppressedResourceLoss = 0;
+        lastObservedResourceCount = Rs2Inventory.count(activeTree.getResourceId());
+        lastTreeClickMillis = 0L;
+        status = "Tree changed to " + activeTree;
+    }
+
+    private void syncResourceBaseline() {
+        lastObservedResourceCount = Rs2Inventory.count(activeTree.getResourceId());
+        lastBurnResourceCount = lastObservedResourceCount;
+        suppressedResourceLoss = 0;
     }
 
     private boolean hasAxe() {
@@ -144,8 +185,9 @@ public class KspWillowChopperScript extends Script {
     }
 
     private void handleDirectBanking() {
+        int resourceId = activeTree.getResourceId();
+        int before = Rs2Inventory.count(resourceId);
         status = "Opening bank directly";
-        int before = Rs2Inventory.count(WILLOW_LOG_ID);
 
         if (!Rs2Bank.openBank()) {
             status = "Nearby bank not clickable";
@@ -157,38 +199,39 @@ public class KspWillowChopperScript extends Script {
             return;
         }
 
-        status = "Banking willow logs";
-        Rs2Bank.depositAll(WILLOW_LOG_ID);
-        sleepUntil(() -> Rs2Inventory.count(WILLOW_LOG_ID) < before, 3000);
+        status = "Banking " + activeTree.getResourceName();
+        Rs2Bank.depositAll(resourceId);
+        sleepUntil(() -> Rs2Inventory.count(resourceId) < before, 3000);
 
-        int after = Rs2Inventory.count(WILLOW_LOG_ID);
-        logsBanked += Math.max(0, before - after);
+        int after = Rs2Inventory.count(resourceId);
+        resourcesBanked += Math.max(0, before - after);
+        lastObservedResourceCount = after;
 
         Rs2Bank.closeBank();
         sleepUntil(() -> !Rs2Bank.isOpen(), 3000);
 
-        status = "Clicking willow directly";
-        clickWillowDirect();
+        status = "Clicking " + activeTree;
+        clickSelectedTreeDirect();
     }
 
     private void handleBurnMode() {
-        trackBurnedLogsFromInventory();
+        trackResourceInventoryChanges(true);
 
+        int resourceId = activeTree.getResourceId();
         Rs2TileObjectModel fire = findCampfire(Rs2Player.getWorldLocation(), 15);
         campfireNearby = fire != null;
-
         trackBurnProgress();
 
         if (burningActive) {
-            if (Rs2Inventory.count(WILLOW_LOG_ID) == 0) {
+            if (Rs2Inventory.count(resourceId) == 0) {
                 burningActive = false;
-                lastBurnLogCount = -1;
+                lastBurnResourceCount = -1;
                 status = "Burn complete";
                 return;
             }
 
             if (System.currentTimeMillis() - lastBurnProgressMillis < 5000) {
-                status = "Burning willow logs";
+                status = "Burning " + activeTree.getResourceName();
                 return;
             }
 
@@ -199,7 +242,7 @@ public class KspWillowChopperScript extends Script {
             }
 
             burningActive = false;
-            lastBurnLogCount = -1;
+            lastBurnResourceCount = -1;
         }
 
         if (!Rs2Inventory.isFull()) {
@@ -207,8 +250,7 @@ public class KspWillowChopperScript extends Script {
                 ensureTinderbox();
                 return;
             }
-
-            clickWillowDirect();
+            clickSelectedTreeDirect();
             return;
         }
 
@@ -246,37 +288,37 @@ public class KspWillowChopperScript extends Script {
     }
 
     private void createCampfire() {
+        int resourceId = activeTree.getResourceId();
+
         if (!Rs2Inventory.hasItem(TINDERBOX_ID)) {
             if (Rs2Inventory.emptySlotCount() > 0) {
                 ensureTinderbox();
             } else {
                 status = "Making room for tinderbox";
-                int beforeDrop = Rs2Inventory.count(WILLOW_LOG_ID);
-                suppressedWillowLoss++;
-                Rs2Inventory.drop(WILLOW_LOG_ID);
-                if (!sleepUntil(() -> Rs2Inventory.count(WILLOW_LOG_ID) < beforeDrop, 2500)) {
-                    suppressedWillowLoss = Math.max(0, suppressedWillowLoss - 1);
+                int beforeDrop = Rs2Inventory.count(resourceId);
+                suppressedResourceLoss++;
+                Rs2Inventory.drop(resourceId);
+                if (!sleepUntil(() -> Rs2Inventory.count(resourceId) < beforeDrop, 2500)) {
+                    suppressedResourceLoss = Math.max(0, suppressedResourceLoss - 1);
                 } else {
-                    trackBurnedLogsFromInventory();
+                    trackResourceInventoryChanges(true);
                 }
             }
             return;
         }
 
-        if (!Rs2Inventory.hasItem(WILLOW_LOG_ID)) {
+        if (!Rs2Inventory.hasItem(resourceId)) {
             return;
         }
 
         status = "Creating campfire";
-        int before = Rs2Inventory.count(WILLOW_LOG_ID);
-        Rs2Inventory.combine("Tinderbox", "Willow logs");
+        Rs2Inventory.combine("Tinderbox", activeTree.getResourceName());
 
         if (Rs2Player.waitForXpDrop(Skill.FIREMAKING, 5000)) {
-            int after = Rs2Inventory.count(WILLOW_LOG_ID);
-            trackBurnedLogsFromInventory();
+            trackResourceInventoryChanges(true);
             campfiresLit++;
             campfireNearby = true;
-            lastBurnLogCount = after;
+            lastBurnResourceCount = Rs2Inventory.count(resourceId);
             lastBurnProgressMillis = System.currentTimeMillis();
             status = "Campfire created";
             return;
@@ -291,16 +333,17 @@ public class KspWillowChopperScript extends Script {
     }
 
     private void startCampfireBurn(Rs2TileObjectModel fire) {
-        if (fire == null || !Rs2Inventory.hasItem(WILLOW_LOG_ID)) {
+        int resourceId = activeTree.getResourceId();
+        if (fire == null || !Rs2Inventory.hasItem(resourceId)) {
             return;
         }
 
-        int count = Rs2Inventory.count(WILLOW_LOG_ID);
-        status = "Adding logs to campfire";
+        int count = Rs2Inventory.count(resourceId);
+        status = "Adding " + activeTree.getResourceName() + " to campfire";
 
-        Rs2Inventory.use(WILLOW_LOG_ID);
+        Rs2Inventory.use(resourceId);
         if (!sleepUntil(Rs2Inventory::isItemSelected, 2000)) {
-            status = "Selecting willow log";
+            status = "Selecting " + activeTree.getResourceName();
             return;
         }
 
@@ -312,87 +355,88 @@ public class KspWillowChopperScript extends Script {
 
         Rs2Keyboard.keyPress(KeyEvent.VK_SPACE);
         burningActive = true;
-        lastBurnLogCount = count;
+        lastBurnResourceCount = count;
         lastBurnProgressMillis = System.currentTimeMillis();
-        status = "Burning willow logs";
+        status = "Burning " + activeTree.getResourceName();
     }
 
     private void trackBurnProgress() {
-        if (!burningActive || lastBurnLogCount < 0) {
+        if (!burningActive || lastBurnResourceCount < 0) {
             return;
         }
 
-        int count = Rs2Inventory.count(WILLOW_LOG_ID);
-        if (count < lastBurnLogCount) {
-            lastBurnLogCount = count;
+        int count = Rs2Inventory.count(activeTree.getResourceId());
+        if (count < lastBurnResourceCount) {
+            lastBurnResourceCount = count;
             lastBurnProgressMillis = System.currentTimeMillis();
         }
     }
 
     /**
-     * Tracks burned logs from the real inventory delta while Burn mode is active.
-     * This deliberately does not depend on the Burn widget or animation state, because
-     * those can disappear between scheduler ticks while the game is still consuming logs.
+     * Tracks resource gains from real inventory increases and burn consumption from
+     * inventory decreases. Banking only updates the baseline; burn mode counts the
+     * decrease as consumed unless it was deliberately suppressed (e.g. one dropped
+     * resource to make room for a tinderbox).
      */
-    private void trackBurnedLogsFromInventory() {
-        int current = Rs2Inventory.count(WILLOW_LOG_ID);
+    private void trackResourceInventoryChanges(boolean countLossAsBurned) {
+        int current = Rs2Inventory.count(activeTree.getResourceId());
 
-        if (lastObservedWillowCount < 0) {
-            lastObservedWillowCount = current;
+        if (lastObservedResourceCount < 0) {
+            lastObservedResourceCount = current;
             return;
         }
 
-        if (current > lastObservedWillowCount) {
-            // Chopped/picked up more logs: move the baseline forward.
-            lastObservedWillowCount = current;
+        if (current > lastObservedResourceCount) {
+            resourcesChopped += current - lastObservedResourceCount;
+            lastObservedResourceCount = current;
             return;
         }
 
-        if (current < lastObservedWillowCount) {
-            int lost = lastObservedWillowCount - current;
-            int ignored = Math.min(lost, suppressedWillowLoss);
-            suppressedWillowLoss -= ignored;
-            int burned = lost - ignored;
+        if (current < lastObservedResourceCount) {
+            int lost = lastObservedResourceCount - current;
+            int ignored = Math.min(lost, suppressedResourceLoss);
+            suppressedResourceLoss -= ignored;
+            int countableLoss = lost - ignored;
 
-            if (burned > 0) {
-                logsBurned += burned;
+            if (countLossAsBurned && countableLoss > 0) {
+                resourcesBurned += countableLoss;
             }
 
-            lastObservedWillowCount = current;
+            lastObservedResourceCount = current;
         }
     }
 
-    private void clickWillowDirect() {
+    private void clickSelectedTreeDirect() {
         if (Rs2Bank.isOpen()) {
             return;
         }
 
         if (Rs2Player.isMoving() || Rs2Player.isAnimating()) {
-            status = "Chopping willow";
+            status = "Chopping " + activeTree;
             return;
         }
 
-        if (System.currentTimeMillis() - lastWillowClickMillis < 1800) {
+        if (System.currentTimeMillis() - lastTreeClickMillis < 1800) {
             return;
         }
 
-        Rs2TileObjectModel willow = Microbot.getRs2TileObjectCache()
+        Rs2TileObjectModel tree = Microbot.getRs2TileObjectCache()
                 .query()
-                .withName("willow tree")
+                .withName(activeTree.getObjectName())
                 .nearestOnClientThread();
 
-        if (willow == null) {
-            status = "No willow tree loaded";
+        if (tree == null) {
+            status = "No " + activeTree + " loaded";
             return;
         }
 
-        status = "Clicking willow";
-        if (willow.click("Chop down")) {
-            lastWillowClickMillis = System.currentTimeMillis();
+        status = "Clicking " + activeTree;
+        if (tree.click(activeTree.getAction())) {
+            lastTreeClickMillis = System.currentTimeMillis();
             Rs2Player.waitForAnimation(3000);
-            status = "Chopping willow";
+            status = "Chopping " + activeTree;
         } else {
-            status = "Willow click failed";
+            status = activeTree + " click failed";
         }
     }
 
@@ -456,6 +500,7 @@ public class KspWillowChopperScript extends Script {
     }
 
     public String getStatus() { return status; }
+    public KspTree getActiveTree() { return activeTree; }
     public boolean isCampfireNearby() { return campfireNearby; }
     public boolean isBurningActive() { return burningActive; }
     public boolean hasSessionStarted() { return sessionStarted && startTimeMillis > 0; }
@@ -466,7 +511,9 @@ public class KspWillowChopperScript extends Script {
     public int getFiremakingLevel() { return skillLevel(Skill.FIREMAKING); }
     public int getWoodcuttingLevelsGained() { return hasSessionStarted() ? Math.max(0, getWoodcuttingLevel() - startWoodcuttingLevel) : 0; }
     public int getFiremakingLevelsGained() { return hasSessionStarted() ? Math.max(0, getFiremakingLevel() - startFiremakingLevel) : 0; }
-    public int getLogsBanked() { return logsBanked; }
-    public int getLogsBurned() { return logsBurned; }
+    public int getResourcesChopped() { return resourcesChopped; }
+    public int getResourcesBanked() { return resourcesBanked; }
+    public int getResourcesBurned() { return resourcesBurned; }
     public int getCampfiresLit() { return campfiresLit; }
+    public int getCurrentResourceCount() { return Rs2Inventory.count(activeTree.getResourceId()); }
 }

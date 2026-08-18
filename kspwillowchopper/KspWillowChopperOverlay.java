@@ -1,7 +1,6 @@
 package net.runelite.client.plugins.microbot.kspwillowchopper;
 
 import net.runelite.client.plugins.microbot.Microbot;
-import net.runelite.client.plugins.microbot.util.inventory.Rs2Inventory;
 import net.runelite.client.ui.overlay.OverlayPanel;
 import net.runelite.client.ui.overlay.OverlayPosition;
 import net.runelite.client.ui.overlay.components.LineComponent;
@@ -47,7 +46,7 @@ public class KspWillowChopperOverlay extends OverlayPanel {
         }
 
         try {
-            panelComponent.setPreferredSize(new Dimension(260, 0));
+            panelComponent.setPreferredSize(new Dimension(275, 0));
             panelComponent.getChildren().clear();
 
             panelComponent.getChildren().add(TitleComponent.builder()
@@ -55,11 +54,14 @@ public class KspWillowChopperOverlay extends OverlayPanel {
                     .color(TITLE)
                     .build());
 
-            addLine("Mode:", config.bankLogs() ? "Bank logs" : "Burn logs", ACTIVE);
+            KspTree tree = script.getActiveTree();
+            addLine("Tree:", tree.toString(), ACTIVE);
+            addLine("Mode:", config.bankLogs() ? "Bank resources" : "Burn logs", ACTIVE);
             addLine("Status:", script.getStatus(), ACTIVE);
-            addLine("Willow logs:", String.valueOf(Rs2Inventory.count(KspWillowChopperScript.WILLOW_LOG_ID)), VALUE);
+            addLine("Resource:", tree.getResourceName(), VALUE);
+            addLine("Inventory:", String.valueOf(script.getCurrentResourceCount()), VALUE);
 
-            if (!config.bankLogs()) {
+            if (!config.bankLogs() && tree.isCampfireBurnable()) {
                 String fireState = script.isBurningActive() ? "Burning" : (script.isCampfireNearby() ? "Nearby" : "None");
                 addLine("Campfire:", fireState, script.isCampfireNearby() ? GOOD : ACTIVE);
             }
@@ -78,15 +80,15 @@ public class KspWillowChopperOverlay extends OverlayPanel {
             double hours = elapsedMs / 3_600_000.0;
             int wcXp = script.getWoodcuttingXpGained();
             int fmXp = script.getFiremakingXpGained();
-            int chopped = plugin.getLogsChopped();
+            int chopped = script.getResourcesChopped();
 
             addLine("Runtime:", formatDuration(elapsedMs), VALUE);
-            addLine("Logs chopped:", format(chopped) + " (" + formatRate(chopped, hours) + "/h)", VALUE);
+            addLine("Items chopped:", format(chopped) + " (" + formatRate(chopped, hours) + "/h)", VALUE);
 
             if (config.bankLogs()) {
-                addLine("Logs banked:", format(script.getLogsBanked()), GOOD);
-            } else {
-                addLine("Logs burned:", format(script.getLogsBurned()), GOOD);
+                addLine("Items banked:", format(script.getResourcesBanked()), GOOD);
+            } else if (tree.isCampfireBurnable()) {
+                addLine("Logs burned:", format(script.getResourcesBurned()), GOOD);
                 addLine("Campfires lit:", format(script.getCampfiresLit()), VALUE);
             }
 
