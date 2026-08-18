@@ -58,6 +58,10 @@ public class KspWillowChopperScript extends Script {
     private volatile WorldPoint invalidatedCampfireLocation;
     private volatile int invalidatedCampfireObjectId = -1;
     private volatile boolean immediateCampfireRetargetRequested;
+    // True only when the active campfire is confirmed gone. While set, stale
+    // burn timers/animations are ignored and recovery must reacquire or create
+    // a fire before the remaining logs can continue.
+    private volatile boolean campfireLostConfirmed;
     private volatile int immediateCampfireRetargetAttempts;
     private volatile boolean burnModeEnabled;
     private volatile boolean burnCycleActive;
@@ -116,6 +120,7 @@ public class KspWillowChopperScript extends Script {
         invalidatedCampfireLocation = null;
         invalidatedCampfireObjectId = -1;
         immediateCampfireRetargetRequested = false;
+        campfireLostConfirmed = false;
         immediateCampfireRetargetAttempts = 0;
         immediateCampfireRetargetQueued.set(false);
         burnModeEnabled = !config.bankLogs() && activeTree.isCampfireBurnable();
@@ -219,6 +224,7 @@ public class KspWillowChopperScript extends Script {
         invalidatedCampfireLocation = null;
         invalidatedCampfireObjectId = -1;
         immediateCampfireRetargetRequested = false;
+        campfireLostConfirmed = false;
         immediateCampfireRetargetAttempts = 0;
         immediateCampfireRetargetQueued.set(false);
         status = "Idle";
@@ -251,6 +257,7 @@ public class KspWillowChopperScript extends Script {
         invalidatedCampfireLocation = null;
         invalidatedCampfireObjectId = -1;
         immediateCampfireRetargetRequested = false;
+        campfireLostConfirmed = false;
         immediateCampfireRetargetAttempts = 0;
         status = "Tree changed to " + activeTree;
     }
@@ -326,8 +333,30 @@ public class KspWillowChopperScript extends Script {
                 return;
             }
 
-            // If the campfire object changed ID/despawned, reacquire its replacement,
-            // but do not repeat Use->campfire while the player is still processing logs.
+            // A confirmed burn-out/despawn is authoritative. Do not let stale
+            // animation/progress state hold us in a fake burning state. If there is
+            // no replacement fire, immediately start creating another one.
+            if (campfireLostConfirmed) {
+                fire = findCampfire(Rs2Player.getWorldLocation(), 15);
+                campfireNearby = fire != null;
+                if (fire == null) {
+                    burningActive = false;
+                    campfireInteractionIssued = false;
+                    createCampfire();
+                    return;
+                }
+
+                activeCampfireLocation = fire.getWorldLocation();
+                activeCampfireObjectId = fire.getId();
+                campfireLostConfirmed = false;
+                immediateCampfireRetargetRequested = false;
+                immediateCampfireRetargetAttempts = 0;
+                startCampfireBurn(fire, true);
+                return;
+            }
+
+            // A same-tile ID morph may have a valid replacement. Reacquire it, but
+            // do not spam another Use action while the existing burn is still alive.
             if (immediateCampfireRetargetRequested) {
                 queueImmediateCampfireRetarget(0L);
                 return;
@@ -434,6 +463,9 @@ public class KspWillowChopperScript extends Script {
             lastBurnResourceCount = Rs2Inventory.count(resourceId);
             lastBurnProgressMillis = System.currentTimeMillis();
             campfireInteractionIssued = false;
+            campfireLostConfirmed = false;
+            immediateCampfireRetargetRequested = false;
+            immediateCampfireRetargetAttempts = 0;
             status = "Campfire created";
             return;
         }
@@ -512,6 +544,7 @@ public class KspWillowChopperScript extends Script {
             lastBurnResourceCount = count;
             lastBurnProgressMillis = lastCampfireInteractionMillis;
             immediateCampfireRetargetRequested = false;
+            campfireLostConfirmed = false;
             immediateCampfireRetargetAttempts = 0;
             invalidatedCampfireLocation = null;
             invalidatedCampfireObjectId = -1;
@@ -789,12 +822,20 @@ public class KspWillowChopperScript extends Script {
         immediateCampfireRetargetRequested = true;
         immediateCampfireRetargetAttempts = 0;
 
-        // Crucially, do NOT cancel burning here. A campfire scene ID can morph while
-        // the Make-X process is still active. Reacquire the new object, then only
-        // repeat Use->campfire if the existing burn actually stalls.
-        status = currentCampfireRemoved
-                ? "Campfire disappeared - checking replacement"
-                : "Campfire ID changed - checking replacement";
+        if (currentCampfireRemoved) {
+            // The exact campfire we were feeding disappeared. Clear the stale
+            // Make-X state now; otherwise recent XP/animation timestamps can keep
+            // isCampfireProcessingActive() true after the fire is already gone.
+            campfireLostConfirmed = true;
+            burningActive = false;
+            campfireInteractionIssued = false;
+            campfireNearby = false;
+            clearActiveCampfireTarget();
+            status = "Campfire disappeared - recovering";
+        } else {
+            campfireLostConfirmed = false;
+            status = "Campfire ID changed - checking replacement";
+        }
         queueImmediateCampfireRetarget(20L);
     }
 
@@ -825,6 +866,39 @@ public class KspWillowChopperScript extends Script {
 
                 if (!Rs2Inventory.hasItem(resourceId)) {
                     immediateCampfireRetargetRequested = false;
+                    campfireLostConfirmed = false;
+                    return;
+                }
+
+                // A confirmed despawn/burn-out must not wait on the old processing
+                // timeout. Allow two very short scene-cache refresh attempts, then
+                // fall back to creating a new fire.
+                if (campfireLostConfirmed) {
+                    Rs2TileObjectModel replacement = findCampfire(Rs2Player.getWorldLocation(), 15);
+                    if (replacement != null) {
+                        activeCampfireLocation = replacement.getWorldLocation();
+                        activeCampfireObjectId = replacement.getId();
+                        campfireNearby = true;
+                        campfireLostConfirmed = false;
+                        immediateCampfireRetargetRequested = false;
+                        immediateCampfireRetargetAttempts = 0;
+                        startCampfireBurn(replacement, true);
+                    } else {
+                        immediateCampfireRetargetAttempts++;
+                        if (immediateCampfireRetargetAttempts < 3) {
+                            retry = true;
+                        } else {
+                            immediateCampfireRetargetRequested = false;
+                            burningActive = false;
+                            campfireInteractionIssued = false;
+                            clearActiveCampfireTarget();
+                            status = "Campfire gone - creating another";
+                            // Keep campfireLostConfirmed true. If the player is still
+                            // finishing an animation, handleBurnMode retries creation
+                            // on the next normal 300 ms cycle.
+                            createCampfire();
+                        }
+                    }
                     return;
                 }
 
@@ -874,6 +948,27 @@ public class KspWillowChopperScript extends Script {
                 }
             }
         }, Math.max(0L, delayMillis), TimeUnit.MILLISECONDS);
+    }
+
+    /** Called when the game explicitly reports that the fire burned out. */
+    public void notifyFireBurnedOut() {
+        if (!sessionStarted || !burnModeEnabled || !burnCycleActive) {
+            return;
+        }
+
+        campfireLostConfirmed = true;
+        burningActive = false;
+        campfireInteractionIssued = false;
+        campfireNearby = false;
+        immediateCampfireRetargetRequested = true;
+        immediateCampfireRetargetAttempts = 0;
+        if (activeCampfireLocation != null) {
+            invalidatedCampfireLocation = activeCampfireLocation;
+            invalidatedCampfireObjectId = activeCampfireObjectId;
+        }
+        clearActiveCampfireTarget();
+        status = "Fire burned out - creating another";
+        queueImmediateCampfireRetarget(0L);
     }
 
     private void clearActiveCampfireTarget() {
