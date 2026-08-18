@@ -11,6 +11,7 @@ import net.runelite.api.widgets.WidgetItem;
 import net.runelite.api.gameval.InterfaceID;
 import net.runelite.client.plugins.microbot.Microbot;
 import net.runelite.client.ui.overlay.WidgetItemOverlay;
+import net.runelite.client.ui.overlay.OverlayManager;
 
 /**
  * Bank item overlay implemented using RuneLite's WidgetItemOverlay.
@@ -25,16 +26,19 @@ final class KspBankOrganizerItemOverlay extends WidgetItemOverlay
     private final KspBankOrganizerConfig config;
     private final BankOrganizerEngine engine;
     private final AutoCategorizer categorizer;
+    private final OverlayManager overlayManager;
 
     @Inject
     KspBankOrganizerItemOverlay(
         KspBankOrganizerConfig config,
         BankOrganizerEngine engine,
-        AutoCategorizer categorizer)
+        AutoCategorizer categorizer,
+        OverlayManager overlayManager)
     {
         this.config = config;
         this.engine = engine;
         this.categorizer = categorizer;
+        this.overlayManager = overlayManager;
         this.categorizer.configure(config);
 
         // Register the bank item interface when the overlay is constructed.
@@ -49,6 +53,90 @@ final class KspBankOrganizerItemOverlay extends WidgetItemOverlay
     void enableBankItems()
     {
         // Intentionally empty.
+    }
+
+    /**
+     * RuneLite's WidgetItemOverlay base renderer assumes every WidgetItem has a
+     * live parent. During bank rebuilds a WidgetItem can transiently have a null
+     * widget/parent. The base implementation dereferences both before calling
+     * renderItemOverlay(), so catching exceptions in renderItemOverlay() is too
+     * late. Filter those transient entries here.
+     */
+    @Override
+    public java.awt.Dimension render(Graphics2D graphics)
+    {
+        final java.util.Collection<WidgetItem> widgetItems =
+            overlayManager.getWidgetItems();
+
+        if (widgetItems == null || widgetItems.isEmpty())
+        {
+            return null;
+        }
+
+        final java.awt.Rectangle originalClip = graphics.getClipBounds();
+        net.runelite.api.widgets.Widget currentParent = null;
+
+        for (WidgetItem widgetItem : widgetItems)
+        {
+            if (widgetItem == null || widgetItem.getWidget() == null)
+            {
+                continue;
+            }
+
+            net.runelite.api.widgets.Widget parent = widgetItem.getWidget().getParent();
+            if (parent == null)
+            {
+                continue;
+            }
+
+            java.awt.Rectangle parentBounds = parent.getBounds();
+            java.awt.Rectangle itemBounds = widgetItem.getCanvasBounds();
+            if (parentBounds == null || itemBounds == null
+                || itemBounds.width <= 0 || itemBounds.height <= 0)
+            {
+                continue;
+            }
+
+            boolean shouldClip =
+                itemBounds.x < parentBounds.x
+                    && itemBounds.x + itemBounds.width >= parentBounds.x
+                || itemBounds.x < parentBounds.x + parentBounds.width
+                    && itemBounds.x + itemBounds.width >= parentBounds.x + parentBounds.width
+                || itemBounds.y < parentBounds.y
+                    && itemBounds.y + itemBounds.height >= parentBounds.y
+                || itemBounds.y < parentBounds.y + parentBounds.height
+                    && itemBounds.y + itemBounds.height >= parentBounds.y + parentBounds.height;
+
+            if (shouldClip)
+            {
+                if (currentParent != parent)
+                {
+                    graphics.setClip(parentBounds);
+                    currentParent = parent;
+                }
+            }
+            else if (currentParent != null && currentParent != parent)
+            {
+                graphics.setClip(originalClip);
+                currentParent = null;
+            }
+
+            try
+            {
+                renderItemOverlay(graphics, widgetItem.getId(), widgetItem);
+            }
+            catch (Throwable ignored)
+            {
+                // A transient bank-widget rebuild must never break the overlay renderer.
+            }
+        }
+
+        if (currentParent != null)
+        {
+            graphics.setClip(originalClip);
+        }
+
+        return null;
     }
 
     @Override

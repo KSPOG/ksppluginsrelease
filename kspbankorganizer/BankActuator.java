@@ -683,21 +683,34 @@ final class BankActuator
     private boolean waitForItemTab(int itemId, int expectedTab, int expectedQuantity, int timeoutMs)
     {
         return Global.sleepUntil(() ->
-        {
-            if (!isBankOpenOnClientThread())
+            Microbot.getClientThread().runOnClientThreadOptional(() ->
             {
-                return false;
-            }
+                /*
+                 * Global.sleepUntil executes on the organizer worker thread.
+                 * Anything touching RuneLite Widget objects must therefore happen
+                 * inside this client-thread callback.
+                 */
+                Widget bankRoot = client.getWidget(12, 1);
+                if (bankRoot == null || bankRoot.isHidden())
+                {
+                    return false;
+                }
 
-            if (!openTabForVerification(expectedTab))
-            {
-                return false;
-            }
-
-            return Microbot.getClientThread().runOnClientThreadOptional(() ->
-            {
                 if (Rs2Bank.getCurrentTab() != expectedTab)
                 {
+                    Widget tabWidget = Rs2Bank.getTabWidget(expectedTab);
+                    if (tabWidget == null || tabWidget.isHidden())
+                    {
+                        return false;
+                    }
+
+                    Rectangle bounds = tabWidget.getBounds();
+                    if (!hasUsableCanvasRectangle(bounds))
+                    {
+                        return false;
+                    }
+
+                    Microbot.getMouse().click(bounds);
                     return false;
                 }
 
@@ -723,18 +736,16 @@ final class BankActuator
                     if (child.getItemId() == itemId)
                     {
                         /*
-                         * Quantity is deliberately not required to be identical.
-                         * A bank move can rebuild the item widget before the final
-                         * quantity text is refreshed. Presence of the requested
-                         * item in the destination tab is the authoritative result.
+                         * Presence in the destination tab is authoritative.
+                         * Quantity text can lag behind the widget rebuild.
                          */
                         return expectedQuantity <= 0 || child.getItemQuantity() >= 1;
                     }
                 }
 
                 return false;
-            }).orElse(false);
-        }, timeoutMs);
+            }).orElse(false),
+            timeoutMs);
     }
 
     private boolean openTabForVerification(int tab)
@@ -744,13 +755,19 @@ final class BankActuator
             return false;
         }
 
-        if (Rs2Bank.getCurrentTab() == tab)
-        {
-            return true;
-        }
-
         return Microbot.getClientThread().runOnClientThreadOptional(() ->
         {
+            Widget bankRoot = client.getWidget(12, 1);
+            if (bankRoot == null || bankRoot.isHidden())
+            {
+                return false;
+            }
+
+            if (Rs2Bank.getCurrentTab() == tab)
+            {
+                return true;
+            }
+
             Widget widget = Rs2Bank.getTabWidget(tab);
             if (widget == null || widget.isHidden())
             {
@@ -766,12 +783,6 @@ final class BankActuator
             Microbot.getMouse().click(bounds);
             return true;
         }).orElse(false);
-    }
-
-    private boolean isBankOpenOnClientThread()
-    {
-        return client.getWidget(12, 1) != null
-            && !client.getWidget(12, 1).isHidden();
     }
 
     private BankSnapshot safeSnapshot()
