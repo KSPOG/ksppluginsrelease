@@ -9,7 +9,11 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
+import javax.inject.Inject;
 import lombok.extern.slf4j.Slf4j;
+import net.runelite.api.ItemComposition;
+import net.runelite.client.game.ItemManager;
+import net.runelite.client.game.ItemStats;
 
 /**
  * Automatic item categorizer adapted from the category/override model in
@@ -25,8 +29,12 @@ final class AutoCategorizer
     private final Map<Integer, ItemCategory> manualOverrides = new HashMap<>();
     private final Map<ItemCategory, Pattern> regexPatterns = new EnumMap<>(ItemCategory.class);
 
-    AutoCategorizer()
+    private final ItemManager itemManager;
+
+    @Inject
+    AutoCategorizer(ItemManager itemManager)
     {
+        this.itemManager = itemManager;
         loadBundledOverrides();
         installCoreIds();
     }
@@ -48,6 +56,15 @@ final class AutoCategorizer
         putRegex(ItemCategory.QUEST_MISC, config.regexQuestMisc());
     }
 
+    /**
+     * Classify every real RuneLite item from the live ItemComposition/ItemStats
+     * metadata instead of maintaining a finite list of known item IDs.
+     *
+     * RuneLite exposes the canonical item name, inventory actions, stackability,
+     * tradeability, equipment stats and high-alchemy value through
+     * ItemComposition/ItemManager. This gives the organizer coverage for newly
+     * released items without requiring another hard-coded ItemID list.
+     */
     ItemCategory categorize(BankSnapshot.BankStack stack)
     {
         ItemCategory manual = manualOverrides.get(stack.itemId());
@@ -62,38 +79,241 @@ final class AutoCategorizer
             return byId;
         }
 
-        String lowerName = stack.name() == null ? "" : stack.name().toLowerCase();
-        for (ItemCategory category : ItemCategory.values())
-        {
-            if (category == ItemCategory.QUEST_MISC)
-            {
-                continue;
-            }
-            for (String keyword : category.getKeywords())
-            {
-                if (lowerName.contains(keyword.toLowerCase()))
-                {
-                    return category;
-                }
-            }
-        }
-
+        String rawName = stack.name() == null ? "" : normalize(stack.name());
         for (Map.Entry<ItemCategory, Pattern> entry : regexPatterns.entrySet())
         {
-            if (entry.getValue().matcher(lowerName).find())
+            if (entry.getValue().matcher(rawName).find())
             {
                 return entry.getKey();
             }
         }
 
-        // Equipment action is a final fallback for obscure gear names. Custom regex
-        // intentionally wins first, matching the reference plugin's override model.
-        if (stack.equipable())
+        ItemComposition item = itemManager.getItemComposition(stack.itemId());
+        if (item == null)
         {
-            return ItemCategory.GEAR;
+            return ItemCategory.QUEST_MISC;
         }
 
+        String name = item.getMembersName();
+        if (name == null || name.isBlank())
+        {
+            name = stack.name();
+        }
+
+        String lower = normalize(name);
+        String[] actions = item.getInventoryActions();
+        boolean eat = hasAction(actions, "eat");
+        boolean drink = hasAction(actions, "drink");
+        boolean teleportAction =
+            hasAction(actions, "teleport")
+            || hasAction(actions, "break")
+            || hasAction(actions, "rub")
+            || hasAction(actions, "activate")
+            || hasAction(actions, "commune")
+            || hasAction(actions, "travel")
+            || hasAction(actions, "operate");
+
+        /*
+         * Consumables first. RuneLite's inventory actions are much more reliable
+         * than trying to maintain a finite food/potion ID list.
+         */
+        if (drink || looksLikePotion(lower))
+        {
+            return ItemCategory.POTIONS;
+        }
+
+        if (eat || looksLikeFood(lower))
+        {
+            return ItemCategory.FOOD;
+        }
+
+        /*
+         * Teleports use both RuneLite actions and name families. The action check
+         * catches new teleport items even when their names are unfamiliar.
+         */
+        if (teleportAction && looksLikeTeleport(lower))
+        {
+            return ItemCategory.TELEPORTS;
+        }
+
+        if (looksLikeTeleport(lower))
+        {
+            return ItemCategory.TELEPORTS;
+        }
+
+        /*
+         * RuneLite's ItemStats is the authoritative equipment test used by
+         * RuneLite's own Item Stats plugin. This catches weapons/armour that are
+         * not represented by a hand-maintained keyword list.
+         */
+        try
+        {
+            ItemStats stats = itemManager.getItemStats(stack.itemId());
+            if (stats != null && stats.isEquipable())
+            {
+                return ItemCategory.GEAR;
+            }
+        }
+        catch (RuntimeException ignored)
+        {
+            // Some special/generated items have no ItemStats entry.
+        }
+
+        if (looksLikeSkilling(lower, actions))
+        {
+            return ItemCategory.SKILLING;
+        }
+
+        if (looksLikeCurrency(lower))
+        {
+            return ItemCategory.CURRENCY;
+        }
+
+        if (looksLikeMaterial(lower))
+        {
+            return ItemCategory.RAW_MATERIALS;
+        }
+
+        /*
+         * High-alch is intentionally conservative. RuneLite exposes getHaPrice()
+         * for every item, but that alone does NOT mean an item should be placed
+         * in a High Alch tab: almost every normal item has an alchemy value.
+         * Only explicitly configured/high-confidence alch names are assigned here.
+         */
         return ItemCategory.QUEST_MISC;
+    }
+
+    private static String normalize(String value)
+    {
+        return value == null ? "" : value.toLowerCase()
+            .replace('\u00a0', ' ')
+            .replaceAll("\\s+", " ")
+            .trim();
+    }
+
+    private static boolean hasAction(String[] actions, String wanted)
+    {
+        if (actions == null)
+        {
+            return false;
+        }
+
+        for (String action : actions)
+        {
+            if (action != null && action.equalsIgnoreCase(wanted))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean containsAny(String name, String... values)
+    {
+        for (String value : values)
+        {
+            if (name.contains(value))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean looksLikePotion(String name)
+    {
+        return containsAny(name,
+            " potion", " potion(", " brew", " restore", " mix",
+            " overload", " renewal", " antidote", " antifire",
+            " antipoison", " antivenom", " battlemage", " bastion",
+            " stamina", " energy potion", " divine ", " super combat",
+            " ranging potion", " magic potion", " strength potion",
+            " attack potion", " defence potion", "prayer potion",
+            " saradomin brew", "zamorak brew", " combat potion");
+    }
+
+    private static boolean looksLikeFood(String name)
+    {
+        return containsAny(name,
+            "shark", "lobster", "swordfish", "tuna", "salmon", "trout",
+            "monkfish", "manta ray", "dark crab", "anglerfish", "karambwan",
+            "bass", "pike", "shrimp", "anchovies", "sardine", "herring",
+            "mackerel", "cod", "cake", "bread", "meat", "chicken",
+            "stew", "potato", "mushroom", "sweetcorn", "cooked ",
+            "pizza", "pie", "fruit", "berry", "papaya", "pineapple",
+            "watermelon", "banana", "apple", "orange", "curry", "chocolate",
+            "snape grass", "purple sweets", "summer pie", "wild pie");
+    }
+
+    private static boolean looksLikeTeleport(String name)
+    {
+        return containsAny(name,
+            "teleport", "teleportation", "teletab", "tablet",
+            "glory(", "dueling(", "games necklace", "ring of wealth",
+            "skills necklace", "combat bracelet", "bracelet of combat",
+            "ring of passage", "burning amulet", "digsite pendant",
+            "slayer ring", "seed pod", "chronicle", "ring of shadows",
+            "ring of returning", "camulet", "quetzal whistle",
+            "skull sceptre", "lunar seal", "kharedst", "memoirs",
+            "ectophial", "xeric's talisman", "mounted glory",
+            "house teleport", "falador teleport", "varrock teleport",
+            "lumbridge teleport", "camelot teleport", "ardougne teleport",
+            "watchtower teleport", "trollheim teleport", "ape atoll teleport",
+            "ancient teleport", "god wars teleport");
+    }
+
+    private static boolean looksLikeSkilling(String name, String[] actions)
+    {
+        if (containsAny(name,
+            "pickaxe", "hammer", "chisel", "saw", "tinderbox", "needle",
+            "spade", "rake", "seed dibber", "secateurs", "watering can",
+            "trowel", "pestle and mortar", "glassblowing pipe", "shears",
+            "bucket", "fish barrel", "herb sack", "gem bag", "coal bag",
+            "plank sack", "seed box", "log basket", "forestry kit",
+            "tackle box", "graceful", "lumberjack", "angler outfit",
+            "farmer outfit", "prospector", "pyromancer", "rogue outfit",
+            "axe", "harpoon", "fishing rod", "fishing net", "compost",
+            "mould", "crucible", "knife"))
+        {
+            return true;
+        }
+
+        return hasAction(actions, "Chop")
+            || hasAction(actions, "Mine")
+            || hasAction(actions, "Smelt")
+            || hasAction(actions, "Craft")
+            || hasAction(actions, "Fletch");
+    }
+
+    private static boolean looksLikeCurrency(String name)
+    {
+        return containsAny(name,
+            "coins", "coin stack", "platinum token", "tokkul",
+            "trading sticks", "numulite", "pieces of eight",
+            "warrior guild token", "mermaid's tear", "hallowed mark",
+            "molch pearl", "stardust", "deadman points", "league points",
+            "tournament points", "commander's insignia");
+    }
+
+    private static boolean looksLikeMaterial(String name)
+    {
+        return containsAny(name,
+            " ore", "ore ", " bar", "logs", " log", "hide", "leather",
+            "essence", "seed", "grimy", " herb", "herb ", "feather",
+            "bone", "wool", "flax", "clay", "sand", "granite",
+            "limestone", "marble block", "steel nails", "iron nails",
+            "bronze nails", "mithril nails", "adamantite nails",
+            "runite nails", "oak plank", "teak plank", "mahogany plank",
+            "gold leaf", "bolt tips", "arrowheads", "dart tip",
+            "uncut ", "gem", "molten glass", "glass", "snape grass",
+            "red spiders' eggs", "volcanic ash", "wine of zamorak",
+            "bird nest", "bird's nest", "cactus spine", "giant seaweed",
+            "giant seaweed", "potato cactus", "white berries",
+            "red berries", "limpwurt root", "marrentill", "tarromin",
+            "harralander", "ranarr", "toadflax", "irit", "avantoe",
+            "kwuarm", "snapdragon", "cadantine", "lantadyme", "dwarf weed",
+            "torstol", "grape", "hop", "sapling", "spirit seed",
+            "tree seed", "fruit tree seed", "snape grass");
     }
 
     private void putRegex(ItemCategory category, String value)

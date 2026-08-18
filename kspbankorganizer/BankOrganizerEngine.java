@@ -21,7 +21,7 @@ final class BankOrganizerEngine
     private final BankSnapshotReader snapshotReader;
     private final BankActuator actuator;
     private final SmartSorter sorter;
-    private final AutoCategorizer categorizer = new AutoCategorizer();
+    private final AutoCategorizer categorizer;
 
     private volatile String phase = "Idle";
     private volatile OperationMode activeMode = OperationMode.PREVIEW;
@@ -35,11 +35,16 @@ final class BankOrganizerEngine
     private volatile Map<Integer, Integer> targetsById = Collections.emptyMap();
 
     @Inject
-    BankOrganizerEngine(BankSnapshotReader snapshotReader, BankActuator actuator, SmartSorter sorter)
+    BankOrganizerEngine(
+        BankSnapshotReader snapshotReader,
+        BankActuator actuator,
+        SmartSorter sorter,
+        AutoCategorizer categorizer)
     {
         this.snapshotReader = snapshotReader;
         this.actuator = actuator;
         this.sorter = sorter;
+        this.categorizer = categorizer;
     }
 
     RunResult run(KspBankOrganizerConfig config)
