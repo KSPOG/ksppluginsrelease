@@ -158,6 +158,13 @@ public class KspWillowChopperScript extends Script {
 
                 trackResourceInventoryChanges(!config.bankLogs());
 
+                // Event notifications are the fastest retarget path, but some larger
+                // or transformed tree objects report a different raw GameObject anchor
+                // than Rs2TileObjectModel. Independently verify that the exact clicked
+                // object is still live so every supported tree type gets the same
+                // immediate replacement behavior.
+                validateActiveTreeTargetLiveness();
+
                 int wcLevel = Rs2Player.getRealSkillLevel(Skill.WOODCUTTING);
                 if (wcLevel < activeTree.getWoodcuttingLevel()) {
                     status = "Need " + activeTree.getWoodcuttingLevel() + " Woodcutting";
@@ -712,16 +719,78 @@ public class KspWillowChopperScript extends Script {
         if (object == null) {
             return;
         }
-        notifyTargetObjectTransition(object.getWorldLocation(), object.getId(), false);
-        notifyCampfireObjectTransition(object.getWorldLocation(), object.getId(), false);
+        WorldPoint normalizedLocation = normalizeGameObjectLocation(object);
+        notifyTargetObjectTransition(normalizedLocation, object.getId(), false);
+        notifyCampfireObjectTransition(normalizedLocation, object.getId(), false);
     }
 
     public void notifyGameObjectDespawned(GameObject object) {
         if (object == null) {
             return;
         }
-        notifyTargetObjectTransition(object.getWorldLocation(), object.getId(), true);
-        notifyCampfireObjectTransition(object.getWorldLocation(), object.getId(), true);
+        WorldPoint normalizedLocation = normalizeGameObjectLocation(object);
+        notifyTargetObjectTransition(normalizedLocation, object.getId(), true);
+        notifyCampfireObjectTransition(normalizedLocation, object.getId(), true);
+    }
+
+    /**
+     * Rs2TileObjectModel normalizes multi-tile GameObjects to their scene-min tile.
+     * The clicked target is stored using that model location, so event locations
+     * must use the same normalization or large trees will never compare equal.
+     */
+    private WorldPoint normalizeGameObjectLocation(GameObject object) {
+        if (object == null) {
+            return null;
+        }
+        try {
+            return new Rs2TileObjectModel(object).getWorldLocation();
+        } catch (Exception ex) {
+            return object.getWorldLocation();
+        }
+    }
+
+    /**
+     * Fallback for tree types whose depletion/morph does not arrive as a matching
+     * spawn/despawn pair. If the exact ID+normalized-location object we clicked is
+     * no longer in the tile-object cache, invalidate it immediately.
+     */
+    private void validateActiveTreeTargetLiveness() {
+        if (!sessionStarted
+                || activeTargetLocation == null
+                || activeTargetObjectId < 0
+                || immediateRetargetRequested
+                || Rs2Bank.isOpen()
+                || plugin.getCurrentForestryEvent() != KspForestryEvent.NONE) {
+            return;
+        }
+
+        // Do not start a new chop while burn mode owns the inventory.
+        if (burnModeEnabled && burnCycleActive) {
+            return;
+        }
+
+        try {
+            Rs2TileObjectModel liveTarget = Microbot.getRs2TileObjectCache()
+                    .query()
+                    .where(o -> o.getId() == activeTargetObjectId)
+                    .nearest(activeTargetLocation, 2);
+
+            boolean exactTargetStillLive = liveTarget != null
+                    && activeTargetObjectId == liveTarget.getId()
+                    && activeTargetLocation.equals(liveTarget.getWorldLocation());
+
+            if (!exactTargetStillLive) {
+                immediateRetargetRequested = true;
+                immediateRetargetAttempts = 0;
+                treeInteractionIssued = false;
+                lastTreeClickMillis = 0L;
+                status = "Target gone - selecting next " + activeTree;
+                queueImmediateRetarget(0L);
+            }
+        } catch (Exception ex) {
+            // Cache reads are only a fallback. Event-driven retargeting remains active
+            // if the cache is temporarily between scene updates.
+        }
     }
 
     private void notifyTargetObjectTransition(WorldPoint location, int objectId, boolean despawned) {
