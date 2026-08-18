@@ -78,64 +78,64 @@ final class KspBankOrganizerItemOverlay extends WidgetItemOverlay
 
         for (WidgetItem widgetItem : widgetItems)
         {
-            if (widgetItem == null || widgetItem.getWidget() == null)
-            {
-                continue;
-            }
-
-            net.runelite.api.widgets.Widget parent = widgetItem.getWidget().getParent();
-            if (parent == null)
-            {
-                continue;
-            }
-
-            java.awt.Rectangle parentBounds = parent.getBounds();
-            java.awt.Rectangle itemBounds = widgetItem.getCanvasBounds();
-            if (parentBounds == null || itemBounds == null
-                || itemBounds.width <= 0 || itemBounds.height <= 0)
-            {
-                continue;
-            }
-
-            boolean shouldClip =
-                itemBounds.x < parentBounds.x
-                    && itemBounds.x + itemBounds.width >= parentBounds.x
-                || itemBounds.x < parentBounds.x + parentBounds.width
-                    && itemBounds.x + itemBounds.width >= parentBounds.x + parentBounds.width
-                || itemBounds.y < parentBounds.y
-                    && itemBounds.y + itemBounds.height >= parentBounds.y
-                || itemBounds.y < parentBounds.y + parentBounds.height
-                    && itemBounds.y + itemBounds.height >= parentBounds.y + parentBounds.height;
-
-            if (shouldClip)
-            {
-                if (currentParent != parent)
-                {
-                    graphics.setClip(parentBounds);
-                    currentParent = parent;
-                }
-            }
-            else if (currentParent != null && currentParent != parent)
-            {
-                graphics.setClip(originalClip);
-                currentParent = null;
-            }
-
             try
             {
+                if (widgetItem == null || widgetItem.getWidget() == null)
+                {
+                    continue;
+                }
+
+                net.runelite.api.widgets.Widget parent = widgetItem.getWidget().getParent();
+                if (parent == null)
+                {
+                    continue;
+                }
+
+                java.awt.Rectangle parentBounds = parent.getBounds();
+                java.awt.Rectangle itemBounds = widgetItem.getCanvasBounds();
+                if (parentBounds == null || itemBounds == null
+                    || itemBounds.width <= 0 || itemBounds.height <= 0)
+                {
+                    continue;
+                }
+
+                boolean shouldClip =
+                    itemBounds.x < parentBounds.x
+                        && itemBounds.x + itemBounds.width >= parentBounds.x
+                    || itemBounds.x < parentBounds.x + parentBounds.width
+                        && itemBounds.x + itemBounds.width >= parentBounds.x + parentBounds.width
+                    || itemBounds.y < parentBounds.y
+                        && itemBounds.y + itemBounds.height >= parentBounds.y
+                    || itemBounds.y < parentBounds.y + parentBounds.height
+                        && itemBounds.y + itemBounds.height >= parentBounds.y + parentBounds.height;
+
+                if (shouldClip)
+                {
+                    if (currentParent != parent)
+                    {
+                        graphics.setClip(parentBounds);
+                        currentParent = parent;
+                    }
+                }
+                else if (currentParent != null && currentParent != parent)
+                {
+                    graphics.setClip(originalClip);
+                    currentParent = null;
+                }
+
                 renderItemOverlay(graphics, widgetItem.getId(), widgetItem);
             }
             catch (Throwable ignored)
             {
-                // A transient bank-widget rebuild must never break the overlay renderer.
+                /*
+                 * Bank widgets are rebuilt live. Any WidgetItem can become
+                 * invalid between two reads in the same render pass. Treat the
+                 * entry as transient and continue rendering the remaining bank.
+                 */
             }
         }
 
-        if (currentParent != null)
-        {
-            graphics.setClip(originalClip);
-        }
-
+        graphics.setClip(originalClip);
         return null;
     }
 

@@ -14,6 +14,7 @@ import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.ItemComposition;
 import net.runelite.client.game.ItemManager;
 import net.runelite.client.game.ItemStats;
+import net.runelite.client.plugins.microbot.Microbot;
 
 /**
  * Automatic item categorizer adapted from the category/override model in
@@ -88,7 +89,16 @@ final class AutoCategorizer
             }
         }
 
-        ItemComposition item = itemManager.getItemComposition(stack.itemId());
+        /*
+         * ItemManager ultimately reads Client#getItemDefinition(), which is a
+         * client-thread-only operation in this Microbot/RuneLite runtime.
+         * BankOrganizerEngine runs on its worker executor, so all RuneLite item
+         * metadata access must be marshalled to the client thread.
+         */
+        ItemComposition item = Microbot.getClientThread()
+            .runOnClientThreadOptional(() -> itemManager.getItemComposition(stack.itemId()))
+            .orElse(null);
+
         if (item == null)
         {
             return ItemCategory.QUEST_MISC;
@@ -148,7 +158,9 @@ final class AutoCategorizer
          */
         try
         {
-            ItemStats stats = itemManager.getItemStats(stack.itemId());
+            ItemStats stats = Microbot.getClientThread()
+                .runOnClientThreadOptional(() -> itemManager.getItemStats(stack.itemId()))
+                .orElse(null);
             if (stats != null && stats.isEquipable())
             {
                 return ItemCategory.GEAR;
