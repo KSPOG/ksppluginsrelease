@@ -11,6 +11,7 @@ import net.runelite.api.Item;
 import net.runelite.api.ItemContainer;
 import net.runelite.api.ItemComposition;
 import net.runelite.api.gameval.InventoryID;
+import net.runelite.api.gameval.VarbitID;
 import net.runelite.api.Varbits;
 import net.runelite.api.widgets.Widget;
 import net.runelite.client.plugins.microbot.Microbot;
@@ -686,37 +687,73 @@ final class BankActuator
     private boolean waitForItemTab(int itemId, int expectedTab, int expectedQuantity, int timeoutMs)
     {
         /*
-         * Use Rs2Bank's own tab resolver for verification. It is the same
-         * implementation Microbot uses everywhere else for bank item tabs:
+         * Do NOT verify a move through Rs2Bank.bankItems()/getItemTabForBankItem().
+         * Those APIs intentionally use Microbot's mirrored bank cache. During a
+         * rearrangement the cache can receive an update before/after the tab
+         * varbits, which is exactly the failure seen with Fire battlestaff.
          *
-         *   Rs2Bank.getItemTabForBankItem(item.getSlot())
-         *
-         * Do not duplicate the tab math here. During a drag, the item container
-         * and tab-count varbits can update on different client ticks, so retry
-         * until both the live bank cache and the tab resolver agree.
+         * The authoritative state for this operation is the live
+         * InventoryID.BANK ItemContainer on the client thread. Find the item
+         * there on every retry, then calculate its tab from its CURRENT raw slot
+         * and CURRENT tab counts. No epoch gate is required.
          */
-        final int epochBefore = Rs2Bank.getBankLiveEpoch();
-
         return Global.sleepUntil(() ->
-        {
-            if (Rs2Bank.getBankLiveEpoch() <= epochBefore)
+            Microbot.getClientThread().runOnClientThreadOptional(() ->
             {
-                return false;
-            }
+                ItemContainer bank = client.getItemContainer(InventoryID.BANK);
+                if (bank == null)
+                {
+                    return false;
+                }
 
-            Rs2ItemModel live = Rs2Bank.bankItems().stream()
-                .filter(item -> item != null && item.getId() == itemId)
-                .findFirst()
-                .orElse(null);
+                Item[] items = bank.getItems();
+                if (items == null)
+                {
+                    return false;
+                }
 
-            if (live == null || live.getQuantity() != expectedQuantity)
-            {
-                return false;
-            }
+                int slot = -1;
+                int quantity = -1;
+                for (int i = 0; i < items.length; i++)
+                {
+                    Item item = items[i];
+                    if (item != null && item.getId() == itemId)
+                    {
+                        slot = i;
+                        quantity = item.getQuantity();
+                        break;
+                    }
+                }
 
-            int actualTab = Rs2Bank.getItemTabForBankItem(live.getSlot());
-            return actualTab == expectedTab;
-        }, timeoutMs);
+                if (slot < 0 || quantity != expectedQuantity)
+                {
+                    return false;
+                }
+
+                int[] counts = new int[9];
+                counts[0] = client.getVarbitValue(VarbitID.BANK_TAB_1);
+                counts[1] = client.getVarbitValue(VarbitID.BANK_TAB_2);
+                counts[2] = client.getVarbitValue(VarbitID.BANK_TAB_3);
+                counts[3] = client.getVarbitValue(VarbitID.BANK_TAB_4);
+                counts[4] = client.getVarbitValue(VarbitID.BANK_TAB_5);
+                counts[5] = client.getVarbitValue(VarbitID.BANK_TAB_6);
+                counts[6] = client.getVarbitValue(VarbitID.BANK_TAB_7);
+                counts[7] = client.getVarbitValue(VarbitID.BANK_TAB_8);
+                counts[8] = client.getVarbitValue(VarbitID.BANK_TAB_9);
+
+                int cumulative = 0;
+                for (int tab = 0; tab < counts.length; tab++)
+                {
+                    cumulative += counts[tab];
+                    if (slot < cumulative)
+                    {
+                        return (tab + 1) == expectedTab;
+                    }
+                }
+
+                return expectedTab == 0;
+            }).orElse(false),
+            timeoutMs);
     }
 
     private BankSnapshot safeSnapshot()
