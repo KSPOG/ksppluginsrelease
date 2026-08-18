@@ -1,4 +1,4 @@
-# KSP Willow Chopper v1.0.1
+# KSP Willow Chopper v1.0.3
 
 Package: `net.runelite.client.plugins.microbot.kspwillowchopper`
 
@@ -55,7 +55,18 @@ The optimal stage 1 / 2 / 3 ingredient combination is learned from the game's me
 - learned Struggling Sapling combination
 
 
-## v1.0.1 overlay fix
+## v1.0.3 overlay fix
 - Fixed overlay using a different injected script instance.
 - Script is now a singleton so the overlay reads the live running state.
 - Runtime and XP panels now stay at 0 until a real session starts.
+
+
+## v1.0.3 burn tracking fix
+- Logs burned are now counted from actual Willow-log inventory decreases while Burn mode is active.
+- Tracking no longer depends on the Burn widget remaining visible or `burningActive` staying true between scheduler ticks.
+- A Willow log intentionally dropped to make room for a tinderbox is explicitly excluded from the burned counter.
+
+
+## v1.0.3 overlay update
+- Added `WC Lv` as current real Woodcutting level / levels gained this session.
+- Added `FM Lv` as current real Firemaking level / levels gained this session.

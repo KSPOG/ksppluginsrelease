@@ -42,11 +42,15 @@ public class KspWillowChopperScript extends Script {
     private long startTimeMillis;
     private int startWoodcuttingXp;
     private int startFiremakingXp;
+    private int startWoodcuttingLevel;
+    private int startFiremakingLevel;
     private int logsBanked;
     private int logsBurned;
     private int campfiresLit;
 
     private int lastBurnLogCount = -1;
+    private int lastObservedWillowCount = -1;
+    private int suppressedWillowLoss = 0;
     private long lastBurnProgressMillis = 0L;
     private long lastWillowClickMillis = 0L;
 
@@ -59,10 +63,14 @@ public class KspWillowChopperScript extends Script {
         startTimeMillis = System.currentTimeMillis();
         startWoodcuttingXp = skillXp(Skill.WOODCUTTING);
         startFiremakingXp = skillXp(Skill.FIREMAKING);
+        startWoodcuttingLevel = skillLevel(Skill.WOODCUTTING);
+        startFiremakingLevel = skillLevel(Skill.FIREMAKING);
         logsBanked = 0;
         logsBurned = 0;
         campfiresLit = 0;
         lastBurnLogCount = -1;
+        lastObservedWillowCount = -1;
+        suppressedWillowLoss = 0;
         burningActive = false;
         campfireNearby = false;
         sessionStarted = true;
@@ -99,6 +107,8 @@ public class KspWillowChopperScript extends Script {
                 if (config.bankLogs()) {
                     burningActive = false;
                     lastBurnLogCount = -1;
+                    lastObservedWillowCount = Rs2Inventory.count(WILLOW_LOG_ID);
+                    suppressedWillowLoss = 0;
                     campfireNearby = false;
 
                     if (Rs2Inventory.isFull()) {
@@ -124,6 +134,8 @@ public class KspWillowChopperScript extends Script {
         sessionStarted = false;
         burningActive = false;
         campfireNearby = false;
+        lastObservedWillowCount = -1;
+        suppressedWillowLoss = 0;
         status = "Idle";
     }
 
@@ -160,6 +172,8 @@ public class KspWillowChopperScript extends Script {
     }
 
     private void handleBurnMode() {
+        trackBurnedLogsFromInventory();
+
         Rs2TileObjectModel fire = findCampfire(Rs2Player.getWorldLocation(), 15);
         campfireNearby = fire != null;
 
@@ -237,7 +251,14 @@ public class KspWillowChopperScript extends Script {
                 ensureTinderbox();
             } else {
                 status = "Making room for tinderbox";
+                int beforeDrop = Rs2Inventory.count(WILLOW_LOG_ID);
+                suppressedWillowLoss++;
                 Rs2Inventory.drop(WILLOW_LOG_ID);
+                if (!sleepUntil(() -> Rs2Inventory.count(WILLOW_LOG_ID) < beforeDrop, 2500)) {
+                    suppressedWillowLoss = Math.max(0, suppressedWillowLoss - 1);
+                } else {
+                    trackBurnedLogsFromInventory();
+                }
             }
             return;
         }
@@ -252,8 +273,7 @@ public class KspWillowChopperScript extends Script {
 
         if (Rs2Player.waitForXpDrop(Skill.FIREMAKING, 5000)) {
             int after = Rs2Inventory.count(WILLOW_LOG_ID);
-            int used = Math.max(1, before - after);
-            logsBurned += used;
+            trackBurnedLogsFromInventory();
             campfiresLit++;
             campfireNearby = true;
             lastBurnLogCount = after;
@@ -304,9 +324,41 @@ public class KspWillowChopperScript extends Script {
 
         int count = Rs2Inventory.count(WILLOW_LOG_ID);
         if (count < lastBurnLogCount) {
-            logsBurned += (lastBurnLogCount - count);
             lastBurnLogCount = count;
             lastBurnProgressMillis = System.currentTimeMillis();
+        }
+    }
+
+    /**
+     * Tracks burned logs from the real inventory delta while Burn mode is active.
+     * This deliberately does not depend on the Burn widget or animation state, because
+     * those can disappear between scheduler ticks while the game is still consuming logs.
+     */
+    private void trackBurnedLogsFromInventory() {
+        int current = Rs2Inventory.count(WILLOW_LOG_ID);
+
+        if (lastObservedWillowCount < 0) {
+            lastObservedWillowCount = current;
+            return;
+        }
+
+        if (current > lastObservedWillowCount) {
+            // Chopped/picked up more logs: move the baseline forward.
+            lastObservedWillowCount = current;
+            return;
+        }
+
+        if (current < lastObservedWillowCount) {
+            int lost = lastObservedWillowCount - current;
+            int ignored = Math.min(lost, suppressedWillowLoss);
+            suppressedWillowLoss -= ignored;
+            int burned = lost - ignored;
+
+            if (burned > 0) {
+                logsBurned += burned;
+            }
+
+            lastObservedWillowCount = current;
         }
     }
 
@@ -397,6 +449,12 @@ public class KspWillowChopperScript extends Script {
         ).orElse(0);
     }
 
+    private int skillLevel(Skill skill) {
+        return Microbot.getClientThread().runOnClientThreadOptional(
+                () -> Microbot.getClient().getRealSkillLevel(skill)
+        ).orElse(0);
+    }
+
     public String getStatus() { return status; }
     public boolean isCampfireNearby() { return campfireNearby; }
     public boolean isBurningActive() { return burningActive; }
@@ -404,6 +462,10 @@ public class KspWillowChopperScript extends Script {
     public long getRuntimeMillis() { return hasSessionStarted() ? Math.max(0L, System.currentTimeMillis() - startTimeMillis) : 0L; }
     public int getWoodcuttingXpGained() { return Math.max(0, skillXp(Skill.WOODCUTTING) - startWoodcuttingXp); }
     public int getFiremakingXpGained() { return Math.max(0, skillXp(Skill.FIREMAKING) - startFiremakingXp); }
+    public int getWoodcuttingLevel() { return skillLevel(Skill.WOODCUTTING); }
+    public int getFiremakingLevel() { return skillLevel(Skill.FIREMAKING); }
+    public int getWoodcuttingLevelsGained() { return hasSessionStarted() ? Math.max(0, getWoodcuttingLevel() - startWoodcuttingLevel) : 0; }
+    public int getFiremakingLevelsGained() { return hasSessionStarted() ? Math.max(0, getFiremakingLevel() - startFiremakingLevel) : 0; }
     public int getLogsBanked() { return logsBanked; }
     public int getLogsBurned() { return logsBurned; }
     public int getCampfiresLit() { return campfiresLit; }

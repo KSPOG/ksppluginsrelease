@@ -90,6 +90,8 @@ public class KspWillowChopperOverlay extends OverlayPanel {
                 addLine("Campfires lit:", format(script.getCampfiresLit()), VALUE);
             }
 
+            addLine("WC Lv:", formatLevel(script.getWoodcuttingLevel(), script.getWoodcuttingLevelsGained()), VALUE);
+            addLine("FM Lv:", formatLevel(script.getFiremakingLevel(), script.getFiremakingLevelsGained()), VALUE);
             addLine("WC XP:", format(wcXp) + " (" + formatRate(wcXp, hours) + "/h)", VALUE);
             if (!config.bankLogs() || fmXp > 0) {
                 addLine("FM XP:", format(fmXp) + " (" + formatRate(fmXp, hours) + "/h)", VALUE);
@@ -139,6 +141,10 @@ public class KspWillowChopperOverlay extends OverlayPanel {
             return "0";
         }
         return format(Math.round(value / hours));
+    }
+
+    private String formatLevel(int current, int gained) {
+        return current + " / +" + gained;
     }
 
     private String formatDuration(long millis) {

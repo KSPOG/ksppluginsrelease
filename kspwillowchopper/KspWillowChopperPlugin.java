@@ -56,7 +56,7 @@ import java.util.regex.Pattern;
 )
 @Slf4j
 public class KspWillowChopperPlugin extends Plugin {
-    public static final String VERSION = "1.0.1";
+    public static final String VERSION = "1.0.3";
 
     private static final Pattern ANIMA_BARK_PATTERN =
             Pattern.compile("You've been awarded <col=[0-9a-f]+>(\\d+) Anima-infused bark</col>\\.");
