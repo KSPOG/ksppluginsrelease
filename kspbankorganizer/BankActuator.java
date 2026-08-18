@@ -586,19 +586,12 @@ final class BankActuator
         return Microbot.getClientThread().runOnClientThreadOptional(() ->
         {
             /*
-             * Rs2Bank.getItemBounds() indexes the dynamic children of the
-             * currently visible bank tab. The organizer snapshot slot is the
-             * global BANK ItemContainer slot. Convert it before looking up
-             * the widget bounds.
+             * IMPORTANT: Rs2Bank.getItemBounds() expects the ORIGINAL global
+             * BANK ItemContainer slot. Microbot's own itemBounds(Rs2ItemModel)
+             * passes rs2Item.getSlot() directly; it does not convert it to a
+             * per-tab local index.
              */
-            int visibleTab = currentTab();
-            int localSlot = globalSlotToVisibleTabSlot(sourceSlot, visibleTab);
-            if (localSlot < 0)
-            {
-                return null;
-            }
-
-            Rectangle source = Rs2Bank.getItemBounds(localSlot);
+            Rectangle source = Rs2Bank.getItemBounds(sourceSlot);
             List<Widget> tabs = Rs2Bank.getTabs();
             if (tabs == null || dynamicTabIndex < 0 || dynamicTabIndex >= tabs.size())
             {
@@ -625,52 +618,14 @@ final class BankActuator
     {
         return Microbot.getClientThread().runOnClientThreadOptional(() ->
         {
-            int visibleTab = currentTab();
-            int sourceLocalSlot = globalSlotToVisibleTabSlot(sourceSlot, visibleTab);
-            int targetLocalSlot = globalSlotToVisibleTabSlot(targetSlot, visibleTab);
-            if (sourceLocalSlot < 0 || targetLocalSlot < 0)
-            {
-                return null;
-            }
-
-            Rectangle source = Rs2Bank.getItemBounds(sourceLocalSlot);
-            Rectangle target = Rs2Bank.getItemBounds(targetLocalSlot);
+            Rectangle source = Rs2Bank.getItemBounds(sourceSlot);
+            Rectangle target = Rs2Bank.getItemBounds(targetSlot);
             if (!hasUsableCanvasRectangle(source) || !hasUsableCanvasRectangle(target))
             {
                 return null;
             }
-
             return new DragBounds(new Rectangle(source), new Rectangle(target));
         }).orElse(null);
-    }
-
-    /**
-     * Converts a global BANK ItemContainer slot to the local slot used by the
-     * currently visible bank-tab widget.
-     */
-    private int globalSlotToVisibleTabSlot(int globalSlot, int visibleTab)
-    {
-        if (globalSlot < 0 || visibleTab < 0 || visibleTab > 9)
-        {
-            return -1;
-        }
-
-        if (visibleTab == 0)
-        {
-            int tabItems = 0;
-            for (int tab = 1; tab <= 9; tab++)
-            {
-                tabItems += tabCount(tab);
-            }
-            return globalSlot - tabItems;
-        }
-
-        int itemsBeforeTab = 0;
-        for (int tab = 1; tab < visibleTab; tab++)
-        {
-            itemsBeforeTab += tabCount(tab);
-        }
-        return globalSlot - itemsBeforeTab;
     }
 
     private boolean hasUsableCanvasRectangle(Rectangle rectangle)
@@ -687,73 +642,95 @@ final class BankActuator
     private boolean waitForItemTab(int itemId, int expectedTab, int expectedQuantity, int timeoutMs)
     {
         /*
-         * Do NOT verify a move through Rs2Bank.bankItems()/getItemTabForBankItem().
-         * Those APIs intentionally use Microbot's mirrored bank cache. During a
-         * rearrangement the cache can receive an update before/after the tab
-         * varbits, which is exactly the failure seen with Fire battlestaff.
+         * Verification must answer the question that actually matters:
+         * "Is this item now inside the destination tab?"
          *
-         * The authoritative state for this operation is the live
-         * InventoryID.BANK ItemContainer on the client thread. Find the item
-         * there on every retry, then calculate its tab from its CURRENT raw slot
-         * and CURRENT tab counts. No epoch gate is required.
+         * Do not infer this from a raw global slot or from tab-count arithmetic.
+         * After a drag, the bank can compact/reindex items. Instead, open the
+         * destination tab and inspect the live Bankmain.ITEMS widget children.
          */
         return Global.sleepUntil(() ->
-            Microbot.getClientThread().runOnClientThreadOptional(() ->
+        {
+            if (!isBankOpenOnClientThread())
             {
-                ItemContainer bank = client.getItemContainer(InventoryID.BANK);
-                if (bank == null)
+                return false;
+            }
+
+            if (!openTabForVerification(expectedTab))
+            {
+                return false;
+            }
+
+            return Microbot.getClientThread().runOnClientThreadOptional(() ->
+            {
+                Widget bankItemsWidget = client.getWidget(Rs2Bank.BANK_ITEM_CONTAINER);
+                if (bankItemsWidget == null || bankItemsWidget.isHidden())
                 {
                     return false;
                 }
 
-                Item[] items = bank.getItems();
-                if (items == null)
+                Widget[] children = bankItemsWidget.getDynamicChildren();
+                if (children == null)
                 {
                     return false;
                 }
 
-                int slot = -1;
-                int quantity = -1;
-                for (int i = 0; i < items.length; i++)
+                for (Widget child : children)
                 {
-                    Item item = items[i];
-                    if (item != null && item.getId() == itemId)
+                    if (child == null)
                     {
-                        slot = i;
-                        quantity = item.getQuantity();
-                        break;
+                        continue;
+                    }
+
+                    if (child.getItemId() == itemId
+                        && (expectedQuantity <= 0 || child.getItemQuantity() == expectedQuantity))
+                    {
+                        return true;
                     }
                 }
 
-                if (slot < 0 || quantity != expectedQuantity)
-                {
-                    return false;
-                }
+                return false;
+            }).orElse(false);
+        }, timeoutMs);
+    }
 
-                int[] counts = new int[9];
-                counts[0] = client.getVarbitValue(VarbitID.BANK_TAB_1);
-                counts[1] = client.getVarbitValue(VarbitID.BANK_TAB_2);
-                counts[2] = client.getVarbitValue(VarbitID.BANK_TAB_3);
-                counts[3] = client.getVarbitValue(VarbitID.BANK_TAB_4);
-                counts[4] = client.getVarbitValue(VarbitID.BANK_TAB_5);
-                counts[5] = client.getVarbitValue(VarbitID.BANK_TAB_6);
-                counts[6] = client.getVarbitValue(VarbitID.BANK_TAB_7);
-                counts[7] = client.getVarbitValue(VarbitID.BANK_TAB_8);
-                counts[8] = client.getVarbitValue(VarbitID.BANK_TAB_9);
+    private boolean openTabForVerification(int tab)
+    {
+        return Microbot.getClientThread().runOnClientThreadOptional(() ->
+        {
+            if (Rs2Bank.getCurrentTab() == tab)
+            {
+                return true;
+            }
 
-                int cumulative = 0;
-                for (int tab = 0; tab < counts.length; tab++)
-                {
-                    cumulative += counts[tab];
-                    if (slot < cumulative)
-                    {
-                        return (tab + 1) == expectedTab;
-                    }
-                }
+            List<Widget> tabs = Rs2Bank.getTabs();
+            int dynamicIndex = BANK_TAB_CONTAINER_DYNAMIC_MAIN_INDEX + tab;
+            if (tabs == null || dynamicIndex < 0 || dynamicIndex >= tabs.size())
+            {
+                return false;
+            }
 
-                return expectedTab == 0;
-            }).orElse(false),
-            timeoutMs);
+            Widget widget = tabs.get(dynamicIndex);
+            if (widget == null || widget.isHidden())
+            {
+                return false;
+            }
+
+            Rectangle bounds = widget.getBounds();
+            if (!hasUsableCanvasRectangle(bounds))
+            {
+                return false;
+            }
+
+            Microbot.getMouse().click(bounds);
+            return true;
+        }).orElse(false);
+    }
+
+    private boolean isBankOpenOnClientThread()
+    {
+        return client.getWidget(12, 1) != null
+            && !client.getWidget(12, 1).isHidden();
     }
 
     private BankSnapshot safeSnapshot()
