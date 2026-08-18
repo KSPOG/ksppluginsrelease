@@ -354,30 +354,7 @@ final class BankActuator
         {
             return ActuatorResult.ok("Item is already in main.");
         }
-        ActuatorResult open = openTab(sourceTab);
-        if (!open.success())
-        {
-            return open;
-        }
-        Rs2ItemModel item = findBankItem(itemId);
-        if (item == null)
-        {
-            return ActuatorResult.fail("Could not find item " + itemId + " in the bank.");
-        }
-        if (!scrollBankToSlotSafe(item.getSlot()))
-        {
-            return ActuatorResult.fail("Could not scroll source item into view.");
-        }
-        DragBounds bounds = itemToTabBounds(itemId, 0);
-        if (bounds == null)
-        {
-            return ActuatorResult.fail("Could not locate live bank widget for " + itemId + " or the main-tab widget.");
-        }
-        int quantity = item.getQuantity();
-        Microbot.drag(bounds.source(), bounds.target());
-        Global.sleep(180);
-        boolean verified = waitForItemTab(itemId, 0, quantity, 6000);
-        return verified ? ActuatorResult.ok("Moved item to main.") : ActuatorResult.fail("Move to main was not verified.");
+        return moveItemToTabWithRetry(itemId, sourceTab, 0, "main");
     }
 
     ActuatorResult moveToExistingTab(int itemId, int sourceTab, int targetTab)
@@ -390,67 +367,81 @@ final class BankActuator
         {
             return ActuatorResult.fail("Destination tab " + targetTab + " does not exist.");
         }
-        ActuatorResult open = openTab(sourceTab);
-        if (!open.success())
-        {
-            return open;
-        }
-        Rs2ItemModel item = findBankItem(itemId);
-        if (item == null)
-        {
-            return ActuatorResult.fail("Could not find item " + itemId + " in the bank.");
-        }
-        if (!scrollBankToSlotSafe(item.getSlot()))
-        {
-            return ActuatorResult.fail("Could not scroll source item into view.");
-        }
-        DragBounds bounds = itemToTabBounds(itemId, targetTab);
-        if (bounds == null)
-        {
-            return ActuatorResult.fail("Could not locate live bank widget for " + itemId + " or destination tab " + targetTab + ".");
-        }
-        int quantity = item.getQuantity();
-        Microbot.drag(bounds.source(), bounds.target());
-        Global.sleep(180);
-        boolean verified = waitForItemTab(itemId, targetTab, quantity, 6000);
-        return verified
-            ? ActuatorResult.ok("Moved item to tab " + targetTab + ".")
-            : ActuatorResult.fail("Move to tab " + targetTab + " was not verified.");
+        return moveItemToTabWithRetry(itemId, sourceTab, targetTab, "tab " + targetTab);
     }
 
     ActuatorResult moveToNewTab(int itemId, int sourceTab)
     {
-        ActuatorResult open = openTab(sourceTab);
-        if (!open.success())
-        {
-            return open;
-        }
         int newTab = realTabCount() + 1;
         if (newTab > 9)
         {
             return ActuatorResult.fail("All nine real bank tabs already exist.");
         }
-        Rs2ItemModel item = findBankItem(itemId);
-        if (item == null)
+        return moveItemToTabWithRetry(itemId, sourceTab, newTab, "new tab " + newTab);
+    }
+
+    private ActuatorResult moveItemToTabWithRetry(int itemId, int sourceTab, int targetTab, String destinationName)
+    {
+        for (int attempt = 1; attempt <= 4; attempt++)
         {
-            return ActuatorResult.fail("Could not find item " + itemId + " in the bank.");
+            if (Thread.currentThread().isInterrupted())
+            {
+                return ActuatorResult.fail("Interrupted while moving item to " + destinationName + ".");
+            }
+
+            ActuatorResult open = openTab(sourceTab);
+            if (!open.success())
+            {
+                if (attempt == 4) return open;
+                Global.sleep(250);
+                continue;
+            }
+
+            Rs2ItemModel item = findBankItem(itemId);
+            if (item == null)
+            {
+                if (attempt == 4)
+                    return ActuatorResult.fail("Could not find item " + itemId + " in the live bank.");
+                Global.sleep(250);
+                continue;
+            }
+
+            int quantity = item.getQuantity();
+
+            if (!scrollBankToSlotSafe(item.getSlot()))
+            {
+                if (attempt == 4)
+                    return ActuatorResult.fail("Could not scroll item " + itemId + " into view.");
+                Global.sleep(250);
+                continue;
+            }
+
+            DragBounds bounds = itemToTabBounds(itemId, targetTab);
+            if (bounds == null)
+            {
+                if (attempt == 4)
+                    return ActuatorResult.fail("Could not locate live source/destination widgets for item "
+                        + itemId + " -> " + destinationName + ".");
+                Global.sleep(250);
+                continue;
+            }
+
+            Rectangle source = centerRect(bounds.source());
+            Rectangle target = centerRect(bounds.target());
+
+            Microbot.drag(source, target);
+            Global.sleep(300);
+
+            if (waitForItemTab(itemId, targetTab, quantity, 2500))
+            {
+                return ActuatorResult.ok("Moved item to " + destinationName + ".");
+            }
+
+            Global.sleep(250);
         }
-        if (!scrollBankToSlotSafe(item.getSlot()))
-        {
-            return ActuatorResult.fail("Could not scroll source item into view.");
-        }
-        DragBounds bounds = itemToTabBounds(itemId, newTab);
-        if (bounds == null)
-        {
-            return ActuatorResult.fail("Could not locate live bank widget for " + itemId + " or new tab " + newTab + ".");
-        }
-        int quantity = item.getQuantity();
-        Microbot.drag(bounds.source(), bounds.target());
-        Global.sleep(180);
-        boolean verified = waitForItemTab(itemId, newTab, quantity, 6000);
-        return verified
-            ? ActuatorResult.ok("Created tab " + newTab + " with item.")
-            : ActuatorResult.fail("New-tab drag was not verified.");
+
+        return ActuatorResult.fail(
+            "Move to " + destinationName + " was not verified after 4 fresh attempts.");
     }
 
     ActuatorResult moveWithinOpenTab(BankSnapshot.BankStack sourceStack, BankSnapshot.BankStack targetStack)
@@ -662,6 +653,20 @@ final class BankActuator
             }
             return new DragBounds(new Rectangle(source), new Rectangle(target));
         }).orElse(null);
+    }
+
+    private Rectangle centerRect(Rectangle rectangle)
+    {
+        if (rectangle == null)
+        {
+            return null;
+        }
+
+        int width = Math.max(4, Math.min(20, rectangle.width));
+        int height = Math.max(4, Math.min(20, rectangle.height));
+        int x = rectangle.x + Math.max(0, (rectangle.width - width) / 2);
+        int y = rectangle.y + Math.max(0, (rectangle.height - height) / 2);
+        return new Rectangle(x, y, width, height);
     }
 
     private boolean hasUsableCanvasRectangle(Rectangle rectangle)
