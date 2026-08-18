@@ -29,11 +29,12 @@ final class KspBankOrganizerItemOverlay extends WidgetItemOverlay
     @Inject
     KspBankOrganizerItemOverlay(
         KspBankOrganizerConfig config,
-        BankOrganizerEngine engine)
+        BankOrganizerEngine engine,
+        AutoCategorizer categorizer)
     {
         this.config = config;
         this.engine = engine;
-        this.categorizer = new AutoCategorizer();
+        this.categorizer = categorizer;
         this.categorizer.configure(config);
 
         // Register the bank item interface when the overlay is constructed.
