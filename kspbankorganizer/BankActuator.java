@@ -686,10 +686,14 @@ final class BankActuator
     private boolean waitForItemTab(int itemId, int expectedTab, int expectedQuantity, int timeoutMs)
     {
         /*
-         * After a drag, the BANK ItemContainer and tab-count varbits update
-         * asynchronously. Do not accept the snapshot that existed before the
-         * drag. Require a live item-container change and then verify the item
-         * using the same raw-slot/tab model as Rs2Bank.
+         * Use Rs2Bank's own tab resolver for verification. It is the same
+         * implementation Microbot uses everywhere else for bank item tabs:
+         *
+         *   Rs2Bank.getItemTabForBankItem(item.getSlot())
+         *
+         * Do not duplicate the tab math here. During a drag, the item container
+         * and tab-count varbits can update on different client ticks, so retry
+         * until both the live bank cache and the tab resolver agree.
          */
         final int epochBefore = Rs2Bank.getBankLiveEpoch();
 
@@ -700,16 +704,18 @@ final class BankActuator
                 return false;
             }
 
-            BankSnapshot snapshot = safeSnapshot();
-            if (snapshot == null)
+            Rs2ItemModel live = Rs2Bank.bankItems().stream()
+                .filter(item -> item != null && item.getId() == itemId)
+                .findFirst()
+                .orElse(null);
+
+            if (live == null || live.getQuantity() != expectedQuantity)
             {
                 return false;
             }
 
-            BankSnapshot.BankStack moved = stackByItemId(snapshot, itemId);
-            return moved != null
-                && moved.tab() == expectedTab
-                && moved.quantity() == expectedQuantity;
+            int actualTab = Rs2Bank.getItemTabForBankItem(live.getSlot());
+            return actualTab == expectedTab;
         }, timeoutMs);
     }
 
