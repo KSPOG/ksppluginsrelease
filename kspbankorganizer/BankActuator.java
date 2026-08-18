@@ -554,7 +554,7 @@ final class BankActuator
             }
 
             Widget tab = tabs.get(dynamicIndex);
-            if (tab == null || tab.isHidden() || !validCanvasRectangleOnClientThread(tab.getBounds()))
+            if (tab == null || tab.isHidden() || !hasUsableCanvasRectangle(tab.getBounds()))
             {
                 return false;
             }
@@ -584,7 +584,20 @@ final class BankActuator
     {
         return Microbot.getClientThread().runOnClientThreadOptional(() ->
         {
-            Rectangle source = Rs2Bank.getItemBounds(sourceSlot);
+            /*
+             * Rs2Bank.getItemBounds() indexes the dynamic children of the
+             * currently visible bank tab. The organizer snapshot slot is the
+             * global BANK ItemContainer slot. Convert it before looking up
+             * the widget bounds.
+             */
+            int visibleTab = currentTab();
+            int localSlot = globalSlotToVisibleTabSlot(sourceSlot, visibleTab);
+            if (localSlot < 0)
+            {
+                return null;
+            }
+
+            Rectangle source = Rs2Bank.getItemBounds(localSlot);
             List<Widget> tabs = Rs2Bank.getTabs();
             if (tabs == null || dynamicTabIndex < 0 || dynamicTabIndex >= tabs.size())
             {
@@ -598,10 +611,11 @@ final class BankActuator
             }
 
             Rectangle target = tab.getBounds();
-            if (!validCanvasRectangleOnClientThread(source) || !validCanvasRectangleOnClientThread(target))
+            if (!hasUsableCanvasRectangle(source) || !hasUsableCanvasRectangle(target))
             {
                 return null;
             }
+
             return new DragBounds(new Rectangle(source), new Rectangle(target));
         }).orElse(null);
     }
@@ -610,24 +624,63 @@ final class BankActuator
     {
         return Microbot.getClientThread().runOnClientThreadOptional(() ->
         {
-            Rectangle source = Rs2Bank.getItemBounds(sourceSlot);
-            Rectangle target = Rs2Bank.getItemBounds(targetSlot);
-            if (!validCanvasRectangleOnClientThread(source) || !validCanvasRectangleOnClientThread(target))
+            int visibleTab = currentTab();
+            int sourceLocalSlot = globalSlotToVisibleTabSlot(sourceSlot, visibleTab);
+            int targetLocalSlot = globalSlotToVisibleTabSlot(targetSlot, visibleTab);
+            if (sourceLocalSlot < 0 || targetLocalSlot < 0)
             {
                 return null;
             }
+
+            Rectangle source = Rs2Bank.getItemBounds(sourceLocalSlot);
+            Rectangle target = Rs2Bank.getItemBounds(targetLocalSlot);
+            if (!hasUsableCanvasRectangle(source) || !hasUsableCanvasRectangle(target))
+            {
+                return null;
+            }
+
             return new DragBounds(new Rectangle(source), new Rectangle(target));
         }).orElse(null);
     }
 
-    private boolean validCanvasRectangleOnClientThread(Rectangle rectangle)
+    /**
+     * Converts a global BANK ItemContainer slot to the local slot used by the
+     * currently visible bank-tab widget.
+     */
+    private int globalSlotToVisibleTabSlot(int globalSlot, int visibleTab)
     {
-        if (rectangle == null || rectangle.width <= 0 || rectangle.height <= 0 || rectangle.x < 0 || rectangle.y < 0)
+        if (globalSlot < 0 || visibleTab < 0 || visibleTab > 9)
         {
-            return false;
+            return -1;
         }
-        return rectangle.x + rectangle.width <= client.getCanvasWidth()
-            && rectangle.y + rectangle.height <= client.getCanvasHeight();
+
+        if (visibleTab == 0)
+        {
+            int tabItems = 0;
+            for (int tab = 1; tab <= 9; tab++)
+            {
+                tabItems += tabCount(tab);
+            }
+            return globalSlot - tabItems;
+        }
+
+        int itemsBeforeTab = 0;
+        for (int tab = 1; tab < visibleTab; tab++)
+        {
+            itemsBeforeTab += tabCount(tab);
+        }
+        return globalSlot - itemsBeforeTab;
+    }
+
+    private boolean hasUsableCanvasRectangle(Rectangle rectangle)
+    {
+        return rectangle != null
+            && rectangle.width > 0
+            && rectangle.height > 0
+            && rectangle.x >= 0
+            && rectangle.y >= 0
+            && rectangle.x < client.getCanvasWidth()
+            && rectangle.y < client.getCanvasHeight();
     }
 
     private boolean waitForItemTab(int itemId, int expectedTab, int expectedQuantity, int timeoutMs)
