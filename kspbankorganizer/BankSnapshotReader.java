@@ -64,6 +64,19 @@ final class BankSnapshotReader
         Item[] items = bankContainer.getItems();
         if (items != null)
         {
+            /*
+             * IMPORTANT:
+             * Bank tab count varbits describe the logical bank layout, including
+             * placeholder stacks. The old implementation removed placeholders
+             * first and then used the compacted list index to calculate the tab.
+             * Once a placeholder existed, every following item could therefore
+             * be assigned to the wrong tab.
+             *
+             * Keep a separate logical layout index containing every non-empty
+             * bank entry, while still excluding placeholders from the organizer's
+             * visible item list.
+             */
+            int logicalBankIndex = 0;
             for (int slot = 0; slot < items.length; slot++)
             {
                 Item item = items[slot];
@@ -73,12 +86,18 @@ final class BankSnapshotReader
                 }
 
                 ItemComposition composition = client.getItemDefinition(item.getId());
-                if (composition == null || composition.getPlaceholderTemplateId() > 0)
+                if (composition == null)
                 {
                     continue;
                 }
 
-                bankItems.add(new Rs2ItemModel(item, composition, slot));
+                boolean placeholder = composition.getPlaceholderTemplateId() > 0;
+                if (!placeholder)
+                {
+                    bankItems.add(new Rs2ItemModel(item, composition, slot));
+                }
+
+                logicalBankIndex++;
             }
         }
         bankItems.sort(Comparator.comparingInt(Rs2ItemModel::getSlot));
@@ -95,13 +114,14 @@ final class BankSnapshotReader
                 name = item.getName();
             }
 
+            int logicalIndex = logicalBankIndexForSlot(items, item.getSlot());
             stacks.add(new BankSnapshot.BankStack(
                 item.getId(),
                 name == null ? "" : name,
                 item.getQuantity(),
                 item.getSlot(),
-                index,
-                tabForIndex(index, tabCounts),
+                logicalIndex,
+                tabForIndex(logicalIndex, tabCounts),
                 composition.isStackable(),
                 composition.isTradeable(),
                 composition.isGeTradeable(),
@@ -119,6 +139,29 @@ final class BankSnapshotReader
             counts[i] = client.getVarbitValue(TAB_COUNT_VARBITS[i]);
         }
         return counts;
+    }
+
+    private static int logicalBankIndexForSlot(Item[] items, int slot)
+    {
+        if (items == null || slot < 0 || slot >= items.length)
+        {
+            return -1;
+        }
+
+        int logicalIndex = 0;
+        for (int i = 0; i <= slot; i++)
+        {
+            Item item = items[i];
+            if (item != null && item.getId() != -1)
+            {
+                if (i == slot)
+                {
+                    return logicalIndex;
+                }
+                logicalIndex++;
+            }
+        }
+        return -1;
     }
 
     private static int tabForIndex(int index, int[] tabCounts)
