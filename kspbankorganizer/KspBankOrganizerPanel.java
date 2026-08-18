@@ -21,7 +21,7 @@ import net.runelite.client.ui.FontManager;
 import net.runelite.client.ui.PluginPanel;
 
 /** Compact RuneLite sidebar for controlling and monitoring the bank organizer. */
-final class KspBankOrganizerPanel extends PluginPanel
+public final class KspBankOrganizerPanel extends PluginPanel
 {
     private static final Color ACCENT = new Color(80, 220, 120);
     private static final Color DANGER = new Color(120, 45, 45);
@@ -43,7 +43,7 @@ final class KspBankOrganizerPanel extends PluginPanel
     private final JButton stopButton = new JButton("Stop");
     private final Timer refreshTimer;
 
-    KspBankOrganizerPanel(KspBankOrganizerPlugin plugin, BankOrganizerEngine engine, KspBankOrganizerConfig config)
+    public KspBankOrganizerPanel(KspBankOrganizerPlugin plugin, BankOrganizerEngine engine, KspBankOrganizerConfig config)
     {
         super(false);
         this.plugin = plugin;

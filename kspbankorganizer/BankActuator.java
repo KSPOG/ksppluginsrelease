@@ -630,7 +630,7 @@ final class BankActuator
             && rectangle.y + rectangle.height <= client.getCanvasHeight();
     }
 
-    private boolean waitForItemTab(int itemId, int expectedTab, int expectedQuantity, long timeoutMs)
+    private boolean waitForItemTab(int itemId, int expectedTab, int expectedQuantity, int timeoutMs)
     {
         /*
          * The drag itself is asynchronous from the organizer worker. Re-read
