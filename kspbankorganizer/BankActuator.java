@@ -28,6 +28,13 @@ final class BankActuator
     private static final int BANK_GROUP_ID = 12;
     private static final int BANK_REARRANGE_BUTTON_CHILD_ID = 23;
 
+    // Bank widgets are rebuilt asynchronously by the client. These pauses are
+    // deliberately conservative so we never take drag coordinates from a
+    // partially rebuilt bank.
+    private static final int TAB_SETTLE_MS = 450;
+    private static final int ACTION_SETTLE_MS = 750;
+    private static final int MOVE_VERIFY_MS = 5000;
+
     private static final int[] TAB_COUNT_VARBITS = {
         Varbits.BANK_TAB_ONE_COUNT,
         Varbits.BANK_TAB_TWO_COUNT,
@@ -59,7 +66,7 @@ final class BankActuator
             // Give the bank container a short settling window, but do not require
             // rearrangement controls for Preview/Scan. Those controls are only
             // needed later when Organize actually starts moving items.
-            Global.sleepUntil(this::isLiveBankItemWidgetPresent, 2000);
+            Global.sleepUntil(this::isLiveBankItemWidgetPresent, 4000);
             return true;
         }
 
@@ -326,7 +333,8 @@ final class BankActuator
             {
                 return ActuatorResult.fail("Could not invoke the main bank tab on the client thread.");
             }
-            return Global.sleepUntil(() -> currentTab() == 0, 2500)
+            Global.sleep(TAB_SETTLE_MS);
+            return Global.sleepUntil(() -> currentTab() == 0, 4000)
                 ? ActuatorResult.ok("Main tab opened.")
                 : ActuatorResult.fail("Main tab did not become active.");
         }
@@ -343,7 +351,8 @@ final class BankActuator
         {
             return ActuatorResult.fail("Could not invoke tab " + tabIndex + " on the client thread.");
         }
-        return Global.sleepUntil(() -> currentTab() == tabIndex, 2500)
+        Global.sleep(TAB_SETTLE_MS);
+        return Global.sleepUntil(() -> currentTab() == tabIndex, 4000)
             ? ActuatorResult.ok("Tab " + tabIndex + " opened.")
             : ActuatorResult.fail("Tab " + tabIndex + " did not become active.");
     }
@@ -408,11 +417,27 @@ final class BankActuator
 
             int quantity = item.getQuantity();
 
+            if (!waitForBankUiStable(1200))
+            {
+                if (attempt == 4)
+                    return ActuatorResult.fail("Bank UI did not stabilize before moving item " + itemId + ".");
+                Global.sleep(TAB_SETTLE_MS);
+                continue;
+            }
+
             if (!scrollBankToSlotSafe(item.getSlot()))
             {
                 if (attempt == 4)
                     return ActuatorResult.fail("Could not scroll item " + itemId + " into view.");
                 Global.sleep(250);
+                continue;
+            }
+
+            if (!waitForBankUiStable(1200))
+            {
+                if (attempt == 4)
+                    return ActuatorResult.fail("Bank UI did not stabilize after scrolling item " + itemId + ".");
+                Global.sleep(TAB_SETTLE_MS);
                 continue;
             }
 
@@ -430,9 +455,9 @@ final class BankActuator
             Rectangle target = centerRect(bounds.target());
 
             Microbot.drag(source, target);
-            Global.sleep(300);
+            Global.sleep(ACTION_SETTLE_MS);
 
-            if (waitForItemTab(itemId, targetTab, quantity, 2500))
+            if (waitForItemTab(itemId, targetTab, quantity, MOVE_VERIFY_MS))
             {
                 return ActuatorResult.ok("Moved item to " + destinationName + ".");
             }
@@ -456,6 +481,8 @@ final class BankActuator
             return ActuatorResult.fail("Source or target slot bounds were unavailable/outside the canvas.");
         }
         Microbot.drag(bounds.source(), bounds.target());
+        Global.sleep(ACTION_SETTLE_MS);
+        waitForBankUiStable(1200);
         return ActuatorResult.ok("Inserted " + sourceStack.name() + " before " + targetStack.name() + ".");
     }
 
@@ -678,6 +705,24 @@ final class BankActuator
             && rectangle.y >= 0
             && rectangle.x < client.getCanvasWidth()
             && rectangle.y < client.getCanvasHeight();
+    }
+
+    private boolean waitForBankUiStable(int timeoutMs)
+    {
+        return Global.sleepUntil(() ->
+            Microbot.getClientThread().runOnClientThreadOptional(() ->
+            {
+                Widget root = client.getWidget(BANK_GROUP_ID, 1);
+                Widget items = client.getWidget(Rs2Bank.BANK_ITEM_CONTAINER);
+                if (root == null || root.isHidden() || items == null || items.isHidden())
+                {
+                    return false;
+                }
+
+                Rectangle bounds = items.getBounds();
+                return hasUsableCanvasRectangle(bounds);
+            }).orElse(false),
+            timeoutMs);
     }
 
     private boolean waitForItemTab(int itemId, int expectedTab, int expectedQuantity, int timeoutMs)
