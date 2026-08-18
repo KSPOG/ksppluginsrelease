@@ -65,18 +65,14 @@ final class BankSnapshotReader
         if (items != null)
         {
             /*
-             * IMPORTANT:
-             * Bank tab count varbits describe the logical bank layout, including
-             * placeholder stacks. The old implementation removed placeholders
-             * first and then used the compacted list index to calculate the tab.
-             * Once a placeholder existed, every following item could therefore
-             * be assigned to the wrong tab.
+             * Match Microbot/Rs2Bank exactly:
+             * - placeholders are excluded from the organizer item list
+             * - the original ItemContainer slot is retained
+             * - tab resolution is performed against that ORIGINAL slot
              *
-             * Keep a separate logical layout index containing every non-empty
-             * bank entry, while still excluding placeholders from the organizer's
-             * visible item list.
+             * Rs2Bank.getItemTabForBankItem() uses the same model: tab counts
+             * are compared directly against the bank ItemContainer slot.
              */
-            int logicalBankIndex = 0;
             for (int slot = 0; slot < items.length; slot++)
             {
                 Item item = items[slot];
@@ -86,27 +82,20 @@ final class BankSnapshotReader
                 }
 
                 ItemComposition composition = client.getItemDefinition(item.getId());
-                if (composition == null)
+                if (composition == null || composition.getPlaceholderTemplateId() > 0)
                 {
                     continue;
                 }
 
-                boolean placeholder = composition.getPlaceholderTemplateId() > 0;
-                if (!placeholder)
-                {
-                    bankItems.add(new Rs2ItemModel(item, composition, slot));
-                }
-
-                logicalBankIndex++;
+                bankItems.add(new Rs2ItemModel(item, composition, slot));
             }
         }
         bankItems.sort(Comparator.comparingInt(Rs2ItemModel::getSlot));
 
         int[] tabCounts = readTabCounts();
         List<BankSnapshot.BankStack> stacks = new ArrayList<>();
-        for (int index = 0; index < bankItems.size(); index++)
+        for (Rs2ItemModel item : bankItems)
         {
-            Rs2ItemModel item = bankItems.get(index);
             ItemComposition composition = itemManager.getItemComposition(item.getId());
             String name = composition.getName();
             if (name == null || name.isEmpty() || "null".equalsIgnoreCase(name))
@@ -114,14 +103,14 @@ final class BankSnapshotReader
                 name = item.getName();
             }
 
-            int logicalIndex = logicalBankIndexForSlot(items, item.getSlot());
+            int bankSlot = item.getSlot();
             stacks.add(new BankSnapshot.BankStack(
                 item.getId(),
                 name == null ? "" : name,
                 item.getQuantity(),
-                item.getSlot(),
-                logicalIndex,
-                tabForIndex(logicalIndex, tabCounts),
+                bankSlot,
+                bankSlot,
+                tabForIndex(bankSlot, tabCounts),
                 composition.isStackable(),
                 composition.isTradeable(),
                 composition.isGeTradeable(),
@@ -139,29 +128,6 @@ final class BankSnapshotReader
             counts[i] = client.getVarbitValue(TAB_COUNT_VARBITS[i]);
         }
         return counts;
-    }
-
-    private static int logicalBankIndexForSlot(Item[] items, int slot)
-    {
-        if (items == null || slot < 0 || slot >= items.length)
-        {
-            return -1;
-        }
-
-        int logicalIndex = 0;
-        for (int i = 0; i <= slot; i++)
-        {
-            Item item = items[i];
-            if (item != null && item.getId() != -1)
-            {
-                if (i == slot)
-                {
-                    return logicalIndex;
-                }
-                logicalIndex++;
-            }
-        }
-        return -1;
     }
 
     private static int tabForIndex(int index, int[] tabCounts)

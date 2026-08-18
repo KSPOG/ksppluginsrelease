@@ -686,12 +686,20 @@ final class BankActuator
     private boolean waitForItemTab(int itemId, int expectedTab, int expectedQuantity, int timeoutMs)
     {
         /*
-         * The drag itself is asynchronous from the organizer worker. Re-read
-         * the live ItemContainer on the client thread until the bank's tab
-         * counts and item ordering settle.
+         * After a drag, the BANK ItemContainer and tab-count varbits update
+         * asynchronously. Do not accept the snapshot that existed before the
+         * drag. Require a live item-container change and then verify the item
+         * using the same raw-slot/tab model as Rs2Bank.
          */
+        final int epochBefore = Rs2Bank.getBankLiveEpoch();
+
         return Global.sleepUntil(() ->
         {
+            if (Rs2Bank.getBankLiveEpoch() <= epochBefore)
+            {
+                return false;
+            }
+
             BankSnapshot snapshot = safeSnapshot();
             if (snapshot == null)
             {
