@@ -1,4 +1,4 @@
-# KSP Willow Chopper v1.1.2
+# KSP Willow Chopper v1.1.3
 
 Package: `net.runelite.client.plugins.microbot.kspwillowchopper`
 
@@ -55,24 +55,24 @@ The optimal stage 1 / 2 / 3 ingredient combination is learned from the game's me
 - learned Struggling Sapling combination
 
 
-## v1.1.2 overlay fix
+## v1.1.3 overlay fix
 - Fixed overlay using a different injected script instance.
 - Script is now a singleton so the overlay reads the live running state.
 - Runtime and XP panels now stay at 0 until a real session starts.
 
 
-## v1.1.2 burn tracking fix
+## v1.1.3 burn tracking fix
 - Logs burned are now counted from actual Willow-log inventory decreases while Burn mode is active.
 - Tracking no longer depends on the Burn widget remaining visible or `burningActive` staying true between scheduler ticks.
 - A Willow log intentionally dropped to make room for a tinderbox is explicitly excluded from the burned counter.
 
 
-## v1.1.2 overlay update
+## v1.1.3 overlay update
 - Added `WC Lv` as current real Woodcutting level / levels gained this session.
 - Added `FM Lv` as current real Firemaking level / levels gained this session.
 
 
-## v1.1.2 tree selector
+## v1.1.3 tree selector
 - Added a Tree dropdown using the full current Microbot WoodcuttingTree support list.
 - Willow remains the default.
 - Direct bank/tree behavior now uses the selected tree and selected resource dynamically.
@@ -82,12 +82,20 @@ The optimal stage 1 / 2 / 3 ingredient combination is learned from the game's me
 - Campfire mode is available only for selections whose resource is a log.
 
 
-## v1.1.2 runtime compiler compatibility
+## v1.1.3 runtime compiler compatibility
 - Removed unsupported Lombok @Getter and @RequiredArgsConstructor from KspTree.
 - Replaced them with a plain Java enum constructor and explicit getters for KSP Source Loader runtime compilation.
 
 
-## v1.1.2 runtime compile fix
+## v1.1.3 runtime compile fix
 - Removed the remaining obsolete `WILLOW_LOG_ID` references introduced before the multi-tree conversion.
 - Forestry inventory-space handling now drops the selected tree resource instead of hardcoded Willow logs.
 - Beehive handling now uses the selected log-producing resource and skips non-log tree selections.
+
+
+## v1.1.3 instant object retargeting
+- Tracks the exact tree object ID and world tile that was clicked.
+- A despawn/object-ID morph immediately invalidates the old target.
+- Replacement tree selection bypasses movement, animation, and normal click throttles.
+- Uses a short 20-60 ms cache-refresh retry burst, then falls back to the normal loop if no replacement is loaded.
+- Removed the blocking post-click animation wait so target-change events can be acted on immediately.

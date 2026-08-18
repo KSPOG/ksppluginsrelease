@@ -1,6 +1,7 @@
 package net.runelite.client.plugins.microbot.kspwillowchopper;
 
 import lombok.extern.slf4j.Slf4j;
+import net.runelite.api.GameObject;
 import net.runelite.api.Skill;
 import net.runelite.api.coords.WorldPoint;
 import net.runelite.api.gameval.ItemID;
@@ -22,6 +23,7 @@ import javax.inject.Inject;
 import javax.inject.Singleton;
 import java.awt.event.KeyEvent;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 @Slf4j
 @Singleton
@@ -38,6 +40,16 @@ public class KspWillowChopperScript extends Script {
     private volatile boolean burningActive;
     private volatile boolean sessionStarted;
     private volatile KspTree activeTree = KspTree.WILLOW;
+
+    // Tracks the exact scene object we most recently clicked. When RuneLite reports
+    // that object despawning/morphing to another ID, normal movement/animation
+    // throttles are bypassed and a replacement target is selected immediately.
+    private volatile WorldPoint activeTargetLocation;
+    private volatile int activeTargetObjectId = -1;
+    private volatile boolean immediateRetargetRequested;
+    private volatile int immediateRetargetAttempts;
+    private final AtomicBoolean immediateRetargetQueued = new AtomicBoolean(false);
+    private final Object targetInteractionLock = new Object();
 
     private long startTimeMillis;
     private int startWoodcuttingXp;
@@ -76,6 +88,11 @@ public class KspWillowChopperScript extends Script {
         burningActive = false;
         campfireNearby = false;
         activeTree = safeTree(config.tree());
+        activeTargetLocation = null;
+        activeTargetObjectId = -1;
+        immediateRetargetRequested = false;
+        immediateRetargetAttempts = 0;
+        immediateRetargetQueued.set(false);
         sessionStarted = true;
         status = "Starting";
 
@@ -152,6 +169,11 @@ public class KspWillowChopperScript extends Script {
         campfireNearby = false;
         lastObservedResourceCount = -1;
         suppressedResourceLoss = 0;
+        activeTargetLocation = null;
+        activeTargetObjectId = -1;
+        immediateRetargetRequested = false;
+        immediateRetargetAttempts = 0;
+        immediateRetargetQueued.set(false);
         status = "Idle";
     }
 
@@ -171,6 +193,10 @@ public class KspWillowChopperScript extends Script {
         suppressedResourceLoss = 0;
         lastObservedResourceCount = Rs2Inventory.count(activeTree.getResourceId());
         lastTreeClickMillis = 0L;
+        activeTargetLocation = null;
+        activeTargetObjectId = -1;
+        immediateRetargetRequested = false;
+        immediateRetargetAttempts = 0;
         status = "Tree changed to " + activeTree;
     }
 
@@ -407,37 +433,153 @@ public class KspWillowChopperScript extends Script {
     }
 
     private void clickSelectedTreeDirect() {
-        if (Rs2Bank.isOpen()) {
-            return;
-        }
+        clickSelectedTreeDirect(false);
+    }
 
-        if (Rs2Player.isMoving() || Rs2Player.isAnimating()) {
-            status = "Chopping " + activeTree;
-            return;
-        }
+    /**
+     * Select/click the nearest currently-live object for the configured tree.
+     * forceImmediate=true is used only when the previously clicked scene object
+     * has despawned or morphed to another object ID. It intentionally bypasses
+     * movement, animation and normal anti-spam click delays.
+     */
+    private boolean clickSelectedTreeDirect(boolean forceImmediate) {
+        synchronized (targetInteractionLock) {
+            if (Rs2Bank.isOpen()) {
+                return false;
+            }
 
-        if (System.currentTimeMillis() - lastTreeClickMillis < 1800) {
-            return;
-        }
+            if (!forceImmediate && (Rs2Player.isMoving() || Rs2Player.isAnimating())) {
+                status = "Chopping " + activeTree;
+                return false;
+            }
 
-        Rs2TileObjectModel tree = Microbot.getRs2TileObjectCache()
-                .query()
-                .withName(activeTree.getObjectName())
-                .nearestOnClientThread();
+            if (!forceImmediate && System.currentTimeMillis() - lastTreeClickMillis < 1800) {
+                return false;
+            }
 
-        if (tree == null) {
-            status = "No " + activeTree + " loaded";
-            return;
-        }
+            Rs2TileObjectModel tree = Microbot.getRs2TileObjectCache()
+                    .query()
+                    .withName(activeTree.getObjectName())
+                    .nearestOnClientThread();
 
-        status = "Clicking " + activeTree;
-        if (tree.click(activeTree.getAction())) {
-            lastTreeClickMillis = System.currentTimeMillis();
-            Rs2Player.waitForAnimation(3000);
-            status = "Chopping " + activeTree;
-        } else {
+            if (tree == null) {
+                status = "No " + activeTree + " loaded";
+                return false;
+            }
+
+            // During a morph/despawn callback the tile-object cache can lag the
+            // client event by a few milliseconds. Never re-click that stale object;
+            // the immediate retarget worker will retry against the refreshed cache.
+            if (forceImmediate
+                    && activeTargetLocation != null
+                    && activeTargetLocation.equals(tree.getWorldLocation())
+                    && activeTargetObjectId == tree.getId()) {
+                return false;
+            }
+
+            status = forceImmediate
+                    ? "Selecting next " + activeTree
+                    : "Clicking " + activeTree;
+
+            if (tree.click(activeTree.getAction())) {
+                activeTargetLocation = tree.getWorldLocation();
+                activeTargetObjectId = tree.getId();
+                immediateRetargetRequested = false;
+                immediateRetargetAttempts = 0;
+                lastTreeClickMillis = System.currentTimeMillis();
+
+                // Do not block waiting for animation here. The normal loop observes
+                // animation state, while object morph events remain free to trigger
+                // an immediate replacement click.
+                status = "Chopping " + activeTree;
+                return true;
+            }
+
             status = activeTree + " click failed";
+            return false;
         }
+    }
+
+    public void notifyGameObjectSpawned(GameObject object) {
+        if (object == null) {
+            return;
+        }
+        notifyTargetObjectTransition(object.getWorldLocation(), object.getId(), false);
+    }
+
+    public void notifyGameObjectDespawned(GameObject object) {
+        if (object == null) {
+            return;
+        }
+        notifyTargetObjectTransition(object.getWorldLocation(), object.getId(), true);
+    }
+
+    private void notifyTargetObjectTransition(WorldPoint location, int objectId, boolean despawned) {
+        WorldPoint targetLocation = activeTargetLocation;
+        int targetId = activeTargetObjectId;
+
+        if (!sessionStarted
+                || targetLocation == null
+                || location == null
+                || !targetLocation.equals(location)
+                || targetId < 0) {
+            return;
+        }
+
+        boolean currentTargetRemoved = despawned && objectId == targetId;
+        boolean sameTileMorphedToDifferentId = !despawned && objectId != targetId;
+        if (!currentTargetRemoved && !sameTileMorphedToDifferentId) {
+            return;
+        }
+
+        immediateRetargetRequested = true;
+        immediateRetargetAttempts = 0;
+        lastTreeClickMillis = 0L;
+        status = "Target changed - selecting next " + activeTree;
+        queueImmediateRetarget(20L);
+    }
+
+    private void queueImmediateRetarget(long delayMillis) {
+        if (!sessionStarted || !immediateRetargetRequested) {
+            return;
+        }
+
+        if (!immediateRetargetQueued.compareAndSet(false, true)) {
+            return;
+        }
+
+        scheduledExecutorService.schedule(() -> {
+            boolean retry = false;
+            try {
+                if (!sessionStarted || !immediateRetargetRequested || !Microbot.isLoggedIn()) {
+                    return;
+                }
+
+                // Full inventory must still be handled by bank/burn mode rather than
+                // blindly clicking another tree. Forestry blocking events also retain
+                // priority over the normal chopping target.
+                if (Rs2Bank.isOpen()
+                        || Rs2Inventory.isFull()
+                        || plugin.getCurrentForestryEvent() != KspForestryEvent.NONE) {
+                    return;
+                }
+
+                immediateRetargetAttempts++;
+                boolean clicked = clickSelectedTreeDirect(true);
+                retry = !clicked && immediateRetargetRequested && immediateRetargetAttempts < 8;
+            } catch (Exception ex) {
+                Microbot.logStackTrace("KspWillowChopperScript immediate retarget", ex);
+            } finally {
+                immediateRetargetQueued.set(false);
+                if (retry) {
+                    queueImmediateRetarget(60L);
+                } else if (immediateRetargetAttempts >= 8) {
+                    // Hand control back to the normal 300 ms loop if no replacement
+                    // object is actually loaded after the short immediate retry burst.
+                    immediateRetargetRequested = false;
+                }
+            }
+        }, Math.max(0L, delayMillis), TimeUnit.MILLISECONDS);
     }
 
     private Rs2TileObjectModel findCampfire(WorldPoint anchor, int radius) {
