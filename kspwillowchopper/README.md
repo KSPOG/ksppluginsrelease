@@ -1,4 +1,4 @@
-# KSP Willow Chopper v1.1.0
+# KSP Willow Chopper v1.1.1
 
 Package: `net.runelite.client.plugins.microbot.kspwillowchopper`
 
@@ -55,24 +55,24 @@ The optimal stage 1 / 2 / 3 ingredient combination is learned from the game's me
 - learned Struggling Sapling combination
 
 
-## v1.1.0 overlay fix
+## v1.1.1 overlay fix
 - Fixed overlay using a different injected script instance.
 - Script is now a singleton so the overlay reads the live running state.
 - Runtime and XP panels now stay at 0 until a real session starts.
 
 
-## v1.1.0 burn tracking fix
+## v1.1.1 burn tracking fix
 - Logs burned are now counted from actual Willow-log inventory decreases while Burn mode is active.
 - Tracking no longer depends on the Burn widget remaining visible or `burningActive` staying true between scheduler ticks.
 - A Willow log intentionally dropped to make room for a tinderbox is explicitly excluded from the burned counter.
 
 
-## v1.1.0 overlay update
+## v1.1.1 overlay update
 - Added `WC Lv` as current real Woodcutting level / levels gained this session.
 - Added `FM Lv` as current real Firemaking level / levels gained this session.
 
 
-## v1.1.0 tree selector
+## v1.1.1 tree selector
 - Added a Tree dropdown using the full current Microbot WoodcuttingTree support list.
 - Willow remains the default.
 - Direct bank/tree behavior now uses the selected tree and selected resource dynamically.
@@ -80,3 +80,8 @@ The optimal stage 1 / 2 / 3 ingredient combination is learned from the game's me
 - Chopped/banked/burned counters are generic to the selected resource.
 - Woodcutting level requirement is checked from the selected tree.
 - Campfire mode is available only for selections whose resource is a log.
+
+
+## v1.1.1 runtime compiler compatibility
+- Removed unsupported Lombok @Getter and @RequiredArgsConstructor from KspTree.
+- Replaced them with a plain Java enum constructor and explicit getters for KSP Source Loader runtime compilation.
