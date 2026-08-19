@@ -13,6 +13,7 @@ import net.runelite.api.gameval.InterfaceID;
 import net.runelite.api.gameval.InventoryID;
 import net.runelite.api.gameval.ItemID;
 import net.runelite.api.gameval.VarClientID;
+import net.runelite.api.gameval.VarbitID;
 import net.runelite.api.widgets.Widget;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.plugins.microbot.Microbot;
@@ -76,6 +77,12 @@ public class F2PProcessingFactoryScript extends Script
     private static final int BANK_AMOUNT_PROMPT_CHILD = 43;
     private static final int BANK_CHATBOX_INPUT_MODE = 7;
     private static final int BANK_WITHDRAW_X_PROMPT_IDENTIFIER = 6;
+    // When the bank already has the exact requested X configured, do not reopen
+    // the amount prompt. These identifiers mirror Rs2Bank.handleAmount() for
+    // a bank-item withdrawal: X is identifier 1 when X is the selected quantity
+    // type, otherwise it is identifier 5 in the item action list.
+    private static final int BANK_WITHDRAW_CONFIGURED_X_SELECTED_IDENTIFIER = 1;
+    private static final int BANK_WITHDRAW_CONFIGURED_X_MENU_IDENTIFIER = 5;
     private static final int BANK_AMOUNT_PROMPT_TIMEOUT_MILLIS = 2_000;
     private static final long BANK_ENTER_MIN_GAP_MILLIS = 600L;
 
@@ -1616,6 +1623,26 @@ public class F2PProcessingFactoryScript extends Script
             return false;
         }
 
+        // Reuse the bank's configured X amount whenever it already equals this
+        // ingredient's required quantity. This is the normal path for recipes whose
+        // consumed inputs use the same batch size (for example amulet + wool x25).
+        // It avoids opening a second Enter-amount prompt and therefore sends no
+        // keyboard input at all for subsequent inputs in the same batch.
+        if (getConfiguredBankWithdrawX() == quantity)
+        {
+            if (withdrawUsingConfiguredBankX(bankItem, itemName, quantity))
+            {
+                log.debug("Factory reused configured bank Withdraw-X={} for {}",
+                    quantity, itemName);
+                return true;
+            }
+
+            // If the bank quantity state changed between the read and invoke, fall
+            // through to the verified prompt path rather than guessing.
+            log.debug("Configured bank Withdraw-X changed before invoke for {} x{}; reopening verified prompt",
+                itemName, quantity);
+        }
+
         // Open the bank's literal Withdraw-X prompt directly. Identifier 6 is the
         // bank-item X-prompt action used by Microbot's own handleAmount() path.
         NewMenuEntry entry = new NewMenuEntry()
@@ -1687,6 +1714,80 @@ public class F2PProcessingFactoryScript extends Script
         return sleepUntil(
             () -> !isExactBankAmountPromptOpen(),
             BANK_AMOUNT_PROMPT_TIMEOUT_MILLIS);
+    }
+
+    private int getConfiguredBankWithdrawX()
+    {
+        return Microbot.getVarbitValue(VarbitID.BANK_REQUESTEDQUANTITY);
+    }
+
+    /**
+     * Uses the already configured bank X value without opening the chatbox amount
+     * prompt. The live requested-X varbit is checked again immediately before the
+     * menu action so this path can never type or press Enter.
+     */
+    private boolean withdrawUsingConfiguredBankX(
+        Rs2ItemModel bankItem,
+        String itemName,
+        int quantity)
+    {
+        if (bankItem == null || quantity <= 1 || !isBankRootVisible()
+            || Rs2GrandExchange.isOpen() || isAnyChatboxNumericInputVisible())
+        {
+            return false;
+        }
+
+        int configuredX = getConfiguredBankWithdrawX();
+        if (configuredX != quantity)
+        {
+            return false;
+        }
+
+        int selectedQuantityType = Microbot.getVarbitValue(VarbitID.BANK_QUANTITY_TYPE);
+        final int identifier;
+        switch (selectedQuantityType)
+        {
+            case 3:
+                identifier = BANK_WITHDRAW_CONFIGURED_X_SELECTED_IDENTIFIER;
+                break;
+            case 0:
+            case 1:
+            case 2:
+            case 4:
+                identifier = BANK_WITHDRAW_CONFIGURED_X_MENU_IDENTIFIER;
+                break;
+            default:
+                log.warn("Factory cannot reuse configured Withdraw-X for {} x{}: unknown bank quantity type {}",
+                    itemName, quantity, selectedQuantityType);
+                return false;
+        }
+
+        // Final live guard immediately before invoking the item action.
+        if (!isBankRootVisible() || Rs2GrandExchange.isOpen()
+            || isAnyChatboxNumericInputVisible()
+            || getConfiguredBankWithdrawX() != quantity)
+        {
+            return false;
+        }
+
+        NewMenuEntry entry = new NewMenuEntry()
+            .param0(bankItem.getSlot())
+            .param1(Rs2Bank.BANK_ITEM_CONTAINER)
+            .opcode(MenuAction.CC_OP.getId())
+            .identifier(identifier)
+            .itemId(bankItem.getId())
+            .target(bankItem.getName());
+
+        Rectangle bounds = Rs2Bank.itemBounds(bankItem);
+        if (bounds == null)
+        {
+            bounds = new Rectangle(1, 1);
+        }
+
+        Microbot.log("KSP AIO Factory reusing configured bank Withdraw-X="
+            + quantity + " for " + itemName + " (no Enter prompt)");
+        Microbot.doInvoke(entry, bounds);
+        return true;
     }
 
     private boolean isBankRootVisible()
