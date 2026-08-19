@@ -60,6 +60,7 @@ final class FactoryGrandExchangeInvoker
     private static volatile boolean modifyInProgress = false;
     private static volatile long modifySellProtectionUntil = 0L;
     private static volatile long lastFactoryEnterAt = 0L;
+    private static volatile boolean initialPlacementInProgress = false;
 
     private FactoryGrandExchangeInvoker()
     {
@@ -68,6 +69,21 @@ final class FactoryGrandExchangeInvoker
     static String getLastFailureReason()
     {
         return lastFailureReason;
+    }
+
+    private static boolean isExactGeOverviewReady()
+    {
+        if (!Rs2GrandExchange.isOpen() || Rs2GrandExchange.isOfferScreenOpen()
+            || isChatboxInputOpen() || isMesText2Visible() || isMenuOpen())
+        {
+            return false;
+        }
+
+        return Microbot.getClientThread().runOnClientThreadOptional(() ->
+        {
+            Widget frame = Microbot.getClient().getWidget(InterfaceID.GE_OFFERS, 1);
+            return frame != null && !frame.isHidden();
+        }).orElse(false);
     }
 
     static boolean placeBuyOffer(
@@ -93,9 +109,13 @@ final class FactoryGrandExchangeInvoker
         // Never start a fresh native placement while any previous GE editor or
         // chatbox input is still active, otherwise repeated state-machine ticks can
         // make those internal Enter presses appear unrelated to the intended action.
-        if (modifyInProgress || hasOpenOfferEditor())
+        if (modifyInProgress || initialPlacementInProgress || hasOpenOfferEditor())
         {
-            return fail("refusing initial BUY while a GE offer/chatbox editor is already open");
+            return fail("refusing initial BUY while another GE action/editor is active");
+        }
+        if (!isExactGeOverviewReady())
+        {
+            return fail("refusing initial BUY because exact GE overview widget state is not ready");
         }
 
         GrandExchangeRequest request = GrandExchangeRequest.builder()
@@ -109,13 +129,22 @@ final class FactoryGrandExchangeInvoker
             .build();
 
         boolean success;
+        initialPlacementInProgress = true;
         try
         {
+            if (!isExactGeOverviewReady())
+            {
+                return fail("initial BUY widget state changed before native placement");
+            }
             success = Rs2GrandExchange.processOffer(request);
         }
         catch (Exception ex)
         {
             return fail("Microbot GE BUY threw " + ex.getClass().getSimpleName());
+        }
+        finally
+        {
+            initialPlacementInProgress = false;
         }
 
         if (!success)
@@ -150,10 +179,14 @@ final class FactoryGrandExchangeInvoker
         // Never allow it while Modify offer is running or while any GE offer editor
         // is already open; doing so can make the client click Offer on the inventory
         // item instead of editing the existing slot.
-        if (modifyInProgress || hasOpenOfferEditor()
+        if (modifyInProgress || initialPlacementInProgress || hasOpenOfferEditor()
             || System.currentTimeMillis() < modifySellProtectionUntil)
         {
-            return fail("refusing initial SELL during/just after Modify offer lifecycle or while a GE input is open");
+            return fail("refusing initial SELL during/just after another GE action or while an editor is open");
+        }
+        if (!isExactGeOverviewReady())
+        {
+            return fail("refusing initial SELL because exact GE overview widget state is not ready");
         }
 
         // Microbot's SELL path deliberately starts from the inventory item's
@@ -173,13 +206,22 @@ final class FactoryGrandExchangeInvoker
             .build();
 
         boolean success;
+        initialPlacementInProgress = true;
         try
         {
+            if (!isExactGeOverviewReady())
+            {
+                return fail("initial SELL widget state changed before native placement");
+            }
             success = Rs2GrandExchange.processOffer(request);
         }
         catch (Exception ex)
         {
             return fail("Microbot GE SELL threw " + ex.getClass().getSimpleName());
+        }
+        finally
+        {
+            initialPlacementInProgress = false;
         }
 
         if (!success)
@@ -562,12 +604,22 @@ final class FactoryGrandExchangeInvoker
     private static boolean isPriceEntryInputOpen()
     {
         // Strict factory-owned Enter gate. MESLAYERMODE=7 alone is not sufficient:
-        // other numeric/chatbox inputs can share that mode. Likewise MES_TEXT2 can
-        // exist briefly while a layer is transitioning. The literal GE price prompt
-        // makes the intended keyboard target unambiguous.
-        return isChatboxInputOpen()
+        // other numeric/chatbox inputs can share that mode. Require the live GE offer
+        // container as well as MES_TEXT2 and the literal GE price prompt.
+        return isGeOfferContainerVisible()
+            && isChatboxInputOpen()
             && isMesText2Visible()
             && Rs2Widget.hasWidget(PRICE_ENTRY_PROMPT);
+    }
+
+    private static boolean isGeOfferContainerVisible()
+    {
+        return Microbot.getClientThread().runOnClientThreadOptional(() ->
+        {
+            Widget container = Microbot.getClient().getWidget(
+                InterfaceID.GE_OFFERS, OFFER_CONTAINER_CHILD);
+            return container != null && !container.isHidden();
+        }).orElse(false);
     }
 
     private static boolean pressEnterForPricePrompt(int price)
@@ -602,7 +654,8 @@ final class FactoryGrandExchangeInvoker
         // During Modify recovery a stale MESLAYERMODE/MES_TEXT2 layer may remain
         // even if the prompt text has already vanished. Escape may close that layer,
         // but Enter is never sent unless isPriceEntryInputOpen() is strictly true.
-        if (isPriceEntryInputOpen() || (isChatboxInputOpen() && isMesText2Visible()))
+        if (isPriceEntryInputOpen()
+            || (isGeOfferContainerVisible() && isChatboxInputOpen() && isMesText2Visible()))
         {
             Rs2Keyboard.keyPress(KeyEvent.VK_ESCAPE);
             sleepUntil(() -> !isChatboxInputOpen() && !isMesText2Visible(), 800);

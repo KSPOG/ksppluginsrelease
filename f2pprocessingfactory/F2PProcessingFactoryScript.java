@@ -56,6 +56,14 @@ public class F2PProcessingFactoryScript extends Script
     private static final int MAX_PROCESS_WITHDRAW_X_ATTEMPTS = 3;
     private static final long WATCHDOG_MIN_RETRY_GAP_MILLIS = 1_500L;
     private static final long WATCHDOG_STUCK_EDITOR_TIMEOUT_MILLIS = 8_000L;
+    // Fixed mode must never fall into the generic multi-minute "no recipe" wait
+    // because of a single transient market quote. Keep the selected recipe pinned
+    // and re-evaluate its margin on a short cadence instead.
+    private static final long FIXED_RECIPE_MARKET_RECHECK_MILLIS = 10_000L;
+    // Keyboard actions are permitted only while the exact target widget is still
+    // visible. This prevents a stale state-machine tick from sending Space into
+    // chat/dialogue/GE after the production interface has already closed.
+    private static final long FACTORY_SPACE_MIN_GAP_MILLIS = 2_000L;
 
     private F2PProcessingFactoryConfig config;
     private FactoryPriceService priceService;
@@ -118,6 +126,7 @@ public class F2PProcessingFactoryScript extends Script
     private volatile long watchdogLastRetryAt;
     private volatile int watchdogRetryCount;
     private volatile String watchdogLastRecovery = "Idle";
+    private volatile long lastFactorySpaceAt;
 
     public boolean run(
         F2PProcessingFactoryConfig config,
@@ -162,6 +171,7 @@ public class F2PProcessingFactoryScript extends Script
         this.sellPriceRetryByItem.clear();
         this.sellMarketBlockedUntil.clear();
         this.sellRetryPolicyExhaustedThisCall = false;
+        this.lastFactorySpaceAt = 0L;
         resetProgressWatchdog();
 
         mainScheduledFuture = scheduledExecutorService.scheduleWithFixedDelay(() ->
@@ -353,6 +363,17 @@ public class F2PProcessingFactoryScript extends Script
             return;
         }
 
+        // Fixed mode is not a recipe search. The configured recipe remains pinned
+        // even when a rapidly-moving market quote temporarily crosses the configured
+        // margin. A bad/transient quote pauses only NEW capital for this one recipe
+        // and is rechecked quickly; it must never collapse into the generic
+        // "No recipe currently meets the configured margin" state.
+        if (config.mode() == FactoryMode.FIXED_RECIPE)
+        {
+            evaluateFixedRecipe(config.fixedRecipe());
+            return;
+        }
+
         List<CyclePlan> viablePlans = new ArrayList<>();
         long shortestLimitReset = Long.MAX_VALUE;
         boolean anyProfitableQuote = false;
@@ -469,6 +490,115 @@ public class F2PProcessingFactoryScript extends Script
             selected.quote.getProfitPerUnit(),
             String.format("%.2f", selected.quote.getRoiPercent()),
             selected.quote.getEstimatedProfitPerHour()
+        );
+    }
+
+    private void evaluateFixedRecipe(FactoryRecipe recipe)
+    {
+        if (recipe == null || !isRecipeEligibleForAccount(recipe))
+        {
+            activePlan = null;
+            activeRecipe = recipe;
+            activeQuote = null;
+            waitForFixedRecipeMarket("Fixed recipe is not currently eligible for this account/world");
+            return;
+        }
+
+        // Keep the selected recipe visible/pinned while the market is being checked.
+        // activePlan stays null until a new purchase is actually safe to start.
+        activePlan = null;
+        activeRecipe = recipe;
+
+        if (isRecipeSellMarketBlocked(recipe))
+        {
+            activeQuote = priceService.quote(recipe, config);
+            waitForFixedRecipeMarket(
+                "Fixed recipe output is temporarily market-blocked: "
+                    + recipe.getOutputItemName());
+            return;
+        }
+
+        ProfitQuote quote = priceService.quote(recipe, config);
+        activeQuote = quote;
+
+        if (!quote.isValid())
+        {
+            String error = quote.getError() == null || quote.getError().isBlank()
+                ? "price lookup unavailable"
+                : quote.getError();
+            log.info("Fixed recipe {} quote temporarily unavailable: {}", recipe, error);
+            waitForFixedRecipeMarket(
+                "Fixed recipe price temporarily unavailable: " + error);
+            return;
+        }
+
+        // Profitability settings still protect new purchases. The important fixed-mode
+        // behavior is that crossing the threshold does NOT discard the recipe or park
+        // it in the generic multi-minute no-recipe state.
+        if (quote.getProfitPerUnit() <= 0 || !quote.meets(config))
+        {
+            log.info(
+                "Fixed recipe {} temporarily below configured margin: profit/unit={}, ROI={}%; required profit/unit>={}, ROI>={}%",
+                recipe,
+                quote.getProfitPerUnit(),
+                String.format("%.2f", quote.getRoiPercent()),
+                config.minimumProfitPerUnit(),
+                config.minimumRoiPercent()
+            );
+            waitForFixedRecipeMarket(String.format(
+                "Fixed recipe below margin: %,d gp/unit, %.2f%% ROI; rechecking",
+                quote.getProfitPerUnit(),
+                quote.getRoiPercent()
+            ));
+            return;
+        }
+
+        String limitBlockedInput = findLimitBlockedMissingInput(recipe);
+        if (limitBlockedInput != null)
+        {
+            int blockedItemId = priceService.getItemId(limitBlockedInput);
+            long reset = blockedItemId <= 0
+                ? 0L
+                : buyLimitTracker.getMillisUntilNextReset(blockedItemId);
+            log.info(
+                "Fixed recipe {} waiting for GE buy-limit capacity on {}",
+                recipe,
+                limitBlockedInput
+            );
+            handleLimitExhaustion(reset);
+            return;
+        }
+
+        CyclePlan plan = createCyclePlan(recipe, quote);
+        if (plan.targetUnits <= 0)
+        {
+            if (plan.nextLimitResetMillis > 0)
+            {
+                handleLimitExhaustion(plan.nextLimitResetMillis);
+                return;
+            }
+
+            refreshCoinSnapshot();
+            waitForFixedRecipeMarket(String.format(
+                "Fixed recipe has no affordable batch: %,d coins spendable (%,d total, %,d reserve)",
+                observedSpendableCoins,
+                observedCoinTotal,
+                config.cashReserve()
+            ));
+            return;
+        }
+
+        activatePlan(plan);
+        status = "Selected fixed recipe: " + activeRecipe.getDisplayName();
+        log.info(
+            "Selected fixed {}: target={}, stock={}, purchases={}, profit/unit={}, ROI={}%, estimated hourly={}",
+            plan.recipe,
+            plan.targetUnits,
+            plan.stockUnits,
+            plan.purchaseQuantities,
+            plan.quote.getProfitPerUnit(),
+            String.format("%.2f", plan.quote.getRoiPercent()),
+            plan.quote.getEstimatedProfitPerHour()
         );
     }
 
@@ -1502,8 +1632,14 @@ public class F2PProcessingFactoryScript extends Script
                     && inventoryCount(outputId) <= outputBefore
                     && !inputsChanged(inputBefore))
                 {
-                    status = "Starting production with Space";
-                    Rs2Keyboard.keyPress(KeyEvent.VK_SPACE);
+                    status = "Starting production";
+                    if (!pressSpaceForProduction(outputId))
+                    {
+                        // Do not blindly retry a keyboard action. The script will
+                        // either observe normal production progress below or fail
+                        // this processing attempt and rebuild state safely.
+                        log.warn("Factory suppressed Space because the exact production widget target was not valid");
+                    }
                 }
 
                 boolean productionStarted = sleepUntil(
@@ -1713,10 +1849,100 @@ public class F2PProcessingFactoryScript extends Script
 
     private boolean isProductionDialogueOpen()
     {
-        return Rs2Widget.isProductionWidgetOpen()
-            || Rs2Widget.hasWidget("How many do you wish to make")
-            || Rs2Widget.hasWidget("How many would you like to make")
-            || Rs2Widget.hasWidget("Choose a quantity");
+        return getVisibleProductionRoot() != null
+            && (Rs2Widget.isProductionWidgetOpen()
+                || Rs2Widget.hasWidget("How many do you wish to make")
+                || Rs2Widget.hasWidget("How many would you like to make")
+                || Rs2Widget.hasWidget("Choose a quantity"));
+    }
+
+    /**
+     * Strict keyboard gate for production. Space is a global key event, so merely
+     * remembering that a production dialogue was open on the previous tick is not
+     * enough. Re-resolve the live SKILLMULTI root immediately before the keypress,
+     * prove that the recipe's output/product still belongs to that root, prove All
+     * is selected, and reject the key if a GE/chatbox numeric input is visible.
+     */
+    private boolean pressSpaceForProduction(int outputId)
+    {
+        if (!isProductionKeyboardTargetValid(outputId))
+        {
+            return false;
+        }
+
+        long now = System.currentTimeMillis();
+        long remainingGap = FACTORY_SPACE_MIN_GAP_MILLIS - (now - lastFactorySpaceAt);
+        if (remainingGap > 0L)
+        {
+            sleep((int) Math.min(Integer.MAX_VALUE, remainingGap));
+        }
+
+        // Re-resolve after a short settle because the production widget can close
+        // between selection/quantity clicks and this global keyboard event.
+        sleep(80, 140);
+        if (!isProductionKeyboardTargetValid(outputId))
+        {
+            return false;
+        }
+
+        Microbot.log("KSP AIO Factory pressing Space for verified production widget: "
+            + activeRecipe.getDisplayName());
+        Rs2Keyboard.keyPress(KeyEvent.VK_SPACE);
+        lastFactorySpaceAt = System.currentTimeMillis();
+        return true;
+    }
+
+    private boolean isProductionKeyboardTargetValid(int outputId)
+    {
+        if (activeRecipe == null || outputId <= 0 || !isAllProductionQuantityEnabled())
+        {
+            return false;
+        }
+
+        return Microbot.getClientThread().runOnClientThreadOptional(() ->
+        {
+            Widget productionRoot = Microbot.getClient().getWidget(InterfaceID.SKILLMULTI, 0);
+            if (productionRoot == null || productionRoot.isHidden())
+            {
+                return false;
+            }
+
+            // Never send Space while the GE is open or a chatbox numeric entry
+            // widget is active. Those interfaces also consume keyboard input.
+            Widget numericInput = Microbot.getClient().getWidget(InterfaceID.Chatbox.MES_TEXT2);
+            if ((numericInput != null && !numericInput.isHidden())
+                || Rs2GrandExchange.isOpen()
+                || Rs2GrandExchange.isOfferScreenOpen())
+            {
+                return false;
+            }
+
+            Widget product = findProductionItemWidget(productionRoot, outputId);
+            if (product != null && !product.isHidden())
+            {
+                return true;
+            }
+
+            if (activeRecipe.requiresProductionOptionSelection())
+            {
+                String optionText = activeRecipe.getProductionOptionText();
+                Widget option = optionText == null || optionText.isBlank()
+                    ? null
+                    : Rs2Widget.searchChildren(optionText, productionRoot, true);
+                return option != null && !option.isHidden();
+            }
+
+            return false;
+        }).orElse(false);
+    }
+
+    private Widget getVisibleProductionRoot()
+    {
+        return Microbot.getClientThread().runOnClientThreadOptional(() ->
+        {
+            Widget root = Microbot.getClient().getWidget(InterfaceID.SKILLMULTI, 0);
+            return root != null && !root.isHidden() ? root : null;
+        }).orElse(null);
     }
 
     private boolean isAllProductionQuantityEnabled()
@@ -4038,6 +4264,18 @@ public class F2PProcessingFactoryScript extends Script
         finishCurrentSaleTarget();
         status = "Banked unsold " + itemName + "; skipping it temporarily and continuing";
         resetProgressWatchdog();
+    }
+
+    private void waitForFixedRecipeMarket(String reason)
+    {
+        // Do not use the configured multi-minute automatic-market wait here. Fixed
+        // mode is already pinned to one recipe, so a transient quote should be
+        // sampled again quickly instead of looking like a permanent "no recipe"
+        // failure. FactoryPriceService/Microbot price caching prevents this cadence
+        // from turning into an API request loop.
+        waitingUntil = System.currentTimeMillis() + FIXED_RECIPE_MARKET_RECHECK_MILLIS;
+        state = FactoryState.WAITING_FOR_MARKET;
+        status = reason;
     }
 
     private void waitForMarket(String reason)
