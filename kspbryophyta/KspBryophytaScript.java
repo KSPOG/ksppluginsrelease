@@ -1055,7 +1055,10 @@ public class KspBryophytaScript extends Script
 
     private void attackWithCurrentWeapon(Rs2NpcModel bryophyta)
     {
-        if (Rs2Player.isIdle())
+        // Compatibility: the Microbot client used by KSP Source Loader does not expose
+        // Rs2Player.isIdle(). isMoving() and isAnimating() are available on the older
+        // runtime API and provide the action-readiness guard needed here.
+        if (!Rs2Player.isMoving() && !Rs2Player.isAnimating())
         {
             bryophyta.click("Attack");
         }
