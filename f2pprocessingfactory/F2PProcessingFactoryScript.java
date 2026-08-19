@@ -76,7 +76,7 @@ public class F2PProcessingFactoryScript extends Script
     private static final int BANK_AMOUNT_PROMPT_CHILD = 43;
     private static final int BANK_CHATBOX_INPUT_MODE = 7;
     private static final int BANK_WITHDRAW_X_PROMPT_IDENTIFIER = 6;
-    private static final long BANK_AMOUNT_PROMPT_TIMEOUT_MILLIS = 2_000L;
+    private static final int BANK_AMOUNT_PROMPT_TIMEOUT_MILLIS = 2_000;
     private static final long BANK_ENTER_MIN_GAP_MILLIS = 600L;
 
     private F2PProcessingFactoryConfig config;
