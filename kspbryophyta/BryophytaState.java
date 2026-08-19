@@ -1,0 +1,21 @@
+package net.runelite.client.plugins.microbot.kspbryophyta;
+
+public enum BryophytaState
+{
+    STARTING,
+    TELEPORTING_VARROCK,
+    BANKING,
+    EQUIPPING,
+    RESTORING_PRAYER,
+    WALKING_TO_SEWERS,
+    WALKING_TO_LAIR,
+    ENTERING_LAIR,
+    FIGHTING_BRYOPHYTA,
+    KILLING_GROWTHLINGS,
+    LOOTING,
+    OPENING_CHEST,
+    WAITING_FOR_RESPAWN,
+    MISSING_REQUIRED_ITEM,
+    WAITING_AT_ENTRANCE,
+    STOPPED
+}
