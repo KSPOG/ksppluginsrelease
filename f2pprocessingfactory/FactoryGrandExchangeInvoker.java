@@ -60,6 +60,16 @@ final class FactoryGrandExchangeInvoker
     private static volatile boolean modifyInProgress = false;
     private static volatile long modifySellProtectionUntil = 0L;
     private static volatile long lastFactoryEnterAt = 0L;
+    /**
+     * Hard keyboard exclusion around bank transitions. A GE price prompt can become
+     * stale during an interface swap; never let a delayed GE Enter land on the bank
+     * or public chat. The short tail also covers the frame immediately after the
+     * bank root becomes visible.
+     */
+    private static volatile boolean bankTransitionActive;
+    private static volatile long bankKeyboardGuardUntil;
+    private static final long BANK_KEYBOARD_GUARD_TAIL_MILLIS = 1_500L;
+
     private static volatile boolean initialPlacementInProgress = false;
 
     private FactoryGrandExchangeInvoker()
@@ -585,6 +595,30 @@ final class FactoryGrandExchangeInvoker
         }).orElse(-1);
     }
 
+    public static void beginBankTransitionGuard()
+    {
+        bankTransitionActive = true;
+        bankKeyboardGuardUntil = Long.MAX_VALUE;
+    }
+
+    public static void endBankTransitionGuard()
+    {
+        bankTransitionActive = false;
+        bankKeyboardGuardUntil = System.currentTimeMillis() + BANK_KEYBOARD_GUARD_TAIL_MILLIS;
+    }
+
+    private static boolean isBankKeyboardGuardActive()
+    {
+        if (bankTransitionActive || System.currentTimeMillis() < bankKeyboardGuardUntil)
+        {
+            return true;
+        }
+
+        // Use a direct widget check instead of Rs2Bank.isOpen(), because isOpen()
+        // also runs bank-pin handling. This predicate must be side-effect free.
+        return Rs2Widget.isWidgetVisible(12, 1);
+    }
+
     private static boolean isChatboxInputOpen()
     {
         return Microbot.getClientThread().runOnClientThreadOptional(() ->
@@ -606,7 +640,8 @@ final class FactoryGrandExchangeInvoker
         // Strict factory-owned Enter gate. MESLAYERMODE=7 alone is not sufficient:
         // other numeric/chatbox inputs can share that mode. Require the live GE offer
         // container as well as MES_TEXT2 and the literal GE price prompt.
-        return isGeOfferContainerVisible()
+        return !isBankKeyboardGuardActive()
+            && isGeOfferContainerVisible()
             && isChatboxInputOpen()
             && isMesText2Visible()
             && Rs2Widget.hasWidget(PRICE_ENTRY_PROMPT);
@@ -624,6 +659,12 @@ final class FactoryGrandExchangeInvoker
 
     private static boolean pressEnterForPricePrompt(int price)
     {
+        if (isBankKeyboardGuardActive())
+        {
+            Microbot.log("KSP AIO Factory suppressed Enter: bank transition/interface is active");
+            return false;
+        }
+
         if (!isPriceEntryInputOpen())
         {
             Microbot.log("KSP AIO Factory suppressed Enter: exact GE price prompt is not active");
@@ -651,6 +692,13 @@ final class FactoryGrandExchangeInvoker
 
     private static void closePriceInputIfOpen()
     {
+        if (isBankKeyboardGuardActive())
+        {
+            // Never use keyboard recovery while the bank is opening/open; Escape can
+            // close the bank and a stale GE layer must simply be abandoned.
+            return;
+        }
+
         // During Modify recovery a stale MESLAYERMODE/MES_TEXT2 layer may remain
         // even if the prompt text has already vanished. Escape may close that layer,
         // but Enter is never sent unless isPriceEntryInputOpen() is strictly true.

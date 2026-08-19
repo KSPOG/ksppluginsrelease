@@ -7,6 +7,7 @@ import net.runelite.api.GrandExchangeOfferState;
 import net.runelite.api.Item;
 import net.runelite.api.ItemComposition;
 import net.runelite.api.ItemContainer;
+import net.runelite.api.MenuAction;
 import net.runelite.api.Player;
 import net.runelite.api.gameval.InterfaceID;
 import net.runelite.api.gameval.InventoryID;
@@ -20,10 +21,13 @@ import net.runelite.client.plugins.microbot.util.bank.Rs2Bank;
 import net.runelite.client.plugins.microbot.util.grandexchange.Rs2GrandExchange;
 import net.runelite.client.plugins.microbot.util.grandexchange.GrandExchangeSlots;
 import net.runelite.client.plugins.microbot.util.inventory.Rs2Inventory;
+import net.runelite.client.plugins.microbot.util.inventory.Rs2ItemModel;
 import net.runelite.client.plugins.microbot.util.keyboard.Rs2Keyboard;
+import net.runelite.client.plugins.microbot.util.menu.NewMenuEntry;
 import net.runelite.client.plugins.microbot.util.player.Rs2Player;
 import net.runelite.client.plugins.microbot.util.widget.Rs2Widget;
 
+import java.awt.Rectangle;
 import java.awt.event.KeyEvent;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -64,6 +68,16 @@ public class F2PProcessingFactoryScript extends Script
     // visible. This prevents a stale state-machine tick from sending Space into
     // chat/dialogue/GE after the production interface has already closed.
     private static final long FACTORY_SPACE_MIN_GAP_MILLIS = 2_000L;
+    // Bank Withdraw-X has its own chatbox amount prompt. Never rely on the
+    // generic Rs2Bank.handleAmount() delayed Enter because the prompt can disappear
+    // during an interface transition before that Enter is sent.
+    private static final String BANK_AMOUNT_PROMPT = "Enter amount:";
+    private static final int BANK_AMOUNT_PROMPT_GROUP = 162;
+    private static final int BANK_AMOUNT_PROMPT_CHILD = 43;
+    private static final int BANK_CHATBOX_INPUT_MODE = 7;
+    private static final int BANK_WITHDRAW_X_PROMPT_IDENTIFIER = 6;
+    private static final long BANK_AMOUNT_PROMPT_TIMEOUT_MILLIS = 2_000L;
+    private static final long BANK_ENTER_MIN_GAP_MILLIS = 600L;
 
     private F2PProcessingFactoryConfig config;
     private FactoryPriceService priceService;
@@ -127,6 +141,7 @@ public class F2PProcessingFactoryScript extends Script
     private volatile int watchdogRetryCount;
     private volatile String watchdogLastRecovery = "Idle";
     private volatile long lastFactorySpaceAt;
+    private volatile long lastBankEnterAt;
 
     public boolean run(
         F2PProcessingFactoryConfig config,
@@ -1443,11 +1458,11 @@ public class F2PProcessingFactoryScript extends Script
 
 
     /**
-     * Processing inventory preparation must always use the bank's Withdraw-X action for
-     * the complete required quantity. Rs2Bank.withdrawX(...) maps to the bank X action,
-     * but a stale widget/menu state can occasionally produce only a partial withdrawal.
-     * Treat that as a failed atomic withdrawal: bank the partial amount and retry the
-     * full X quantity instead of topping up one item at a time.
+     * Processing inventory preparation must always use one verified bank Withdraw-X
+     * action for the complete required quantity. The factory owns the amount prompt
+     * and Enter checks so a stale bank/chatbox transition cannot receive the key.
+     * Treat a partial withdrawal as a failed atomic withdrawal: bank the partial amount
+     * and retry the full X quantity instead of topping up one item at a time.
      */
     private boolean withdrawProcessingItemWithX(int itemId, String itemName, int quantity)
     {
@@ -1495,7 +1510,7 @@ public class F2PProcessingFactoryScript extends Script
             status = "Withdraw-X " + itemName + " x" + quantity
                 + " (" + attempt + "/" + MAX_PROCESS_WITHDRAW_X_ATTEMPTS + ")";
 
-            if (!Rs2Bank.withdrawX(itemId, quantity))
+            if (!withdrawXWithVerifiedBankPrompt(itemId, itemName, quantity))
             {
                 log.warn(
                     "Processing Withdraw-X invoke failed: {} x{} attempt={}/{}",
@@ -1541,6 +1556,195 @@ public class F2PProcessingFactoryScript extends Script
             sleepUntil(() -> inventoryCount(itemId) == 0, INVENTORY_CHANGE_TIMEOUT_MILLIS);
         }
         return false;
+    }
+
+    /**
+     * Executes a bank Withdraw-X without using Rs2Bank.handleAmount()'s delayed,
+     * unchecked Enter. Every keyboard step is bound to the exact live bank amount
+     * prompt and the bank root widget.
+     */
+    private boolean withdrawXWithVerifiedBankPrompt(int itemId, String itemName, int quantity)
+    {
+        if (quantity <= 0)
+        {
+            return true;
+        }
+
+        if (!isBankRootVisible() || Rs2GrandExchange.isOpen())
+        {
+            log.warn("Factory suppressed bank Withdraw-X for {} x{}: bank root is not exclusively active",
+                itemName, quantity);
+            return false;
+        }
+
+        // Never stack a new Withdraw-X on top of an old numeric input layer.
+        // If the *exact* bank amount prompt is left over from our previous attempt,
+        // Escape is safe and intentional; any other input is left untouched.
+        if (isExactBankAmountPromptOpen())
+        {
+            Rs2Keyboard.keyPress(KeyEvent.VK_ESCAPE);
+            if (!sleepUntil(() -> !isExactBankAmountPromptOpen(), 800))
+            {
+                log.warn("Factory could not close stale verified bank amount prompt before {} x{}",
+                    itemName, quantity);
+                return false;
+            }
+        }
+        else if (isAnyChatboxNumericInputVisible())
+        {
+            log.warn("Factory suppressed bank Withdraw-X for {} x{}: unrelated numeric input is active",
+                itemName, quantity);
+            return false;
+        }
+
+        // Quantity one never needs a keyboard prompt.
+        if (quantity == 1)
+        {
+            return Rs2Bank.withdrawOne(itemId);
+        }
+
+        Rs2ItemModel bankItem = Rs2Bank.bankItems().stream()
+            .filter(item -> item != null
+                && (item.getId() == itemId
+                    || (item.getName() != null && item.getName().equalsIgnoreCase(itemName))))
+            .findFirst()
+            .orElse(null);
+        if (bankItem == null)
+        {
+            log.warn("Factory verified Withdraw-X could not resolve bank row for {} ({})",
+                itemName, itemId);
+            return false;
+        }
+
+        // Open the bank's literal Withdraw-X prompt directly. Identifier 6 is the
+        // bank-item X-prompt action used by Microbot's own handleAmount() path.
+        NewMenuEntry entry = new NewMenuEntry()
+            .param0(bankItem.getSlot())
+            .param1(Rs2Bank.BANK_ITEM_CONTAINER)
+            .opcode(MenuAction.CC_OP.getId())
+            .identifier(BANK_WITHDRAW_X_PROMPT_IDENTIFIER)
+            .itemId(bankItem.getId())
+            .target(bankItem.getName());
+
+        Rectangle bounds = Rs2Bank.itemBounds(bankItem);
+        if (bounds == null)
+        {
+            bounds = new Rectangle(1, 1);
+        }
+
+        Microbot.doInvoke(entry, bounds);
+
+        if (!sleepUntil(
+            () -> isExactBankAmountPromptOpen(),
+            BANK_AMOUNT_PROMPT_TIMEOUT_MILLIS))
+        {
+            log.warn("Factory suppressed bank Enter for {} x{}: exact 'Enter amount:' widget never opened",
+                itemName, quantity);
+            return false;
+        }
+
+        // Re-resolve immediately before typing. Do not type into a prompt that was
+        // valid only on the previous state-machine observation.
+        if (!isExactBankAmountPromptOpen())
+        {
+            log.warn("Factory suppressed bank amount typing for {} x{}: prompt became stale",
+                itemName, quantity);
+            return false;
+        }
+
+        Rs2Keyboard.typeString(String.valueOf(quantity));
+        sleep(80, 140);
+
+        // Critical second widget check: this is the race missing from the generic
+        // Rs2Bank helper. If the bank/prompt changed while typing, Enter is forbidden.
+        if (!isExactBankAmountPromptOpen() || !bankAmountInputMatches(quantity))
+        {
+            log.warn("Factory suppressed bank Enter for {} x{}: prompt/input changed before confirmation",
+                itemName, quantity);
+            return false;
+        }
+
+        long remainingGap = BANK_ENTER_MIN_GAP_MILLIS
+            - (System.currentTimeMillis() - lastBankEnterAt);
+        if (remainingGap > 0L)
+        {
+            sleep((int) remainingGap);
+        }
+
+        // Third and final live check immediately at the keyboard event.
+        if (!isExactBankAmountPromptOpen() || !bankAmountInputMatches(quantity))
+        {
+            log.warn("Factory suppressed bank Enter for {} x{} after cooldown: prompt/input is no longer exact",
+                itemName, quantity);
+            return false;
+        }
+
+        Microbot.log("KSP AIO Factory bank pressing Enter for verified 'Enter amount:' prompt: "
+            + itemName + " x" + quantity);
+        Rs2Keyboard.enter();
+        lastBankEnterAt = System.currentTimeMillis();
+
+        return sleepUntil(
+            () -> !isExactBankAmountPromptOpen(),
+            BANK_AMOUNT_PROMPT_TIMEOUT_MILLIS);
+    }
+
+    private boolean isBankRootVisible()
+    {
+        // Direct widget predicate: no bank-pin side effects.
+        return Rs2Widget.isWidgetVisible(12, 1);
+    }
+
+    private boolean isExactBankAmountPromptOpen()
+    {
+        if (!isBankRootVisible() || Rs2GrandExchange.isOpen())
+        {
+            return false;
+        }
+
+        return Microbot.getClientThread().runOnClientThreadOptional(() ->
+        {
+            if (Microbot.getClient().getVarcIntValue(VarClientID.MESLAYERMODE)
+                != BANK_CHATBOX_INPUT_MODE)
+            {
+                return false;
+            }
+
+            Widget prompt = Microbot.getClient().getWidget(
+                BANK_AMOUNT_PROMPT_GROUP, BANK_AMOUNT_PROMPT_CHILD);
+            Widget input = Microbot.getClient().getWidget(InterfaceID.Chatbox.MES_TEXT2);
+
+            if (prompt == null || prompt.isHidden() || input == null || input.isHidden())
+            {
+                return false;
+            }
+
+            String promptText = prompt.getText();
+            return promptText != null
+                && BANK_AMOUNT_PROMPT.equalsIgnoreCase(
+                    promptText.replaceAll("<[^>]*>", "").trim());
+        }).orElse(false);
+    }
+
+    private boolean bankAmountInputMatches(int quantity)
+    {
+        return Microbot.getClientThread().runOnClientThreadOptional(() ->
+        {
+            Widget input = Microbot.getClient().getWidget(InterfaceID.Chatbox.MES_TEXT2);
+            if (input == null || input.isHidden())
+            {
+                return false;
+            }
+
+            String text = input.getText();
+            if (text == null)
+            {
+                return false;
+            }
+
+            String digits = text.replaceAll("[^0-9]", "");
+            return digits.equals(String.valueOf(quantity));
+        }).orElse(false);
     }
 
     private void processInventory()
@@ -3092,7 +3296,11 @@ public class F2PProcessingFactoryScript extends Script
 
         int withdraw = (int) Math.min(Integer.MAX_VALUE, required);
         Rs2Bank.depositAll();
-        Rs2Bank.withdrawX(coinsId, withdraw);
+        if (!withdrawXWithVerifiedBankPrompt(coinsId, "Coins", withdraw))
+        {
+            status = "Verified bank withdrawal failed for coins x" + withdraw;
+            return false;
+        }
         return sleepUntil(
             () -> inventoryCount(coinsId) >= withdraw,
             INVENTORY_CHANGE_TIMEOUT_MILLIS
@@ -3101,25 +3309,61 @@ public class F2PProcessingFactoryScript extends Script
 
     private boolean ensureBankOpen()
     {
-        if (Rs2Bank.isOpen())
+        if (isBankRootVisible())
         {
             return true;
         }
 
-        if (Rs2GrandExchange.isOpen())
+        FactoryGrandExchangeInvoker.beginBankTransitionGuard();
+        try
         {
-            FactoryGrandExchangeInvoker.closeExchangeWithoutMouse();
-            sleepUntil(() -> !Rs2GrandExchange.isOpen(), 3_000);
-        }
+            if (Rs2GrandExchange.isOpen())
+            {
+                FactoryGrandExchangeInvoker.closeExchangeWithoutMouse();
+                sleepUntil(() -> !Rs2GrandExchange.isOpen(), 3_000);
+            }
 
-        if (Rs2Bank.openBank())
+            // Never begin a bank interaction while a stale numeric/chatbox layer is
+            // still active. A bank click does not grant permission to press Enter.
+            if (isAnyChatboxNumericInputVisible())
+            {
+                status = "Waiting for stale input to close before bank";
+                log.warn("Factory deferred bank open because MES_TEXT2/input mode is still active");
+                return false;
+            }
+
+            if (Rs2Bank.openBank())
+            {
+                boolean opened = sleepUntil(this::isBankRootVisible, BANK_OPEN_TIMEOUT_MILLIS);
+                if (opened)
+                {
+                    // Give the interface swap one client tick to settle. GE Enter is
+                    // still locked during this interval.
+                    sleep(250, 400);
+                }
+                return opened;
+            }
+
+            status = "Walking to bank";
+            Rs2Bank.walkToBank();
+            return false;
+        }
+        finally
         {
-            return sleepUntil(Rs2Bank::isOpen, BANK_OPEN_TIMEOUT_MILLIS);
+            FactoryGrandExchangeInvoker.endBankTransitionGuard();
         }
+    }
 
-        status = "Walking to bank";
-        Rs2Bank.walkToBank();
-        return false;
+    private boolean isAnyChatboxNumericInputVisible()
+    {
+        return Microbot.getClientThread().runOnClientThreadOptional(() ->
+        {
+            Widget input = Microbot.getClient().getWidget(InterfaceID.Chatbox.MES_TEXT2);
+            return input != null
+                && !input.isHidden()
+                && Microbot.getClient().getVarcIntValue(VarClientID.MESLAYERMODE)
+                    == BANK_CHATBOX_INPUT_MODE;
+        }).orElse(false);
     }
 
     private boolean ensureGrandExchangeOpen()
