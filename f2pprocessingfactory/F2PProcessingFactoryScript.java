@@ -7,14 +7,11 @@ import net.runelite.api.GrandExchangeOfferState;
 import net.runelite.api.Item;
 import net.runelite.api.ItemComposition;
 import net.runelite.api.ItemContainer;
-import net.runelite.api.MenuAction;
 import net.runelite.api.Player;
-import net.runelite.api.WorldType;
 import net.runelite.api.gameval.InterfaceID;
 import net.runelite.api.gameval.InventoryID;
 import net.runelite.api.gameval.ItemID;
 import net.runelite.api.gameval.VarClientID;
-import net.runelite.api.gameval.VarbitID;
 import net.runelite.api.widgets.Widget;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.plugins.microbot.Microbot;
@@ -23,13 +20,10 @@ import net.runelite.client.plugins.microbot.util.bank.Rs2Bank;
 import net.runelite.client.plugins.microbot.util.grandexchange.Rs2GrandExchange;
 import net.runelite.client.plugins.microbot.util.grandexchange.GrandExchangeSlots;
 import net.runelite.client.plugins.microbot.util.inventory.Rs2Inventory;
-import net.runelite.client.plugins.microbot.util.inventory.Rs2ItemModel;
 import net.runelite.client.plugins.microbot.util.keyboard.Rs2Keyboard;
-import net.runelite.client.plugins.microbot.util.menu.NewMenuEntry;
 import net.runelite.client.plugins.microbot.util.player.Rs2Player;
 import net.runelite.client.plugins.microbot.util.widget.Rs2Widget;
 
-import java.awt.Rectangle;
 import java.awt.event.KeyEvent;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -58,12 +52,9 @@ public class F2PProcessingFactoryScript extends Script
     private static final long GE_PLACEMENT_FAILURE_BACKOFF_MILLIS = 10_000L;
     private static final long GE_PLACEMENT_WARNING_INTERVAL_MILLIS = 60_000L;
     private static final int MAX_PROGRESS_WATCHDOG_RETRIES = 3;
+    private static final int MAX_PROCESS_WITHDRAW_X_ATTEMPTS = 3;
     private static final long WATCHDOG_MIN_RETRY_GAP_MILLIS = 1_500L;
     private static final long WATCHDOG_STUCK_EDITOR_TIMEOUT_MILLIS = 8_000L;
-    private static final long FACTORY_HEARTBEAT_INTERVAL_MILLIS = 30_000L;
-    private static final long GE_OWNERSHIP_RECOVERY_WINDOW_MILLIS = 30_000L;
-    private static final int MAX_BANK_SINGLE_WITHDRAW_FALLBACK = 28;
-    private static final int BANK_SINGLE_WITHDRAW_VERIFY_TIMEOUT_MILLIS = 2_000;
 
     private F2PProcessingFactoryConfig config;
     private FactoryPriceService priceService;
@@ -109,13 +100,11 @@ public class F2PProcessingFactoryScript extends Script
      */
     private final Map<GrandExchangeSlots, Integer> factorySellOfferItemIds = new HashMap<>();
     private final Map<Integer, Integer> sellPriceRetryByItem = new HashMap<>();
-    private final Map<Integer, Long> pendingFactorySellPlacements = new HashMap<>();
     /**
      * Outputs whose sale retry policy was exhausted are temporarily market-blocked.
      * Their unsold remainder is collected back to the bank, then the factory moves
      * on instead of sitting in WAITING_FOR_MARKET with an empty Grand Exchange.
      */
-    private final Map<Integer, Long> buyMarketBlockedUntil = new HashMap<>();
     private final Map<Integer, Long> sellMarketBlockedUntil = new HashMap<>();
     private boolean sellRetryPolicyExhaustedThisCall;
 
@@ -128,8 +117,6 @@ public class F2PProcessingFactoryScript extends Script
     private volatile long watchdogLastRetryAt;
     private volatile int watchdogRetryCount;
     private volatile String watchdogLastRecovery = "Idle";
-    private volatile long lastHeartbeatAt;
-    private volatile boolean fatalRuntimeError;
 
     public boolean run(
         F2PProcessingFactoryConfig config,
@@ -172,41 +159,19 @@ public class F2PProcessingFactoryScript extends Script
         this.factorySellOfferPrices.clear();
         this.factorySellOfferItemIds.clear();
         this.sellPriceRetryByItem.clear();
-        this.pendingFactorySellPlacements.clear();
-        this.buyMarketBlockedUntil.clear();
         this.sellMarketBlockedUntil.clear();
         this.sellRetryPolicyExhaustedThisCall = false;
-        this.lastHeartbeatAt = 0L;
-        this.fatalRuntimeError = false;
         resetProgressWatchdog();
 
         mainScheduledFuture = scheduledExecutorService.scheduleWithFixedDelay(() ->
         {
             try
             {
-                if (fatalRuntimeError)
-                {
-                    return;
-                }
                 if (!super.run() || !Microbot.isLoggedIn())
                 {
                     return;
                 }
                 tick();
-            }
-            catch (LinkageError error)
-            {
-                fatalRuntimeError = true;
-                state = FactoryState.STOPPED;
-                status = "Fatal runtime API error: " + safeMessage(error) + "; reload Factory after updating";
-                log.error("KSP AIO Factory fatal runtime linkage failure; actions stopped until reload", error);
-            }
-            catch (AssertionError error)
-            {
-                fatalRuntimeError = true;
-                state = FactoryState.STOPPED;
-                status = "Fatal runtime assertion: " + safeMessage(error) + "; reload Factory";
-                log.error("KSP AIO Factory fatal assertion failure; actions stopped until reload", error);
             }
             catch (Exception ex)
             {
@@ -220,8 +185,6 @@ public class F2PProcessingFactoryScript extends Script
 
     private void tick()
     {
-        logHeartbeatIfDue();
-
         if (antiban != null && antiban.beforeTick(state))
         {
             // Anti-ban pauses are intentional and must never be interpreted as a
@@ -363,7 +326,7 @@ public class F2PProcessingFactoryScript extends Script
         List<FactoryRecipe> candidates = buildCandidateList();
         if (candidates.isEmpty())
         {
-            waitForMarket(buildEligibilityFailureStatus());
+            waitForMarket("No supported recipes meet the account's membership/skill requirements");
             return;
         }
 
@@ -379,7 +342,6 @@ public class F2PProcessingFactoryScript extends Script
         List<CyclePlan> viablePlans = new ArrayList<>();
         long shortestLimitReset = Long.MAX_VALUE;
         boolean anyProfitableQuote = false;
-        ProfitQuote fixedRecipeQuote = null;
 
         for (FactoryRecipe recipe : candidates)
         {
@@ -391,21 +353,7 @@ public class F2PProcessingFactoryScript extends Script
             }
 
             ProfitQuote quote = priceService.quote(recipe, config);
-            boolean fixedSelected = config.mode() == FactoryMode.FIXED_RECIPE
-                && recipe == config.fixedRecipe();
-            if (fixedSelected)
-            {
-                fixedRecipeQuote = quote;
-            }
-
-            // Profit/ROI thresholds are an Automatic-mode recipe-selection policy.
-            // In Fixed Recipe mode the user has already chosen which recipe to run,
-            // so a positive-profit quote is allowed even when it is below those
-            // ranking thresholds. We still refuse a currently negative/zero-profit
-            // purchase rather than silently burning capital.
-            if (!quote.isValid()
-                || quote.getProfitPerUnit() <= 0
-                || (!fixedSelected && !quote.meets(config)))
+            if (!quote.isValid() || quote.getProfitPerUnit() <= 0 || !quote.meets(config))
             {
                 log.debug("Skipping {}: {}", recipe, quote.isValid()
                     ? (quote.getProfitPerUnit() <= 0
@@ -413,16 +361,6 @@ public class F2PProcessingFactoryScript extends Script
                         : "margin below configured minimum")
                     : quote.getError());
                 continue;
-            }
-
-            if (fixedSelected && !quote.meets(config))
-            {
-                log.info(
-                    "Fixed recipe {} is below Automatic-mode margin thresholds (profit/unit={}, ROI={}%) but remains selected",
-                    recipe,
-                    quote.getProfitPerUnit(),
-                    String.format("%.2f", quote.getRoiPercent())
-                );
             }
 
             anyProfitableQuote = true;
@@ -473,20 +411,6 @@ public class F2PProcessingFactoryScript extends Script
                     config.cashReserve()
                 ));
             }
-            else if (config.mode() == FactoryMode.FIXED_RECIPE && fixedRecipeQuote != null)
-            {
-                if (!fixedRecipeQuote.isValid())
-                {
-                    waitForMarket("Fixed recipe price unavailable: " + fixedRecipeQuote.getError());
-                }
-                else
-                {
-                    waitForMarket(String.format(
-                        "Fixed recipe currently unprofitable: %,d gp/unit",
-                        fixedRecipeQuote.getProfitPerUnit()
-                    ));
-                }
-            }
             else
             {
                 waitForMarket("No recipe currently meets the configured margin");
@@ -500,7 +424,14 @@ public class F2PProcessingFactoryScript extends Script
             selected = viablePlans.stream()
                 .filter(plan -> plan.recipe == config.fixedRecipe())
                 .findFirst()
-                .orElse(null);
+                .orElseGet(() ->
+                {
+                    if (config.limitExhaustedAction() == LimitExhaustedAction.SWITCH_RECIPE)
+                    {
+                        return selectBestPlan(viablePlans);
+                    }
+                    return null;
+                });
         }
         else
         {
@@ -534,10 +465,10 @@ public class F2PProcessingFactoryScript extends Script
     private boolean startExistingBankBacklog()
     {
         List<CyclePlan> stockPlans = new ArrayList<>();
-        // Fixed mode is a hard recipe boundary: never process banked inputs from a
-        // different recipe because that would eventually cause unrelated outputs
-        // to be sold. Automatic mode may still drain any eligible recipe backlog.
-        for (FactoryRecipe recipe : getModeScopedRecipes())
+        // Backlog cleanup is intentionally broader than the normal candidate list.
+        // Even Fixed mode must finish already-owned processable stock before it
+        // commits new coins to its configured recipe.
+        for (FactoryRecipe recipe : FactoryRecipe.values())
         {
             if (!isRecipeEligibleForAccount(recipe))
             {
@@ -582,7 +513,7 @@ public class F2PProcessingFactoryScript extends Script
                 selected = stockPlans.stream()
                     .filter(plan -> plan.recipe == config.fixedRecipe())
                     .findFirst()
-                    .orElse(null);
+                    .orElseGet(() -> selectBestBacklogPlan(stockPlans));
             }
             else
             {
@@ -662,10 +593,7 @@ public class F2PProcessingFactoryScript extends Script
         ExistingOutputBacklog best = null;
         Set<String> seenOutputs = new HashSet<>();
 
-        // Only inspect outputs belonging to recipes that the current mode is
-        // allowed to trade. In Fixed mode this is exactly one recipe, including
-        // only that recipe's declared container/byproduct outputs.
-        for (FactoryRecipe recipe : getModeScopedRecipes())
+        for (FactoryRecipe recipe : FactoryRecipe.values())
         {
             if (!isRecipeEligibleForAccount(recipe))
             {
@@ -695,6 +623,8 @@ public class F2PProcessingFactoryScript extends Script
                     continue;
                 }
 
+                // In fixed mode, the fixed recipe's own output/byproducts win
+                // immediately. Automatic mode drains the largest finished stack.
                 ExistingOutputBacklog candidate = new ExistingOutputBacklog(recipe, outputName, quantity);
                 if (config.mode() == FactoryMode.FIXED_RECIPE && recipe == config.fixedRecipe())
                 {
@@ -851,36 +781,12 @@ public class F2PProcessingFactoryScript extends Script
 
         if (!activePlan.purchaseQuantities.isEmpty())
         {
-            List<String> blockedPurchases = getMarketBlockedOutstandingPurchases();
-            if (!blockedPurchases.isEmpty()
-                && blockedPurchases.size() == activePlan.purchaseQuantities.size()
-                && factoryBuyOfferSlots.isEmpty())
-            {
-                long shortestCooldown = getShortestBuyMarketCooldownMillis();
-                waitingUntil = System.currentTimeMillis() + Math.max(1_000L, shortestCooldown);
-                state = FactoryState.WAITING_FOR_MARKET;
-                status = "Buy retries exhausted; waiting for market recheck: "
-                    + String.join(", ", blockedPurchases);
-                clearGeWaitFlags();
-                return;
-            }
-
             state = FactoryState.BUYING_INPUTS;
             return;
         }
 
-        // Every factory-owned BUY offer has already been collected by exact slot
-        // before its purchase quantity is removed. Never use Collect-all here: a
-        // completed player offer may be present in another GE slot.
-        if (!factoryBuyOfferSlots.isEmpty())
-        {
-            waitingForExistingGeOffer = true;
-            status = "Waiting for factory input offers to be collected";
-            state = FactoryState.BUYING_INPUTS;
-            return;
-        }
-
-        sleep(250, 450);
+        Rs2GrandExchange.collectAllToBank();
+        sleep(400, 800);
         FactoryGrandExchangeInvoker.closeExchangeWithoutMouse();
 
         state = FactoryState.OPENING_BANK;
@@ -909,14 +815,6 @@ public class F2PProcessingFactoryScript extends Script
             int requested = Math.max(0, entry.getValue());
             int itemId = priceService.getItemId(itemName);
             if (requested <= 0 || itemId <= 0)
-            {
-                continue;
-            }
-
-            // A BUY that exhausted its configured reprice policy is temporarily
-            // market-blocked. Do not immediately recreate the same max-priced
-            // offer on the next tick; wait for a fresh market recheck instead.
-            if (isBuyMarketBlocked(itemId) && findMatchingOfferSlot(itemId, false) == null)
             {
                 continue;
             }
@@ -995,15 +893,6 @@ public class F2PProcessingFactoryScript extends Script
             }
 
             clearGePlacementBackoff();
-
-            // BUY requests explicitly target this slot in Microbot. Claim it as soon
-            // as processOffer confirms success so a delayed client-array update cannot
-            // make the Factory forget ownership of its own offer.
-            factoryBuyOfferSlots.add(slot);
-            factoryBuyOfferPrices.put(slot, candidate.price);
-            factoryBuyOfferRetries.put(slot, candidate.retry);
-            buyPriceRetryByItem.putIfAbsent(candidate.itemId, candidate.retry);
-
             GrandExchangeSlots actualSlot = waitForOfferSlot(candidate.itemId, false, slot);
             if (actualSlot == null)
             {
@@ -1012,7 +901,10 @@ public class F2PProcessingFactoryScript extends Script
                 return;
             }
 
-            migrateTrackedFactoryBuySlot(slot, actualSlot);
+            factoryBuyOfferSlots.add(actualSlot);
+            factoryBuyOfferPrices.put(actualSlot, candidate.price);
+            factoryBuyOfferRetries.put(actualSlot, candidate.retry);
+            buyPriceRetryByItem.putIfAbsent(candidate.itemId, candidate.retry);
             placed++;
         }
 
@@ -1041,18 +933,8 @@ public class F2PProcessingFactoryScript extends Script
             return 0;
         }
 
-        // Once the maximum BUY reprice policy has been exhausted, pause this item
-        // until the market recheck expires. A live Factory offer is still allowed
-        // to finish/collect; only creation of another replacement offer is blocked.
-        if (isBuyMarketBlocked(itemId) && findTrackedFactoryBuyOfferSlot(itemId) == null)
-        {
-            waitingForExistingGeOffer = true;
-            status = "Buy market cooling down: " + itemName + " (" + buyMarketBlockedSeconds(itemId) + "s)";
-            return 0;
-        }
-
-        // Exact-slot collection can finish several completed parallel input offers.
-        // Consume those already-accounted credits before placing anything new.
+        // A single Collect-all click can collect several completed parallel input
+        // offers. Consume those already-accounted credits before placing anything new.
         int collectedCredit = consumePendingBuyCredit(itemId, requestedQuantity);
         if (collectedCredit > 0)
         {
@@ -1060,9 +942,10 @@ public class F2PProcessingFactoryScript extends Script
             return collectedCredit;
         }
 
-        // If every factory-owned parallel BUY is already terminal, collect each
-        // tracked slot before inspecting individual slots. Each successful collection
-        // is credited independently, so unrelated GE offers remain untouched.
+        // If every factory-owned parallel BUY is already terminal, press the GE
+        // Collect button before inspecting individual slots. This snapshots and
+        // credits every completed slot atomically so a Collect-all cannot cause a
+        // second purchase of an item that was collected in the same click.
         if (collectTrackedFactoryBuyOffersIfReady())
         {
             collectedCredit = consumePendingBuyCredit(itemId, requestedQuantity);
@@ -1100,20 +983,24 @@ public class F2PProcessingFactoryScript extends Script
 
             if (!factoryOwned)
             {
-                // Strict ownership boundary: an offer that was not created and tracked
-                // by this Factory run is read-only. This also protects player offers
-                // after a source-loader reload, where in-memory ownership is reset.
-                waitingForExistingGeOffer = true;
+                // Observe pre-existing player offers without modifying them. Completed
+                // offers are always collected with the Grand Exchange's top Collect
+                // button. The helper snapshots/reconciles any factory-owned completed
+                // BUY offers that the same Collect-all click may clear.
                 if (offer != null && isFinishedBuyState(offer.getState()))
                 {
-                    status = "Existing completed " + itemName
-                        + " buy is not Factory-owned; collect it manually";
+                    if (!collectCompletedOfferWithButton(existingOffer, "existing " + itemName + " buy"))
+                    {
+                        waitingForExistingGeOffer = true;
+                        return 0;
+                    }
+                    int credited = Math.min(requestedQuantity, filled);
+                    status = "Collected existing " + itemName + " offer (" + filled + "/" + total + ")";
+                    return credited;
                 }
-                else
-                {
-                    status = "Waiting for existing non-Factory " + itemName
-                        + " buy (" + filled + "/" + total + ")";
-                }
+
+                waitingForExistingGeOffer = true;
+                status = "Waiting for existing " + itemName + " offer (" + filled + "/" + total + ")";
                 return 0;
             }
 
@@ -1177,8 +1064,8 @@ public class F2PProcessingFactoryScript extends Script
             }
 
             // Maximum reprices reached. Cancel this exact slot without collecting;
-            // exact-slot collection is deferred until every tracked input offer is
-            // terminal so parallel input accounting remains deterministic.
+            // Collect-all is intentionally deferred until every tracked input offer
+            // is terminal so one click can be accounted for atomically.
             if (!FactoryGrandExchangeInvoker.cancelOfferWithoutCollect(existingOffer, itemId))
             {
                 waitingForExistingGeOffer = true;
@@ -1197,14 +1084,6 @@ public class F2PProcessingFactoryScript extends Script
                 status = "Waiting for cancelled buy offer state: " + itemName;
                 return 0;
             }
-
-            markBuyMarketBlocked(itemId);
-            log.info(
-                "Buy retry policy exhausted for {}; pausing replacement offers for {}s",
-                itemName,
-                buyMarketBlockedSeconds(itemId)
-            );
-
             if (collectTrackedFactoryBuyOffersIfReady())
             {
                 return consumePendingBuyCredit(itemId, requestedQuantity);
@@ -1251,22 +1130,19 @@ public class F2PProcessingFactoryScript extends Script
 
         clearGePlacementBackoff();
 
-        factoryBuyOfferSlots.add(reservedSlot);
-        factoryBuyOfferPrices.put(reservedSlot, price);
-        factoryBuyOfferRetries.put(reservedSlot, retry);
-        buyPriceRetryByItem.putIfAbsent(itemId, retry);
-
         GrandExchangeSlots slot = waitForOfferSlot(itemId, false, reservedSlot);
         if (slot == null)
         {
             waitingForExistingGeOffer = true;
             status = "Offer placed; waiting for GE slot sync: " + itemName;
-            log.warn("Could not identify newly placed buy offer for {} by item ID {}; preserving ownership claim on {}",
-                itemName, itemId, reservedSlot);
+            log.warn("Could not identify newly placed buy offer for {} by item ID {}", itemName, itemId);
             return 0;
         }
 
-        migrateTrackedFactoryBuySlot(reservedSlot, slot);
+        factoryBuyOfferSlots.add(slot);
+        factoryBuyOfferPrices.put(slot, price);
+        factoryBuyOfferRetries.put(slot, retry);
+        buyPriceRetryByItem.putIfAbsent(itemId, retry);
 
         OfferWaitResult result = waitForOfferResult(
             slot,
@@ -1343,14 +1219,6 @@ public class F2PProcessingFactoryScript extends Script
             status = "Waiting for cancelled buy offer state: " + itemName;
             return 0;
         }
-
-        markBuyMarketBlocked(itemId);
-        log.info(
-            "Buy retry policy exhausted for {}; pausing replacement offers for {}s",
-            itemName,
-            buyMarketBlockedSeconds(itemId)
-        );
-
         if (collectTrackedFactoryBuyOffersIfReady())
         {
             return consumePendingBuyCredit(itemId, requestedQuantity);
@@ -1414,18 +1282,9 @@ public class F2PProcessingFactoryScript extends Script
                 return;
             }
 
-            if (!withdrawProcessingInputSafely(input, itemId, quantity))
+            if (!withdrawProcessingItemWithX(itemId, input.getItemName(), quantity))
             {
-                state = FactoryState.STOPPED;
-                status = "Stopped: safe bank withdrawal failed for " + input.getItemName()
-                    + "; check bank layout/log before restarting";
-                log.error(
-                    "Factory bank-withdraw safety stop recipe={} expectedItem={} itemId={} quantity={}",
-                    activeRecipe.getDisplayName(),
-                    input.getItemName(),
-                    itemId,
-                    quantity
-                );
+                status = "Withdraw-X failed for " + input.getItemName() + " x" + quantity;
                 return;
             }
         }
@@ -1436,167 +1295,106 @@ public class F2PProcessingFactoryScript extends Script
         status = "Processing " + activeRecipe.getDisplayName();
     }
 
+
     /**
-     * Withdraws a processing input by exact recipe name and verifies that the expected
-     * item actually entered the inventory. This deliberately does not trust an ID-only
-     * bank lookup: a stale/misaligned bank row must never make the factory keep clicking
-     * a different item (the failure observed with Wooden shield in v1.0.37).
-     *
-     * The normal path still uses Withdraw-X for speed. If that action produces no
-     * inventory change, a bounded exact-name Withdraw-1 fallback is attempted. If a
-     * different inventory item appears, or the expected item still cannot be obtained,
-     * the caller stops the Factory instead of retrying forever.
+     * Processing inventory preparation must always use the bank's Withdraw-X action for
+     * the complete required quantity. Rs2Bank.withdrawX(...) maps to the bank X action,
+     * but a stale widget/menu state can occasionally produce only a partial withdrawal.
+     * Treat that as a failed atomic withdrawal: bank the partial amount and retry the
+     * full X quantity instead of topping up one item at a time.
      */
-    private boolean withdrawProcessingInputSafely(RecipeInput input, int resolvedItemId, int quantity)
+    private boolean withdrawProcessingItemWithX(int itemId, String itemName, int quantity)
     {
-        if (input == null || quantity <= 0)
-        {
-            return quantity <= 0;
-        }
-
-        String itemName = input.getItemName();
-        int expectedBefore = inventoryCountExactName(itemName);
-        int inventorySlotsBefore = Rs2Inventory.count();
-        int expectedTarget = expectedBefore + quantity;
-
-        status = "Withdrawing " + quantity + " x " + itemName;
-        boolean invoked = invokeExactMainBankWithdrawX(itemName, quantity);
-        boolean reachedTarget = invoked && sleepUntil(
-            () -> inventoryCountExactName(itemName) >= expectedTarget,
-            INVENTORY_CHANGE_TIMEOUT_MILLIS
-        );
-
-        int expectedAfterX = inventoryCountExactName(itemName);
-        int inventorySlotsAfterX = Rs2Inventory.count();
-        log.info(
-            "Factory bank withdraw-X recipe={} expectedItem={} itemId={} requested={} before={} after={} invoked={} verified={}",
-            activeRecipe == null ? "none" : activeRecipe.getDisplayName(),
-            itemName,
-            resolvedItemId,
-            quantity,
-            expectedBefore,
-            expectedAfterX,
-            invoked,
-            reachedTarget
-        );
-
-        if (reachedTarget)
+        if (quantity <= 0)
         {
             return true;
         }
-
-        // If something entered the inventory but it was not the requested recipe item,
-        // do not issue another bank action. This is the hard safety guard against the
-        // wrong-bank-row loop seen in the recording.
-        if (expectedAfterX <= expectedBefore && inventorySlotsAfterX != inventorySlotsBefore)
+        if (!Rs2Bank.isOpen())
         {
-            log.error(
-                "Factory bank withdrawal targeted an unexpected item; expected={} itemId={} slotsBefore={} slotsAfter={}",
-                itemName,
-                resolvedItemId,
-                inventorySlotsBefore,
-                inventorySlotsAfterX
-            );
             return false;
         }
 
-        int remaining = Math.max(0, expectedTarget - expectedAfterX);
-        if (remaining <= 0)
+        for (int attempt = 1; attempt <= MAX_PROCESS_WITHDRAW_X_ATTEMPTS; attempt++)
         {
-            return true;
-        }
-        if (remaining > MAX_BANK_SINGLE_WITHDRAW_FALLBACK)
-        {
-            log.error(
-                "Factory bank withdrawal fallback refused for {}: remaining {} exceeds safe limit {}",
+            int current = inventoryCount(itemId);
+            if (current == quantity)
+            {
+                return true;
+            }
+
+            // Never turn a partial/incorrect withdrawal into a sequence of small top-ups.
+            // Reset this item to zero and retry one complete Withdraw-X operation.
+            if (current != 0)
+            {
+                log.warn(
+                    "Processing Withdraw-X reset: {} expected={} inventory={} attempt={}/{}",
+                    itemName,
+                    quantity,
+                    current,
+                    attempt,
+                    MAX_PROCESS_WITHDRAW_X_ATTEMPTS
+                );
+                if (!Rs2Bank.depositAll(itemId))
+                {
+                    return false;
+                }
+                if (!sleepUntil(
+                    () -> inventoryCount(itemId) == 0,
+                    INVENTORY_CHANGE_TIMEOUT_MILLIS))
+                {
+                    return false;
+                }
+            }
+
+            status = "Withdraw-X " + itemName + " x" + quantity
+                + " (" + attempt + "/" + MAX_PROCESS_WITHDRAW_X_ATTEMPTS + ")";
+
+            if (!Rs2Bank.withdrawX(itemId, quantity))
+            {
+                log.warn(
+                    "Processing Withdraw-X invoke failed: {} x{} attempt={}/{}",
+                    itemName,
+                    quantity,
+                    attempt,
+                    MAX_PROCESS_WITHDRAW_X_ATTEMPTS
+                );
+                continue;
+            }
+
+            boolean exactQuantityReached = sleepUntil(
+                () -> inventoryCount(itemId) == quantity,
+                INVENTORY_CHANGE_TIMEOUT_MILLIS
+            );
+            if (exactQuantityReached)
+            {
+                log.debug(
+                    "Processing Withdraw-X complete: {} x{} attempt={}",
+                    itemName,
+                    quantity,
+                    attempt
+                );
+                return true;
+            }
+
+            log.warn(
+                "Processing Withdraw-X made no exact progress: {} expected={} inventory={} attempt={}/{}",
                 itemName,
-                remaining,
-                MAX_BANK_SINGLE_WITHDRAW_FALLBACK
+                quantity,
+                inventoryCount(itemId),
+                attempt,
+                MAX_PROCESS_WITHDRAW_X_ATTEMPTS
             );
-            return false;
         }
 
-        status = "Retrying exact bank withdrawal: " + itemName + " x " + remaining;
-        log.warn(
-            "Factory Withdraw-X verification failed for {}; using bounded exact-name Withdraw-1 fallback for {} item(s)",
-            itemName,
-            remaining
-        );
-
-        for (int i = 0; i < remaining; i++)
+        // Leave the bank open. The normal state watchdog can safely re-enter bank
+        // preparation, but processing must never begin with a partial ingredient stack.
+        int leftover = inventoryCount(itemId);
+        if (leftover != 0)
         {
-            int beforeOne = inventoryCountExactName(itemName);
-            int slotsBeforeOne = Rs2Inventory.count();
-            if (!invokeExactMainBankWithdrawOne(itemName))
-            {
-                log.error("Factory exact-name Withdraw-1 could not be invoked for {}", itemName);
-                return false;
-            }
-
-            boolean oneVerified = sleepUntil(
-                () -> inventoryCountExactName(itemName) > beforeOne,
-                BANK_SINGLE_WITHDRAW_VERIFY_TIMEOUT_MILLIS
-            );
-            if (!oneVerified)
-            {
-                int afterOne = inventoryCountExactName(itemName);
-                int slotsAfterOne = Rs2Inventory.count();
-                if (afterOne <= beforeOne && slotsAfterOne != slotsBeforeOne)
-                {
-                    log.error(
-                        "Factory exact-name Withdraw-1 changed inventory with the wrong item; expected={} itemId={} attempt={}/{}",
-                        itemName,
-                        resolvedItemId,
-                        i + 1,
-                        remaining
-                    );
-                }
-                else
-                {
-                    log.error(
-                        "Factory exact-name Withdraw-1 made no verified progress; expected={} itemId={} attempt={}/{}",
-                        itemName,
-                        resolvedItemId,
-                        i + 1,
-                        remaining
-                    );
-                }
-                return false;
-            }
+            Rs2Bank.depositAll(itemId);
+            sleepUntil(() -> inventoryCount(itemId) == 0, INVENTORY_CHANGE_TIMEOUT_MILLIS);
         }
-
-        int finalCount = inventoryCountExactName(itemName);
-        boolean success = finalCount >= expectedTarget;
-        log.info(
-            "Factory bank withdrawal fallback complete expectedItem={} itemId={} target={} final={} success={}",
-            itemName,
-            resolvedItemId,
-            expectedTarget,
-            finalCount,
-            success
-        );
-        return success;
-    }
-
-    private int inventoryCountExactName(String itemName)
-    {
-        if (itemName == null || itemName.isBlank())
-        {
-            return 0;
-        }
-
-        try
-        {
-            return Rs2Inventory.all().stream()
-                .filter(item -> item != null && item.getName() != null && item.getName().equalsIgnoreCase(itemName))
-                .mapToInt(item -> Math.max(1, item.getQuantity()))
-                .sum();
-        }
-        catch (Exception ex)
-        {
-            log.warn("Unable to count exact inventory item {}: {}", itemName, safeMessage(ex));
-            return 0;
-        }
+        return false;
     }
 
     private void processInventory()
@@ -2198,9 +1996,9 @@ public class F2PProcessingFactoryScript extends Script
                 return;
             }
 
-            if (!invokeExactMainBankWithdrawAll(outputName))
+            if (!Rs2Bank.withdrawAll(outputId))
             {
-                finishOrReevaluate("Unable to Withdraw-all exact output for sale: " + outputName);
+                finishOrReevaluate("Unable to Withdraw-all output for sale");
                 return;
             }
 
@@ -2317,35 +2115,25 @@ public class F2PProcessingFactoryScript extends Script
             int filled = offer == null ? 0 : Math.max(0, offer.getQuantitySold());
             int total = offer == null ? requestedQuantity : Math.max(1, offer.getTotalQuantity());
             boolean factoryOwned = factorySellOfferSlots.contains(existingOffer);
-            if (!factoryOwned && hasPendingFactorySellPlacement(itemId))
-            {
-                factorySellOfferSlots.add(existingOffer);
-                factorySellOfferPrices.put(existingOffer, offer == null ? 1 : Math.max(1, offer.getPrice()));
-                factorySellOfferItemIds.put(existingOffer, itemId);
-                pendingFactorySellPlacements.remove(itemId);
-                factoryOwned = true;
-                log.info("Recovered delayed Factory SELL ownership for itemId {} in slot {}", itemId, existingOffer);
-            }
-            else if (factoryOwned)
+            if (factoryOwned)
             {
                 factorySellOfferItemIds.put(existingOffer, itemId);
             }
 
             if (!factoryOwned)
             {
-                // Strict ownership boundary: never collect, cancel, modify, or account
-                // a sale that was not created by this Factory run.
-                waitingForExistingGeOffer = true;
+                // Never alter a pre-existing player sale. If it has finished, use the
+                // GE Collect button so its slot is clean before the factory proceeds.
                 if (offer != null && isFinishedSellState(offer.getState()))
                 {
-                    status = "Existing completed " + itemName
-                        + " sale is not Factory-owned; collect it manually";
+                    collectCompletedOfferWithButton(existingOffer, "existing " + itemName + " sale");
+                    status = "Collected existing " + itemName + " sale; preparing current batch";
                 }
                 else
                 {
-                    status = "Waiting for existing non-Factory " + itemName
-                        + " sale (" + filled + "/" + total + ")";
+                    status = "Waiting for existing " + itemName + " sale (" + filled + "/" + total + ")";
                 }
+                waitingForExistingGeOffer = true;
                 return 0;
             }
 
@@ -2364,7 +2152,7 @@ public class F2PProcessingFactoryScript extends Script
 
             if (result.completed || result.cancelled)
             {
-                if (!collectFactorySellOffer(existingOffer, itemName + " sale"))
+                if (!collectCompletedOfferWithButton(existingOffer, itemName + " sale"))
                 {
                     waitingForExistingGeOffer = true;
                     return 0;
@@ -2424,7 +2212,7 @@ public class F2PProcessingFactoryScript extends Script
                 {
                     soldThisOffer = Math.max(soldThisOffer, cancelledOffer.getQuantitySold());
                 }
-                if (!collectFactorySellOffer(existingOffer, itemName + " cancelled sale"))
+                if (!collectCompletedOfferWithButton(existingOffer, itemName + " cancelled sale"))
                 {
                     waitingForExistingGeOffer = true;
                     return 0;
@@ -2498,22 +2286,16 @@ public class F2PProcessingFactoryScript extends Script
         }
 
         clearGePlacementBackoff();
-        pendingFactorySellPlacements.put(
-            itemId,
-            System.currentTimeMillis() + GE_OWNERSHIP_RECOVERY_WINDOW_MILLIS
-        );
 
         GrandExchangeSlots slot = waitForOfferSlot(itemId, true, reservedSlot);
         if (slot == null)
         {
             waitingForExistingGeOffer = true;
             status = "Sale placed; waiting for GE slot sync: " + itemName;
-            log.warn("Could not identify newly placed sell offer for {} by item ID {}; preserving short ownership recovery claim",
-                itemName, itemId);
+            log.warn("Could not identify newly placed sell offer for {} by item ID {}", itemName, itemId);
             return 0;
         }
 
-        pendingFactorySellPlacements.remove(itemId);
         factorySellOfferSlots.add(slot);
         factorySellOfferPrices.put(slot, price);
         factorySellOfferItemIds.put(slot, itemId);
@@ -2531,7 +2313,7 @@ public class F2PProcessingFactoryScript extends Script
         int soldThisOffer = Math.max(0, result.filledQuantity);
         if (result.completed || result.cancelled)
         {
-            if (!collectFactorySellOffer(slot, itemName + " sale"))
+            if (!collectCompletedOfferWithButton(slot, itemName + " sale"))
             {
                 waitingForExistingGeOffer = true;
                 return 0;
@@ -2588,7 +2370,7 @@ public class F2PProcessingFactoryScript extends Script
             {
                 soldThisOffer = Math.max(soldThisOffer, cancelledOffer.getQuantitySold());
             }
-            if (!collectFactorySellOffer(slot, itemName + " cancelled sale"))
+            if (!collectCompletedOfferWithButton(slot, itemName + " cancelled sale"))
             {
                 waitingForExistingGeOffer = true;
                 return 0;
@@ -2826,11 +2608,33 @@ public class F2PProcessingFactoryScript extends Script
 
     private List<FactoryRecipe> buildCandidateList()
     {
-        // Mode scope is applied before profitability/affordability evaluation.
-        // Fixed mode therefore cannot leak into another recipe because of a GE
-        // limit, existing bank stock, or a temporarily unattractive market.
+        // Every supported output is part of the automatic pool by default.
+        // Skill requirements remain the hard eligibility gate; profitability,
+        // affordability, liquidity/buy limits, and configured margin thresholds
+        // decide whether the recipe is actually selected.
+        if (config.mode() == FactoryMode.FIXED_RECIPE)
+        {
+            List<FactoryRecipe> recipes = new ArrayList<>();
+            FactoryRecipe fixed = config.fixedRecipe();
+            if (isRecipeEligibleForAccount(fixed))
+            {
+                recipes.add(fixed);
+            }
+            if (config.limitExhaustedAction() == LimitExhaustedAction.SWITCH_RECIPE)
+            {
+                for (FactoryRecipe recipe : FactoryRecipe.values())
+                {
+                    if (recipe != fixed && isRecipeEligibleForAccount(recipe))
+                    {
+                        recipes.add(recipe);
+                    }
+                }
+            }
+            return recipes;
+        }
+
         List<FactoryRecipe> recipes = new ArrayList<>();
-        for (FactoryRecipe recipe : getModeScopedRecipes())
+        for (FactoryRecipe recipe : FactoryRecipe.values())
         {
             if (isRecipeEligibleForAccount(recipe))
             {
@@ -2840,74 +2644,17 @@ public class F2PProcessingFactoryScript extends Script
         return recipes;
     }
 
-    /**
-     * Returns the complete recipe scope the current operating mode may process or
-     * trade. Fixed Recipe mode is intentionally strict: exactly the configured
-     * recipe is returned and SWITCH_RECIPE is not permitted to widen that scope.
-     */
-    private List<FactoryRecipe> getModeScopedRecipes()
-    {
-        if (config != null && config.mode() == FactoryMode.FIXED_RECIPE)
-        {
-            FactoryRecipe fixed = config.fixedRecipe();
-            return fixed == null
-                ? Collections.emptyList()
-                : Collections.singletonList(fixed);
-        }
-
-        List<FactoryRecipe> recipes = new ArrayList<>();
-        Collections.addAll(recipes, FactoryRecipe.values());
-        return recipes;
-    }
-
     private boolean isRecipeEligibleForAccount(FactoryRecipe recipe)
     {
         if (recipe == null)
         {
             return false;
         }
-
-        // For an already logged-in player the current world is authoritative for
-        // whether members-only content is usable. Microbot's Rs2Player.isMember()
-        // currently reads ACCOUNT_CREDIT, which can be zero/stale even while the
-        // account is demonstrably logged into a members world. Requiring both
-        // signals incorrectly rejected members-only fixed recipes such as Ranarr
-        // potion (unf) before profitability was even evaluated.
-        if (recipe.isMembersOnly() && !memberWorld)
+        if (recipe.isMembersOnly() && (!membersAccount || !memberWorld))
         {
             return false;
         }
         return hasRequiredSkill(recipe);
-    }
-
-    private String buildEligibilityFailureStatus()
-    {
-        if (config != null && config.mode() == FactoryMode.FIXED_RECIPE)
-        {
-            FactoryRecipe fixed = config.fixedRecipe();
-            if (fixed != null)
-            {
-                if (fixed.isMembersOnly() && !memberWorld)
-                {
-                    return fixed.getDisplayName() + " requires a members world";
-                }
-
-                int detectedLevel = getRequiredSkillLevel(fixed);
-                if (detectedLevel < fixed.getRequiredLevel())
-                {
-                    return String.format(
-                        "%s requires %d %s (detected %d)",
-                        fixed.getDisplayName(),
-                        fixed.getRequiredLevel(),
-                        fixed.getRequiredSkill().name(),
-                        Math.max(0, detectedLevel)
-                    );
-                }
-
-                return "Unable to validate fixed recipe eligibility: " + fixed.getDisplayName();
-            }
-        }
-        return "No supported recipes meet the account's membership/skill requirements";
     }
 
     /**
@@ -2954,14 +2701,6 @@ public class F2PProcessingFactoryScript extends Script
 
     private boolean detectMembersAccount()
     {
-        // A player cannot be logged into a members world without membership. Use
-        // detectMemberWorld() here so the direct client world flags are preferred
-        // over Microbot's external world-service lookup.
-        if (detectMemberWorld())
-        {
-            return true;
-        }
-
         try
         {
             return Rs2Player.isMember();
@@ -2975,26 +2714,6 @@ public class F2PProcessingFactoryScript extends Script
 
     private boolean detectMemberWorld()
     {
-        // Prefer the logged-in client's own world flags. This does not depend on
-        // the external world-service list, so transient proxy/world-service failures
-        // cannot make a members world look like F2P to the Factory.
-        try
-        {
-            Boolean direct = Microbot.getClientThread().runOnClientThreadOptional(() ->
-            {
-                Set<WorldType> worldTypes = Microbot.getClient().getWorldType();
-                return worldTypes != null && worldTypes.contains(WorldType.MEMBERS);
-            }).orElse(null);
-            if (direct != null)
-            {
-                return direct;
-            }
-        }
-        catch (Exception ex)
-        {
-            log.debug("Unable to read client world type directly: {}", ex.getMessage());
-        }
-
         try
         {
             return Rs2Player.isInMemberWorld();
@@ -3008,27 +2727,16 @@ public class F2PProcessingFactoryScript extends Script
 
     private boolean hasRequiredSkill(FactoryRecipe recipe)
     {
-        return getRequiredSkillLevel(recipe) >= recipe.getRequiredLevel();
-    }
-
-    private int getRequiredSkillLevel(FactoryRecipe recipe)
-    {
-        if (recipe == null || recipe.getRequiredSkill() == null)
-        {
-            return -1;
-        }
         try
         {
             Integer level = Microbot.getClientThread().runOnClientThreadOptional(
                 () -> Microbot.getClient().getRealSkillLevel(recipe.getRequiredSkill())
             ).orElse(null);
-            return level == null ? -1 : level;
+            return level != null && level >= recipe.getRequiredLevel();
         }
         catch (Exception ex)
         {
-            log.debug("Unable to read {} level for {}: {}",
-                recipe.getRequiredSkill(), recipe.getDisplayName(), ex.getMessage());
-            return -1;
+            return false;
         }
     }
 
@@ -3153,248 +2861,11 @@ public class F2PProcessingFactoryScript extends Script
 
         int withdraw = (int) Math.min(Integer.MAX_VALUE, required);
         Rs2Bank.depositAll();
-        boolean coinsWithdrawInvoked = invokeExactMainBankWithdrawX("Coins", withdraw);
-        if (!coinsWithdrawInvoked)
-        {
-            status = "Unable to withdraw Coins from main bank tab";
-            return false;
-        }
+        Rs2Bank.withdrawX(coinsId, withdraw);
         return sleepUntil(
             () -> inventoryCount(coinsId) >= withdraw,
             INVENTORY_CHANGE_TIMEOUT_MILLIS
         );
-    }
-
-
-    /**
-     * Resolves the live bank widget for an exact item while the main bank tab is
-     * open. Rs2Bank's normal withdraw path can open the item's custom bank tab
-     * and then reuse the absolute bank slot as a dynamic-child index. With
-     * custom tabs that can point at a different visible item. The Factory avoids
-     * that path by staying on the main tab and resolving the live widget by item
-     * id before constructing the menu entry.
-     */
-    private BankWidgetTarget resolveExactMainBankTarget(String itemName)
-    {
-        if (itemName == null || itemName.isBlank() || !Rs2Bank.isOpen())
-        {
-            return null;
-        }
-
-        if (!Rs2Bank.isMainTabOpen())
-        {
-            if (!Rs2Bank.openMainTab()
-                || !sleepUntil(Rs2Bank::isMainTabOpen, 2_000))
-            {
-                log.error("Factory could not open main bank tab for {}", itemName);
-                return null;
-            }
-        }
-
-        Rs2ItemModel cached = Rs2Bank.getBankItem(itemName, true);
-        if (cached == null)
-        {
-            log.error("Factory exact bank item not found in mirror: {}", itemName);
-            return null;
-        }
-
-        int expectedId = cached.getId();
-        List<Widget> widgets = Rs2Bank.getItems();
-        int liveSlot = -1;
-        Widget liveWidget = null;
-
-        for (int i = 0; i < widgets.size(); i++)
-        {
-            Widget widget = widgets.get(i);
-            if (widget != null && widget.getItemId() == expectedId)
-            {
-                liveSlot = i;
-                liveWidget = widget;
-                break;
-            }
-        }
-
-        if (liveSlot < 0 || liveWidget == null)
-        {
-            log.error(
-                "Factory could not map exact bank item to live main-tab widget: item={} id={} cachedSlot={} widgetCount={}",
-                itemName,
-                expectedId,
-                cached.getSlot(),
-                widgets.size()
-            );
-            return null;
-        }
-
-        if (liveSlot != cached.getSlot())
-        {
-            log.warn(
-                "Factory corrected bank slot mismatch item={} id={} cachedSlot={} liveSlot={}",
-                itemName,
-                expectedId,
-                cached.getSlot(),
-                liveSlot
-            );
-        }
-
-        if (!Rs2Bank.scrollBankToSlot(liveSlot))
-        {
-            log.error("Factory could not scroll bank to {} at slot {}", itemName, liveSlot);
-            return null;
-        }
-
-        // Re-read the widget after scrolling because its bounds can change.
-        widgets = Rs2Bank.getItems();
-        if (liveSlot >= widgets.size())
-        {
-            return null;
-        }
-        liveWidget = widgets.get(liveSlot);
-        if (liveWidget == null || liveWidget.getItemId() != expectedId)
-        {
-            log.error(
-                "Factory bank widget changed during scroll item={} id={} slot={} liveItemId={}",
-                itemName,
-                expectedId,
-                liveSlot,
-                liveWidget == null ? -1 : liveWidget.getItemId()
-            );
-            return null;
-        }
-
-        Rectangle bounds = liveWidget.getBounds();
-        if (bounds == null || bounds.width <= 0 || bounds.height <= 0)
-        {
-            log.error("Factory bank widget has invalid bounds item={} slot={} bounds={}", itemName, liveSlot, bounds);
-            return null;
-        }
-
-        return new BankWidgetTarget(itemName, expectedId, liveSlot, bounds);
-    }
-
-    private boolean invokeExactMainBankWithdrawOne(String itemName)
-    {
-        BankWidgetTarget target = resolveExactMainBankTarget(itemName);
-        if (target == null)
-        {
-            return false;
-        }
-
-        int selected = Microbot.getVarbitValue(VarbitID.BANK_QUANTITY_TYPE);
-        int identifier = selected == 0 ? 1 : 2;
-        invokeBankTarget(target, identifier);
-        return true;
-    }
-
-    private boolean invokeExactMainBankWithdrawAll(String itemName)
-    {
-        BankWidgetTarget target = resolveExactMainBankTarget(itemName);
-        if (target == null)
-        {
-            return false;
-        }
-
-        int selected = Microbot.getVarbitValue(VarbitID.BANK_QUANTITY_TYPE);
-        int identifier = selected == 4 ? 1 : 7;
-        invokeBankTarget(target, identifier);
-        return true;
-    }
-
-    private boolean invokeExactMainBankWithdrawX(String itemName, int amount)
-    {
-        if (amount <= 0)
-        {
-            return true;
-        }
-
-        BankWidgetTarget target = resolveExactMainBankTarget(itemName);
-        if (target == null)
-        {
-            return false;
-        }
-
-        int selected = Microbot.getVarbitValue(VarbitID.BANK_QUANTITY_TYPE);
-        int configuredX = Microbot.getVarbitValue(VarbitID.BANK_REQUESTEDQUANTITY);
-        boolean hasX = configuredX > 0;
-
-        if (hasX && configuredX == amount)
-        {
-            int identifier;
-            switch (selected)
-            {
-                case 0:
-                case 1:
-                case 2:
-                case 4:
-                    identifier = 5;
-                    break;
-                case 3:
-                    identifier = 1;
-                    break;
-                default:
-                    log.error("Factory encountered unknown bank quantity type {}", selected);
-                    return false;
-            }
-
-            invokeBankTarget(target, identifier);
-            return true;
-        }
-
-        // Bank-container Withdraw-X prompt is identifier 6 when X is not already
-        // the requested amount. This mirrors Rs2Bank.handleAmount(), but without
-        // its custom-tab slot remapping.
-        invokeBankTarget(target, 6);
-
-        boolean promptVisible = sleepUntil(() -> {
-            Widget widget = Rs2Widget.getWidget(162, 43);
-            return widget != null && "Enter amount:".equalsIgnoreCase(widget.getText());
-        }, 2_500);
-
-        if (!promptVisible)
-        {
-            log.error(
-                "Factory Withdraw-X prompt did not open item={} id={} slot={} amount={}",
-                target.itemName,
-                target.itemId,
-                target.slot,
-                amount
-            );
-            return false;
-        }
-
-        Rs2Keyboard.typeString(String.valueOf(amount));
-        Rs2Keyboard.enter();
-        return true;
-    }
-
-    private void invokeBankTarget(BankWidgetTarget target, int identifier)
-    {
-        Microbot.doInvoke(
-            new NewMenuEntry()
-                .param0(target.slot)
-                .param1(Rs2Bank.BANK_ITEM_CONTAINER)
-                .opcode(MenuAction.CC_OP.getId())
-                .identifier(identifier)
-                .itemId(target.itemId)
-                .target(target.itemName),
-            target.bounds
-        );
-    }
-
-    private static final class BankWidgetTarget
-    {
-        private final String itemName;
-        private final int itemId;
-        private final int slot;
-        private final Rectangle bounds;
-
-        private BankWidgetTarget(String itemName, int itemId, int slot, Rectangle bounds)
-        {
-            this.itemName = itemName;
-            this.itemId = itemId;
-            this.slot = slot;
-            this.bounds = bounds;
-        }
     }
 
     private boolean ensureBankOpen()
@@ -3453,9 +2924,9 @@ public class F2PProcessingFactoryScript extends Script
             return true;
         }
 
-        // Never use Collect-all while only part of the factory's parallel BUY set
-        // is finished. That would clear completed tracked slots before their fills
-        // have been snapshotted into pendingCollectedBuyCredits.
+        // Always use the top GE Collect button. Completed factory BUY slots are
+        // snapshotted before every Collect-all so even a partially-completed parallel
+        // BUY set can be collected safely without losing per-item accounting.
         if (!factoryBuyOfferSlots.isEmpty())
         {
             collectTrackedFactoryBuyOffersIfReady();
@@ -3465,13 +2936,41 @@ public class F2PProcessingFactoryScript extends Script
             }
         }
 
-        // Do not free GE capacity by touching unrelated/player offers. A slot is
-        // usable by the Factory only if it is already empty or if a Factory-owned
-        // terminal offer was collected above.
+        // A completed unrelated/player offer is also collected through the top GE
+        // Collect button. Active offers remain untouched by Collect-all.
+        for (GrandExchangeSlots slot : GrandExchangeSlots.values())
+        {
+            if (slot.ordinal() >= 3
+                || factoryBuyOfferSlots.contains(slot)
+                || factorySellOfferSlots.contains(slot))
+            {
+                continue;
+            }
+
+            GrandExchangeOffer offer = getOffer(slot);
+            if (offer == null)
+            {
+                continue;
+            }
+            GrandExchangeOfferState offerState = offer.getState();
+            if (!isFinishedBuyState(offerState) && !isFinishedSellState(offerState))
+            {
+                continue;
+            }
+
+            if (collectCompletedOfferWithButton(slot, "completed existing GE offer"))
+            {
+                if (Rs2GrandExchange.getAvailableSlotsCount() > 0)
+                {
+                    return true;
+                }
+            }
+        }
+
         waitingForGeSlot = true;
         status = !factoryBuyOfferSlots.isEmpty()
-            ? "All available GE slots occupied; waiting for Factory input offers"
-            : "All available GE slots occupied by non-Factory offers; clear a slot manually";
+            ? "All available GE slots occupied; waiting for parallel input offers"
+            : "All available GE slots occupied; waiting";
         return false;
     }
 
@@ -3516,43 +3015,6 @@ public class F2PProcessingFactoryScript extends Script
             }
         }
         return null;
-    }
-
-    private void migrateTrackedFactoryBuySlot(GrandExchangeSlots expectedSlot, GrandExchangeSlots actualSlot)
-    {
-        if (expectedSlot == null || actualSlot == null || expectedSlot == actualSlot)
-        {
-            return;
-        }
-
-        Integer price = factoryBuyOfferPrices.remove(expectedSlot);
-        Integer retry = factoryBuyOfferRetries.remove(expectedSlot);
-        factoryBuyOfferSlots.remove(expectedSlot);
-        factoryBuyOfferSlots.add(actualSlot);
-        if (price != null)
-        {
-            factoryBuyOfferPrices.put(actualSlot, price);
-        }
-        if (retry != null)
-        {
-            factoryBuyOfferRetries.put(actualSlot, retry);
-        }
-        log.info("Migrated Factory BUY ownership from expected slot {} to synced slot {}", expectedSlot, actualSlot);
-    }
-
-    private boolean hasPendingFactorySellPlacement(int itemId)
-    {
-        Long expiresAt = pendingFactorySellPlacements.get(itemId);
-        if (expiresAt == null)
-        {
-            return false;
-        }
-        if (System.currentTimeMillis() > expiresAt)
-        {
-            pendingFactorySellPlacements.remove(itemId);
-            return false;
-        }
-        return true;
     }
 
     private GrandExchangeSlots findTrackedFactorySellOfferSlot(int itemId)
@@ -3723,24 +3185,19 @@ public class F2PProcessingFactoryScript extends Script
     }
 
     /**
-     * Collect factory-owned input offers only by their exact GE slots. All tracked
-     * BUY offers must be terminal before collection begins, preserving parallel-buy
-     * accounting without ever invoking the global Collect-all button.
+     * Snapshot every completed factory-owned BUY offer. The top GE Collect button may
+     * clear several completed offers at once, including only a subset of parallel BUYs.
+     * Capturing the fills before clicking Collect preserves exact per-item accounting.
      */
-    private boolean collectTrackedFactoryBuyOffersIfReady()
+    private List<CompletedBuySnapshot> snapshotCompletedFactoryBuyOffers()
     {
-        if (factoryBuyOfferSlots.isEmpty())
-        {
-            return false;
-        }
-
         List<CompletedBuySnapshot> completed = new ArrayList<>();
         for (GrandExchangeSlots slot : new HashSet<>(factoryBuyOfferSlots))
         {
             GrandExchangeOffer offer = getOffer(slot);
             if (offer == null || !isFinishedBuyState(offer.getState()))
             {
-                return false;
+                continue;
             }
 
             int itemId = offer.getItemId();
@@ -3749,27 +3206,13 @@ public class F2PProcessingFactoryScript extends Script
             boolean fullyBought = offer.getState() == GrandExchangeOfferState.BOUGHT;
             completed.add(new CompletedBuySnapshot(slot, itemId, quantity, price, fullyBought));
         }
+        return completed;
+    }
 
-        if (completed.isEmpty())
-        {
-            return false;
-        }
-
+    private void reconcileCollectedFactoryBuys(List<CompletedBuySnapshot> completed)
+    {
         for (CompletedBuySnapshot snapshot : completed)
         {
-            status = "Collecting Factory input offer from " + snapshot.slot;
-            if (!Rs2GrandExchange.collectOffer(snapshot.slot, true))
-            {
-                status = "Failed to collect Factory input offer from " + snapshot.slot;
-                return false;
-            }
-
-            if (!sleepUntil(() -> Rs2GrandExchange.isSlotAvailable(snapshot.slot), 5_000))
-            {
-                status = "Waiting for Factory input slot to clear: " + snapshot.slot;
-                return false;
-            }
-
             if (snapshot.quantity > 0)
             {
                 pendingCollectedBuyCredits.merge(snapshot.itemId, snapshot.quantity, Integer::sum);
@@ -3784,32 +3227,82 @@ public class F2PProcessingFactoryScript extends Script
             factoryBuyOfferPrices.remove(snapshot.slot);
             factoryBuyOfferRetries.remove(snapshot.slot);
         }
-
-        return true;
     }
 
-    private boolean collectFactorySellOffer(GrandExchangeSlots slot, String description)
+    /**
+     * Collect completed factory BUYs through the single Collect control at the top of
+     * the Grand Exchange. Unlike older builds, this does not require every parallel
+     * BUY to be terminal: completed slots are snapshotted and credited while active
+     * offers remain on the GE untouched.
+     */
+    private boolean collectTrackedFactoryBuyOffersIfReady()
     {
-        if (slot == null || !factorySellOfferSlots.contains(slot))
+        if (factoryBuyOfferSlots.isEmpty())
         {
-            status = "Refusing to collect non-Factory GE offer: " + description;
-            log.warn("Refusing GE collection for unowned slot {} ({})", slot, description);
             return false;
         }
 
-        status = "Collecting " + description + " from " + slot;
-        if (!Rs2GrandExchange.collectOffer(slot, true))
+        List<CompletedBuySnapshot> completed = snapshotCompletedFactoryBuyOffers();
+        if (completed.isEmpty())
         {
-            status = "GE slot collection failed for " + description;
             return false;
         }
 
-        boolean cleared = sleepUntil(() -> Rs2GrandExchange.isSlotAvailable(slot), 5_000);
-        if (!cleared)
+        return collectWithTopGeButton(null, "completed input offers", completed);
+    }
+
+    /**
+     * All factory BUY/SELL collection funnels through the top GE Collect button.
+     * Any completed factory BUYs that may be swept up by the same click are reconciled
+     * atomically so Collect-all can never cause a duplicate purchase.
+     */
+    private boolean collectCompletedOfferWithButton(GrandExchangeSlots slot, String description)
+    {
+        return collectWithTopGeButton(slot, description, snapshotCompletedFactoryBuyOffers());
+    }
+
+    private boolean collectWithTopGeButton(
+        GrandExchangeSlots expectedSlot,
+        String description,
+        List<CompletedBuySnapshot> completedFactoryBuys)
+    {
+        status = "Using top GE Collect button: " + description;
+        if (!Rs2GrandExchange.collectAllToBank())
         {
-            status = "Waiting for collected GE slot to clear: " + description;
+            status = "Top GE Collect button failed for " + description;
+            return false;
         }
-        return cleared;
+
+        List<GrandExchangeSlots> slotsToClear = new ArrayList<>();
+        if (expectedSlot != null)
+        {
+            slotsToClear.add(expectedSlot);
+        }
+        for (CompletedBuySnapshot snapshot : completedFactoryBuys)
+        {
+            if (!slotsToClear.contains(snapshot.slot))
+            {
+                slotsToClear.add(snapshot.slot);
+            }
+        }
+
+        if (!slotsToClear.isEmpty())
+        {
+            boolean cleared = sleepUntil(() -> slotsToClear.stream()
+                .allMatch(Rs2GrandExchange::isSlotAvailable), 5_000);
+            if (!cleared)
+            {
+                status = "Waiting for top GE Collect to clear: " + description;
+                return false;
+            }
+        }
+        else
+        {
+            sleep(300, 600);
+        }
+
+        reconcileCollectedFactoryBuys(completedFactoryBuys);
+        return true;
     }
 
     private OfferWaitResult waitForOfferResult(
@@ -4477,89 +3970,6 @@ public class F2PProcessingFactoryScript extends Script
         }
     }
 
-    private void markBuyMarketBlocked(int itemId)
-    {
-        if (itemId <= 0)
-        {
-            return;
-        }
-        long cooldown = TimeUnit.MINUTES.toMillis(Math.max(1, config.reevaluateMinutes()));
-        buyMarketBlockedUntil.put(itemId, System.currentTimeMillis() + cooldown);
-    }
-
-    private boolean isBuyMarketBlocked(int itemId)
-    {
-        if (itemId <= 0)
-        {
-            return false;
-        }
-        Long until = buyMarketBlockedUntil.get(itemId);
-        if (until == null)
-        {
-            return false;
-        }
-        if (System.currentTimeMillis() >= until)
-        {
-            buyMarketBlockedUntil.remove(itemId);
-            // A fresh market window gets a fresh retry budget.
-            buyPriceRetryByItem.remove(itemId);
-            return false;
-        }
-        return true;
-    }
-
-    private long buyMarketBlockedSeconds(int itemId)
-    {
-        Long until = buyMarketBlockedUntil.get(itemId);
-        if (until == null)
-        {
-            return 0L;
-        }
-        long remaining = Math.max(0L, until - System.currentTimeMillis());
-        return Math.max(1L, (remaining + 999L) / 1_000L);
-    }
-
-    private List<String> getMarketBlockedOutstandingPurchases()
-    {
-        List<String> blocked = new ArrayList<>();
-        if (activePlan == null)
-        {
-            return blocked;
-        }
-
-        for (Map.Entry<String, Integer> entry : activePlan.purchaseQuantities.entrySet())
-        {
-            if (entry.getValue() == null || entry.getValue() <= 0)
-            {
-                continue;
-            }
-            int itemId = priceService.getItemId(entry.getKey());
-            if (itemId > 0
-                && isBuyMarketBlocked(itemId)
-                && findMatchingOfferSlot(itemId, false) == null)
-            {
-                blocked.add(entry.getKey());
-            }
-        }
-        return blocked;
-    }
-
-    private long getShortestBuyMarketCooldownMillis()
-    {
-        long now = System.currentTimeMillis();
-        long shortest = Long.MAX_VALUE;
-        for (Long until : buyMarketBlockedUntil.values())
-        {
-            if (until != null && until > now)
-            {
-                shortest = Math.min(shortest, until - now);
-            }
-        }
-        return shortest == Long.MAX_VALUE
-            ? TimeUnit.MINUTES.toMillis(Math.max(1, config.reevaluateMinutes()))
-            : shortest;
-    }
-
     private void markSellMarketBlocked(int itemId)
     {
         if (itemId <= 0)
@@ -4679,32 +4089,15 @@ public class F2PProcessingFactoryScript extends Script
         factorySellOfferPrices.clear();
         factorySellOfferItemIds.clear();
         sellPriceRetryByItem.clear();
-        pendingFactorySellPlacements.clear();
         sellRetryPolicyExhaustedThisCall = false;
         state = FactoryState.OPENING_BANK;
         status = "Starting next cycle";
         resetProgressWatchdog();
     }
 
-    private void logHeartbeatIfDue()
+    private static String safeMessage(Exception ex)
     {
-        long now = System.currentTimeMillis();
-        if (now - lastHeartbeatAt < FACTORY_HEARTBEAT_INTERVAL_MILLIS)
-        {
-            return;
-        }
-
-        lastHeartbeatAt = now;
-        String recipeName = activeRecipe == null ? "none" : activeRecipe.getDisplayName();
-        log.info(
-            "KSP AIO Factory heartbeat state={} status=\"{}\" recipe={} factoryBuySlots={} factorySellSlots={}",
-            state, status, recipeName, factoryBuyOfferSlots.size(), factorySellOfferSlots.size()
-        );
-    }
-
-    private static String safeMessage(Throwable error)
-    {
-        return error.getMessage() == null ? error.getClass().getSimpleName() : error.getMessage();
+        return ex.getMessage() == null ? ex.getClass().getSimpleName() : ex.getMessage();
     }
 
     public FactoryState getState()
@@ -4822,15 +4215,12 @@ public class F2PProcessingFactoryScript extends Script
         factorySellOfferPrices.clear();
         factorySellOfferItemIds.clear();
         sellPriceRetryByItem.clear();
-        pendingFactorySellPlacements.clear();
         watchdogState = FactoryState.STOPPED;
         watchdogFingerprint = "";
         watchdogLastProgressAt = 0L;
         watchdogLastRetryAt = 0L;
         watchdogRetryCount = 0;
         watchdogLastRecovery = "Stopped";
-        lastHeartbeatAt = 0L;
-        fatalRuntimeError = false;
         if (antiban != null)
         {
             antiban.reset();

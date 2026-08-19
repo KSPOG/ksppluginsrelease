@@ -47,6 +47,7 @@ final class FactoryGrandExchangeInvoker
     private static final String PRICE_ENTRY_PROMPT = "Set a price for each item:";
     private static final int PRICE_ENTRY_TIMEOUT_MILLIS = 3_000;
     private static final int PRICE_VERIFY_TIMEOUT_MILLIS = 4_000;
+    private static final int FACTORY_ENTER_MIN_GAP_MILLIS = 1_500;
     private static final int MODIFY_OPEN_TIMEOUT_MILLIS = 2_800;
     private static final int MODIFY_RECOVERY_TIMEOUT_MILLIS = 3_000;
     private static final int MENU_OPEN_TIMEOUT_MILLIS = 2_500;
@@ -58,6 +59,7 @@ final class FactoryGrandExchangeInvoker
     private static volatile String lastFailureReason = "";
     private static volatile boolean modifyInProgress = false;
     private static volatile long modifySellProtectionUntil = 0L;
+    private static volatile long lastFactoryEnterAt = 0L;
 
     private FactoryGrandExchangeInvoker()
     {
@@ -85,6 +87,15 @@ final class FactoryGrandExchangeInvoker
         if (!Rs2GrandExchange.isOpen())
         {
             return fail("Grand Exchange is not open");
+        }
+
+        // Native Microbot BUY uses Enter internally for GE price/quantity prompts.
+        // Never start a fresh native placement while any previous GE editor or
+        // chatbox input is still active, otherwise repeated state-machine ticks can
+        // make those internal Enter presses appear unrelated to the intended action.
+        if (modifyInProgress || hasOpenOfferEditor())
+        {
+            return fail("refusing initial BUY while a GE offer/chatbox editor is already open");
         }
 
         GrandExchangeRequest request = GrandExchangeRequest.builder()
@@ -139,10 +150,10 @@ final class FactoryGrandExchangeInvoker
         // Never allow it while Modify offer is running or while any GE offer editor
         // is already open; doing so can make the client click Offer on the inventory
         // item instead of editing the existing slot.
-        if (modifyInProgress || Rs2GrandExchange.isOfferScreenOpen()
+        if (modifyInProgress || hasOpenOfferEditor()
             || System.currentTimeMillis() < modifySellProtectionUntil)
         {
-            return fail("refusing initial SELL during/just after Modify offer lifecycle");
+            return fail("refusing initial SELL during/just after Modify offer lifecycle or while a GE input is open");
         }
 
         // Microbot's SELL path deliberately starts from the inventory item's
@@ -366,9 +377,10 @@ final class FactoryGrandExchangeInvoker
                 return fail("Modify offer price control was not available/clickable");
             }
 
-            // The GE Flipper uses MESLAYERMODE=7 as the authoritative input-open
-            // signal. Also require the price prompt so another chatbox input can
-            // never be mistaken for the price editor.
+            // Enter is dangerous when the wrong chatbox layer is active. Require
+            // all three signals for the exact GE absolute-price prompt before we
+            // write a value or press Enter: MESLAYERMODE=7, MES_TEXT2 visible, and
+            // the literal "Set a price for each item:" prompt.
             if (!sleepUntil(
                 FactoryGrandExchangeInvoker::isPriceEntryInputOpen,
                 PRICE_ENTRY_TIMEOUT_MILLIS))
@@ -376,16 +388,34 @@ final class FactoryGrandExchangeInvoker
                 closePriceInputIfOpen();
                 if (attempt == PRICE_ENTRY_ATTEMPTS)
                 {
-                    return fail("Modify offer did not open 'Set a price for each item' input");
+                    return fail("Modify offer did not open the exact 'Set a price for each item:' input");
                 }
                 sleep(250, 450);
                 continue;
             }
 
-            sleep(600, 1_000);
+            sleep(350, 600);
+            if (!isPriceEntryInputOpen())
+            {
+                closePriceInputIfOpen();
+                if (attempt == PRICE_ENTRY_ATTEMPTS)
+                {
+                    return fail("Modify offer price prompt disappeared before value entry");
+                }
+                continue;
+            }
+
             Rs2GrandExchange.setChatboxValue(price);
-            sleep(500, 750);
-            Rs2Keyboard.enter();
+            sleep(250, 450);
+            if (!pressEnterForPricePrompt(price))
+            {
+                closePriceInputIfOpen();
+                if (attempt == PRICE_ENTRY_ATTEMPTS)
+                {
+                    return fail("Modify offer refused Enter because the exact price prompt was not active");
+                }
+                continue;
+            }
 
             if (!sleepUntil(() -> !isPriceEntryInputOpen(), PRICE_ENTRY_TIMEOUT_MILLIS))
             {
@@ -520,26 +550,62 @@ final class FactoryGrandExchangeInvoker
         ).orElse(false);
     }
 
-    private static boolean isPriceEntryInputOpen()
+    private static boolean isMesText2Visible()
     {
-        // Microbot's native GE setPrice() waits for Chatbox.MES_TEXT2. Keep the
-        // MESLAYERMODE=7 signal too, but do not require a global text search for
-        // the prompt because that search can lag behind the already-open GE input.
-        boolean mesText2Visible = Microbot.getClientThread().runOnClientThreadOptional(() ->
+        return Microbot.getClientThread().runOnClientThreadOptional(() ->
         {
             Widget widget = Microbot.getClient().getWidget(InterfaceID.Chatbox.MES_TEXT2);
             return widget != null && !widget.isHidden();
         }).orElse(false);
+    }
 
-        return mesText2Visible || isChatboxInputOpen();
+    private static boolean isPriceEntryInputOpen()
+    {
+        // Strict factory-owned Enter gate. MESLAYERMODE=7 alone is not sufficient:
+        // other numeric/chatbox inputs can share that mode. Likewise MES_TEXT2 can
+        // exist briefly while a layer is transitioning. The literal GE price prompt
+        // makes the intended keyboard target unambiguous.
+        return isChatboxInputOpen()
+            && isMesText2Visible()
+            && Rs2Widget.hasWidget(PRICE_ENTRY_PROMPT);
+    }
+
+    private static boolean pressEnterForPricePrompt(int price)
+    {
+        if (!isPriceEntryInputOpen())
+        {
+            Microbot.log("KSP AIO Factory suppressed Enter: exact GE price prompt is not active");
+            return false;
+        }
+
+        long now = System.currentTimeMillis();
+        long remainingGap = FACTORY_ENTER_MIN_GAP_MILLIS - (now - lastFactoryEnterAt);
+        if (remainingGap > 0L)
+        {
+            sleep((int) Math.min(Integer.MAX_VALUE, remainingGap));
+        }
+
+        if (!isPriceEntryInputOpen())
+        {
+            Microbot.log("KSP AIO Factory suppressed Enter after cooldown: GE price prompt closed");
+            return false;
+        }
+
+        Microbot.log("KSP AIO Factory GE Modify pressing Enter for confirmed price prompt: " + price);
+        Rs2Keyboard.enter();
+        lastFactoryEnterAt = System.currentTimeMillis();
+        return true;
     }
 
     private static void closePriceInputIfOpen()
     {
-        if (isPriceEntryInputOpen())
+        // During Modify recovery a stale MESLAYERMODE/MES_TEXT2 layer may remain
+        // even if the prompt text has already vanished. Escape may close that layer,
+        // but Enter is never sent unless isPriceEntryInputOpen() is strictly true.
+        if (isPriceEntryInputOpen() || (isChatboxInputOpen() && isMesText2Visible()))
         {
             Rs2Keyboard.keyPress(KeyEvent.VK_ESCAPE);
-            sleepUntil(() -> !isPriceEntryInputOpen(), 800);
+            sleepUntil(() -> !isChatboxInputOpen() && !isMesText2Visible(), 800);
         }
     }
 

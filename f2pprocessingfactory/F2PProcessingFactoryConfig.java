@@ -280,7 +280,7 @@ public interface F2PProcessingFactoryConfig extends Config
     @ConfigItem(
         keyName = "limitExhaustedAction",
         name = "When limit is exhausted",
-        description = "Action used when a required input has no tracked buy-limit capacity remaining. Fixed Recipe mode never switches to another recipe; Switch recipe waits/re-evaluates the selected recipe instead",
+        description = "Action used when a required input has no tracked buy-limit capacity remaining",
         position = 3,
         section = buyLimitSection
     )

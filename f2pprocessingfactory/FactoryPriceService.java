@@ -1,7 +1,6 @@
 package net.runelite.client.plugins.microbot.f2pprocessingfactory;
 
 import lombok.extern.slf4j.Slf4j;
-import net.runelite.api.WorldType;
 import net.runelite.api.gameval.ItemID;
 import net.runelite.client.plugins.microbot.Microbot;
 import net.runelite.client.plugins.microbot.util.grandexchange.Rs2GrandExchange;
@@ -43,11 +42,14 @@ public final class FactoryPriceService
         int itemId = Rs2ItemManager.getItemIdByName(itemName.trim(), false);
         if (itemId <= 0)
         {
-            // Factory recipes use canonical item names. Never accept the first fuzzy
-            // RuneLite search result here: caching a near/incorrect match can make
-            // banking and GE actions target an unrelated item for the rest of the run.
-            log.warn("Factory exact item resolution failed for '{}'", itemName.trim());
-            return -1;
+            try
+            {
+                itemId = Microbot.getRs2ItemManager().getItemId(itemName.trim());
+            }
+            catch (Exception ignored)
+            {
+                itemId = -1;
+            }
         }
 
         if (itemId > 0)
@@ -153,20 +155,7 @@ public final class FactoryPriceService
                 : profitLong < Integer.MIN_VALUE ? Integer.MIN_VALUE : (int) profitLong;
             double roi = inputCost <= 0 ? 0.0 : (profit * 100.0) / inputCost;
 
-            ProfitQuote quote = ProfitQuote.valid(
-                recipe, inputPrices, outputPrice, inputCost, tax, profit, roi
-            );
-            log.info(
-                "Factory quote {}: inputs={} inputCost={} outputPrice={} tax={} profit={} ROI={}%",
-                recipe,
-                inputPrices,
-                inputCost,
-                outputPrice,
-                tax,
-                profit,
-                String.format("%.2f", roi)
-            );
-            return quote;
+            return ProfitQuote.valid(recipe, inputPrices, outputPrice, inputCost, tax, profit, roi);
         }
         catch (Exception ex)
         {
@@ -180,35 +169,6 @@ public final class FactoryPriceService
     {
         try
         {
-            Boolean directMemberWorld = Microbot.getClientThread().runOnClientThreadOptional(() ->
-            {
-                java.util.Set<WorldType> worldTypes = Microbot.getClient().getWorldType();
-                return worldTypes != null && worldTypes.contains(WorldType.MEMBERS);
-            }).orElse(null);
-            if (Boolean.TRUE.equals(directMemberWorld))
-            {
-                return true;
-            }
-        }
-        catch (Exception ex)
-        {
-            log.debug("Unable to read client world type for pricing eligibility: {}", ex.getMessage());
-        }
-
-        try
-        {
-            if (Rs2Player.isInMemberWorld())
-            {
-                return true;
-            }
-        }
-        catch (Exception ex)
-        {
-            log.debug("Unable to use member-world service signal for pricing eligibility: {}", ex.getMessage());
-        }
-
-        try
-        {
             return Rs2Player.isMember();
         }
         catch (Exception ex)
@@ -220,37 +180,55 @@ public final class FactoryPriceService
 
     public int getBuyOfferPrice(int itemId, int markupPercent, int retryAttempt)
     {
-        // Profitability and execution use the same deterministic BUY basis. Start
-        // from the Wiki bid/low side and apply only the configured markup plus the
-        // bounded retry premium. Crossing immediately from Wiki high plus markup
-        // double-counts aggressiveness and can incorrectly reject processing margins.
-        int marketPrice = getInitialBuyBasisPrice(itemId);
+        double basePercentage = 1.0 + (Math.max(0, markupPercent) / 100.0);
+        try
+        {
+            int adaptivePrice = Rs2GrandExchange.getAdaptiveBuyPrice(itemId, basePercentage, retryAttempt);
+            if (adaptivePrice > 0)
+            {
+                return adaptivePrice;
+            }
+        }
+        catch (Exception ignored)
+        {
+            // Fall through to local calculation.
+        }
+
+        int marketPrice = getInstantBuyPrice(itemId);
         if (marketPrice <= 0)
         {
             return marketPrice;
         }
-
-        double effectiveMarkupPercent = Math.max(0, markupPercent)
-            + (Math.max(0, retryAttempt) * 2.0);
-        double multiplier = 1.0 + (effectiveMarkupPercent / 100.0);
-        return Math.max(1, (int) Math.ceil(marketPrice * multiplier));
+        double retryMultiplier = 1.0 + ((Math.max(0, markupPercent) + (retryAttempt * 2.0)) / 100.0);
+        return Math.max(1, (int) Math.ceil(marketPrice * retryMultiplier));
     }
 
     public int getSellOfferPrice(int itemId, int discountPercent, int retryAttempt)
     {
-        // Start from the Wiki ask/high side and apply only the configured discount
-        // plus the bounded retry discount. Starting from Wiki low and discounting
-        // again crosses the spread twice and undervalues the finished output.
-        int marketPrice = getInitialSellBasisPrice(itemId);
+        double basePercentage = Math.max(0.01, 1.0 - (Math.max(0, discountPercent) / 100.0));
+        try
+        {
+            int adaptivePrice = Rs2GrandExchange.getAdaptiveSellPrice(itemId, basePercentage, retryAttempt);
+            if (adaptivePrice > 0)
+            {
+                return adaptivePrice;
+            }
+        }
+        catch (Exception ignored)
+        {
+            // Fall through to local calculation.
+        }
+
+        int marketPrice = getInstantSellPrice(itemId);
         if (marketPrice <= 0)
         {
             return marketPrice;
         }
-
-        double effectiveDiscountPercent = Math.max(0, discountPercent)
-            + (Math.max(0, retryAttempt) * 2.0);
-        double multiplier = Math.max(0.01, 1.0 - (effectiveDiscountPercent / 100.0));
-        return Math.max(1, (int) Math.floor(marketPrice * multiplier));
+        double retryMultiplier = Math.max(
+            0.01,
+            1.0 - ((Math.max(0, discountPercent) + (retryAttempt * 2.0)) / 100.0)
+        );
+        return Math.max(1, (int) Math.floor(marketPrice * retryMultiplier));
     }
 
     public int getTradeLimit(int itemId, int unknownLimitFallback)
@@ -270,29 +248,14 @@ public final class FactoryPriceService
         return Math.max(1, unknownLimitFallback);
     }
 
-    /**
-     * Initial Factory BUYs should start from the current bid side, not the ask side.
-     * Microbot's WikiPrice names are execution-oriented: buyPrice is Wiki "high"
-     * (the price paid by an instant buyer / current ask) while sellPrice is Wiki
-     * "low" (the price received by an instant seller / current bid). For a BUY
-     * offer we therefore start from sellPrice and apply the configured markup.
-     * Repricing can become more aggressive later if the offer stalls.
-     */
-    private int getInitialBuyBasisPrice(int itemId)
+    private int getInstantBuyPrice(int itemId)
     {
         try
         {
             WikiPrice price = Rs2GrandExchange.getRealTimePrices(itemId);
-            if (price != null)
+            if (price != null && price.buyPrice > 0)
             {
-                if (price.sellPrice > 0)
-                {
-                    return price.sellPrice;
-                }
-                if (price.buyPrice > 0)
-                {
-                    return price.buyPrice;
-                }
+                return price.buyPrice;
             }
         }
         catch (Exception ignored)
@@ -302,26 +265,14 @@ public final class FactoryPriceService
         return Microbot.getRs2ItemManager().getGEPrice(itemId);
     }
 
-    /**
-     * Initial Factory SELLs should start from the current ask side. Using Wiki high
-     * here and applying the configured discount gives a competitive sell offer
-     * without unnecessarily crossing the whole spread.
-     */
-    private int getInitialSellBasisPrice(int itemId)
+    private int getInstantSellPrice(int itemId)
     {
         try
         {
             WikiPrice price = Rs2GrandExchange.getRealTimePrices(itemId);
-            if (price != null)
+            if (price != null && price.sellPrice > 0)
             {
-                if (price.buyPrice > 0)
-                {
-                    return price.buyPrice;
-                }
-                if (price.sellPrice > 0)
-                {
-                    return price.sellPrice;
-                }
+                return price.sellPrice;
             }
         }
         catch (Exception ignored)
