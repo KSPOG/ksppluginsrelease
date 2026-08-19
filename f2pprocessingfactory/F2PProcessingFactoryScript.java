@@ -27,6 +27,7 @@ import net.runelite.client.plugins.microbot.util.widget.Rs2Widget;
 import java.awt.event.KeyEvent;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -185,6 +186,19 @@ public class F2PProcessingFactoryScript extends Script
 
     private void tick()
     {
+        if (config != null
+            && config.mode() == FactoryMode.FIXED_RECIPE
+            && activeRecipe != null
+            && activeRecipe != config.fixedRecipe())
+        {
+            log.info(
+                "Fixed recipe changed/enforced: abandoning active {} plan and switching to {}",
+                activeRecipe,
+                config.fixedRecipe()
+            );
+            resetCycle();
+        }
+
         if (antiban != null && antiban.beforeTick(state))
         {
             // Anti-ban pauses are intentional and must never be interpreted as a
@@ -421,17 +435,13 @@ public class F2PProcessingFactoryScript extends Script
         CyclePlan selected;
         if (config.mode() == FactoryMode.FIXED_RECIPE)
         {
+            // Fixed mode is strict: never substitute another recipe. If the fixed
+            // recipe cannot currently run, the normal wait/re-evaluation path below
+            // handles it instead of silently changing what the user selected.
             selected = viablePlans.stream()
                 .filter(plan -> plan.recipe == config.fixedRecipe())
                 .findFirst()
-                .orElseGet(() ->
-                {
-                    if (config.limitExhaustedAction() == LimitExhaustedAction.SWITCH_RECIPE)
-                    {
-                        return selectBestPlan(viablePlans);
-                    }
-                    return null;
-                });
+                .orElse(null);
         }
         else
         {
@@ -465,10 +475,12 @@ public class F2PProcessingFactoryScript extends Script
     private boolean startExistingBankBacklog()
     {
         List<CyclePlan> stockPlans = new ArrayList<>();
-        // Backlog cleanup is intentionally broader than the normal candidate list.
-        // Even Fixed mode must finish already-owned processable stock before it
-        // commits new coins to its configured recipe.
-        for (FactoryRecipe recipe : FactoryRecipe.values())
+        // Fixed mode must remain fixed even when unrelated processable materials
+        // are already present in the bank. Automatic mode may drain any backlog.
+        List<FactoryRecipe> backlogRecipes = config.mode() == FactoryMode.FIXED_RECIPE
+            ? Collections.singletonList(config.fixedRecipe())
+            : Arrays.asList(FactoryRecipe.values());
+        for (FactoryRecipe recipe : backlogRecipes)
         {
             if (!isRecipeEligibleForAccount(recipe))
             {
@@ -513,7 +525,7 @@ public class F2PProcessingFactoryScript extends Script
                 selected = stockPlans.stream()
                     .filter(plan -> plan.recipe == config.fixedRecipe())
                     .findFirst()
-                    .orElseGet(() -> selectBestBacklogPlan(stockPlans));
+                    .orElse(null);
             }
             else
             {
@@ -593,7 +605,11 @@ public class F2PProcessingFactoryScript extends Script
         ExistingOutputBacklog best = null;
         Set<String> seenOutputs = new HashSet<>();
 
-        for (FactoryRecipe recipe : FactoryRecipe.values())
+        List<FactoryRecipe> outputRecipes = config.mode() == FactoryMode.FIXED_RECIPE
+            ? Collections.singletonList(config.fixedRecipe())
+            : Arrays.asList(FactoryRecipe.values());
+
+        for (FactoryRecipe recipe : outputRecipes)
         {
             if (!isRecipeEligibleForAccount(recipe))
             {
@@ -2614,23 +2630,12 @@ public class F2PProcessingFactoryScript extends Script
         // decide whether the recipe is actually selected.
         if (config.mode() == FactoryMode.FIXED_RECIPE)
         {
-            List<FactoryRecipe> recipes = new ArrayList<>();
             FactoryRecipe fixed = config.fixedRecipe();
             if (isRecipeEligibleForAccount(fixed))
             {
-                recipes.add(fixed);
+                return Collections.singletonList(fixed);
             }
-            if (config.limitExhaustedAction() == LimitExhaustedAction.SWITCH_RECIPE)
-            {
-                for (FactoryRecipe recipe : FactoryRecipe.values())
-                {
-                    if (recipe != fixed && isRecipeEligibleForAccount(recipe))
-                    {
-                        recipes.add(recipe);
-                    }
-                }
-            }
-            return recipes;
+            return Collections.emptyList();
         }
 
         List<FactoryRecipe> recipes = new ArrayList<>();
