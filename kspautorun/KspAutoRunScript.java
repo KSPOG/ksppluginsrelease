@@ -8,7 +8,6 @@ import net.runelite.client.plugins.microbot.Script;
 import net.runelite.client.plugins.microbot.util.menu.NewMenuEntry;
 import net.runelite.client.plugins.microbot.util.misc.Rs2UiHelper;
 import net.runelite.client.plugins.microbot.util.player.Rs2Player;
-import net.runelite.client.plugins.microbot.util.widget.Rs2Widget;
 
 import java.awt.Rectangle;
 import java.util.concurrent.TimeUnit;
@@ -99,13 +98,6 @@ public class KspAutoRunScript extends Script
     private boolean invokeRunOrb()
     {
         final int packedWidgetId = WidgetInfo.MINIMAP_TOGGLE_RUN_ORB.getId();
-        final Widget widget = Rs2Widget.getWidget(packedWidgetId);
-
-        if (widget == null)
-        {
-            return false;
-        }
-
         final Rectangle bounds = Microbot.getClientThread()
                 .runOnClientThreadOptional(() ->
                 {
@@ -114,8 +106,16 @@ public class KspAutoRunScript extends Script
                 })
                 .orElse(null);
 
+        // A widget reference is only valid while the client is on the same interface state.
+        // Do not invoke a stale Run orb (or fall back to a synthetic click location) after the
+        // live widget has disappeared.
+        if (bounds == null)
+        {
+            return false;
+        }
+
         final Rectangle invokeRectangle =
-                bounds != null && Rs2UiHelper.isRectangleWithinCanvas(bounds)
+                Rs2UiHelper.isRectangleWithinCanvas(bounds)
                         ? bounds
                         : Rs2UiHelper.getDefaultRectangle();
 
@@ -125,7 +125,7 @@ public class KspAutoRunScript extends Script
                 .identifier(1)
                 .type(MenuAction.CC_OP)
                 .param0(-1)
-                .param1(widget.getId())
+                .param1(packedWidgetId)
                 .forceLeftClick(false);
 
         Microbot.doInvoke(menuEntry, invokeRectangle);
