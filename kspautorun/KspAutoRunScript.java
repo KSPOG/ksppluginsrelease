@@ -70,6 +70,29 @@ public class KspAutoRunScript extends Script
         final int threshold = Math.max(1, Math.min(100, config.runThreshold()));
         final int runEnergy = Rs2Player.getRunEnergy();
 
+        if (runToggleRequestedAt != 0L)
+        {
+            if (System.currentTimeMillis() - runToggleRequestedAt
+                    >= RUN_TOGGLE_CONFIRMATION_TIMEOUT_MS)
+            {
+                // Toggle Run is not idempotent. If its postcondition was not observed,
+                // do not send another toggle that could disable Run after a delayed client
+                // update. Resume only after energy has fallen below the threshold.
+                runToggleRequestedAt = 0L;
+                runDisabledObservedAt = 0L;
+                awaitingEnergyReset = true;
+                state = "waiting for next energy cycle";
+                return;
+            }
+
+            // Energy can fall below the threshold before the client has published the
+            // result of a submitted invoke. Keep the request intact until its
+            // postcondition is observed (or it times out), otherwise the next energy
+            // cycle may submit a second, non-idempotent toggle.
+            state = "waiting for run toggle";
+            return;
+        }
+
         if (runEnergy < threshold)
         {
             // A request that did not reach its postcondition can be retried only after
@@ -86,25 +109,6 @@ public class KspAutoRunScript extends Script
         if (awaitingEnergyReset)
         {
             state = "waiting for next energy cycle";
-            return;
-        }
-
-        if (runToggleRequestedAt != 0L)
-        {
-            if (System.currentTimeMillis() - runToggleRequestedAt
-                    >= RUN_TOGGLE_CONFIRMATION_TIMEOUT_MS)
-            {
-                // Toggle Run is not idempotent. If its postcondition was not observed,
-                // do not send another toggle that could disable Run after a delayed client
-                // update. Resume only after energy has fallen below the threshold.
-                runToggleRequestedAt = 0L;
-                runDisabledObservedAt = 0L;
-                awaitingEnergyReset = true;
-                state = "waiting for next energy cycle";
-                return;
-            }
-
-            state = "waiting for run toggle";
             return;
         }
 
