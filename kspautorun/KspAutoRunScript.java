@@ -146,13 +146,15 @@ public class KspAutoRunScript extends Script
                 .runOnClientThreadOptional(() ->
                 {
                     final Widget currentWidget = Microbot.getClient().getWidget(packedWidgetId);
-                    return currentWidget != null ? currentWidget.getBounds() : null;
+                    return currentWidget != null && !currentWidget.isHidden()
+                            ? currentWidget.getBounds()
+                            : null;
                 })
                 .orElse(null);
 
         // A widget reference is only valid while the client is on the same interface state.
-        // Do not invoke a stale Run orb (or fall back to a synthetic click location) after the
-        // live widget has disappeared.
+        // Do not invoke a stale or hidden Run orb (or fall back to a synthetic click location)
+        // after the live widget is no longer actionable.
         if (bounds == null)
         {
             return false;
