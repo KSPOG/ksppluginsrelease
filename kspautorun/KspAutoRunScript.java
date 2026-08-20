@@ -58,11 +58,13 @@ public class KspAutoRunScript extends Script
         if (Rs2Player.isRunEnabled())
         {
             // The requested toggle has reached its postcondition.  From this point the
-            // script is idle until Run is disabled again, so expose the steady state
-            // rather than retaining the completed action as the current state.
+            // script is idle until this energy cycle has ended. Requiring the energy
+            // to drop below the threshold before rearming prevents an external or
+            // delayed Run-state change from causing a second, non-idempotent toggle
+            // while the same charge is still available.
             runToggleRequestedAt = 0L;
             runDisabledObservedAt = 0L;
-            awaitingEnergyReset = false;
+            awaitingEnergyReset = true;
             state = "monitoring run energy";
             return;
         }
