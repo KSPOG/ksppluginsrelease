@@ -286,11 +286,20 @@ public class KspFleshCrawlerScript extends Script {
         int healAt = Math.max(safetyFloor, Math.min(configured, noWaste));
         if (currentHp > healAt) return false;
 
-        state = FleshCrawlerState.HEALING;
+        int foodBefore = Rs2Inventory.count(config.foodName(), false);
         lastAction = "Eating " + config.foodName() + " at " + currentHp + " HP";
         if (Rs2Inventory.interact(config.foodName(), "Eat", false)) {
-            foodEaten++;
-            sleep(450, 700);
+            state = FleshCrawlerState.HEALING;
+            boolean foodConsumed = sleepUntil(
+                    () -> Rs2Inventory.count(config.foodName(), false) < foodBefore,
+                    1_500
+            );
+            if (foodConsumed) {
+                foodEaten++;
+            } else {
+                state = FleshCrawlerState.FIGHTING;
+                lastAction = "Waiting for " + config.foodName() + " consumption confirmation";
+            }
         }
         return true;
     }
