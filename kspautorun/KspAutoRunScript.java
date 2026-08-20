@@ -101,17 +101,6 @@ public class KspAutoRunScript extends Script
             return;
         }
 
-        // Re-read the postcondition immediately before submitting Toggle Run. Another
-        // script or a queued client update can enable Run after the confirmation above;
-        // invoking the orb in that case would disable it again.
-        if (Rs2Player.isRunEnabled())
-        {
-            runToggleRequestedAt = 0L;
-            runDisabledObservedAt = 0L;
-            state = "monitoring run energy";
-            return;
-        }
-
         state = "enabling run";
         if (invokeRunOrb())
         {
