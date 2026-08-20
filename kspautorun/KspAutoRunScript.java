@@ -20,6 +20,7 @@ public class KspAutoRunScript extends Script
     private static final long RUN_TOGGLE_CONFIRMATION_TIMEOUT_MS = 1_500L;
 
     private long runToggleRequestedAt = 0L;
+    private long runDisabledObservedAt = 0L;
     // Kept locally so runtime state collection does not fall back to another plugin's shared Microbot.status.
     private volatile String state = "waiting to log in";
 
@@ -61,6 +62,7 @@ public class KspAutoRunScript extends Script
             // script is idle until Run is disabled again, so expose the steady state
             // rather than retaining the completed action as the current state.
             runToggleRequestedAt = 0L;
+            runDisabledObservedAt = 0L;
             state = "monitoring run energy";
             return;
         }
@@ -70,6 +72,7 @@ public class KspAutoRunScript extends Script
 
         if (runEnergy < threshold)
         {
+            runDisabledObservedAt = 0L;
             state = "waiting for energy";
             return;
         }
@@ -82,10 +85,27 @@ public class KspAutoRunScript extends Script
             return;
         }
 
+        // A different script can enable Run between polling iterations. Require the
+        // disabled postcondition to remain true across two observations before
+        // invoking the toggle, so a stale or interleaved read cannot turn Run off.
+        if (runDisabledObservedAt == 0L)
+        {
+            runDisabledObservedAt = now;
+            state = "confirming run disabled";
+            return;
+        }
+
+        if (now - runDisabledObservedAt < CHECK_INTERVAL_MS)
+        {
+            state = "confirming run disabled";
+            return;
+        }
+
         state = "enabling run";
         if (invokeRunOrb())
         {
             runToggleRequestedAt = now;
+            runDisabledObservedAt = 0L;
             // The invoke has been submitted; wait for the run-state postcondition rather
             // than continuing to report the completed action while the client updates.
             state = "waiting for run toggle";
@@ -147,6 +167,7 @@ public class KspAutoRunScript extends Script
     {
         super.shutdown();
         runToggleRequestedAt = 0L;
+        runDisabledObservedAt = 0L;
         state = "stopped";
     }
 }
