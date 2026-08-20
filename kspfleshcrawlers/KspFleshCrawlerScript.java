@@ -8,6 +8,7 @@ import net.runelite.client.plugins.microbot.Microbot;
 import net.runelite.client.plugins.microbot.Script;
 import net.runelite.client.plugins.microbot.util.bank.Rs2Bank;
 import net.runelite.client.plugins.microbot.util.combat.Rs2Combat;
+import net.runelite.client.plugins.microbot.util.dialogues.Rs2Dialogue;
 import net.runelite.client.plugins.microbot.util.grounditem.Rs2GroundItem;
 import net.runelite.client.plugins.microbot.util.inventory.Rs2Inventory;
 import net.runelite.client.plugins.microbot.util.misc.Rs2Food;
@@ -19,13 +20,67 @@ import net.runelite.client.plugins.microbot.util.walker.Rs2Walker;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
-import java.util.Locale;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 @SuppressWarnings({"deprecation", "removal"})
 public class KspFleshCrawlerScript extends Script {
     private static final String NPC_NAME = "Flesh Crawler";
+
+    /** Dense Flesh Crawler room in the south-east of the Catacomb of Famine. */
+    private static final WorldPoint DEFAULT_FIGHT_POINT = new WorldPoint(2041, 5189, 0);
+
+    /** Current Stronghold of Security floor coordinate bands used to describe navigation progress. */
+    private static final int FLOOR_1_MIN_X = 1855;
+    private static final int FLOOR_1_MAX_X = 1920;
+    private static final int FLOOR_1_MIN_Y = 5184;
+    private static final int FLOOR_1_MAX_Y = 5248;
+    private static final int FLOOR_2_MIN_X = 1983;
+    private static final int FLOOR_2_MAX_X = 2048;
+    private static final int FLOOR_2_MIN_Y = 5184;
+    private static final int FLOOR_2_MAX_Y = 5248;
+
+    /** Security-question answers used by the Stronghold QuestHelper. */
+    private static final String[] STRONGHOLD_CORRECT_ANSWERS = {
+            "No.",
+            "Me.",
+            "Nobody.",
+            "Talk to any banker.",
+            "Nothing, it's a fake.",
+            "Delete it - it's a fake!",
+            "Don't give them my password.",
+            "Report the player for phishing.",
+            "Use the Account Recovery system.",
+            "No way! I'm reporting you to Jagex!",
+            "No, you should never buy an account.",
+            "Secure my device and reset my password.",
+            "Decline the offer and report that player.",
+            "The birthday of a famous person or event.",
+            "Only on the Old School RuneScape website.",
+            "Read the text and follow the advice given.",
+            "Virus scan my device then change my password.",
+            "Report the incident and do not click any links.",
+            "Don't share your information and report the player.",
+            "Set up two-factor authentication with my email provider.",
+            "No, you should never allow anyone to level your account.",
+            "No, you should never allow anyone to use your account.",
+            "Authenticator and two-step login on my registered email.",
+            "No way! You'll just take my gold for your own! Reported!",
+            "Don't type in my password backwards and report the player.",
+            "Don't give them the information and send an 'Abuse report'.",
+            "Don't tell them anything and click the 'Report Abuse' button.",
+            "Politely tell them no and then use the 'Report Abuse' button.",
+            "Politely tell them no, then use the 'Report Abuse' button.",
+            "Don't give out your password to anyone. Not even close friends.",
+            "Do not visit the website and report the player who messaged you.",
+            "Report the stream as a scam. Real Jagex streams have a 'verified' mark.",
+            "Two-factor authentication on your account and your registered email.",
+            "Nope, you're tricking me into going somewhere dangerous.",
+            "It's never used on other websites or accounts."
+    };
 
     private final CombatTrainingController trainingController = new CombatTrainingController();
 
@@ -37,12 +92,17 @@ public class KspFleshCrawlerScript extends Script {
     private volatile int foodEaten;
 
     private volatile WorldPoint fightAnchor;
+
+    private ExecutorService navigationExecutor;
+    private volatile Future<?> navigationFuture;
+    private volatile WorldPoint navigationTarget;
     private volatile int trackedNpcIndex = -1;
     private volatile boolean trackedNpcCounted;
 
     public boolean run(KspFleshCrawlerConfig config) {
         Microbot.enableAutoRunOn = true;
         resetSession();
+        ensureNavigationExecutor();
 
         mainScheduledFuture = scheduledExecutorService.scheduleWithFixedDelay(() -> {
             try {
@@ -50,8 +110,11 @@ public class KspFleshCrawlerScript extends Script {
                     return;
                 }
 
-                captureFightAnchor();
                 updateKillTracking();
+
+                if (handleStrongholdDialogue()) {
+                    return;
+                }
 
                 if (config.autoRetaliate()) {
                     Rs2Combat.setAutoRetaliate(true);
@@ -72,6 +135,10 @@ public class KspFleshCrawlerScript extends Script {
                 }
 
                 if (config.usePotions() && handlePotions()) {
+                    return;
+                }
+
+                if (ensureAtFleshCrawlerRoom(config)) {
                     return;
                 }
 
@@ -105,6 +172,11 @@ public class KspFleshCrawlerScript extends Script {
 
     @Override
     public void shutdown() {
+        cancelNavigation();
+        if (navigationExecutor != null) {
+            navigationExecutor.shutdownNow();
+            navigationExecutor = null;
+        }
         super.shutdown();
         state = FleshCrawlerState.WAITING;
         lastAction = "Stopped";
@@ -117,20 +189,147 @@ public class KspFleshCrawlerScript extends Script {
         itemsLooted = 0;
         bonesBuried = 0;
         foodEaten = 0;
-        fightAnchor = null;
+        fightAnchor = DEFAULT_FIGHT_POINT;
+        navigationTarget = null;
+        navigationFuture = null;
         trackedNpcIndex = -1;
         trackedNpcCounted = false;
     }
 
-    private void captureFightAnchor() {
-        if (fightAnchor != null) {
+    private boolean ensureAtFleshCrawlerRoom(KspFleshCrawlerConfig config) {
+        if (!config.autoTravel()) {
+            return false;
+        }
+
+        WorldPoint player = Rs2Player.getWorldLocation();
+        if (player == null) {
+            state = FleshCrawlerState.WALKING_TO_FIGHT;
+            lastAction = "Waiting for player location";
+            return true;
+        }
+
+        if (isNavigationRunning()) {
+            state = FleshCrawlerState.WALKING_TO_FIGHT;
+            lastAction = navigationStatus(player);
+            return true;
+        }
+
+        int arrivalRadius = Math.min(Math.max(config.fightRadius() / 2, 4), 8);
+        if (isOnFloor2(player) && player.distanceTo(DEFAULT_FIGHT_POINT) <= arrivalRadius) {
+            return false;
+        }
+
+        state = FleshCrawlerState.WALKING_TO_FIGHT;
+        lastAction = navigationStatus(player);
+        startNavigation(DEFAULT_FIGHT_POINT, 4);
+        return true;
+    }
+
+    private String navigationStatus(WorldPoint player) {
+        if (isOnFloor1(player)) {
+            return "Crossing Stronghold floor 1";
+        }
+        if (isOnFloor2(player)) {
+            return "Walking through Catacomb of Famine";
+        }
+        return "Walking to Stronghold of Security";
+    }
+
+    private boolean isOnFloor1(WorldPoint point) {
+        return isInside(point, FLOOR_1_MIN_X, FLOOR_1_MAX_X, FLOOR_1_MIN_Y, FLOOR_1_MAX_Y);
+    }
+
+    private boolean isOnFloor2(WorldPoint point) {
+        return isInside(point, FLOOR_2_MIN_X, FLOOR_2_MAX_X, FLOOR_2_MIN_Y, FLOOR_2_MAX_Y);
+    }
+
+    private boolean isInside(WorldPoint point, int minX, int maxX, int minY, int maxY) {
+        return point != null
+                && point.getPlane() == 0
+                && point.getX() >= minX && point.getX() <= maxX
+                && point.getY() >= minY && point.getY() <= maxY;
+    }
+
+    private boolean handleStrongholdDialogue() {
+        if (!isNavigationRunning() || !Rs2Dialogue.isInDialogue()) {
+            return false;
+        }
+
+        if (Rs2Dialogue.hasSelectAnOption()) {
+            for (String answer : STRONGHOLD_CORRECT_ANSWERS) {
+                if (Rs2Dialogue.hasDialogueOption(answer, true)) {
+                    state = FleshCrawlerState.WALKING_TO_FIGHT;
+                    lastAction = "Answering Stronghold security door";
+                    if (Rs2Dialogue.clickOption(true, answer)) {
+                        sleep(300, 500);
+                    }
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        if (Rs2Dialogue.hasContinue()) {
+            state = FleshCrawlerState.WALKING_TO_FIGHT;
+            lastAction = "Continuing Stronghold dialogue";
+            Rs2Dialogue.clickContinue();
+            sleep(250, 450);
+            return true;
+        }
+
+        return false;
+    }
+
+    private synchronized void ensureNavigationExecutor() {
+        if (navigationExecutor != null && !navigationExecutor.isShutdown()) {
+            return;
+        }
+        navigationExecutor = Executors.newSingleThreadExecutor(runnable -> {
+            Thread thread = new Thread(runnable, "ksp-flesh-crawler-navigation");
+            thread.setDaemon(true);
+            return thread;
+        });
+    }
+
+    private synchronized void startNavigation(WorldPoint target, int distance) {
+        if (target == null || isNavigationRunning()) {
             return;
         }
 
-        Rs2NpcModel nearby = Rs2Npc.getNpcs(NPC_NAME, true).findFirst().orElse(null);
-        if (nearby != null) {
-            fightAnchor = Rs2Player.getWorldLocation();
-            lastAction = "Fight anchor captured";
+        ensureNavigationExecutor();
+        navigationTarget = target;
+        navigationFuture = navigationExecutor.submit(() -> {
+            try {
+                boolean arrived = Rs2Walker.walkTo(target, distance);
+                if (arrived) {
+                    lastAction = "Arrived at Flesh Crawler room";
+                } else if (!Thread.currentThread().isInterrupted()) {
+                    lastAction = "Walker stopped before destination - retrying";
+                }
+            } catch (Exception ex) {
+                Microbot.logStackTrace("KspFleshCrawlerNavigation", ex);
+                lastAction = "Navigation error - retrying";
+            } finally {
+                navigationTarget = null;
+            }
+        });
+    }
+
+    private boolean isNavigationRunning() {
+        Future<?> future = navigationFuture;
+        return future != null && !future.isDone() && !future.isCancelled();
+    }
+
+    private synchronized void cancelNavigation() {
+        Future<?> future = navigationFuture;
+        boolean ownedActiveWalk = (future != null && !future.isDone()) || navigationTarget != null;
+        if (future != null && !future.isDone()) {
+            future.cancel(true);
+        }
+        navigationFuture = null;
+        navigationTarget = null;
+        if (ownedActiveWalk) {
+            Rs2Walker.setTarget(null);
         }
     }
 
@@ -184,6 +383,10 @@ public class KspFleshCrawlerScript extends Script {
             return true;
         }
 
+        if (isNavigationRunning()) {
+            cancelNavigation();
+        }
+
         if (!Rs2Bank.isNearBank(10)) {
             state = FleshCrawlerState.WALKING_TO_BANK;
             lastAction = "Walking to bank for food";
@@ -218,7 +421,7 @@ public class KspFleshCrawlerScript extends Script {
         Rs2Bank.closeBank();
         state = FleshCrawlerState.RETURNING_TO_FIGHT;
         lastAction = "Returning to Flesh Crawlers";
-        Rs2Walker.walkTo(fightAnchor);
+        startNavigation(fightAnchor, 4);
         return true;
     }
 
@@ -305,9 +508,7 @@ public class KspFleshCrawlerScript extends Script {
 
     private void attackNextCrawler(KspFleshCrawlerConfig config) {
         if (fightAnchor == null) {
-            state = FleshCrawlerState.WAITING;
-            lastAction = "Start near Flesh Crawlers on floor 2";
-            return;
+            fightAnchor = DEFAULT_FIGHT_POINT;
         }
 
         Rs2NpcModel target = Rs2Npc.getNpcs(npc -> {

@@ -2,6 +2,7 @@ package net.runelite.client.plugins.microbot.kspfleshcrawlers;
 
 public enum FleshCrawlerState {
     INITIALIZING,
+    WALKING_TO_FIGHT,
     FIGHTING,
     LOOTING,
     BURYING,

@@ -276,12 +276,23 @@ public interface KspFleshCrawlerConfig extends Config {
 
     // -------------------- Area --------------------
 
+    @ConfigItem(
+            keyName = "autoTravel",
+            name = "Auto walk to crawlers",
+            description = "Automatically web-walk from your current location to the south-east Flesh Crawler room on Stronghold floor 2",
+            position = 0,
+            section = areaSection
+    )
+    default boolean autoTravel() {
+        return true;
+    }
+
     @Range(min = 3, max = 30)
     @ConfigItem(
             keyName = "fightRadius",
             name = "Fight radius",
-            description = "Maximum distance from the captured Flesh Crawler fight anchor that targets may be selected",
-            position = 0,
+            description = "Maximum distance from the south-east Flesh Crawler room anchor that targets may be selected",
+            position = 1,
             section = areaSection
     )
     default int fightRadius() {
@@ -292,7 +303,7 @@ public interface KspFleshCrawlerConfig extends Config {
             keyName = "autoRetaliate",
             name = "Auto retaliate",
             description = "Keep auto-retaliate enabled while fighting Flesh Crawlers",
-            position = 1,
+            position = 2,
             section = areaSection
     )
     default boolean autoRetaliate() {
