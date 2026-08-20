@@ -34,21 +34,33 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
+import javax.inject.Singleton;
 
+@Singleton
 @SuppressWarnings({"deprecation", "removal"})
 public class KspFleshCrawlerScript extends Script {
     private static final String NPC_NAME = "Flesh Crawler";
 
     /*
-     * The v1.0.1 target was the deep south-east room. That forced the generic
-     * web-walker through most of Catacomb of Famine. The near-entry crawler
-     * room is a much better operational target: after the floor-1 shortcut
-     * portal + ladder, only the entry-room rickety door pair must be crossed.
+     * Confirmed Flesh Crawler training target supplied from the live client.
+     * The Stronghold-specific navigator must get close to this south-east tile
+     * before combat is allowed to take over.
      */
-    private static final WorldPoint DEFAULT_FIGHT_POINT = new WorldPoint(2032, 5242, 0);
+    private static final WorldPoint DEFAULT_FIGHT_POINT = new WorldPoint(2040, 5188, 0);
+    private static final int FIGHT_TARGET_ARRIVAL_RADIUS = 7;
     private static final WorldPoint STRONGHOLD_SURFACE_ENTRANCE = new WorldPoint(3081, 3420, 0);
     private static final WorldPoint WAR_PORTAL_POINT = new WorldPoint(1863, 5238, 0);
     private static final WorldPoint WAR_LADDER_DOWN_POINT = new WorldPoint(1902, 5222, 0);
+
+    /*
+     * Dedicated bank-exit transports from Microbot's current Stronghold transport data.
+     * 2042,5245 climbs from Catacomb of Famine directly back to the Vault of War
+     * start room, and the Vault ladder then exits to Barbarian Village.
+     */
+    private static final WorldPoint FAMINE_EXIT_LADDER_POINT = new WorldPoint(2042, 5245, 0);
+    private static final int FAMINE_EXIT_LADDER_ID = 19003;
+    private static final WorldPoint WAR_SURFACE_EXIT_POINT = new WorldPoint(1859, 5243, 0);
+    private static final int WAR_SURFACE_EXIT_LADDER_ID = 20784;
 
     private static final int FLOOR_1_MIN_X = 1855;
     private static final int FLOOR_1_MAX_X = 1920;
@@ -65,9 +77,12 @@ public class KspFleshCrawlerScript extends Script {
     private static final int FLOOR_1_START_MAX_Y = 5247;
 
     private static final long MOVE_CLICK_COOLDOWN_MS = 850L;
-    private static final long DOOR_RETRY_COOLDOWN_MS = 12_000L;
+    private static final long DOOR_RETRY_COOLDOWN_MS = 20_000L;
     private static final long DOOR_NUDGE_MIN_DELAY_MS = 350L;
     private static final long PORTAL_RETRY_COOLDOWN_MS = 4_000L;
+    private static final int DOOR_SEARCH_RADIUS = 16;
+    private static final int DOOR_INTERACT_DISTANCE = 2;
+    private static final long PENDING_DOOR_TIMEOUT_MS = 6_500L;
 
     /*
      * Route used only when the Vault of War portal is unavailable.
@@ -91,16 +106,14 @@ public class KspFleshCrawlerScript extends Script {
     );
 
     /*
-     * Floor 2 starts in the north-east room.  The nearest Flesh Crawler
-     * group is immediately west of that start room, not south.  The old
-     * v1.0.2 route therefore aimed at the wrong wall and could sit forever
-     * on the first floor-2 waypoint.  These points follow the first segment
-     * of Microbot QuestHelper's Catacomb of Famine route and then stop in
-     * the adjacent crawler room.
+     * Confirmed Flesh Crawler training destination.  The plugin must reach the
+     * south-east target area around 2040,5188 rather than adopting one of the
+     * earlier Flesh Crawler rooms it can see on the way.  We intentionally keep
+     * the floor-2 route goal-based: the custom Stronghold door resolver advances
+     * from the entry ladder toward this final tile and owns every rickety door.
      */
     private static final List<WorldPoint> FLOOR_2_ENTRY_ROUTE = Arrays.asList(
             new WorldPoint(2042, 5245, 0),
-            new WorldPoint(2034, 5244, 0),
             DEFAULT_FIGHT_POINT
     );
 
@@ -158,6 +171,7 @@ public class KspFleshCrawlerScript extends Script {
     private volatile int foodEaten;
 
     private volatile WorldPoint fightAnchor;
+    private volatile boolean exitingForBank;
 
     /*
      * The blocking web-walker is retained only for the overworld leg to the
@@ -281,6 +295,7 @@ public class KspFleshCrawlerScript extends Script {
         bonesBuried = 0;
         foodEaten = 0;
         fightAnchor = DEFAULT_FIGHT_POINT;
+        exitingForBank = false;
         navigationTarget = null;
         navigationFuture = null;
         trackedNpcIndex = -1;
@@ -311,14 +326,17 @@ public class KspFleshCrawlerScript extends Script {
         updateTravelProgress(player);
 
         /*
-         * If the user starts the plugin already beside Flesh Crawlers on floor 2,
-         * use that room rather than forcing a walk back to our preferred entry room.
+         * Do not stop at an earlier Flesh Crawler room.  A crawler is only accepted
+         * as the fight anchor when both the player and that crawler are already close
+         * to the confirmed target area around 2040,5188.
          */
         if (isOnFloor2(player)) {
             Rs2NpcModel nearbyCrawler = Rs2Npc.getNpcs(npc ->
                             npc.getName() != null
                                     && NPC_NAME.equalsIgnoreCase(npc.getName())
                                     && !npc.isDead()
+                                    && player.distanceTo(DEFAULT_FIGHT_POINT) <= 14
+                                    && npc.getWorldLocation().distanceTo(DEFAULT_FIGHT_POINT) <= 16
                                     && npc.getWorldLocation().distanceTo(player) <= 12
                                     && Rs2Walker.canReach(npc.getWorldLocation()))
                     .findFirst()
@@ -330,7 +348,8 @@ public class KspFleshCrawlerScript extends Script {
             }
         }
 
-        int arrivalRadius = Math.min(Math.max(config.fightRadius() / 2, 4), 8);
+        int arrivalRadius = Math.max(FIGHT_TARGET_ARRIVAL_RADIUS,
+                Math.min(Math.max(config.fightRadius() / 2, 4), 8));
         if (isOnFloor2(player) && player.distanceTo(DEFAULT_FIGHT_POINT) <= arrivalRadius) {
             fightAnchor = DEFAULT_FIGHT_POINT;
             cancelNavigationIfOwned();
@@ -448,9 +467,7 @@ public class KspFleshCrawlerScript extends Script {
             }
         }
 
-        lastAction = nearestCrawler != null
-                ? "Crossing rickety doors to Flesh Crawlers"
-                : "Entering nearest Flesh Crawler room";
+        lastAction = "Routing to Flesh Crawler target 2040,5188";
 
         floor2RouteIndex = normalizeRouteIndex(FLOOR_2_ENTRY_ROUTE, floor2RouteIndex, player);
         if (floor2RouteIndex >= FLOOR_2_ENTRY_ROUTE.size()) {
@@ -464,18 +481,9 @@ public class KspFleshCrawlerScript extends Script {
             return true;
         }
 
-        /*
-         * Once the west-side waypoint is active and a crawler is visible, use
-         * the crawler itself as the direction-of-travel hint for door scoring.
-         * This prevents a south/east door from winning merely because it is a
-         * little closer to the player.
-         */
-        WorldPoint navigationHint = waypoint;
-        if (floor2RouteIndex >= 1 && nearestCrawler != null && nearestCrawler.getWorldLocation() != null) {
-            navigationHint = nearestCrawler.getWorldLocation();
-        }
-
-        navigateStrongholdWaypoint(player, navigationHint, "Rickety door");
+        // Always score doors against the confirmed route target.  Using an arbitrary
+        // visible crawler as the hint can pull the navigator into the wrong room.
+        navigateStrongholdWaypoint(player, waypoint, "Rickety door");
         return true;
     }
 
@@ -490,7 +498,8 @@ public class KspFleshCrawlerScript extends Script {
                         && !npc.isDead()
                         && npc.getWorldLocation() != null
                         && isOnFloor2(npc.getWorldLocation())
-                        && npc.getWorldLocation().distanceTo(player) <= radius)
+                        && npc.getWorldLocation().distanceTo(player) <= radius
+                        && npc.getWorldLocation().distanceTo(DEFAULT_FIGHT_POINT) <= 18)
                 .min(Comparator.comparingInt(npc -> npc.getWorldLocation().distanceTo(player)))
                 .orElse(null);
     }
@@ -528,7 +537,7 @@ public class KspFleshCrawlerScript extends Script {
         long stationaryFor = System.currentTimeMillis() - lastTravelProgressMs;
         boolean waypointReachable = Rs2Walker.canReach(waypoint);
 
-        if (!waypointReachable || stationaryFor >= 1_200L) {
+        if (!waypointReachable || stationaryFor >= 900L) {
             if (tryOpenProgressDoor(player, waypoint, doorName)) {
                 return;
             }
@@ -546,10 +555,14 @@ public class KspFleshCrawlerScript extends Script {
 
         List<TileObject> matching = Rs2GameObject.getAll().stream()
                 .filter(obj -> obj != null && obj.getWorldLocation() != null)
-                .filter(obj -> obj.getWorldLocation().distanceTo(player) <= 7)
+                .filter(obj -> obj.getWorldLocation().distanceTo(player) <= DOOR_SEARCH_RADIUS)
                 .filter(obj -> isExpectedStrongholdDoor(obj, expectedName))
                 .filter(obj -> Rs2GameObject.hasAction(obj, "Open", false))
                 .filter(obj -> !isDoorOnCooldown(obj.getWorldLocation()))
+                // Stronghold mazes sometimes require a short detour before progress.
+                // Keep obviously bad doors out, but allow enough slack for a correct
+                // rickety-door chain to temporarily move away from the final tile.
+                .filter(obj -> obj.getWorldLocation().distanceTo(waypoint) <= player.distanceTo(waypoint) + 12)
                 .sorted(Comparator.comparingInt(obj -> doorScore(player, waypoint, obj.getWorldLocation())))
                 .collect(Collectors.toList());
 
@@ -559,13 +572,23 @@ public class KspFleshCrawlerScript extends Script {
 
         TileObject door = matching.get(0);
         WorldPoint doorLocation = door.getWorldLocation();
+        int distanceToDoor = player.distanceTo(doorLocation);
 
         /*
-         * Stronghold-specific anti-loop rule:
-         * once a gate/door was clicked, it is ineligible for twelve seconds.
-         * The second door of the pair therefore wins the next selection instead
-         * of the navigator hammering the first door over and over.
+         * Do not invoke a Stronghold door from across the room.  The old code
+         * marked the door as pending before the player was actually beside it;
+         * on the next 350 ms script tick handlePendingDoorCrossing() then saw
+         * the player several tiles away and discarded the pending state.  That
+         * is what allowed the navigator to fall back into repeated/stalled door
+         * selection.  First walk to a reachable tile on THIS side of the door.
          */
+        if (distanceToDoor > DOOR_INTERACT_DISTANCE) {
+            WorldPoint approach = chooseDoorApproachTile(player, doorLocation, waypoint);
+            lastAction = "Approaching next " + expectedName;
+            moveLocally(approach != null ? approach : doorLocation);
+            return true;
+        }
+
         recentlyClickedDoors.put(doorLocation, System.currentTimeMillis());
         pendingDoorLocation = doorLocation;
         pendingDoorApproachPoint = player;
@@ -578,10 +601,48 @@ public class KspFleshCrawlerScript extends Script {
             return true;
         }
 
+        // Interaction did not fire, so do not poison this doorway with a long cooldown.
+        recentlyClickedDoors.remove(doorLocation);
         clearPendingDoor();
         return false;
     }
 
+    /**
+     * Pick a walkable tile adjacent to the selected door on the player's current
+     * side.  This lets us approach the correct airlock door without asking the
+     * webwalker to path through the closed door itself.
+     */
+    private WorldPoint chooseDoorApproachTile(WorldPoint player, WorldPoint door, WorldPoint waypoint) {
+        if (player == null || door == null) {
+            return null;
+        }
+
+        List<WorldPoint> candidates = new ArrayList<>();
+        for (int dx = -2; dx <= 2; dx++) {
+            for (int dy = -2; dy <= 2; dy++) {
+                if (dx == 0 && dy == 0) {
+                    continue;
+                }
+                WorldPoint point = new WorldPoint(door.getX() + dx, door.getY() + dy, door.getPlane());
+                if (point.distanceTo(door) > 2) {
+                    continue;
+                }
+                if (!Rs2Walker.canReach(point)) {
+                    continue;
+                }
+                candidates.add(point);
+            }
+        }
+
+        return candidates.stream()
+                .min(Comparator.comparingInt(point -> {
+                    int doorDistance = point.distanceTo(door);
+                    int travelDistance = point.distanceTo(player);
+                    int routePenalty = waypoint == null ? 0 : Math.max(0, point.distanceTo(waypoint) - player.distanceTo(waypoint));
+                    return doorDistance * 100 + travelDistance * 5 + routePenalty * 25;
+                }))
+                .orElse(null);
+    }
 
     private boolean isExpectedStrongholdDoor(TileObject obj, String expectedName) {
         if (obj == null) {
@@ -625,18 +686,26 @@ public class KspFleshCrawlerScript extends Script {
             return true;
         }
 
-        if (player.distanceTo(pendingDoorLocation) >= 3) {
+        long age = System.currentTimeMillis() - pendingDoorClickedAtMs;
+        if (age > PENDING_DOOR_TIMEOUT_MS) {
             clearPendingDoor();
             return false;
         }
 
-        long age = System.currentTimeMillis() - pendingDoorClickedAtMs;
-        if (age < DOOR_NUDGE_MIN_DELAY_MS) {
-            return true;
-        }
-
-        if (age > 3_500L) {
+        /*
+         * If we are already clearly beyond the doorway and closer to the route
+         * target than when the door was clicked, crossing succeeded.  Clear the
+         * pending state and let the route choose the second airlock door / next
+         * waypoint.  Do not use a raw "distance from door >= 3" test here: that
+         * was the v1.0.6/v1.0.7 bug which discarded the pending door while the
+         * player was still approaching it.
+         */
+        if (pendingDoorApproachPoint != null && pendingDoorWaypoint != null
+                && player.distanceTo(pendingDoorWaypoint) + 1 < pendingDoorApproachPoint.distanceTo(pendingDoorWaypoint)
+                && player.distanceTo(pendingDoorLocation) >= 2) {
             clearPendingDoor();
+            lastTravelPoint = player;
+            lastTravelProgressMs = System.currentTimeMillis();
             return false;
         }
 
@@ -644,9 +713,20 @@ public class KspFleshCrawlerScript extends Script {
             return true;
         }
 
-        // Do not hammer the same post-door tile every script tick. A single
-        // canvas click gets time to move the player through the airlock before
-        // another nudge is allowed.
+        int distanceToDoor = player.distanceTo(pendingDoorLocation);
+        if (distanceToDoor > 2) {
+            WorldPoint approach = chooseDoorApproachTile(player, pendingDoorLocation, pendingDoorWaypoint);
+            if (approach != null) {
+                lastAction = "Moving up to opened Stronghold door";
+                moveLocally(approach);
+                return true;
+            }
+        }
+
+        if (age < DOOR_NUDGE_MIN_DELAY_MS) {
+            return true;
+        }
+
         if (System.currentTimeMillis() - lastMoveClickMs < MOVE_CLICK_COOLDOWN_MS) {
             return true;
         }
@@ -654,8 +734,16 @@ public class KspFleshCrawlerScript extends Script {
         WorldPoint crossTile = chooseDoorCrossTile();
         if (crossTile != null) {
             lastAction = "Crossing opened Stronghold door";
-            Rs2Walker.walkFastCanvas(crossTile);
+            if (!Rs2Walker.walkFastCanvas(crossTile)) {
+                Rs2Walker.walkMiniMap(crossTile);
+            }
             lastMoveClickMs = System.currentTimeMillis();
+            return true;
+        }
+
+        // Give the game a little time to update the door collision after the
+        // Open interaction before abandoning the pending airlock.
+        if (age < 2_800L) {
             return true;
         }
 
@@ -795,8 +883,10 @@ public class KspFleshCrawlerScript extends Script {
         if (Rs2Dialogue.hasSelectAnOption()) {
             for (String answer : STRONGHOLD_CORRECT_ANSWERS) {
                 if (Rs2Dialogue.hasDialogueOption(answer, true)) {
-                    state = FleshCrawlerState.WALKING_TO_FIGHT;
-                    lastAction = "Answering Stronghold security door";
+                    state = exitingForBank ? FleshCrawlerState.WALKING_TO_BANK : FleshCrawlerState.WALKING_TO_FIGHT;
+                    lastAction = exitingForBank
+                            ? "Answering Stronghold door while exiting"
+                            : "Answering Stronghold security door";
                     if (Rs2Dialogue.clickOption(true, answer)) {
                         sleep(300, 500);
                     }
@@ -807,8 +897,10 @@ public class KspFleshCrawlerScript extends Script {
         }
 
         if (Rs2Dialogue.hasContinue()) {
-            state = FleshCrawlerState.WALKING_TO_FIGHT;
-            lastAction = "Continuing Stronghold dialogue";
+            state = exitingForBank ? FleshCrawlerState.WALKING_TO_BANK : FleshCrawlerState.WALKING_TO_FIGHT;
+            lastAction = exitingForBank
+                    ? "Continuing Stronghold exit dialogue"
+                    : "Continuing Stronghold dialogue";
             Rs2Dialogue.clickContinue();
             sleep(250, 450);
             return true;
@@ -876,6 +968,64 @@ public class KspFleshCrawlerScript extends Script {
         }
     }
 
+    /**
+     * Leaves the Stronghold without giving the generic webwalker control of any
+     * Stronghold door. This is the reverse of the fight-entry policy.
+     */
+    private void handleStrongholdExitForBank(WorldPoint player) {
+        if (player == null) {
+            lastAction = "Waiting for Stronghold exit location";
+            return;
+        }
+
+        updateTravelProgress(player);
+
+        if (isOnFloor2(player)) {
+            lastAction = "Leaving Catacomb of Famine for bank";
+
+            if (player.distanceTo(FAMINE_EXIT_LADDER_POINT) <= 4) {
+                if (Rs2Player.isMoving() || Rs2Dialogue.isInDialogue()) {
+                    return;
+                }
+
+                lastAction = "Climbing to Vault of War";
+                if (!Rs2GameObject.interact(FAMINE_EXIT_LADDER_ID, "Climb-up")) {
+                    Rs2GameObject.interact(FAMINE_EXIT_LADDER_ID);
+                }
+                sleep(450, 700);
+                return;
+            }
+
+            // Only our Stronghold door resolver may cross the rickety airlock.
+            navigateStrongholdWaypoint(player, FAMINE_EXIT_LADDER_POINT, "Rickety door");
+            return;
+        }
+
+        if (isOnFloor1(player)) {
+            lastAction = "Leaving Vault of War for bank";
+
+            // Coming up from floor 2 lands in the floor-1 start room. The nearest
+            // level-1 exit ladder goes directly back to Barbarian Village.
+            if (player.distanceTo(WAR_SURFACE_EXIT_POINT) <= 6 || isInFloor1StartRoom(player)) {
+                if (Rs2Player.isMoving() || Rs2Dialogue.isInDialogue()) {
+                    return;
+                }
+
+                lastAction = "Climbing out of Stronghold";
+                if (!Rs2GameObject.interact(WAR_SURFACE_EXIT_LADDER_ID, "Climb-up")) {
+                    Rs2GameObject.interact(WAR_SURFACE_EXIT_LADDER_ID);
+                }
+                sleep(450, 700);
+                return;
+            }
+
+            // Defensive fallback if a transport leaves us elsewhere on floor 1.
+            // We still keep the generic webwalker disabled and use the same
+            // anti-loop door resolver while moving back toward the start room.
+            navigateStrongholdWaypoint(player, WAR_SURFACE_EXIT_POINT, "Gate of War");
+        }
+    }
+
     private boolean handleHealing(KspFleshCrawlerConfig config) {
         if (!config.useHealing()) {
             return false;
@@ -938,6 +1088,25 @@ public class KspFleshCrawlerScript extends Script {
             cancelNavigation();
         }
 
+        WorldPoint player = Rs2Player.getWorldLocation();
+        if (player != null && (isOnFloor1(player) || isOnFloor2(player))) {
+            if (!exitingForBank) {
+                // Direction changed: let the reverse route use doors immediately rather than
+                // inheriting a cooldown from the trip into the crawler room.
+                exitingForBank = true;
+                recentlyClickedDoors.clear();
+                clearPendingDoor();
+                lastTravelPoint = player;
+                lastTravelProgressMs = System.currentTimeMillis();
+            }
+
+            state = FleshCrawlerState.WALKING_TO_BANK;
+            handleStrongholdExitForBank(player);
+            return true;
+        }
+
+        // The generic bank walker is only allowed after we are back on the surface.
+        exitingForBank = false;
         if (!Rs2Bank.isNearBank(10)) {
             state = FleshCrawlerState.WALKING_TO_BANK;
             lastAction = "Walking to bank for food";
@@ -970,6 +1139,11 @@ public class KspFleshCrawlerScript extends Script {
         }
 
         Rs2Bank.closeBank();
+        exitingForBank = false;
+        floor1RouteIndex = 0;
+        floor2RouteIndex = 0;
+        recentlyClickedDoors.clear();
+        clearPendingDoor();
         state = FleshCrawlerState.RETURNING_TO_FIGHT;
         lastAction = "Returning to Flesh Crawlers";
         /*
@@ -1247,6 +1421,10 @@ public class KspFleshCrawlerScript extends Script {
 
     public WorldPoint getFightAnchor() {
         return fightAnchor;
+    }
+
+    public WorldPoint getFightTarget() {
+        return DEFAULT_FIGHT_POINT;
     }
 
     public Skill getCurrentTrainingSkill() {

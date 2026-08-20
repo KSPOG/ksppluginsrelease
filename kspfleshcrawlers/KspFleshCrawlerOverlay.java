@@ -1,8 +1,8 @@
 package net.runelite.client.plugins.microbot.kspfleshcrawlers;
 
 import net.runelite.api.Skill;
+import net.runelite.api.coords.WorldPoint;
 import net.runelite.client.plugins.microbot.Microbot;
-import net.runelite.client.plugins.microbot.kspbryophyta.KspBryophytaPlugin;
 import net.runelite.client.ui.overlay.OverlayPanel;
 import net.runelite.client.ui.overlay.OverlayPosition;
 import net.runelite.client.ui.overlay.components.LineComponent;
@@ -36,13 +36,15 @@ public class KspFleshCrawlerOverlay extends OverlayPanel {
         panelComponent.setPreferredSize(new Dimension(235, 0));
 
         panelComponent.getChildren().add(TitleComponent.builder()
-                .text("KSP Flesh Crawlers v" + KspFleshCrawlerPlugin.VERSION)
-                .color(Color.WHITE)
+                .text("Flesh Crawlers v" + KspFleshCrawlerPlugin.VERSION)
+                .color(Color.ORANGE)
                 .build());
 
         addLine("Runtime", plugin.getRuntimeText());
         addLine("State", prettyState(script.getState()));
         addLine("Action", script.getLastAction());
+        addLine("Location", locationText());
+        addLine("Target", targetText());
         addLine("Training", trainingText());
         addLine("Attack", levelText(Skill.ATTACK, config.attackTarget(), config.trainAttack()));
         addLine("Strength", levelText(Skill.STRENGTH, config.strengthTarget(), config.trainStrength()));
@@ -67,6 +69,25 @@ public class KspFleshCrawlerOverlay extends OverlayPanel {
                 .left(left + ":")
                 .right(right == null ? "-" : right)
                 .build());
+    }
+
+    private String locationText() {
+        if (!Microbot.isLoggedIn()) {
+            return "-";
+        }
+        WorldPoint point = net.runelite.client.plugins.microbot.util.player.Rs2Player.getWorldLocation();
+        if (point == null) {
+            return "-";
+        }
+        return point.getX() + "," + point.getY() + "," + point.getPlane();
+    }
+
+    private String targetText() {
+        WorldPoint target = script.getFightTarget();
+        if (target == null) {
+            return "-";
+        }
+        return target.getX() + "," + target.getY() + "," + target.getPlane();
     }
 
     private String trainingText() {
