@@ -126,6 +126,10 @@ public class KspAutoRunScript extends Script
         }
         else
         {
+            // The orb may have disappeared between the state confirmation and the
+            // invoke attempt. Require a fresh disabled-state observation before a
+            // later retry instead of carrying that stale confirmation forward.
+            runDisabledObservedAt = 0L;
             state = "run orb unavailable";
         }
     }
