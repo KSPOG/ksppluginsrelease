@@ -454,18 +454,6 @@ final class BankActuator
             Rectangle source = centerRect(bounds.source());
             Rectangle target = centerRect(bounds.target());
 
-            // The organizer runs on a worker while other plugins can change the
-            // active interface. Do not replay bank coordinates after that UI has
-            // disappeared; those coordinates can belong to another interface.
-            if (!isBankUiReadyForInteraction())
-            {
-                if (attempt == 4)
-                {
-                    return ActuatorResult.fail("Bank UI closed before moving item " + itemId + ".");
-                }
-                continue;
-            }
-
             Microbot.drag(source, target);
             Global.sleep(ACTION_SETTLE_MS);
 
@@ -483,10 +471,6 @@ final class BankActuator
 
     ActuatorResult moveWithinOpenTab(BankSnapshot.BankStack sourceStack, BankSnapshot.BankStack targetStack)
     {
-        if (!waitForBankUiStable(1200))
-        {
-            return ActuatorResult.fail("Bank UI did not stabilize before sorting.");
-        }
         if (!scrollBankToSlotSafe(sourceStack.slot()))
         {
             return ActuatorResult.fail("Could not scroll source item into view.");
@@ -496,17 +480,10 @@ final class BankActuator
         {
             return ActuatorResult.fail("Source or target slot bounds were unavailable/outside the canvas.");
         }
-
-        if (!isBankUiReadyForInteraction())
-        {
-            return ActuatorResult.fail("Bank UI closed before sorting.");
-        }
-
         Microbot.drag(bounds.source(), bounds.target());
         Global.sleep(ACTION_SETTLE_MS);
-        return waitForBankUiStable(1200)
-            ? ActuatorResult.ok("Inserted " + sourceStack.name() + " before " + targetStack.name() + ".")
-            : ActuatorResult.fail("Bank UI closed while sorting.");
+        waitForBankUiStable(1200);
+        return ActuatorResult.ok("Inserted " + sourceStack.name() + " before " + targetStack.name() + ".");
     }
 
     int realTabCount()
@@ -589,11 +566,6 @@ final class BankActuator
     {
         return Microbot.getClientThread().runOnClientThreadOptional(() ->
         {
-            if (!isBankUiReadyForInteractionOnClient())
-            {
-                return false;
-            }
-
             /*
              * Do not index Rs2Bank.getTabs() directly. The returned list is a
              * dynamic widget collection and its list position is not the same
@@ -624,7 +596,7 @@ final class BankActuator
     private boolean scrollBankToSlotSafe(int slot)
     {
         return Microbot.getClientThread().runOnClientThreadOptional(
-            () -> isBankUiReadyForInteractionOnClient() && Rs2Bank.scrollBankToSlot(slot)).orElse(false);
+            () -> Rs2Bank.scrollBankToSlot(slot)).orElse(false);
     }
 
     /**
@@ -636,11 +608,6 @@ final class BankActuator
     {
         return Microbot.getClientThread().runOnClientThreadOptional(() ->
         {
-            if (!isBankUiReadyForInteractionOnClient())
-            {
-                return null;
-            }
-
             /*
              * Do not derive the source rectangle from the bank ItemContainer slot.
              * The bank can contain placeholders and the visual widget list is
@@ -705,11 +672,6 @@ final class BankActuator
     {
         return Microbot.getClientThread().runOnClientThreadOptional(() ->
         {
-            if (!isBankUiReadyForInteractionOnClient())
-            {
-                return null;
-            }
-
             Rectangle source = Rs2Bank.getItemBounds(sourceSlot);
             Rectangle target = Rs2Bank.getItemBounds(targetSlot);
             if (!hasUsableCanvasRectangle(source) || !hasUsableCanvasRectangle(target))
@@ -747,24 +709,20 @@ final class BankActuator
 
     private boolean waitForBankUiStable(int timeoutMs)
     {
-        return Global.sleepUntil(this::isBankUiReadyForInteraction, timeoutMs);
-    }
+        return Global.sleepUntil(() ->
+            Microbot.getClientThread().runOnClientThreadOptional(() ->
+            {
+                Widget root = client.getWidget(BANK_GROUP_ID, 1);
+                Widget items = client.getWidget(Rs2Bank.BANK_ITEM_CONTAINER);
+                if (root == null || root.isHidden() || items == null || items.isHidden())
+                {
+                    return false;
+                }
 
-    private boolean isBankUiReadyForInteraction()
-    {
-        return Microbot.getClientThread().runOnClientThreadOptional(
-            this::isBankUiReadyForInteractionOnClient).orElse(false);
-    }
-
-    private boolean isBankUiReadyForInteractionOnClient()
-    {
-        Widget root = client.getWidget(BANK_GROUP_ID, 1);
-        Widget items = client.getWidget(Rs2Bank.BANK_ITEM_CONTAINER);
-        return root != null
-            && !root.isHidden()
-            && items != null
-            && !items.isHidden()
-            && hasUsableCanvasRectangle(items.getBounds());
+                Rectangle bounds = items.getBounds();
+                return hasUsableCanvasRectangle(bounds);
+            }).orElse(false),
+            timeoutMs);
     }
 
     private boolean waitForItemTab(int itemId, int expectedTab, int expectedQuantity, int timeoutMs)
