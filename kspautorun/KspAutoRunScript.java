@@ -167,12 +167,6 @@ public class KspAutoRunScript extends Script
 
         if (awaitingEnergyReset)
         {
-            // The reset postcondition is specifically "Run disabled while energy is
-            // below the threshold". A later high-energy observation invalidates a
-            // pending low-energy observation; retaining its timestamp would let a
-            // future, single low-energy read clear the latch and reopen this
-            // non-idempotent toggle cycle.
-            runDisabledObservedAt = 0L;
             state = "waiting for next energy cycle";
             return;
         }
