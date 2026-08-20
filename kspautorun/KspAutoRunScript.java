@@ -20,6 +20,7 @@ public class KspAutoRunScript extends Script
     private long runToggleRequestedAt = 0L;
     private long runDisabledObservedAt = 0L;
     private boolean awaitingEnergyReset = false;
+    private boolean runEnabledObserved = false;
     // Kept locally so runtime state collection does not fall back to another plugin's shared Microbot.status.
     private volatile String state = "waiting to log in";
 
@@ -55,22 +56,31 @@ public class KspAutoRunScript extends Script
 
     private void enableRunIfThresholdReached(KspAutoRunConfig config)
     {
+        final int threshold = Math.max(1, Math.min(100, config.runThreshold()));
+        final int runEnergy = Rs2Player.getRunEnergy();
+
         if (Rs2Player.isRunEnabled())
         {
-            // The requested toggle has reached its postcondition.  From this point the
-            // script is idle until this energy cycle has ended. Requiring the energy
-            // to drop below the threshold before rearming prevents an external or
-            // delayed Run-state change from causing a second, non-idempotent toggle
-            // while the same charge is still available.
+            // A successful toggle is acknowledged only once.  Sampling energy while
+            // Run remains enabled also records a completed energy cycle before the
+            // client publishes the corresponding disabled Run state.
+            if (!runEnabledObserved)
+            {
+                awaitingEnergyReset = true;
+            }
+            if (runEnergy < threshold)
+            {
+                awaitingEnergyReset = false;
+            }
+
+            runEnabledObserved = true;
             runToggleRequestedAt = 0L;
             runDisabledObservedAt = 0L;
-            awaitingEnergyReset = true;
             state = "monitoring run energy";
             return;
         }
 
-        final int threshold = Math.max(1, Math.min(100, config.runThreshold()));
-        final int runEnergy = Rs2Player.getRunEnergy();
+        runEnabledObserved = false;
 
         if (runToggleRequestedAt != 0L)
         {
@@ -226,6 +236,7 @@ public class KspAutoRunScript extends Script
         runToggleRequestedAt = 0L;
         runDisabledObservedAt = 0L;
         awaitingEnergyReset = false;
+        runEnabledObserved = false;
         state = "stopped";
     }
 }
