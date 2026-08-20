@@ -101,7 +101,7 @@ public class KspAutoRunScript extends Script
             runEnabledObserved = true;
             runToggleRequestedAt = 0L;
             runDisabledObservedAt = 0L;
-            state = "monitoring run energy";
+            state = energyState("monitoring run energy", runEnergy, threshold);
             return;
         }
 
@@ -161,7 +161,7 @@ public class KspAutoRunScript extends Script
             runToggleRequestedAt = 0L;
             runDisabledObservedAt = 0L;
             awaitingEnergyReset = false;
-            state = "waiting for energy";
+            state = energyState("waiting for energy", runEnergy, threshold);
             return;
         }
 
@@ -195,7 +195,7 @@ public class KspAutoRunScript extends Script
             return;
         }
 
-        state = "enabling run";
+        state = energyState("enabling run", runEnergy, threshold);
         if (invokeRunOrb())
         {
             // Start the confirmation window only after the client-thread invocation has
@@ -289,6 +289,11 @@ public class KspAutoRunScript extends Script
             this.runEnergy = runEnergy;
             this.runEnabled = runEnabled;
         }
+    }
+
+    private String energyState(String phase, int runEnergy, int threshold)
+    {
+        return phase + " (energy " + runEnergy + "/" + threshold + ")";
     }
 
     private void setMicrobotAutoRun(boolean enabled)
