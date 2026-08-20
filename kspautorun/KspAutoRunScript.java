@@ -74,19 +74,19 @@ public class KspAutoRunScript extends Script
     private void enableRunIfThresholdReached(KspAutoRunConfig config)
     {
         final int threshold = Math.max(1, Math.min(100, config.runThreshold()));
-        final int runEnergy = Rs2Player.getRunEnergy();
-        final Boolean runEnabled = getRunEnabledState();
+        final RunState runState = getRunState();
 
-        // Run state is maintained by the game client. Do not treat an unavailable
-        // client-thread observation as "disabled": Toggle Run is non-idempotent,
-        // so that fallback could turn an already-enabled orb back off.
-        if (runEnabled == null)
+        // Keep energy and the Run flag from the same client-thread observation. A
+        // mixed snapshot can falsely look like "Run disabled below threshold" and
+        // prematurely re-arm this non-idempotent toggle cycle.
+        if (runState == null)
         {
             state = "waiting for run state";
             return;
         }
 
-        if (runEnabled)
+        final int runEnergy = runState.runEnergy;
+        if (runState.runEnabled)
         {
             // A successful toggle is acknowledged only once. Keep the completed
             // energy cycle latched until Run is observed disabled below the
@@ -269,11 +269,26 @@ public class KspAutoRunScript extends Script
                 .orElse(false);
     }
 
-    private Boolean getRunEnabledState()
+    private RunState getRunState()
     {
         return Microbot.getClientThread()
-                .runOnClientThreadOptional(Rs2Player::isRunEnabled)
+                .runOnClientThreadOptional(() -> new RunState(
+                        Rs2Player.getRunEnergy(),
+                        Rs2Player.isRunEnabled()
+                ))
                 .orElse(null);
+    }
+
+    private static final class RunState
+    {
+        private final int runEnergy;
+        private final boolean runEnabled;
+
+        private RunState(int runEnergy, boolean runEnabled)
+        {
+            this.runEnergy = runEnergy;
+            this.runEnabled = runEnabled;
+        }
     }
 
     private void setMicrobotAutoRun(boolean enabled)
