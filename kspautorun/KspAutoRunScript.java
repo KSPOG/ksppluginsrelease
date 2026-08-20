@@ -8,7 +8,6 @@ import net.runelite.client.plugins.microbot.Script;
 import net.runelite.client.plugins.microbot.util.menu.NewMenuEntry;
 import net.runelite.client.plugins.microbot.util.misc.Rs2UiHelper;
 import net.runelite.client.plugins.microbot.util.player.Rs2Player;
-import net.runelite.client.plugins.microbot.util.widget.Rs2Widget;
 
 import java.awt.Rectangle;
 import java.util.concurrent.TimeUnit;
@@ -87,13 +86,6 @@ public class KspAutoRunScript extends Script
     private boolean invokeRunOrb()
     {
         final int packedWidgetId = WidgetInfo.MINIMAP_TOGGLE_RUN_ORB.getId();
-        final Widget widget = Rs2Widget.getWidget(packedWidgetId);
-
-        if (widget == null)
-        {
-            return false;
-        }
-
         final Rectangle bounds = Microbot.getClientThread()
                 .runOnClientThreadOptional(() ->
                 {
@@ -102,10 +94,17 @@ public class KspAutoRunScript extends Script
                 })
                 .orElse(null);
 
-        final Rectangle invokeRectangle =
-                bounds != null && Rs2UiHelper.isRectangleWithinCanvas(bounds)
-                        ? bounds
-                        : Rs2UiHelper.getDefaultRectangle();
+        // The widget tree is client-thread owned. Do not keep a Widget reference obtained by
+        // the scheduled script: it can belong to a different interface state by the time the
+        // menu invoke is built.
+        if (bounds == null)
+        {
+            return false;
+        }
+
+        final Rectangle invokeRectangle = Rs2UiHelper.isRectangleWithinCanvas(bounds)
+                ? bounds
+                : Rs2UiHelper.getDefaultRectangle();
 
         final NewMenuEntry menuEntry = new NewMenuEntry()
                 .option("Toggle Run")
@@ -113,7 +112,7 @@ public class KspAutoRunScript extends Script
                 .identifier(1)
                 .type(MenuAction.CC_OP)
                 .param0(-1)
-                .param1(widget.getId())
+                .param1(packedWidgetId)
                 .forceLeftClick(false);
 
         Microbot.doInvoke(menuEntry, invokeRectangle);
