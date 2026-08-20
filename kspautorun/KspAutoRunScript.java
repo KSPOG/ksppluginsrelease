@@ -20,6 +20,7 @@ public class KspAutoRunScript extends Script
     private static final long RUN_TOGGLE_CONFIRMATION_TIMEOUT_MS = 1_500L;
 
     private long runToggleRequestedAt = 0L;
+    private long successfulRunEnablements = 0L;
     // Kept locally so runtime state collection does not fall back to another plugin's shared Microbot.status.
     private volatile String state = "waiting to log in";
 
@@ -57,8 +58,16 @@ public class KspAutoRunScript extends Script
     {
         if (Rs2Player.isRunEnabled())
         {
-            runToggleRequestedAt = 0L;
-            state = "run enabled";
+            if (runToggleRequestedAt != 0L)
+            {
+                runToggleRequestedAt = 0L;
+                successfulRunEnablements++;
+                state = "run enabled " + successfulRunEnablements;
+            }
+            else
+            {
+                state = "monitoring run energy";
+            }
             return;
         }
 
@@ -137,6 +146,7 @@ public class KspAutoRunScript extends Script
     {
         super.shutdown();
         runToggleRequestedAt = 0L;
+        successfulRunEnablements = 0L;
         state = "stopped";
     }
 }
