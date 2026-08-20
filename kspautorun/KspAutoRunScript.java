@@ -16,10 +16,9 @@ import java.util.concurrent.TimeUnit;
 public class KspAutoRunScript extends Script
 {
     private static final long CHECK_INTERVAL_MS = 250L;
-    private static final long RUN_TOGGLE_CONFIRMATION_TIMEOUT_MS = 1_200L;
+    private static final long INVOKE_COOLDOWN_MS = 600L;
 
-    private boolean runTogglePending;
-    private long runToggleRequestedAt;
+    private long lastInvokeAt = 0L;
 
     public boolean run(KspAutoRunConfig config)
     {
@@ -53,8 +52,6 @@ public class KspAutoRunScript extends Script
     {
         if (Rs2Player.isRunEnabled())
         {
-            runTogglePending = false;
-            runToggleRequestedAt = 0L;
             return;
         }
 
@@ -67,20 +64,14 @@ public class KspAutoRunScript extends Script
         }
 
         final long now = System.currentTimeMillis();
-        if (runTogglePending)
+        if (now - lastInvokeAt < INVOKE_COOLDOWN_MS)
         {
-            if (now - runToggleRequestedAt < RUN_TOGGLE_CONFIRMATION_TIMEOUT_MS)
-            {
-                return;
-            }
-
-            runTogglePending = false;
+            return;
         }
 
         if (invokeRunOrb())
         {
-            runTogglePending = true;
-            runToggleRequestedAt = now;
+            lastInvokeAt = now;
         }
     }
 
@@ -133,7 +124,6 @@ public class KspAutoRunScript extends Script
     public void shutdown()
     {
         super.shutdown();
-        runTogglePending = false;
-        runToggleRequestedAt = 0L;
+        lastInvokeAt = 0L;
     }
 }
