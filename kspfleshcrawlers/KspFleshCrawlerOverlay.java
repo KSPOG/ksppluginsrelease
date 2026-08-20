@@ -2,6 +2,7 @@ package net.runelite.client.plugins.microbot.kspfleshcrawlers;
 
 import net.runelite.api.Skill;
 import net.runelite.client.plugins.microbot.Microbot;
+import net.runelite.client.plugins.microbot.kspbryophyta.KspBryophytaPlugin;
 import net.runelite.client.ui.overlay.OverlayPanel;
 import net.runelite.client.ui.overlay.OverlayPosition;
 import net.runelite.client.ui.overlay.components.LineComponent;
@@ -35,7 +36,7 @@ public class KspFleshCrawlerOverlay extends OverlayPanel {
         panelComponent.setPreferredSize(new Dimension(235, 0));
 
         panelComponent.getChildren().add(TitleComponent.builder()
-                .text("KSP Flesh Crawlers")
+                .text("KSP Flesh Crawlersv" + KspFleshCrawlerPlugin.VERSION)
                 .color(Color.WHITE)
                 .build());
 

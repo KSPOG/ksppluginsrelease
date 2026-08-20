@@ -1,7 +1,6 @@
 package net.runelite.client.plugins.microbot.kspfleshcrawlers;
 
 import net.runelite.api.Actor;
-import net.runelite.api.NPC;
 import net.runelite.api.Skill;
 import net.runelite.api.TileObject;
 import net.runelite.api.TileItem;
@@ -1125,21 +1124,35 @@ public class KspFleshCrawlerScript extends Script {
     }
 
     private void trackCurrentOpponent() {
-        Actor interacting = Microbot.getClientThread().runOnClientThreadOptional(() -> {
-            if (Microbot.getClient().getLocalPlayer() == null) {
-                return null;
+        /*
+         * Never leak the raw RuneLite Actor/NPC out of the client-thread callback.
+         * Several injected NPC accessors (notably getName()) require the client
+         * thread. v1.0.5 returned the raw Actor and then called npc.getName() on
+         * the script scheduler thread, causing an exception every combat tick.
+         * Snapshot only the primitive NPC index while we are on the client thread.
+         */
+        int opponentIndex = Microbot.getClientThread().runOnClientThreadOptional(() -> {
+            if (Microbot.getClient() == null || Microbot.getClient().getLocalPlayer() == null) {
+                return -1;
             }
-            return Microbot.getClient().getLocalPlayer().getInteracting();
-        }).orElse(null);
 
-        if (interacting instanceof NPC) {
-            NPC npc = (NPC) interacting;
-            if (npc.getName() != null && NPC_NAME.equalsIgnoreCase(npc.getName())) {
-                if (trackedNpcIndex != npc.getIndex()) {
-                    trackedNpcIndex = npc.getIndex();
-                    trackedNpcCounted = false;
-                }
+            Actor interacting = Microbot.getClient().getLocalPlayer().getInteracting();
+            if (!(interacting instanceof net.runelite.api.NPC)) {
+                return -1;
             }
+
+            net.runelite.api.NPC npc = (net.runelite.api.NPC) interacting;
+            String name = npc.getName();
+            if (name == null || !NPC_NAME.equalsIgnoreCase(name)) {
+                return -1;
+            }
+
+            return npc.getIndex();
+        }).orElse(-1);
+
+        if (opponentIndex >= 0 && trackedNpcIndex != opponentIndex) {
+            trackedNpcIndex = opponentIndex;
+            trackedNpcCounted = false;
         }
     }
 
@@ -1148,8 +1161,25 @@ public class KspFleshCrawlerScript extends Script {
             return;
         }
 
-        Rs2NpcModel tracked = Rs2Npc.getNpcByIndex(trackedNpcIndex);
-        if (tracked != null && tracked.isDead()) {
+        final int npcIndex = trackedNpcIndex;
+        Boolean dead = Microbot.getClientThread().runOnClientThreadOptional(() -> {
+            if (Microbot.getClient() == null || Microbot.getClient().getTopLevelWorldView() == null
+                    || Microbot.getClient().getTopLevelWorldView().npcs() == null) {
+                return null;
+            }
+
+            for (net.runelite.api.NPC npc : Microbot.getClient().getTopLevelWorldView().npcs()) {
+                if (npc != null && npc.getIndex() == npcIndex) {
+                    return npc.isDead();
+                }
+            }
+
+            // The tracked NPC disappearing from the scene is not by itself proof
+            // of a kill (e.g. region/scene transition), so do not increment here.
+            return null;
+        }).orElse(null);
+
+        if (Boolean.TRUE.equals(dead)) {
             kills++;
             trackedNpcCounted = true;
             lastAction = "Flesh Crawler defeated";
