@@ -146,7 +146,10 @@ public class KspAutoRunScript extends Script
         state = "enabling run";
         if (invokeRunOrb())
         {
-            runToggleRequestedAt = now;
+            // Start the confirmation window only after the client-thread invocation has
+            // been submitted. The earlier timestamp is for the disabled-state check and
+            // must not consume time from the action postcondition.
+            runToggleRequestedAt = System.currentTimeMillis();
             runDisabledObservedAt = 0L;
             // The invoke has been submitted; wait for the run-state postcondition rather
             // than continuing to report the completed action while the client updates.
