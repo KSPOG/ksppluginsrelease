@@ -15,9 +15,11 @@ import java.util.concurrent.TimeUnit;
 public class KspAutoRunScript extends Script
 {
     private static final long CHECK_INTERVAL_MS = 250L;
+    private static final long RUN_TOGGLE_CONFIRMATION_TIMEOUT_MS = 3_000L;
 
     private long runToggleRequestedAt = 0L;
     private long runDisabledObservedAt = 0L;
+    private boolean awaitingEnergyReset = false;
     // Kept locally so runtime state collection does not fall back to another plugin's shared Microbot.status.
     private volatile String state = "waiting to log in";
 
@@ -60,6 +62,7 @@ public class KspAutoRunScript extends Script
             // rather than retaining the completed action as the current state.
             runToggleRequestedAt = 0L;
             runDisabledObservedAt = 0L;
+            awaitingEnergyReset = false;
             state = "monitoring run energy";
             return;
         }
@@ -75,12 +78,32 @@ public class KspAutoRunScript extends Script
             // Run back off.
             runToggleRequestedAt = 0L;
             runDisabledObservedAt = 0L;
+            awaitingEnergyReset = false;
             state = "waiting for energy";
+            return;
+        }
+
+        if (awaitingEnergyReset)
+        {
+            state = "waiting for next energy cycle";
             return;
         }
 
         if (runToggleRequestedAt != 0L)
         {
+            if (System.currentTimeMillis() - runToggleRequestedAt
+                    >= RUN_TOGGLE_CONFIRMATION_TIMEOUT_MS)
+            {
+                // Toggle Run is not idempotent. If its postcondition was not observed,
+                // do not send another toggle that could disable Run after a delayed client
+                // update. Resume only after energy has fallen below the threshold.
+                runToggleRequestedAt = 0L;
+                runDisabledObservedAt = 0L;
+                awaitingEnergyReset = true;
+                state = "waiting for next energy cycle";
+                return;
+            }
+
             state = "waiting for run toggle";
             return;
         }
@@ -111,6 +134,7 @@ public class KspAutoRunScript extends Script
         {
             runToggleRequestedAt = 0L;
             runDisabledObservedAt = 0L;
+            awaitingEnergyReset = false;
             state = "monitoring run energy";
             return;
         }
@@ -188,6 +212,7 @@ public class KspAutoRunScript extends Script
         super.shutdown();
         runToggleRequestedAt = 0L;
         runDisabledObservedAt = 0L;
+        awaitingEnergyReset = false;
         state = "stopped";
     }
 }
