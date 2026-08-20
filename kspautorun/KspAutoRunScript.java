@@ -19,6 +19,8 @@ public class KspAutoRunScript extends Script
     private static final long INVOKE_COOLDOWN_MS = 600L;
 
     private long lastInvokeAt = 0L;
+    // Kept locally so runtime state collection does not fall back to another plugin's shared Microbot.status.
+    private volatile String state = "waiting to log in";
 
     public boolean run(KspAutoRunConfig config)
     {
@@ -28,11 +30,13 @@ public class KspAutoRunScript extends Script
             {
                 if (Microbot.pauseAllScripts.get() || Thread.currentThread().isInterrupted())
                 {
+                    state = "paused";
                     return;
                 }
 
                 if (!Microbot.isLoggedIn())
                 {
+                    state = "waiting to log in";
                     return;
                 }
 
@@ -52,6 +56,7 @@ public class KspAutoRunScript extends Script
     {
         if (Rs2Player.isRunEnabled())
         {
+            state = "run enabled";
             return;
         }
 
@@ -60,15 +65,18 @@ public class KspAutoRunScript extends Script
 
         if (runEnergy < threshold)
         {
+            state = "waiting for energy";
             return;
         }
 
         final long now = System.currentTimeMillis();
         if (now - lastInvokeAt < INVOKE_COOLDOWN_MS)
         {
+            state = "waiting for run toggle";
             return;
         }
 
+        state = "enabling run";
         if (invokeRunOrb())
         {
             lastInvokeAt = now;
@@ -125,5 +133,6 @@ public class KspAutoRunScript extends Script
     {
         super.shutdown();
         lastInvokeAt = 0L;
+        state = "stopped";
     }
 }
