@@ -75,8 +75,18 @@ public class KspAutoRunScript extends Script
     {
         final int threshold = Math.max(1, Math.min(100, config.runThreshold()));
         final int runEnergy = Rs2Player.getRunEnergy();
+        final Boolean runEnabled = getRunEnabledState();
 
-        if (Rs2Player.isRunEnabled())
+        // Run state is maintained by the game client. Do not treat an unavailable
+        // client-thread observation as "disabled": Toggle Run is non-idempotent,
+        // so that fallback could turn an already-enabled orb back off.
+        if (runEnabled == null)
+        {
+            state = "waiting for run state";
+            return;
+        }
+
+        if (runEnabled)
         {
             // A successful toggle is acknowledged only once. Keep the completed
             // energy cycle latched until Run is observed disabled below the
@@ -179,19 +189,6 @@ public class KspAutoRunScript extends Script
             return;
         }
 
-        // The run state may change after the confirmation above and before this
-        // scheduled task submits the invoke. Toggle Run is not idempotent, so
-        // invoking the orb after another client update has enabled it would turn
-        // Run back off and restart the waiting-for-energy cycle.
-        if (Rs2Player.isRunEnabled())
-        {
-            runToggleRequestedAt = 0L;
-            runDisabledObservedAt = 0L;
-            awaitingEnergyReset = false;
-            state = "monitoring run energy";
-            return;
-        }
-
         state = "enabling run";
         if (invokeRunOrb())
         {
@@ -264,6 +261,13 @@ public class KspAutoRunScript extends Script
                     return true;
                 })
                 .orElse(false);
+    }
+
+    private Boolean getRunEnabledState()
+    {
+        return Microbot.getClientThread()
+                .runOnClientThreadOptional(Rs2Player::isRunEnabled)
+                .orElse(null);
     }
 
     private void setMicrobotAutoRun(boolean enabled)
