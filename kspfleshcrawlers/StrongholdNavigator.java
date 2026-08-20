@@ -15,8 +15,9 @@ import java.util.List;
  * Deterministic Stronghold navigator for the exact rooms supplied by the user.
  *
  * Design rules:
- *  - WebWalker is used again, but only for known reachable segments inside the supplied rooms/corridors.
- *  - WebWalker is never given a target on the far side of a closed Stronghold door.
+ *  - WebWalker owns movement inside each known room/corridor and walks to the approach tile of the NEXT known door.
+ *  - The plugin only interacts with a Stronghold door after WebWalker has brought the player next to that door.
+ *  - WebWalker is never given a destination on the far side of a closed Stronghold door.
  *  - Door crossings, portals, ropes and ladders remain deterministic object interactions.
  *  - No nearest-door logic exists; every floor-2 door is bound to one specific airlock boundary.
  *  - The bank exit uses the east floor-2 rope shortcut instead of reversing the maze.
@@ -47,6 +48,7 @@ final class StrongholdNavigator {
     private static final int FAM_DOOR_OPEN_B = 18965;
 
     private static final long MOVE_COOLDOWN_MS = 700L;
+    private static final int DOOR_APPROACH_DISTANCE = 1;
     private static final long OBJECT_RETRY_MS = 1_800L;
     private static final long DOOR_RETRY_MS = 2_400L;
     private static final int MAX_DOOR_ATTEMPTS = 6;
@@ -235,9 +237,14 @@ final class StrongholdNavigator {
         }
 
         if (StrongholdZones.ROOM_1_EXIT.contains(player)) {
-            stage = "Room 1 corridor";
-            action = "Following fixed corridor checkpoints";
-            followCorridor(player);
+            stage = "Room 1 corridor -> ladder room";
+            if (useWebWalker) {
+                action = "WebWalking through room to next door";
+                webWalkToKnownPoint(LADDER_TO_ROOM2.approach, 1, "WebWalker (room -> next door)");
+            } else {
+                action = "Following fixed corridor fallback";
+                followCorridor(player);
+            }
             return false;
         }
 
@@ -330,8 +337,13 @@ final class StrongholdNavigator {
         // recover toward the ladder room with the same fixed corridor route.
         if (StrongholdZones.ROOM_1_EXIT.contains(player)) {
             stage = "Floor 2 corridor recovery";
-            action = "Recovering to ladder room";
-            followCorridor(player);
+            if (useWebWalker) {
+                action = "WebWalking to ladder-room door";
+                webWalkToKnownPoint(LADDER_TO_ROOM2.approach, 1, "WebWalker (recovery -> next door)");
+            } else {
+                action = "Recovering with fixed checkpoints";
+                followCorridor(player);
+            }
             return false;
         }
 
@@ -361,7 +373,7 @@ final class StrongholdNavigator {
         doorAttempts = 0;
         lastDoorAt = 0L;
         stage = transition.name;
-        action = "Approaching fixed airlock";
+        action = "WebWalking to next door";
     }
 
     private boolean tickDoor(DoorTransition transition) {
@@ -379,9 +391,22 @@ final class StrongholdNavigator {
 
         if (handleDialogue()) return false;
 
-        if (player.distanceTo(transition.approach) > 1) {
-            action = "Walking to fixed door approach";
-            moveKnown(transition.approach);
+        // Room-state rule: while we are in room X, WebWalker first walks to the
+        // approach tile of room X's NEXT known door.  The plugin does not even
+        // search/click the door until the player has actually arrived there.
+        if (player.distanceTo(transition.approach) > DOOR_APPROACH_DISTANCE) {
+            action = "WebWalking to next door";
+            if (useWebWalker) {
+                webWalkToKnownPoint(transition.approach, DOOR_APPROACH_DISTANCE,
+                        "WebWalker (room -> next door)");
+            } else {
+                moveKnown(transition.approach);
+            }
+            return false;
+        }
+
+        if (Rs2Player.isMoving()) {
+            action = "Arriving at next door";
             return false;
         }
 
@@ -498,11 +523,32 @@ final class StrongholdNavigator {
     /**
      * Move toward a target that is known to be in the player's current reachable room/corridor.
      *
-     * The key v2.0.1 rule is that WebWalker is only used when Rs2Walker.canReach(target)
+     * Generic movement helper for non-door targets. Door approaches use webWalkToKnownPoint()
+     * instead, because v2.0.2 explicitly requires WebWalker to bring the player to the next door.
+     * For other room-local targets WebWalker is only used when Rs2Walker.canReach(target)
      * is already true. This prevents the shortest-path transport/door resolver from being
      * asked to solve a closed Stronghold airlock. If the target is not locally reachable,
      * we keep control and fall back to a direct canvas/minimap click instead.
      */
+    /**
+     * WebWalk to a point that is known to be on the CURRENT side of the next closed door.
+     *
+     * Unlike the old generic maze routing, this method is never given a tile beyond the
+     * door.  That means the WebWalker only has to solve normal floor movement inside the
+     * current room/corridor.  Door interaction remains owned by this navigator.
+     */
+    private void webWalkToKnownPoint(WorldPoint target, int distance, String mode) {
+        if (target == null) return;
+        long now = System.currentTimeMillis();
+        if (now - lastMoveAt < MOVE_COOLDOWN_MS || Rs2Player.isMoving()) return;
+
+        movementMode = mode;
+        boolean moved = Rs2Walker.walkTo(target, Math.max(0, distance));
+        if (moved) {
+            lastMoveAt = now;
+        }
+    }
+
     private void moveKnown(WorldPoint target) {
         if (target == null) return;
         long now = System.currentTimeMillis();
@@ -526,7 +572,9 @@ final class StrongholdNavigator {
     }
 
     /**
-     * Never hand an opened airlock crossing to WebWalker. The destination is deliberately
+     * After the fixed door is open, make only the tiny crossing ourselves. As soon as the
+     * destination room polygon is entered, the next tick maps that room to its NEXT door and
+     * WebWalker takes over the approach again. The destination is deliberately
      * only one or two tiles through the exact door that we just opened, which avoids the
      * old behaviour where the generic walker could re-select a door/transport.
      */
