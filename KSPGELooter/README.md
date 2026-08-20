@@ -1,10 +1,16 @@
-# KSP GE Looter v0.1.2
+# KSP GE Looter v0.1.3
 
 ## Features
 
 - Configurable minimum **total Grand Exchange value** for ground-item stacks.
 - Repeated fast `Take` interactions ("spam clicking") on the selected loot target.
 - Hard perimeter guard using the exact coordinates supplied for the Grand Exchange area.
+- Optional **Priority Mode**:
+  - Watches for ground items meeting the configured GE-value threshold.
+  - When qualifying loot appears, temporarily pauses other Microbot scripts without restarting them.
+  - The looter remains active while it owns that pause, including while creating inventory space.
+  - As soon as no qualifying ground loot remains, it releases only the pause it created and hands control back.
+  - If scripts were already paused before the looter tried to take priority, it does not claim ownership and will not unpause that external pause.
 - Optional High Level Alchemy:
   - With **Staff of fire** equipped: item HA value must be greater than **1 Nature rune**.
   - Without **Staff of fire** equipped: item HA value must be greater than **1 Nature rune + 5 Fire runes**.
@@ -23,6 +29,7 @@ The expanded session overlay shows:
 
 - Current status and whether the player is inside the protected GE area.
 - Runtime.
+- Priority Mode state, takeover state, and whether the looter owns the shared script pause.
 - Current loot target and its total GE value.
 - Configured minimum GE value.
 - Spam-click count and delay.
@@ -52,6 +59,7 @@ For a direct Microbot-Hub source integration, move the Java files into:
 ## Config defaults
 
 - Minimum GE Value: `1000`
+- Priority Mode: `false`
 - High Alch: `false`
 - Clicks Per Item: `5`
 - Click Delay: `70 ms`
@@ -61,3 +69,9 @@ For a direct Microbot-Hub source integration, move the Java files into:
 The supplied perimeter is represented with RuneLite `WorldPoint` values. The polygon also explicitly includes each supplied perimeter tile so edge points are not rejected by `Polygon.contains()`.
 
 The looter gives ground loot priority while inventory space exists. High Alchemy runs when the inventory is full or when there is currently no qualifying ground loot, reducing the chance of missing valuable drops.
+
+## Priority Mode behavior
+
+Microbot currently exposes `Microbot.pauseAllScripts` as the shared script-level pause gate. KSP GE Looter uses that gate transactionally: it only resumes it when the looter itself successfully changed the flag from running to paused. This preserves the running script's state instead of disabling/restarting its plugin.
+
+When Priority Mode is enabled, idle High Alchemy is intentionally suppressed after the last qualifying ground item disappears so control is returned immediately to the interrupted script. High Alchemy can still be used during an active loot takeover when inventory space must be created.

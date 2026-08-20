@@ -16,16 +16,23 @@ public interface KSPGELooterConfig extends Config
     String lootingSection = "looting";
 
     @ConfigSection(
+            name = "Priority Mode",
+            description = "Temporarily pauses other Microbot scripts while eligible loot is present",
+            position = 1
+    )
+    String prioritySection = "priority";
+
+    @ConfigSection(
             name = "High Alchemy",
             description = "Automatic High Level Alchemy settings",
-            position = 1
+            position = 2
     )
     String alchemySection = "alchemy";
 
     @ConfigSection(
             name = "Spam Clicking",
             description = "Controls repeated Take interactions",
-            position = 2
+            position = 3
     )
     String spamSection = "spam";
 
@@ -39,6 +46,18 @@ public interface KSPGELooterConfig extends Config
     default int minimumGeValue()
     {
         return 1000;
+    }
+
+    @ConfigItem(
+            keyName = "priorityMode",
+            name = "Priority Mode",
+            description = "When eligible loot appears, pause other Microbot scripts until no eligible loot remains",
+            position = 0,
+            section = prioritySection
+    )
+    default boolean priorityMode()
+    {
+        return false;
     }
 
     @ConfigItem(

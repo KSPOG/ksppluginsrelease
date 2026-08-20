@@ -52,6 +52,8 @@ public class KSPGELooterScript extends Script
     public static volatile int fireRunes = 0;
     public static volatile boolean staffOfFireEquipped = false;
     public static volatile boolean insideArea = false;
+    public static volatile boolean priorityTakeoverActive = false;
+    public static volatile boolean priorityPauseOwned = false;
 
     private static long startTimeMs = 0L;
 
@@ -59,6 +61,7 @@ public class KSPGELooterScript extends Script
     private int fireRunePrice = 0;
     private long lastRunePriceRefresh = 0L;
     private long lastAlchAt = 0L;
+    private boolean ownsPriorityPause = false;
 
 
     public boolean run(KSPGELooterConfig config)
@@ -80,20 +83,50 @@ public class KSPGELooterScript extends Script
         fireRunes = 0;
         staffOfFireEquipped = false;
         insideArea = false;
+        priorityTakeoverActive = false;
+        priorityPauseOwned = false;
+        ownsPriorityPause = false;
 
         mainScheduledFuture = scheduledExecutorService.scheduleWithFixedDelay(() -> {
             try
             {
-                if (!super.run() || !Microbot.isLoggedIn())
+                boolean baseCanRun = super.run();
+
+                /*
+                 * While this looter owns Priority Mode's global pause, Script.run()
+                 * returns false because Microbot.pauseAllScripts is true. The looter
+                 * must remain alive so it can finish the loot interrupt and release
+                 * the exact pause it created.
+                 */
+                if (!baseCanRun && !ownsPriorityPause)
                 {
                     return;
                 }
 
+                if (!Microbot.isLoggedIn())
+                {
+                    releasePriorityPause("Logged out");
+                    return;
+                }
+
+                // If another controller explicitly cleared the shared pause, drop
+                // stale ownership. A still-present loot target can acquire it again.
+                if (ownsPriorityPause && !Microbot.pauseAllScripts.get())
+                {
+                    ownsPriorityPause = false;
+                    priorityPauseOwned = false;
+                }
+
+                if (!config.priorityMode() && ownsPriorityPause)
+                {
+                    releasePriorityPause("Priority Mode disabled");
+                }
+
                 updateOverlayState();
 
-                WorldPoint playerLocation = Rs2Player.getWorldLocation();
                 if (!insideArea)
                 {
+                    releasePriorityPause("Outside GE area");
                     status = "OUTSIDE AREA - PAUSED";
                     targetName = "-";
                     targetGeValue = 0L;
@@ -108,9 +141,37 @@ public class KSPGELooterScript extends Script
                 refreshRunePricesIfNeeded();
 
                 /*
+                 * Detect eligible ground loot before inventory handling. This lets
+                 * Priority Mode stop the other active script immediately, even when
+                 * this looter first needs to alch/bank to create inventory space.
+                 */
+                Rs2TileItemModel lootTarget = findLootTarget(Math.max(0, config.minimumGeValue()));
+
+                if (config.priorityMode())
+                {
+                    if (lootTarget != null)
+                    {
+                        beginPriorityTakeover();
+                    }
+                    else
+                    {
+                        releasePriorityPause("No eligible loot remains");
+
+                        // Priority Mode is an interrupt-only mode: once loot is gone,
+                        // immediately hand control back to the previously running script.
+                        targetName = "-";
+                        targetGeValue = 0L;
+                        status = "Waiting for priority loot";
+                        updateOverlayState();
+                        return;
+                    }
+                }
+
+                /*
                  * Full inventory rule:
                  * 1) If High Alch is enabled and an actionable profitable alch exists, alch it.
                  * 2) Otherwise bank all non-rune items.
+                 * Priority takeover remains active while qualifying ground loot still exists.
                  */
                 if (Rs2Inventory.isFull())
                 {
@@ -123,18 +184,13 @@ public class KSPGELooterScript extends Script
                     return;
                 }
 
-                /*
-                 * Loot has priority while inventory space exists so valuable ground
-                 * items are not missed while the script is spending ticks alching.
-                 */
-                Rs2TileItemModel lootTarget = findLootTarget(Math.max(0, config.minimumGeValue()));
                 if (lootTarget != null)
                 {
                     spamLoot(lootTarget, config);
                     return;
                 }
 
-                // No eligible ground item right now: use idle time to High Alch.
+                // Normal mode retains the original idle-time High Alch behavior.
                 if (config.highAlch() && tryHighAlch())
                 {
                     return;
@@ -158,12 +214,62 @@ public class KSPGELooterScript extends Script
     @Override
     public void shutdown()
     {
+        releasePriorityPause("Looter stopped");
         super.shutdown();
         status = "Stopped";
         targetName = "-";
         targetGeValue = 0L;
         alchRuneCost = 0L;
         insideArea = false;
+        priorityTakeoverActive = false;
+        priorityPauseOwned = false;
+    }
+
+    private void beginPriorityTakeover()
+    {
+        priorityTakeoverActive = true;
+
+        if (ownsPriorityPause)
+        {
+            priorityPauseOwned = true;
+            return;
+        }
+
+        /*
+         * Only claim ownership when this looter actually changes the shared pause
+         * flag from false -> true. If something else already paused scripts, the
+         * looter must never clear that external pause later.
+         */
+        if (Microbot.pauseAllScripts.compareAndSet(false, true))
+        {
+            ownsPriorityPause = true;
+            priorityPauseOwned = true;
+            Microbot.log("KSP GE Looter Priority Mode: paused other scripts for loot");
+        }
+        else
+        {
+            priorityPauseOwned = false;
+        }
+    }
+
+    private void releasePriorityPause(String reason)
+    {
+        priorityTakeoverActive = false;
+
+        if (!ownsPriorityPause)
+        {
+            priorityPauseOwned = false;
+            return;
+        }
+
+        /*
+         * Resume only the pause state this looter owns. This preserves a pause that
+         * already existed before Priority Mode attempted its takeover.
+         */
+        Microbot.pauseAllScripts.compareAndSet(true, false);
+        ownsPriorityPause = false;
+        priorityPauseOwned = false;
+        Microbot.log("KSP GE Looter Priority Mode: resumed scripts - " + reason);
     }
 
     public static Duration getRuntime()

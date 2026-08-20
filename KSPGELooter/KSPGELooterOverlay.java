@@ -26,7 +26,7 @@ public class KSPGELooterOverlay extends OverlayPanel
     public Dimension render(java.awt.Graphics2D graphics)
     {
         panelComponent.getChildren().clear();
-        panelComponent.setPreferredSize(new Dimension(285, 390));
+        panelComponent.setPreferredSize(new Dimension(300, 430));
 
         Duration runtime = KSPGELooterScript.getRuntime();
         long lootGpPerHour = perHour(KSPGELooterScript.totalLootGeValue, runtime);
@@ -40,6 +40,9 @@ public class KSPGELooterOverlay extends OverlayPanel
         addLine("Status:", KSPGELooterScript.status);
         addLine("Area:", KSPGELooterScript.insideArea ? "Inside GE area" : "OUTSIDE / PAUSED");
         addLine("Runtime:", formatDuration(runtime));
+        addLine("Priority mode:", config.priorityMode() ? "ON" : "OFF");
+        addLine("Priority takeover:", KSPGELooterScript.priorityTakeoverActive ? "ACTIVE" : "Idle");
+        addLine("Script pause:", KSPGELooterScript.priorityPauseOwned ? "Owned by looter" : "Not owned");
 
         addLine("Target:", KSPGELooterScript.targetName);
         addLine("Target GE:", formatGp(KSPGELooterScript.targetGeValue));

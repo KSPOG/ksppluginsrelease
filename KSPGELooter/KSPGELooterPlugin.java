@@ -12,18 +12,18 @@ import javax.inject.Inject;
 import java.awt.AWTException;
 
 @PluginDescriptor(
-        name = PluginConstants.KSP +"GE Looter",
+        name = PluginConstants.KSP + "GE Looter",
         description = "Value-based Grand Exchange looter with optional profitable High Alchemy",
         tags = {"looter", "loot", "ge", "alchemy", "microbot", "ksp"},
         version = KSPGELooterPlugin.version,
-        minClientVersion = "2.0.13",
+        minClientVersion = "0.0.3",
         enabledByDefault = PluginConstants.DEFAULT_ENABLED,
         isExternal = PluginConstants.IS_EXTERNAL
 )
 @Slf4j
 public class KSPGELooterPlugin extends Plugin
 {
-    public static final String version = "0.1.2";
+    public static final String version = "0.1.3";
 
     @Inject
     private KSPGELooterConfig config;
