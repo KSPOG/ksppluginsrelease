@@ -31,6 +31,8 @@ import java.util.stream.Collectors;
 public class KspFleshCrawlerScript extends Script {
     private static final String NPC_NAME = "Flesh Crawler";
     private static final long ATTACK_COMMIT_GRACE_MS = 3_000L;
+    private static final long COMBAT_STALL_TIMEOUT_MS = 6_000L;
+    private static final long COMBAT_RECOVERY_COOLDOWN_MS = 4_000L;
 
     private final CombatTrainingController trainingController = new CombatTrainingController();
     private final StrongholdNavigator navigator = new StrongholdNavigator();
@@ -49,6 +51,18 @@ public class KspFleshCrawlerScript extends Script {
     private volatile boolean trackedNpcCounted;
     private volatile boolean retaliateConfigured;
 
+    // Combat watchdog. RuneLite can keep interaction pointers alive even when no
+    // attack cycle is actually progressing. Track real combat activity so a stale
+    // pointer cannot leave the script in FIGHTING forever.
+    private volatile long lastCombatActivityMs;
+    private volatile long lastCombatRecoveryMs;
+    private volatile int lastObservedOpponentIndex = -1;
+    private volatile int lastObservedPlayerAnimation = -1;
+    private volatile int lastObservedNpcAnimation = -1;
+    private volatile int lastObservedPlayerHp = -1;
+    private volatile int lastObservedNpcHealthRatio = Integer.MIN_VALUE;
+    private volatile String combatWatchdogStatus = "Idle";
+
     public boolean run(KspFleshCrawlerConfig config) {
         Microbot.enableAutoRunOn = true;
         resetSession();
@@ -59,6 +73,7 @@ public class KspFleshCrawlerScript extends Script {
                 if (!super.run()) return;
 
                 updateKillTracking();
+                CombatSnapshot combat = observeCombat();
 
                 if (navigator.handleDialogue()) {
                     mirrorNavigationAction();
@@ -111,10 +126,15 @@ public class KspFleshCrawlerScript extends Script {
                     retaliateConfigured = true;
                 }
 
-                if (hasActiveCombatEngagement()) {
+                if (combat.engaged) {
                     trackCurrentOpponent();
+                    if (handleStalledCombat(combat)) {
+                        return;
+                    }
                     state = FleshCrawlerState.FIGHTING;
-                    lastAction = "Fighting Flesh Crawler";
+                    lastAction = combat.crawlerIndex >= 0
+                            ? "Fighting Flesh Crawler"
+                            : "Waiting for current combat to finish";
                     return;
                 }
 
@@ -141,6 +161,7 @@ public class KspFleshCrawlerScript extends Script {
         bankTripActive = false;
         returningFromBank = false;
         retaliateConfigured = false;
+        resetCombatWatchdog();
     }
 
     private void resetSession() {
@@ -156,6 +177,7 @@ public class KspFleshCrawlerScript extends Script {
         trackedNpcIndex = -1;
         trackedNpcCounted = false;
         retaliateConfigured = false;
+        resetCombatWatchdog();
         navigator.reset();
     }
 
@@ -164,6 +186,7 @@ public class KspFleshCrawlerScript extends Script {
         returningFromBank = false;
         retaliateConfigured = false;
         navigator.reset();
+        resetCombatWatchdog();
         // Prevent auto-retaliate from immediately acquiring another crawler while
         // we are trying to leave after the current fight has ended.
         Rs2Combat.setAutoRetaliate(false);
@@ -378,32 +401,186 @@ public class KspFleshCrawlerScript extends Script {
                 .orElse(null);
     }
 
-    private boolean hasActiveCombatEngagement() {
-        if (System.currentTimeMillis() < attackCommitUntilMs) return true;
-
-        return Microbot.getClientThread().runOnClientThreadOptional(() -> {
-            if (Microbot.getClient() == null || Microbot.getClient().getLocalPlayer() == null) return false;
+    private CombatSnapshot observeCombat() {
+        CombatSnapshot snapshot = Microbot.getClientThread().runOnClientThreadOptional(() -> {
+            if (Microbot.getClient() == null || Microbot.getClient().getLocalPlayer() == null) {
+                return CombatSnapshot.NONE;
+            }
 
             net.runelite.api.Player player = Microbot.getClient().getLocalPlayer();
+            int playerHp = Microbot.getClient().getBoostedSkillLevel(Skill.HITPOINTS);
+            int playerAnimation = player.getAnimation();
+
+            net.runelite.api.NPC playerTarget = null;
             Actor current = player.getInteracting();
-            if (current != null && current.getCombatLevel() > 0 && !current.isDead()) return true;
-
-            if (Microbot.getClient().getTopLevelWorldView() == null
-                    || Microbot.getClient().getTopLevelWorldView().npcs() == null) return false;
-
-            for (net.runelite.api.NPC npc : Microbot.getClient().getTopLevelWorldView().npcs()) {
-                if (npc == null || npc.isDead() || npc.getCombatLevel() < 1) continue;
-                if (npc.getInteracting() == player) return true;
+            if (current instanceof net.runelite.api.NPC) {
+                net.runelite.api.NPC npc = (net.runelite.api.NPC) current;
+                if (!npc.isDead() && npc.getCombatLevel() > 0) {
+                    playerTarget = npc;
+                }
             }
+
+            net.runelite.api.NPC incoming = null;
+            if (Microbot.getClient().getTopLevelWorldView() != null
+                    && Microbot.getClient().getTopLevelWorldView().npcs() != null) {
+                for (net.runelite.api.NPC npc : Microbot.getClient().getTopLevelWorldView().npcs()) {
+                    if (npc == null || npc.isDead() || npc.getCombatLevel() < 1) continue;
+                    if (npc.getInteracting() == player) {
+                        incoming = npc;
+                        if (NPC_NAME.equalsIgnoreCase(npc.getName())) break;
+                    }
+                }
+            }
+
+            net.runelite.api.NPC preferred = playerTarget != null ? playerTarget : incoming;
+            boolean engaged = preferred != null;
+            int opponentIndex = preferred == null ? -1 : preferred.getIndex();
+            String opponentName = preferred == null ? null : preferred.getName();
+            boolean crawler = opponentName != null && NPC_NAME.equalsIgnoreCase(opponentName);
+            int npcAnimation = preferred == null ? -1 : preferred.getAnimation();
+            int npcHealthRatio = preferred == null ? Integer.MIN_VALUE : preferred.getHealthRatio();
+            boolean incomingAttack = incoming != null;
+
+            return new CombatSnapshot(
+                    engaged,
+                    crawler ? opponentIndex : -1,
+                    opponentIndex,
+                    playerAnimation,
+                    npcAnimation,
+                    playerHp,
+                    npcHealthRatio,
+                    incomingAttack
+            );
+        }).orElse(CombatSnapshot.NONE);
+
+        long now = System.currentTimeMillis();
+        if (!snapshot.engaged) {
+            resetObservedCombatState();
+            combatWatchdogStatus = "Idle";
+            return snapshot;
+        }
+
+        boolean activity = false;
+        if (snapshot.opponentIndex != lastObservedOpponentIndex) activity = true;
+        if (snapshot.playerAnimation != -1) activity = true;
+        if (snapshot.npcAnimation != -1) activity = true;
+        if (lastObservedPlayerHp >= 0 && snapshot.playerHp != lastObservedPlayerHp) activity = true;
+        if (lastObservedNpcHealthRatio != Integer.MIN_VALUE
+                && snapshot.npcHealthRatio != lastObservedNpcHealthRatio) activity = true;
+
+        if (lastCombatActivityMs == 0L || activity) {
+            lastCombatActivityMs = now;
+        }
+
+        lastObservedOpponentIndex = snapshot.opponentIndex;
+        lastObservedPlayerAnimation = snapshot.playerAnimation;
+        lastObservedNpcAnimation = snapshot.npcAnimation;
+        lastObservedPlayerHp = snapshot.playerHp;
+        lastObservedNpcHealthRatio = snapshot.npcHealthRatio;
+
+        long quietMs = Math.max(0L, now - lastCombatActivityMs);
+        combatWatchdogStatus = quietMs >= COMBAT_STALL_TIMEOUT_MS
+                ? "Stalled " + (quietMs / 1000L) + "s"
+                : "Active";
+        return snapshot;
+    }
+
+    /**
+     * Recover a fight only by clicking the SAME Flesh Crawler that the client says
+     * is already involved with us. This keeps the previous invariant: never switch
+     * to another crawler while a real combat engagement exists.
+     */
+    private boolean handleStalledCombat(CombatSnapshot snapshot) {
+        if (!snapshot.engaged) return false;
+
+        long now = System.currentTimeMillis();
+        if (lastCombatActivityMs == 0L || now - lastCombatActivityMs < COMBAT_STALL_TIMEOUT_MS) {
             return false;
-        }).orElse(false);
+        }
+        if (now - lastCombatRecoveryMs < COMBAT_RECOVERY_COOLDOWN_MS) {
+            state = FleshCrawlerState.FIGHTING;
+            lastAction = "Combat watchdog waiting after retry";
+            return true;
+        }
+
+        // Only recover Flesh Crawler fights. If some other NPC has us engaged, do
+        // not select a crawler until that engagement genuinely ends.
+        if (snapshot.crawlerIndex < 0) {
+            state = FleshCrawlerState.FIGHTING;
+            lastAction = "Current combat is stalled - waiting";
+            return true;
+        }
+
+        final int sameNpcIndex = snapshot.crawlerIndex;
+        Rs2NpcModel sameCrawler = Rs2Npc.getNpcs(npc -> {
+                    String name = npc.getName();
+                    return npc.getIndex() == sameNpcIndex
+                            && name != null
+                            && NPC_NAME.equalsIgnoreCase(name)
+                            && !npc.isDead()
+                            && StrongholdZones.FLESH_CRAWLER_ROOM.contains(npc.getWorldLocation());
+                })
+                .findFirst()
+                .orElse(null);
+
+        if (sameCrawler == null) {
+            // Player-side interaction pointers can outlive a despawn/death. If no
+            // NPC is actually attacking us anymore, allow normal target selection.
+            if (!snapshot.incomingAttack) {
+                trackedNpcIndex = -1;
+                trackedNpcCounted = false;
+                attackCommitUntilMs = 0L;
+                resetObservedCombatState();
+                combatWatchdogStatus = "Cleared stale target";
+                return false;
+            }
+
+            state = FleshCrawlerState.FIGHTING;
+            lastAction = "Waiting for attacking Flesh Crawler";
+            return true;
+        }
+
+        lastCombatRecoveryMs = now;
+        state = FleshCrawlerState.FIGHTING;
+        lastAction = "Recovering stalled fight - re-attacking same crawler";
+        combatWatchdogStatus = "Retry same crawler";
+
+        if (Rs2Npc.attack(sameCrawler)) {
+            trackedNpcIndex = sameNpcIndex;
+            trackedNpcCounted = false;
+            attackCommitUntilMs = now + ATTACK_COMMIT_GRACE_MS;
+            lastCombatActivityMs = now;
+        }
+        return true;
+    }
+
+    private boolean hasActiveCombatEngagement() {
+        if (System.currentTimeMillis() < attackCommitUntilMs) return true;
+        return observeCombat().engaged;
+    }
+
+    private void resetCombatWatchdog() {
+        lastCombatActivityMs = 0L;
+        lastCombatRecoveryMs = 0L;
+        resetObservedCombatState();
+        combatWatchdogStatus = "Idle";
+    }
+
+    private void resetObservedCombatState() {
+        lastObservedOpponentIndex = -1;
+        lastObservedPlayerAnimation = -1;
+        lastObservedNpcAnimation = -1;
+        lastObservedPlayerHp = -1;
+        lastObservedNpcHealthRatio = Integer.MIN_VALUE;
     }
 
     private void attackNextCrawler(KspFleshCrawlerConfig config) {
-        if (hasActiveCombatEngagement()) {
+        CombatSnapshot combat = observeCombat();
+        if (combat.engaged) {
             trackCurrentOpponent();
+            if (handleStalledCombat(combat)) return;
             state = FleshCrawlerState.FIGHTING;
-            lastAction = "Fighting Flesh Crawler";
+            lastAction = combat.crawlerIndex >= 0 ? "Fighting Flesh Crawler" : "Waiting for current combat to finish";
             return;
         }
 
@@ -425,17 +602,22 @@ public class KspFleshCrawlerScript extends Script {
         }
 
         // Second guard immediately before interaction closes the auto-retaliate race.
-        if (hasActiveCombatEngagement()) {
+        CombatSnapshot beforeClick = observeCombat();
+        if (beforeClick.engaged) {
             trackCurrentOpponent();
+            if (handleStalledCombat(beforeClick)) return;
             state = FleshCrawlerState.FIGHTING;
-            lastAction = "Fighting Flesh Crawler";
+            lastAction = beforeClick.crawlerIndex >= 0 ? "Fighting Flesh Crawler" : "Waiting for current combat to finish";
             return;
         }
 
         if (Rs2Npc.attack(target)) {
             trackedNpcIndex = target.getIndex();
             trackedNpcCounted = false;
-            attackCommitUntilMs = System.currentTimeMillis() + ATTACK_COMMIT_GRACE_MS;
+            long now = System.currentTimeMillis();
+            attackCommitUntilMs = now + ATTACK_COMMIT_GRACE_MS;
+            lastCombatActivityMs = now;
+            combatWatchdogStatus = "Attack committed";
             state = FleshCrawlerState.FIGHTING;
             lastAction = "Attacking Flesh Crawler (level " + target.getCombatLevel() + ")";
         }
@@ -488,6 +670,9 @@ public class KspFleshCrawlerScript extends Script {
             kills++;
             trackedNpcCounted = true;
             attackCommitUntilMs = 0L;
+            resetObservedCombatState();
+            lastCombatActivityMs = 0L;
+            combatWatchdogStatus = "Kill confirmed";
             lastAction = "Flesh Crawler defeated";
         }
     }
@@ -531,4 +716,30 @@ public class KspFleshCrawlerScript extends Script {
     public String getNavigationZone() { return navigator.getCurrentZoneName(); }
     public String getNavigationError() { return navigator.getError(); }
     public String getNavigationMovementMode() { return navigator.getMovementMode(); }
+    public String getCombatWatchdogStatus() { return combatWatchdogStatus; }
+
+    private static final class CombatSnapshot {
+        private static final CombatSnapshot NONE = new CombatSnapshot(false, -1, -1, -1, -1, -1, Integer.MIN_VALUE, false);
+
+        private final boolean engaged;
+        private final int crawlerIndex;
+        private final int opponentIndex;
+        private final int playerAnimation;
+        private final int npcAnimation;
+        private final int playerHp;
+        private final int npcHealthRatio;
+        private final boolean incomingAttack;
+
+        private CombatSnapshot(boolean engaged, int crawlerIndex, int opponentIndex, int playerAnimation,
+                               int npcAnimation, int playerHp, int npcHealthRatio, boolean incomingAttack) {
+            this.engaged = engaged;
+            this.crawlerIndex = crawlerIndex;
+            this.opponentIndex = opponentIndex;
+            this.playerAnimation = playerAnimation;
+            this.npcAnimation = npcAnimation;
+            this.playerHp = playerHp;
+            this.npcHealthRatio = npcHealthRatio;
+            this.incomingAttack = incomingAttack;
+        }
+    }
 }

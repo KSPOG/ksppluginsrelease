@@ -46,6 +46,7 @@ public class KspFleshCrawlerOverlay extends OverlayPanel {
         addLine("Zone", script.getNavigationZone());
         addLine("Location", locationText());
         addLine("Target", "2040,5188,0");
+        addLine("Combat", script.getCombatWatchdogStatus());
         if (script.getNavigationError() != null) addLine("Nav error", script.getNavigationError());
 
         addLine("Training", trainingText());
