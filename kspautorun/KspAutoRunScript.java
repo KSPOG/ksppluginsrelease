@@ -4,6 +4,7 @@ import net.runelite.api.MenuAction;
 import net.runelite.api.widgets.Widget;
 import net.runelite.api.widgets.WidgetInfo;
 import net.runelite.client.plugins.microbot.Microbot;
+import net.runelite.client.plugins.microbot.MicrobotConfig;
 import net.runelite.client.plugins.microbot.Script;
 import net.runelite.client.plugins.microbot.util.menu.NewMenuEntry;
 import net.runelite.client.plugins.microbot.util.misc.Rs2UiHelper;
@@ -21,15 +22,31 @@ public class KspAutoRunScript extends Script
     private long runDisabledObservedAt = 0L;
     private boolean awaitingEnergyReset = false;
     private boolean runEnabledObserved = false;
+    private Boolean previousMicrobotAutoRun;
     // Kept locally so runtime state collection does not fall back to another plugin's shared Microbot.status.
     private volatile String state = "waiting to log in";
 
     public boolean run(KspAutoRunConfig config)
     {
+        // The shared Microbot auto-run handler also toggles the Run orb. Toggle Run
+        // is non-idempotent, so this plugin must be the sole owner while it is active.
+        if (previousMicrobotAutoRun == null)
+        {
+            previousMicrobotAutoRun = Microbot.enableAutoRunOn;
+        }
+        setMicrobotAutoRun(false);
+
         mainScheduledFuture = scheduledExecutorService.scheduleWithFixedDelay(() ->
         {
             try
             {
+                // Keep the shared handler disabled if another component re-enables it
+                // while this script owns Run toggles.
+                if (Microbot.enableAutoRunOn)
+                {
+                    setMicrobotAutoRun(false);
+                }
+
                 if (Microbot.pauseAllScripts.get() || Thread.currentThread().isInterrupted())
                 {
                     state = "paused";
@@ -227,10 +244,27 @@ public class KspAutoRunScript extends Script
                 .orElse(false);
     }
 
+    private void setMicrobotAutoRun(boolean enabled)
+    {
+        Microbot.enableAutoRunOn = enabled;
+        Microbot.getConfigManager().setConfiguration(
+                MicrobotConfig.configGroup,
+                MicrobotConfig.keyEnableAutoRunOn,
+                enabled
+        );
+    }
+
     @Override
     public void shutdown()
     {
         super.shutdown();
+
+        if (previousMicrobotAutoRun != null)
+        {
+            setMicrobotAutoRun(previousMicrobotAutoRun);
+            previousMicrobotAutoRun = null;
+        }
+
         runToggleRequestedAt = 0L;
         runDisabledObservedAt = 0L;
         awaitingEnergyReset = false;
