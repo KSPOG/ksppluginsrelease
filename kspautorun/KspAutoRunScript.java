@@ -122,6 +122,28 @@ public class KspAutoRunScript extends Script
 
         if (runEnergy < threshold)
         {
+            // Run state is updated asynchronously. After this script has observed a
+            // completed toggle, do not treat one disabled read as a new energy cycle:
+            // a stale read would clear the latch and allow a later high-energy read to
+            // submit another non-idempotent Toggle Run. Match the confirmation used
+            // before toggling and require the reset postcondition to persist.
+            if (awaitingEnergyReset)
+            {
+                final long now = System.currentTimeMillis();
+                if (runDisabledObservedAt == 0L)
+                {
+                    runDisabledObservedAt = now;
+                    state = "confirming energy reset";
+                    return;
+                }
+
+                if (now - runDisabledObservedAt < CHECK_INTERVAL_MS)
+                {
+                    state = "confirming energy reset";
+                    return;
+                }
+            }
+
             // A request that did not reach its postcondition can be retried only after
             // this energy cycle ends. Toggle Run is non-idempotent, so retrying an
             // ambiguous request while the original invoke may still be queued can turn
