@@ -85,6 +85,14 @@ public class KspFleshCrawlerScript extends Script {
     private static final long PENDING_DOOR_TIMEOUT_MS = 6_500L;
 
     /*
+     * Rs2Combat.inCombat() can briefly report false between combat ticks or after
+     * an eat/interaction animation even though a Flesh Crawler is still committed
+     * to the player.  Hold an issued Attack command for a short grace window and
+     * also inspect both sides of the actor interaction before selecting a new NPC.
+     */
+    private static final long ATTACK_COMMIT_GRACE_MS = 3_000L;
+
+    /*
      * Route used only when the Vault of War portal is unavailable.
      * These are the current Stronghold QuestHelper line points to the
      * Gift of Peace / ladder area. We deliberately do NOT call web-walk
@@ -188,6 +196,7 @@ public class KspFleshCrawlerScript extends Script {
     private int floor2RouteIndex;
     private long lastMoveClickMs;
     private long lastPortalAttemptMs;
+    private volatile long attackCommitUntilMs;
     private WorldPoint lastTravelPoint;
     private long lastTravelProgressMs;
 
@@ -245,7 +254,7 @@ public class KspFleshCrawlerScript extends Script {
 
                 trainingController.update(config);
 
-                if (Rs2Combat.inCombat()) {
+                if (hasActiveCombatEngagement()) {
                     trackCurrentOpponent();
                     state = FleshCrawlerState.FIGHTING;
                     lastAction = "Fighting Flesh Crawler";
@@ -305,6 +314,7 @@ public class KspFleshCrawlerScript extends Script {
         floor2RouteIndex = 0;
         lastMoveClickMs = 0L;
         lastPortalAttemptMs = 0L;
+        attackCommitUntilMs = 0L;
         lastTravelPoint = null;
         lastTravelProgressMs = System.currentTimeMillis();
         recentlyClickedDoors.clear();
@@ -1264,7 +1274,56 @@ public class KspFleshCrawlerScript extends Script {
         return false;
     }
 
+    /**
+     * Stronger combat guard than Rs2Combat.inCombat().  The Microbot helper is
+     * animation-sensitive, so it can transiently return false while the player
+     * is still engaged (for example immediately after eating).  For this fighter
+     * we treat combat as occupied when either side still targets the other, or
+     * while a recently-issued Attack command is waiting to become an interaction.
+     */
+    private boolean hasActiveCombatEngagement() {
+        if (System.currentTimeMillis() < attackCommitUntilMs) {
+            return true;
+        }
+
+        return Microbot.getClientThread().runOnClientThreadOptional(() -> {
+            if (Microbot.getClient() == null || Microbot.getClient().getLocalPlayer() == null) {
+                return false;
+            }
+
+            net.runelite.api.Player player = Microbot.getClient().getLocalPlayer();
+            Actor current = player.getInteracting();
+            if (current != null && current.getCombatLevel() > 0 && !current.isDead()) {
+                return true;
+            }
+
+            if (Microbot.getClient().getTopLevelWorldView() == null
+                    || Microbot.getClient().getTopLevelWorldView().npcs() == null) {
+                return false;
+            }
+
+            for (net.runelite.api.NPC npc : Microbot.getClient().getTopLevelWorldView().npcs()) {
+                if (npc == null || npc.isDead() || npc.getCombatLevel() < 1) {
+                    continue;
+                }
+                if (npc.getInteracting() == player) {
+                    return true;
+                }
+            }
+            return false;
+        }).orElse(false);
+    }
+
     private void attackNextCrawler(KspFleshCrawlerConfig config) {
+        // Never issue a second Attack while the player is already engaged or
+        // while the previous attack click is still being committed by the client.
+        if (hasActiveCombatEngagement()) {
+            trackCurrentOpponent();
+            state = FleshCrawlerState.FIGHTING;
+            lastAction = "Fighting Flesh Crawler";
+            return;
+        }
+
         if (fightAnchor == null) {
             fightAnchor = DEFAULT_FIGHT_POINT;
         }
@@ -1289,9 +1348,19 @@ public class KspFleshCrawlerScript extends Script {
             return;
         }
 
+        // Re-check immediately before the click.  Auto-retaliate can acquire a
+        // crawler between target selection and this point.
+        if (hasActiveCombatEngagement()) {
+            trackCurrentOpponent();
+            state = FleshCrawlerState.FIGHTING;
+            lastAction = "Fighting Flesh Crawler";
+            return;
+        }
+
         if (Rs2Npc.attack(target)) {
             trackedNpcIndex = target.getIndex();
             trackedNpcCounted = false;
+            attackCommitUntilMs = System.currentTimeMillis() + ATTACK_COMMIT_GRACE_MS;
             state = FleshCrawlerState.FIGHTING;
             lastAction = "Attacking Flesh Crawler (level " + target.getCombatLevel() + ")";
         }
@@ -1310,18 +1379,32 @@ public class KspFleshCrawlerScript extends Script {
                 return -1;
             }
 
-            Actor interacting = Microbot.getClient().getLocalPlayer().getInteracting();
-            if (!(interacting instanceof net.runelite.api.NPC)) {
-                return -1;
+            net.runelite.api.Player player = Microbot.getClient().getLocalPlayer();
+            Actor interacting = player.getInteracting();
+            if (interacting instanceof net.runelite.api.NPC) {
+                net.runelite.api.NPC npc = (net.runelite.api.NPC) interacting;
+                String name = npc.getName();
+                if (name != null && NPC_NAME.equalsIgnoreCase(name)) {
+                    return npc.getIndex();
+                }
             }
 
-            net.runelite.api.NPC npc = (net.runelite.api.NPC) interacting;
-            String name = npc.getName();
-            if (name == null || !NPC_NAME.equalsIgnoreCase(name)) {
-                return -1;
+            // During eating or some combat transitions the player's interacting
+            // pointer can be temporarily null while the crawler still targets us.
+            if (Microbot.getClient().getTopLevelWorldView() != null
+                    && Microbot.getClient().getTopLevelWorldView().npcs() != null) {
+                for (net.runelite.api.NPC npc : Microbot.getClient().getTopLevelWorldView().npcs()) {
+                    if (npc == null || npc.isDead() || npc.getInteracting() != player) {
+                        continue;
+                    }
+                    String name = npc.getName();
+                    if (name != null && NPC_NAME.equalsIgnoreCase(name)) {
+                        return npc.getIndex();
+                    }
+                }
             }
 
-            return npc.getIndex();
+            return -1;
         }).orElse(-1);
 
         if (opponentIndex >= 0 && trackedNpcIndex != opponentIndex) {
