@@ -703,16 +703,18 @@ public class KspFleshCrawlerScript extends Script {
         }
 
         /*
-         * If we are already clearly beyond the doorway and closer to the route
-         * target than when the door was clicked, crossing succeeded.  Clear the
-         * pending state and let the route choose the second airlock door / next
-         * waypoint.  Do not use a raw "distance from door >= 3" test here: that
-         * was the v1.0.6/v1.0.7 bug which discarded the pending door while the
-         * player was still approaching it.
+         * Determine door-crossing success geometrically, not by straight-line
+         * progress to the final waypoint.  The Catacomb of Famine maze often
+         * requires crossing a Rickety door that initially moves the player
+         * sideways or even farther away from the ladder.  v1.0.10 treated those
+         * crossings as failures and repeatedly reopened the same airlock while
+         * banking.
+         *
+         * The vector from the click-side position toward the door defines the
+         * forward direction.  Once the player is on the opposite side of the
+         * door plane, the dot product becomes positive and the crossing is done.
          */
-        if (pendingDoorApproachPoint != null && pendingDoorWaypoint != null
-                && player.distanceTo(pendingDoorWaypoint) + 1 < pendingDoorApproachPoint.distanceTo(pendingDoorWaypoint)
-                && player.distanceTo(pendingDoorLocation) >= 2) {
+        if (isAcrossPendingDoor(player)) {
             clearPendingDoor();
             lastTravelPoint = player;
             lastTravelProgressMs = System.currentTimeMillis();
@@ -762,9 +764,14 @@ public class KspFleshCrawlerScript extends Script {
     }
 
     private WorldPoint chooseDoorCrossTile() {
-        if (pendingDoorLocation == null || pendingDoorWaypoint == null || pendingDoorApproachPoint == null) {
+        if (pendingDoorLocation == null || pendingDoorApproachPoint == null) {
             return null;
         }
+
+        final int forwardX = Integer.compare(
+                pendingDoorLocation.getX() - pendingDoorApproachPoint.getX(), 0);
+        final int forwardY = Integer.compare(
+                pendingDoorLocation.getY() - pendingDoorApproachPoint.getY(), 0);
 
         List<WorldPoint> candidates = new ArrayList<>();
         for (int dx = -2; dx <= 2; dx++) {
@@ -772,29 +779,69 @@ public class KspFleshCrawlerScript extends Script {
                 if (dx == 0 && dy == 0) {
                     continue;
                 }
+
                 WorldPoint point = new WorldPoint(
                         pendingDoorLocation.getX() + dx,
                         pendingDoorLocation.getY() + dy,
                         pendingDoorLocation.getPlane()
                 );
 
-                if (point.distanceTo(pendingDoorApproachPoint) <= 1) {
+                if (point.distanceTo(pendingDoorLocation) > 2) {
                     continue;
                 }
-                if (point.distanceTo(pendingDoorWaypoint) >= pendingDoorApproachPoint.distanceTo(pendingDoorWaypoint)) {
+
+                /*
+                 * Only accept tiles on the far side of the selected doorway.
+                 * This is intentionally independent of distance to the route
+                 * waypoint because Stronghold mazes require temporary detours.
+                 */
+                int sideScore = (point.getX() - pendingDoorLocation.getX()) * forwardX
+                        + (point.getY() - pendingDoorLocation.getY()) * forwardY;
+                if (sideScore <= 0) {
                     continue;
                 }
-                if (Rs2Walker.canReach(point)) {
-                    candidates.add(point);
+
+                if (!Rs2Walker.canReach(point)) {
+                    continue;
                 }
+                candidates.add(point);
             }
         }
 
         return candidates.stream()
-                .min(Comparator.comparingInt(point ->
-                        point.distanceTo(pendingDoorWaypoint) * 10
-                                - point.distanceTo(pendingDoorApproachPoint) * 2))
+                .min(Comparator.comparingInt(point -> {
+                    int distanceFromDoor = point.distanceTo(pendingDoorLocation);
+                    int routeDistance = pendingDoorWaypoint == null ? 0 : point.distanceTo(pendingDoorWaypoint);
+                    int sideDepth = ((point.getX() - pendingDoorLocation.getX()) * forwardX)
+                            + ((point.getY() - pendingDoorLocation.getY()) * forwardY);
+                    return distanceFromDoor * 100 + routeDistance * 2 - sideDepth * 20;
+                }))
                 .orElse(null);
+    }
+
+    /**
+     * Returns true when the player has crossed to the opposite side of the
+     * currently pending Stronghold door.  This avoids assuming that every valid
+     * doorway immediately reduces Euclidean distance to the final destination.
+     */
+    private boolean isAcrossPendingDoor(WorldPoint player) {
+        if (player == null || pendingDoorLocation == null || pendingDoorApproachPoint == null) {
+            return false;
+        }
+
+        int forwardX = Integer.compare(
+                pendingDoorLocation.getX() - pendingDoorApproachPoint.getX(), 0);
+        int forwardY = Integer.compare(
+                pendingDoorLocation.getY() - pendingDoorApproachPoint.getY(), 0);
+
+        if (forwardX == 0 && forwardY == 0) {
+            return false;
+        }
+
+        int playerSide = (player.getX() - pendingDoorLocation.getX()) * forwardX
+                + (player.getY() - pendingDoorLocation.getY()) * forwardY;
+
+        return playerSide > 0 && player.distanceTo(pendingDoorLocation) >= 1;
     }
 
     private void moveLocally(WorldPoint target) {

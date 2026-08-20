@@ -37,7 +37,7 @@ public class KspFleshCrawlerOverlay extends OverlayPanel {
 
         panelComponent.getChildren().add(TitleComponent.builder()
                 .text("Flesh Crawlers v" + KspFleshCrawlerPlugin.VERSION)
-                .color(Color.GREEN)
+                .color(Color.BLACK)
                 .build());
 
         addLine("Runtime", plugin.getRuntimeText());
