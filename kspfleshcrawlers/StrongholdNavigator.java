@@ -10,13 +10,15 @@ import net.runelite.client.plugins.microbot.util.walker.Rs2Walker;
 import java.util.Arrays;
 import java.util.Comparator;
 import java.util.List;
+import java.util.stream.Collectors;
 
 /**
  * Deterministic Stronghold navigator for the exact rooms supplied by the user.
  *
  * Design rules:
- *  - WebWalker owns movement inside each known room/corridor and walks to the approach tile of the NEXT known door.
+ *  - WebWalker owns movement inside each known room/corridor and walks toward the NEXT known/observed door.
  *  - The plugin only interacts with a Stronghold door after WebWalker has brought the player next to that door.
+ *  - In the long Room-1 corridor, loaded Famine doors are discovered from the WebWalker path and handled one-by-one.
  *  - WebWalker is never given a destination on the far side of a closed Stronghold door.
  *  - Door crossings, portals, ropes and ladders remain deterministic object interactions.
  *  - No nearest-door logic exists; every floor-2 door is bound to one specific airlock boundary.
@@ -52,6 +54,12 @@ final class StrongholdNavigator {
     private static final long OBJECT_RETRY_MS = 1_800L;
     private static final long DOOR_RETRY_MS = 2_400L;
     private static final int MAX_DOOR_ATTEMPTS = 6;
+    private static final int CORRIDOR_PATH_DOOR_RADIUS = 4;
+    private static final int CORRIDOR_DOOR_SCAN_RADIUS = 14;
+    private static final int CORRIDOR_NEAR_DOOR_RADIUS = 5;
+    private static final long CORRIDOR_STALL_SCAN_MS = 1_200L;
+    private static final long CORRIDOR_RECENT_DOOR_SUPPRESS_MS = 8_000L;
+    private static final long CORRIDOR_DOOR_SETTLE_MS = 450L;
 
     private static final String[] SECURITY_ANSWERS = {
             "No.", "Me.", "Nobody.", "Talk to any banker.", "Nothing, it's a fake.",
@@ -136,8 +144,19 @@ final class StrongholdNavigator {
     private long lastDoorAt;
     private int doorAttempts;
     private int corridorIndex;
+    private WorldPoint corridorDoorLocation;
+    private WorldPoint corridorDoorApproach;
+    private WorldPoint corridorDoorCross;
+    private long corridorDoorOpenedAt;
+    private long corridorDoorLastInteractAt;
+    private int corridorDoorAttempts;
+    private WorldPoint corridorLastProgressTile;
+    private long corridorLastProgressAt;
+    private WorldPoint lastCrossedCorridorDoor;
+    private long lastCrossedCorridorDoorAt;
     private boolean useWebWalker = true;
     private String movementMode = "Idle";
+    private String nextDoorInfo = "None";
 
     void reset() {
         stage = "Idle";
@@ -149,8 +168,14 @@ final class StrongholdNavigator {
         lastDoorAt = 0L;
         doorAttempts = 0;
         corridorIndex = 0;
+        clearCorridorDoor();
+        corridorLastProgressTile = null;
+        corridorLastProgressAt = 0L;
+        lastCrossedCorridorDoor = null;
+        lastCrossedCorridorDoorAt = 0L;
         useWebWalker = true;
         movementMode = "Idle";
+        nextDoorInfo = "None";
     }
 
     boolean tickToFight(boolean useWarPortal, boolean useWebWalker) {
@@ -239,8 +264,7 @@ final class StrongholdNavigator {
         if (StrongholdZones.ROOM_1_EXIT.contains(player)) {
             stage = "Room 1 corridor -> ladder room";
             if (useWebWalker) {
-                action = "WebWalking through room to next door";
-                webWalkToKnownPoint(LADDER_TO_ROOM2.approach, 1, "WebWalker (room -> next door)");
+                tickDoorAwareCorridor(player, LADDER_TO_ROOM2.approach);
             } else {
                 action = "Following fixed corridor fallback";
                 followCorridor(player);
@@ -338,8 +362,7 @@ final class StrongholdNavigator {
         if (StrongholdZones.ROOM_1_EXIT.contains(player)) {
             stage = "Floor 2 corridor recovery";
             if (useWebWalker) {
-                action = "WebWalking to ladder-room door";
-                webWalkToKnownPoint(LADDER_TO_ROOM2.approach, 1, "WebWalker (recovery -> next door)");
+                tickDoorAwareCorridor(player, LADDER_TO_ROOM2.approach);
             } else {
                 action = "Recovering with fixed checkpoints";
                 followCorridor(player);
@@ -356,16 +379,339 @@ final class StrongholdNavigator {
     }
 
     private void followCorridor(WorldPoint player) {
-        while (corridorIndex < ROOM_1_CORRIDOR_ROUTE.size() - 1
-                && player.distanceTo(ROOM_1_CORRIDOR_ROUTE.get(corridorIndex)) <= 2) {
+        corridorIndex = nextCorridorWaypointIndex(player);
+        WorldPoint waypoint = ROOM_1_CORRIDOR_ROUTE.get(corridorIndex);
+        if (player.distanceTo(waypoint) <= 2 && corridorIndex < ROOM_1_CORRIDOR_ROUTE.size() - 1) {
             corridorIndex++;
-        }
-
-        WorldPoint waypoint = ROOM_1_CORRIDOR_ROUTE.get(Math.min(corridorIndex, ROOM_1_CORRIDOR_ROUTE.size() - 1));
-        if (player.distanceTo(waypoint) <= 2 && StrongholdZones.FLOOR_2_LADDER_ROOM.contains(player)) {
-            return;
+            waypoint = ROOM_1_CORRIDOR_ROUTE.get(corridorIndex);
         }
         moveKnown(waypoint);
+    }
+
+    /**
+     * Door-aware WebWalker corridor controller.
+     *
+     * The long Room-1 polygon is not treated as one giant connected room anymore.
+     * Instead we advance through short WebWalker checkpoints. Before each short walk,
+     * the current WebWalker path is inspected for a loaded Catacomb-of-Famine door.
+     * If one is on that path, WebWalker is only sent to the same-side tile immediately
+     * before the door. The plugin opens it, nudges through to the first path tile on
+     * the far side, clears that door, then recomputes the next short path.
+     *
+     * Behaviour:
+     *     room/segment X -> get close to next door -> click next door -> continue -> repeat.
+     */
+    private void tickDoorAwareCorridor(WorldPoint player, WorldPoint finalTarget) {
+        if (corridorDoorLocation != null) {
+            tickObservedCorridorDoor(player);
+            return;
+        }
+
+        if (StrongholdZones.FLOOR_2_LADDER_ROOM.contains(player)
+                || player.distanceTo(finalTarget) <= 2) {
+            action = "Reached ladder-room door approach";
+            return;
+        }
+
+        long now = System.currentTimeMillis();
+        if (corridorLastProgressTile == null || !corridorLastProgressTile.equals(player)) {
+            corridorLastProgressTile = player;
+            corridorLastProgressAt = now;
+        }
+        boolean stalled = !Rs2Player.isMoving()
+                && corridorLastProgressAt > 0L
+                && now - corridorLastProgressAt >= CORRIDOR_STALL_SCAN_MS;
+
+        corridorIndex = nextCorridorWaypointIndex(player);
+        WorldPoint segmentTarget = ROOM_1_CORRIDOR_ROUTE.get(corridorIndex);
+
+        if (player.distanceTo(finalTarget) < player.distanceTo(segmentTarget)) {
+            segmentTarget = finalTarget;
+        }
+
+        // Primary rule: while travelling through room/segment X, identify the NEXT
+        // closed Famine door that blocks the forward WebWalker route.  The path
+        // proximity allowance is intentionally wider than one tile because wall
+        // objects are often offset from the walkable path by 1-3 tiles.
+        //
+        // Recovery rule: if WebWalker has stopped for >1.2s, any closed Famine
+        // door within five tiles can become the next door even if the pathfinder
+        // terminated just before it.  This is the exact situation visible in the
+        // user's screenshots: the numbered path reaches the doorway and then the
+        // walker has nothing else to do.
+        ObservedDoor observed = findNextCorridorDoor(player, segmentTarget, stalled);
+        if (observed != null) {
+            corridorDoorLocation = observed.location;
+            corridorDoorApproach = observed.approach;
+            corridorDoorCross = observed.cross;
+            corridorDoorOpenedAt = 0L;
+            corridorDoorLastInteractAt = 0L;
+            corridorDoorAttempts = 0;
+            nextDoorInfo = format(observed.location) + " -> " + format(observed.cross);
+            action = player.distanceTo(corridorDoorApproach) <= 1
+                    ? "At next door; preparing interaction"
+                    : "WebWalking close to next door";
+            if (player.distanceTo(corridorDoorApproach) > 1) {
+                webWalkToKnownPoint(corridorDoorApproach, 0, "WebWalker (room -> next door)");
+            }
+            return;
+        }
+
+        action = stalled
+                ? "WebWalker stalled; searching nearby next door"
+                : "WebWalking corridor segment " + (corridorIndex + 1) + "/" + ROOM_1_CORRIDOR_ROUTE.size();
+        webWalkToKnownPoint(segmentTarget, 1, "WebWalker (short corridor segment)");
+    }
+
+    private int nextCorridorWaypointIndex(WorldPoint player) {
+        int nearestIndex = 0;
+        int nearestDistance = Integer.MAX_VALUE;
+        for (int i = 0; i < ROOM_1_CORRIDOR_ROUTE.size(); i++) {
+            int distance = player.distanceTo(ROOM_1_CORRIDOR_ROUTE.get(i));
+            if (distance < nearestDistance) {
+                nearestDistance = distance;
+                nearestIndex = i;
+            }
+        }
+
+        if (nearestDistance <= 3 && nearestIndex < ROOM_1_CORRIDOR_ROUTE.size() - 1) {
+            return nearestIndex + 1;
+        }
+        return nearestIndex;
+    }
+
+    private ObservedDoor findNextCorridorDoor(WorldPoint player, WorldPoint segmentTarget, boolean stalled) {
+        if (player == null || segmentTarget == null) return null;
+
+        List<WorldPoint> path;
+        try {
+            path = Rs2Walker.getWalkPath(segmentTarget);
+        } catch (Exception ex) {
+            path = null;
+        }
+
+        final long now = System.currentTimeMillis();
+        final List<WorldPoint> currentPath = path;
+
+        List<TileObject> closedDoors = Rs2GameObject.getAll().stream()
+                .filter(obj -> obj != null && obj.getWorldLocation() != null)
+                .filter(this::isClosedFamineDoor)
+                .filter(obj -> player.distanceTo(obj.getWorldLocation()) <= CORRIDOR_DOOR_SCAN_RADIUS)
+                .filter(obj -> !(lastCrossedCorridorDoor != null
+                        && now - lastCrossedCorridorDoorAt < CORRIDOR_RECENT_DOOR_SUPPRESS_MS
+                        && obj.getWorldLocation().distanceTo(lastCrossedCorridorDoor) <= 1))
+                .collect(Collectors.toList());
+
+        ObservedDoor best = null;
+        int bestScore = Integer.MAX_VALUE;
+
+        for (TileObject door : closedDoors) {
+            WorldPoint doorLoc = door.getWorldLocation();
+            WorldPoint approach = findReachableDoorApproach(player, doorLoc, segmentTarget);
+            if (approach == null) continue;
+
+            int pathIndex = Integer.MAX_VALUE;
+            int pathDistance = Integer.MAX_VALUE;
+            if (currentPath != null && !currentPath.isEmpty()) {
+                for (int i = 0; i < currentPath.size(); i++) {
+                    WorldPoint pp = currentPath.get(i);
+                    if (pp == null || pp.getPlane() != doorLoc.getPlane()) continue;
+                    int d = pp.distanceTo(doorLoc);
+                    if (d < pathDistance) {
+                        pathDistance = d;
+                        pathIndex = i;
+                    }
+                }
+            }
+
+            boolean onForwardPath = pathDistance <= CORRIDOR_PATH_DOOR_RADIUS;
+            boolean stalledBesideDoor = stalled && player.distanceTo(doorLoc) <= CORRIDOR_NEAR_DOOR_RADIUS;
+            boolean alreadyBesideDoor = player.distanceTo(doorLoc) <= 2;
+            if (!onForwardPath && !stalledBesideDoor && !alreadyBesideDoor) continue;
+
+            WorldPoint cross = mirrorAcrossDoor(approach, doorLoc, segmentTarget);
+            if (cross == null) continue;
+
+            int score;
+            if (alreadyBesideDoor) {
+                score = -10_000 + player.distanceTo(approach);
+            } else if (stalledBesideDoor) {
+                score = -5_000 + player.distanceTo(approach) * 10 + doorLoc.distanceTo(segmentTarget);
+            } else {
+                score = pathIndex * 100 + pathDistance * 20 + player.distanceTo(approach);
+            }
+
+            if (score < bestScore) {
+                bestScore = score;
+                best = new ObservedDoor(doorLoc, approach, cross);
+            }
+        }
+
+        return best;
+    }
+
+    private WorldPoint findReachableDoorApproach(WorldPoint player, WorldPoint door, WorldPoint forwardTarget) {
+        if (player == null || door == null) return null;
+
+        WorldPoint[] candidates = {
+                new WorldPoint(door.getX() + 1, door.getY(), door.getPlane()),
+                new WorldPoint(door.getX() - 1, door.getY(), door.getPlane()),
+                new WorldPoint(door.getX(), door.getY() + 1, door.getPlane()),
+                new WorldPoint(door.getX(), door.getY() - 1, door.getPlane())
+        };
+
+        return Arrays.stream(candidates)
+                .filter(tile -> tile.getPlane() == player.getPlane())
+                .filter(tile -> player.distanceTo(tile) <= 1 || safeCanReach(tile))
+                .min(Comparator.comparingInt(tile ->
+                        player.distanceTo(tile) * 20
+                                + (forwardTarget == null ? 0 : tile.distanceTo(forwardTarget))))
+                .orElse(null);
+    }
+
+    private boolean safeCanReach(WorldPoint point) {
+        try {
+            return Rs2Walker.canReach(point);
+        } catch (Exception ignored) {
+            return false;
+        }
+    }
+
+    private WorldPoint mirrorAcrossDoor(WorldPoint approach, WorldPoint door, WorldPoint forwardTarget) {
+        if (approach == null || door == null) return null;
+        int dx = Integer.compare(door.getX(), approach.getX());
+        int dy = Integer.compare(door.getY(), approach.getY());
+
+        // Approach candidates are cardinal, but retain a deterministic fallback in
+        // case object geometry shifts by one tile in a future cache revision.
+        if (dx != 0 && dy != 0) {
+            if (forwardTarget != null
+                    && Math.abs(forwardTarget.getX() - door.getX()) >= Math.abs(forwardTarget.getY() - door.getY())) {
+                dy = 0;
+            } else {
+                dx = 0;
+            }
+        }
+        if (dx == 0 && dy == 0 && forwardTarget != null) {
+            dx = Integer.compare(forwardTarget.getX(), door.getX());
+            dy = Integer.compare(forwardTarget.getY(), door.getY());
+            if (dx != 0 && dy != 0) {
+                if (Math.abs(forwardTarget.getX() - door.getX()) >= Math.abs(forwardTarget.getY() - door.getY())) dy = 0;
+                else dx = 0;
+            }
+        }
+        if (dx == 0 && dy == 0) return null;
+
+        return new WorldPoint(door.getX() + dx, door.getY() + dy, door.getPlane());
+    }
+
+    private boolean isClosedFamineDoor(TileObject obj) {
+        if (obj == null) return false;
+        int id = obj.getId();
+        if (id == FAM_DOOR_CLOSED_A || id == FAM_DOOR_CLOSED_B) return true;
+        try {
+            return Rs2GameObject.hasAction(obj, "Open");
+        } catch (Exception ignored) {
+            return false;
+        }
+    }
+
+    private boolean isOpenFamineDoor(TileObject obj) {
+        if (obj == null) return false;
+        int id = obj.getId();
+        if (id == FAM_DOOR_OPEN_A || id == FAM_DOOR_OPEN_B) return true;
+        try {
+            return Rs2GameObject.hasAction(obj, "Close");
+        } catch (Exception ignored) {
+            return false;
+        }
+    }
+
+    private void tickObservedCorridorDoor(WorldPoint player) {
+        if (corridorDoorLocation == null || corridorDoorApproach == null || corridorDoorCross == null) {
+            clearCorridorDoor();
+            return;
+        }
+
+        if (player.distanceTo(corridorDoorCross) <= 1
+                && player.distanceTo(corridorDoorLocation) >= 1) {
+            action = "Observed door crossed; recalculating";
+            lastCrossedCorridorDoor = corridorDoorLocation;
+            lastCrossedCorridorDoorAt = System.currentTimeMillis();
+            corridorLastProgressTile = player;
+            corridorLastProgressAt = System.currentTimeMillis();
+            clearCorridorDoor();
+            return;
+        }
+
+        if (player.distanceTo(corridorDoorApproach) > 1) {
+            action = "WebWalking close to observed next door";
+            webWalkToKnownPoint(corridorDoorApproach, 0, "WebWalker (to observed door)");
+            return;
+        }
+
+        if (Rs2Player.isMoving()) {
+            action = "Arriving at observed next door";
+            return;
+        }
+
+        TileObject closed = findFamineDoorAt(corridorDoorLocation, true);
+        TileObject open = findFamineDoorAt(corridorDoorLocation, false);
+        long now = System.currentTimeMillis();
+
+        if (closed != null) {
+            if (corridorDoorAttempts >= MAX_DOOR_ATTEMPTS) {
+                fail("Observed corridor door did not open: " + format(corridorDoorLocation));
+                return;
+            }
+
+            if (now - corridorDoorLastInteractAt < DOOR_RETRY_MS) {
+                action = "Waiting for observed door/dialogue";
+                return;
+            }
+
+            action = "Opening observed next Rickety door";
+            movementMode = "Fixed observed-door interaction";
+            if (Rs2GameObject.interact(closed, "Open")) {
+                corridorDoorAttempts++;
+                corridorDoorLastInteractAt = now;
+                corridorDoorOpenedAt = now;
+            } else {
+                corridorDoorLastInteractAt = now - (DOOR_RETRY_MS - 700L);
+            }
+            return;
+        }
+
+        if (corridorDoorOpenedAt == 0L) {
+            corridorDoorOpenedAt = now;
+        }
+        if (now - corridorDoorOpenedAt < CORRIDOR_DOOR_SETTLE_MS) {
+            action = open != null ? "Observed door open; settling" : "Door model changed; settling";
+            return;
+        }
+
+        action = "Crossing observed next door";
+        moveDoorCrossing(corridorDoorCross);
+    }
+
+    private TileObject findFamineDoorAt(WorldPoint expected, boolean closed) {
+        if (expected == null) return null;
+        return Rs2GameObject.getAll().stream()
+                .filter(obj -> obj != null && obj.getWorldLocation() != null)
+                .filter(obj -> closed ? isClosedFamineDoor(obj) : isOpenFamineDoor(obj))
+                .filter(obj -> obj.getWorldLocation().distanceTo(expected) <= 1)
+                .min(Comparator.comparingInt(obj -> obj.getWorldLocation().distanceTo(expected)))
+                .orElse(null);
+    }
+
+    private void clearCorridorDoor() {
+        corridorDoorLocation = null;
+        corridorDoorApproach = null;
+        corridorDoorCross = null;
+        corridorDoorOpenedAt = 0L;
+        corridorDoorLastInteractAt = 0L;
+        corridorDoorAttempts = 0;
+        nextDoorInfo = "None";
     }
 
     private void beginDoor(DoorTransition transition) {
@@ -604,6 +950,7 @@ final class StrongholdNavigator {
     String getAction() { return action; }
     String getError() { return error; }
     String getMovementMode() { return movementMode; }
+    String getNextDoorInfo() { return nextDoorInfo; }
 
     String getCurrentZoneName() {
         StrongholdZones.PolygonZone zone = StrongholdZones.locate(Rs2Player.getWorldLocation());
@@ -612,6 +959,18 @@ final class StrongholdNavigator {
 
     private String format(WorldPoint point) {
         return point.getX() + "," + point.getY() + "," + point.getPlane();
+    }
+
+    private static final class ObservedDoor {
+        private final WorldPoint location;
+        private final WorldPoint approach;
+        private final WorldPoint cross;
+
+        private ObservedDoor(WorldPoint location, WorldPoint approach, WorldPoint cross) {
+            this.location = location;
+            this.approach = approach;
+            this.cross = cross;
+        }
     }
 
     private static final class DoorTransition {

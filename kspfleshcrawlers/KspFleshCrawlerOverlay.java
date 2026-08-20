@@ -34,8 +34,8 @@ public class KspFleshCrawlerOverlay extends OverlayPanel {
         panelComponent.setPreferredSize(new Dimension(285, 0));
 
         panelComponent.getChildren().add(TitleComponent.builder()
-                .text("Flesh Crawlers v" + KspFleshCrawlerPlugin.VERSION)
-                .color(Color.YELLOW)
+                .text("KSP Flesh Crawlers v" + KspFleshCrawlerPlugin.VERSION)
+                .color(Color.WHITE)
                 .build());
 
         addLine("Runtime", plugin.getRuntimeText());
@@ -43,6 +43,7 @@ public class KspFleshCrawlerOverlay extends OverlayPanel {
         addLine("Action", script.getLastAction());
         addLine("Nav stage", script.getNavigationStage());
         addLine("Nav move", script.getNavigationMovementMode());
+        addLine("Next door", script.getNavigationNextDoor());
         addLine("Zone", script.getNavigationZone());
         addLine("Location", locationText());
         addLine("Target", "2040,5188,0");

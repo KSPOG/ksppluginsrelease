@@ -716,6 +716,7 @@ public class KspFleshCrawlerScript extends Script {
     public String getNavigationZone() { return navigator.getCurrentZoneName(); }
     public String getNavigationError() { return navigator.getError(); }
     public String getNavigationMovementMode() { return navigator.getMovementMode(); }
+    public String getNavigationNextDoor() { return navigator.getNextDoorInfo(); }
     public String getCombatWatchdogStatus() { return combatWatchdogStatus; }
 
     private static final class CombatSnapshot {

@@ -23,7 +23,7 @@ import java.time.Instant;
         enabledByDefault = false
 )
 public class KspFleshCrawlerPlugin extends Plugin {
-    public static final String VERSION = "2.0.3";
+    public static final String VERSION = "2.0.5";
 
     @Inject private KspFleshCrawlerConfig config;
     @Inject private KspFleshCrawlerScript script;
