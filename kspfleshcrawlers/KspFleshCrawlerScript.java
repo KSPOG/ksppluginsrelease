@@ -86,7 +86,7 @@ public class KspFleshCrawlerScript extends Script {
                             ? FleshCrawlerState.RETURNING_TO_FIGHT
                             : FleshCrawlerState.WALKING_TO_FIGHT;
 
-                    boolean arrived = navigator.tickToFight(config.useWarPortal());
+                    boolean arrived = navigator.tickToFight(config.useWarPortal(), config.useWebWalker());
                     mirrorNavigationAction();
                     if (navigator.getError() != null) state = FleshCrawlerState.NAVIGATION_ERROR;
 
@@ -175,7 +175,7 @@ public class KspFleshCrawlerScript extends Script {
 
         if (StrongholdZones.isOnFloor1(player) || StrongholdZones.isOnFloor2(player)) {
             state = FleshCrawlerState.WALKING_TO_BANK;
-            navigator.tickToSurface();
+            navigator.tickToSurface(config.useWebWalker());
             mirrorNavigationAction();
             if (navigator.getError() != null) state = FleshCrawlerState.NAVIGATION_ERROR;
             return;
@@ -530,4 +530,5 @@ public class KspFleshCrawlerScript extends Script {
     public String getNavigationStage() { return navigator.getStage(); }
     public String getNavigationZone() { return navigator.getCurrentZoneName(); }
     public String getNavigationError() { return navigator.getError(); }
+    public String getNavigationMovementMode() { return navigator.getMovementMode(); }
 }

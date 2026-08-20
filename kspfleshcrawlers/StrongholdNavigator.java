@@ -15,9 +15,10 @@ import java.util.List;
  * Deterministic Stronghold navigator for the exact rooms supplied by the user.
  *
  * Design rules:
- *  - WebWalker is never used on Stronghold floor 1 or floor 2.
- *  - No nearest-door logic exists.
- *  - Every floor-2 door is bound to one specific airlock boundary.
+ *  - WebWalker is used again, but only for known reachable segments inside the supplied rooms/corridors.
+ *  - WebWalker is never given a target on the far side of a closed Stronghold door.
+ *  - Door crossings, portals, ropes and ladders remain deterministic object interactions.
+ *  - No nearest-door logic exists; every floor-2 door is bound to one specific airlock boundary.
  *  - The bank exit uses the east floor-2 rope shortcut instead of reversing the maze.
  */
 @SuppressWarnings({"deprecation", "removal"})
@@ -133,6 +134,8 @@ final class StrongholdNavigator {
     private long lastDoorAt;
     private int doorAttempts;
     private int corridorIndex;
+    private boolean useWebWalker = true;
+    private String movementMode = "Idle";
 
     void reset() {
         stage = "Idle";
@@ -144,9 +147,12 @@ final class StrongholdNavigator {
         lastDoorAt = 0L;
         doorAttempts = 0;
         corridorIndex = 0;
+        useWebWalker = true;
+        movementMode = "Idle";
     }
 
-    boolean tickToFight(boolean useWarPortal) {
+    boolean tickToFight(boolean useWarPortal, boolean useWebWalker) {
+        this.useWebWalker = useWebWalker;
         error = null;
         if (handleDialogue()) return false;
 
@@ -167,7 +173,7 @@ final class StrongholdNavigator {
                 return true;
             }
             action = "Moving to 2040,5188";
-            moveLocal(FIGHT_TARGET);
+            moveKnown(FIGHT_TARGET);
             return false;
         }
 
@@ -175,6 +181,7 @@ final class StrongholdNavigator {
             stage = "Overworld -> Stronghold";
             if (player.distanceTo(SURFACE_ENTRANCE) > 4) {
                 action = "Walking to Barbarian Village entrance";
+                movementMode = "WebWalker (overworld)";
                 if (!Rs2Player.isMoving()) Rs2Walker.walkTo(SURFACE_ENTRANCE, 2);
                 return false;
             }
@@ -198,7 +205,7 @@ final class StrongholdNavigator {
             stage = "Floor 1 treasure";
             if (player.distanceTo(WAR_LADDER_DOWN) > 2) {
                 action = "Walking to floor-2 ladder";
-                moveLocal(WAR_LADDER_DOWN);
+                moveKnown(WAR_LADDER_DOWN);
             } else {
                 action = "Climbing down to floor 2";
                 interactExpectedObject(SOS_WAR_LADDER_DOWN, WAR_LADDER_DOWN, 4, "Climb-down");
@@ -252,7 +259,8 @@ final class StrongholdNavigator {
      * Flesh room -> two known airlock doors -> ladder room -> east rope shortcut
      * -> floor-2 start -> ladder to floor 1 -> surface ladder.
      */
-    boolean tickToSurface() {
+    boolean tickToSurface(boolean useWebWalker) {
+        this.useWebWalker = useWebWalker;
         error = null;
         if (handleDialogue()) return false;
 
@@ -286,7 +294,7 @@ final class StrongholdNavigator {
             stage = "Floor 2 ladder room";
             if (player.distanceTo(FAMINE_EAST_ROPE) > 2) {
                 action = "Walking to east rope shortcut";
-                moveLocal(FAMINE_EAST_ROPE);
+                moveKnown(FAMINE_EAST_ROPE);
             } else {
                 action = "Using floor-2 rope shortcut";
                 interactExpectedObject(SOS_FAM_ROPE_UP, FAMINE_EAST_ROPE, 3, "Climb-up");
@@ -298,7 +306,7 @@ final class StrongholdNavigator {
             stage = "Floor 2 start";
             if (player.distanceTo(FAMINE_START_LADDER_UP) > 2) {
                 action = "Walking to floor-2 start ladder";
-                moveLocal(FAMINE_START_LADDER_UP);
+                moveKnown(FAMINE_START_LADDER_UP);
             } else {
                 action = "Climbing to floor 1";
                 interactExpectedObject(SOS_FAM_LADDER_UP, FAMINE_START_LADDER_UP, 4, "Climb-up");
@@ -310,7 +318,7 @@ final class StrongholdNavigator {
             stage = "Floor 1 start";
             if (player.distanceTo(WAR_START_LADDER_UP) > 2) {
                 action = "Walking to surface ladder";
-                moveLocal(WAR_START_LADDER_UP);
+                moveKnown(WAR_START_LADDER_UP);
             } else {
                 action = "Climbing to surface";
                 interactExpectedObject(SOS_WAR_LADDER_UP, WAR_START_LADDER_UP, 4, "Climb-up");
@@ -345,7 +353,7 @@ final class StrongholdNavigator {
         if (player.distanceTo(waypoint) <= 2 && StrongholdZones.FLOOR_2_LADDER_ROOM.contains(player)) {
             return;
         }
-        moveLocal(waypoint);
+        moveKnown(waypoint);
     }
 
     private void beginDoor(DoorTransition transition) {
@@ -373,7 +381,7 @@ final class StrongholdNavigator {
 
         if (player.distanceTo(transition.approach) > 1) {
             action = "Walking to fixed door approach";
-            moveLocal(transition.approach);
+            moveKnown(transition.approach);
             return false;
         }
 
@@ -382,7 +390,7 @@ final class StrongholdNavigator {
 
         if (open != null) {
             action = "Crossing fixed airlock";
-            moveLocal(transition.cross);
+            moveDoorCrossing(transition.cross);
             return false;
         }
 
@@ -403,6 +411,7 @@ final class StrongholdNavigator {
         }
 
         action = "Opening fixed Rickety door";
+        movementMode = "Fixed door interaction";
         if (Rs2GameObject.interact(closed, "Open")) {
             doorAttempts++;
             lastDoorAt = now;
@@ -435,17 +444,18 @@ final class StrongholdNavigator {
                 .orElse(null);
 
         if (object == null) {
-            if (player != null && player.distanceTo(expected) > 2) moveLocal(expected);
+            if (player != null && player.distanceTo(expected) > 2) moveKnown(expected);
             return false;
         }
 
         if (player != null && player.distanceTo(object.getWorldLocation()) > 2) {
-            moveLocal(object.getWorldLocation());
+            moveKnown(object.getWorldLocation());
             return false;
         }
 
         long now = System.currentTimeMillis();
         if (now - lastObjectAt < OBJECT_RETRY_MS) return false;
+        movementMode = "Fixed object interaction";
         if (Rs2GameObject.interact(object, actionName)) {
             lastObjectAt = now;
             return true;
@@ -485,14 +495,50 @@ final class StrongholdNavigator {
         return false;
     }
 
-    private void moveLocal(WorldPoint target) {
+    /**
+     * Move toward a target that is known to be in the player's current reachable room/corridor.
+     *
+     * The key v2.0.1 rule is that WebWalker is only used when Rs2Walker.canReach(target)
+     * is already true. This prevents the shortest-path transport/door resolver from being
+     * asked to solve a closed Stronghold airlock. If the target is not locally reachable,
+     * we keep control and fall back to a direct canvas/minimap click instead.
+     */
+    private void moveKnown(WorldPoint target) {
         if (target == null) return;
         long now = System.currentTimeMillis();
         if (now - lastMoveAt < MOVE_COOLDOWN_MS || Rs2Player.isMoving()) return;
 
-        boolean clicked = Rs2Walker.walkFastCanvas(target);
-        if (!clicked) clicked = Rs2Walker.walkMiniMap(target);
-        if (clicked) lastMoveAt = now;
+        boolean moved = false;
+        if (useWebWalker && Rs2Walker.canReach(target)) {
+            movementMode = "WebWalker (known segment)";
+            moved = Rs2Walker.walkTo(target, 1);
+        }
+
+        if (!moved) {
+            movementMode = useWebWalker
+                    ? "Direct fallback (segment blocked)"
+                    : "Direct room movement";
+            moved = Rs2Walker.walkFastCanvas(target);
+            if (!moved) moved = Rs2Walker.walkMiniMap(target);
+        }
+
+        if (moved) lastMoveAt = now;
+    }
+
+    /**
+     * Never hand an opened airlock crossing to WebWalker. The destination is deliberately
+     * only one or two tiles through the exact door that we just opened, which avoids the
+     * old behaviour where the generic walker could re-select a door/transport.
+     */
+    private void moveDoorCrossing(WorldPoint target) {
+        if (target == null) return;
+        long now = System.currentTimeMillis();
+        if (now - lastMoveAt < MOVE_COOLDOWN_MS || Rs2Player.isMoving()) return;
+
+        movementMode = "Direct fixed-door crossing";
+        boolean moved = Rs2Walker.walkFastCanvas(target);
+        if (!moved) moved = Rs2Walker.walkMiniMap(target);
+        if (moved) lastMoveAt = now;
     }
 
     private void set(String stage, String action) {
@@ -509,6 +555,7 @@ final class StrongholdNavigator {
     String getStage() { return stage; }
     String getAction() { return action; }
     String getError() { return error; }
+    String getMovementMode() { return movementMode; }
 
     String getCurrentZoneName() {
         StrongholdZones.PolygonZone zone = StrongholdZones.locate(Rs2Player.getWorldLocation());

@@ -100,13 +100,16 @@ public interface KspFleshCrawlerConfig extends Config {
     @ConfigItem(keyName = "autoTravel", name = "Auto travel", description = "Automatically travel between the bank and the confirmed Flesh Crawler room", position = 0, section = navigationSection)
     default boolean autoTravel() { return true; }
 
-    @ConfigItem(keyName = "useWarPortal", name = "Use War portal", description = "Use the Vault of War portal from floor 1 whenever available. This is the supported inbound route in v2.", position = 1, section = navigationSection)
+    @ConfigItem(keyName = "useWarPortal", name = "Use War portal", description = "Use the Vault of War portal from floor 1 whenever available. This remains the deterministic floor-1 transport.", position = 1, section = navigationSection)
     default boolean useWarPortal() { return true; }
 
+    @ConfigItem(keyName = "useWebWalker", name = "Use WebWalker", description = "Use Microbot WebWalker for known reachable room/corridor segments. Door crossings, portals, ropes and ladders stay deterministic so the walker cannot loop the wrong door.", position = 2, section = navigationSection)
+    default boolean useWebWalker() { return true; }
+
     @Range(min = 3, max = 20)
-    @ConfigItem(keyName = "fightRadius", name = "Fight radius", description = "Maximum target distance from 2040,5188", position = 2, section = navigationSection)
+    @ConfigItem(keyName = "fightRadius", name = "Fight radius", description = "Maximum target distance from 2040,5188", position = 3, section = navigationSection)
     default int fightRadius() { return 12; }
 
-    @ConfigItem(keyName = "autoRetaliate", name = "Auto retaliate", description = "Keep auto-retaliate enabled", position = 3, section = navigationSection)
+    @ConfigItem(keyName = "autoRetaliate", name = "Auto retaliate", description = "Keep auto-retaliate enabled", position = 4, section = navigationSection)
     default boolean autoRetaliate() { return true; }
 }

@@ -13,7 +13,7 @@ import java.time.Duration;
 import java.time.Instant;
 
 @PluginDescriptor(
-        name = PluginConstants.KSP + "Flesh Crawlers",
+        name = "KSP Flesh Crawlers",
         description = "Deterministic Stronghold Flesh Crawler trainer with fixed room navigation, combat balancing, looting and food banking.",
         tags = {"ksp", "microbot", "combat", "flesh crawler", "stronghold of security", "training"},
         authors = {"KSP"},
@@ -23,7 +23,7 @@ import java.time.Instant;
         enabledByDefault = false
 )
 public class KspFleshCrawlerPlugin extends Plugin {
-    public static final String VERSION = "2.0.0";
+    public static final String VERSION = "2.0.1";
 
     @Inject private KspFleshCrawlerConfig config;
     @Inject private KspFleshCrawlerScript script;
