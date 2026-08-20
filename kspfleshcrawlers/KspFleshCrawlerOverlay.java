@@ -36,7 +36,7 @@ public class KspFleshCrawlerOverlay extends OverlayPanel {
         panelComponent.setPreferredSize(new Dimension(235, 0));
 
         panelComponent.getChildren().add(TitleComponent.builder()
-                .text("KSP Flesh Crawlersv" + KspFleshCrawlerPlugin.VERSION)
+                .text("KSP Flesh Crawlers v" + KspFleshCrawlerPlugin.VERSION)
                 .color(Color.WHITE)
                 .build());
 
