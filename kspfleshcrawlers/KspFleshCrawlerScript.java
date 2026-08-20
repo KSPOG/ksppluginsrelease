@@ -286,11 +286,20 @@ public class KspFleshCrawlerScript extends Script {
         int healAt = Math.max(safetyFloor, Math.min(configured, noWaste));
         if (currentHp > healAt) return false;
 
-        state = FleshCrawlerState.HEALING;
+        int foodBefore = Rs2Inventory.count(config.foodName(), false);
         lastAction = "Eating " + config.foodName() + " at " + currentHp + " HP";
         if (Rs2Inventory.interact(config.foodName(), "Eat", false)) {
-            foodEaten++;
-            sleep(450, 700);
+            state = FleshCrawlerState.HEALING;
+            boolean foodConsumed = sleepUntil(
+                    () -> Rs2Inventory.count(config.foodName(), false) < foodBefore,
+                    1_500
+            );
+            if (foodConsumed) {
+                foodEaten++;
+            } else {
+                state = FleshCrawlerState.FIGHTING;
+                lastAction = "Waiting for " + config.foodName() + " consumption confirmation";
+            }
         }
         return true;
     }
@@ -353,14 +362,7 @@ public class KspFleshCrawlerScript extends Script {
         GroundItem ownDrop = findGroundItem(null, config.lootRadius(), true);
         if (ownDrop == null) return false;
 
-        state = FleshCrawlerState.LOOTING;
-        lastAction = "Looting own drop: " + ownDrop.getName();
-        if (Rs2GroundItem.interact(ownDrop)) {
-            itemsLooted++;
-            sleep(450, 750);
-            return true;
-        }
-        return false;
+        return lootGroundItem(ownDrop, "Looting own drop: ");
     }
 
     private boolean handleConfiguredLoot(KspFleshCrawlerConfig config) {
@@ -370,14 +372,28 @@ public class KspFleshCrawlerScript extends Script {
         GroundItem drop = findGroundItem(lootNames, config.lootRadius(), false);
         if (drop == null || Rs2Inventory.isFull(drop.getName())) return false;
 
-        state = FleshCrawlerState.LOOTING;
-        lastAction = "Looting " + drop.getName();
-        if (Rs2GroundItem.interact(drop)) {
+        return lootGroundItem(drop, "Looting ");
+    }
+
+    /**
+     * A ground-item interaction only reports that a click was sent. Confirm that
+     * the item reached the inventory before recording loot or entering LOOTING;
+     * another enabled plugin can otherwise consume or invalidate the same drop.
+     */
+    private boolean lootGroundItem(GroundItem drop, String actionPrefix) {
+        int countBefore = Rs2Inventory.count(drop.getName(), false);
+        lastAction = actionPrefix + drop.getName();
+        if (!Rs2GroundItem.interact(drop)) return false;
+
+        if (sleepUntil(() -> Rs2Inventory.count(drop.getName(), false) > countBefore, 1_500)) {
             itemsLooted++;
-            sleep(450, 750);
+            state = FleshCrawlerState.LOOTING;
             return true;
         }
-        return false;
+
+        state = FleshCrawlerState.WAITING;
+        lastAction = "Loot pickup not confirmed: " + drop.getName();
+        return true;
     }
 
     private GroundItem findGroundItem(List<String> names, int radius, boolean ownOnly) {
