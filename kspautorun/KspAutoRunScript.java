@@ -101,6 +101,18 @@ public class KspAutoRunScript extends Script
             return;
         }
 
+        // The run state may change after the confirmation above and before this
+        // scheduled task submits the invoke. Toggle Run is not idempotent, so
+        // invoking the orb after another client update has enabled it would turn
+        // Run back off and restart the waiting-for-energy cycle.
+        if (Rs2Player.isRunEnabled())
+        {
+            runToggleRequestedAt = 0L;
+            runDisabledObservedAt = 0L;
+            state = "monitoring run energy";
+            return;
+        }
+
         state = "enabling run";
         if (invokeRunOrb())
         {
