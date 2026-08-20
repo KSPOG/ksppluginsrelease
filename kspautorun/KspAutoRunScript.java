@@ -61,16 +61,14 @@ public class KspAutoRunScript extends Script
 
         if (Rs2Player.isRunEnabled())
         {
-            // A successful toggle is acknowledged only once.  Sampling energy while
-            // Run remains enabled also records a completed energy cycle before the
-            // client publishes the corresponding disabled Run state.
+            // A successful toggle is acknowledged only once. Keep the completed
+            // energy cycle latched until Run is observed disabled below the
+            // threshold. Clearing it while Run is still enabled would allow a
+            // transient disabled-state update at high energy to submit a second,
+            // non-idempotent toggle.
             if (!runEnabledObserved)
             {
                 awaitingEnergyReset = true;
-            }
-            if (runEnergy < threshold)
-            {
-                awaitingEnergyReset = false;
             }
 
             runEnabledObserved = true;
