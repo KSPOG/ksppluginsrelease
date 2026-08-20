@@ -13,5 +13,6 @@ public enum FleshCrawlerState {
     RETURNING_TO_FIGHT,
     OUT_OF_FOOD,
     GOALS_REACHED,
-    WAITING
+    WAITING,
+    NAVIGATION_ERROR
 }

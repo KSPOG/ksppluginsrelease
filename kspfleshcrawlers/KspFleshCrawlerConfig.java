@@ -10,337 +10,103 @@ import net.runelite.client.config.Range;
 public interface KspFleshCrawlerConfig extends Config {
     String GROUP = "kspfleshcrawlers";
 
-    @ConfigSection(
-            name = "Training",
-            description = "Combat training goals and balancing",
-            position = 0,
-            closedByDefault = false
-    )
+    @ConfigSection(name = "Training", description = "Combat goals and melee balancing", position = 0, closedByDefault = false)
     String trainingSection = "training";
 
-    @ConfigSection(
-            name = "Loot",
-            description = "Looting and bone burying",
-            position = 1,
-            closedByDefault = false
-    )
+    @ConfigSection(name = "Loot", description = "Ground-item looting and bones", position = 1, closedByDefault = false)
     String lootSection = "loot";
 
-    @ConfigSection(
-            name = "Supplies",
-            description = "Healing, potions and optional food restocking",
-            position = 2,
-            closedByDefault = false
-    )
+    @ConfigSection(name = "Supplies", description = "Food, healing, potions and banking", position = 2, closedByDefault = false)
     String suppliesSection = "supplies";
 
-    @ConfigSection(
-            name = "Area",
-            description = "Flesh Crawler targeting boundaries",
-            position = 3,
-            closedByDefault = true
-    )
-    String areaSection = "area";
+    @ConfigSection(name = "Navigation", description = "Stronghold travel controls", position = 3, closedByDefault = true)
+    String navigationSection = "navigation";
 
-    // -------------------- Training --------------------
-
-    @ConfigItem(
-            keyName = "trainAttack",
-            name = "Train Attack",
-            description = "Allow the plugin to train Attack",
-            position = 0,
-            section = trainingSection
-    )
-    default boolean trainAttack() {
-        return true;
-    }
+    @ConfigItem(keyName = "trainAttack", name = "Train Attack", description = "Allow Attack training", position = 0, section = trainingSection)
+    default boolean trainAttack() { return true; }
 
     @Range(min = 1, max = 99)
-    @ConfigItem(
-            keyName = "attackTarget",
-            name = "Attack target",
-            description = "Stop selecting Attack once this real level is reached",
-            position = 1,
-            section = trainingSection
-    )
-    default int attackTarget() {
-        return 50;
-    }
+    @ConfigItem(keyName = "attackTarget", name = "Attack target", description = "Attack goal", position = 1, section = trainingSection)
+    default int attackTarget() { return 50; }
 
-    @ConfigItem(
-            keyName = "trainStrength",
-            name = "Train Strength",
-            description = "Allow the plugin to train Strength",
-            position = 2,
-            section = trainingSection
-    )
-    default boolean trainStrength() {
-        return true;
-    }
+    @ConfigItem(keyName = "trainStrength", name = "Train Strength", description = "Allow Strength training", position = 2, section = trainingSection)
+    default boolean trainStrength() { return true; }
 
     @Range(min = 1, max = 99)
-    @ConfigItem(
-            keyName = "strengthTarget",
-            name = "Strength target",
-            description = "Stop selecting Strength once this real level is reached",
-            position = 3,
-            section = trainingSection
-    )
-    default int strengthTarget() {
-        return 50;
-    }
+    @ConfigItem(keyName = "strengthTarget", name = "Strength target", description = "Strength goal", position = 3, section = trainingSection)
+    default int strengthTarget() { return 50; }
 
-    @ConfigItem(
-            keyName = "trainDefence",
-            name = "Train Defence",
-            description = "Allow the plugin to train Defence",
-            position = 4,
-            section = trainingSection
-    )
-    default boolean trainDefence() {
-        return true;
-    }
+    @ConfigItem(keyName = "trainDefence", name = "Train Defence", description = "Allow Defence training", position = 4, section = trainingSection)
+    default boolean trainDefence() { return true; }
 
     @Range(min = 1, max = 99)
-    @ConfigItem(
-            keyName = "defenceTarget",
-            name = "Defence target",
-            description = "Stop selecting Defence once this real level is reached",
-            position = 5,
-            section = trainingSection
-    )
-    default int defenceTarget() {
-        return 50;
-    }
+    @ConfigItem(keyName = "defenceTarget", name = "Defence target", description = "Defence goal", position = 5, section = trainingSection)
+    default int defenceTarget() { return 50; }
 
-    @ConfigItem(
-            keyName = "balanceCombatLevels",
-            name = "Balance combat levels",
-            description = "Train the lowest enabled melee level that is still below its target",
-            position = 6,
-            section = trainingSection
-    )
-    default boolean balanceCombatLevels() {
-        return true;
-    }
+    @ConfigItem(keyName = "balanceCombatLevels", name = "Balance combat levels", description = "Train the lowest enabled melee skill that remains below its goal", position = 6, section = trainingSection)
+    default boolean balanceCombatLevels() { return true; }
 
-    @ConfigItem(
-            keyName = "avoidControlled",
-            name = "Avoid Controlled",
-            description = "Do not use Controlled styles for Attack/Strength/Defence training.",
-            position = 7,
-            section = trainingSection
-    )
-    default boolean avoidControlled() {
-        return true;
-    }
+    @ConfigItem(keyName = "avoidControlled", name = "Avoid Controlled", description = "Avoid Controlled weapon styles", position = 7, section = trainingSection)
+    default boolean avoidControlled() { return true; }
 
-    @ConfigItem(
-            keyName = "stopAtGoals",
-            name = "Stop at goals",
-            description = "Stop attacking once every enabled melee target has been reached",
-            position = 8,
-            section = trainingSection
-    )
-    default boolean stopAtGoals() {
-        return true;
-    }
+    @ConfigItem(keyName = "stopAtGoals", name = "Stop at goals", description = "Stop attacking once all enabled goals are reached", position = 8, section = trainingSection)
+    default boolean stopAtGoals() { return true; }
 
-    // -------------------- Loot --------------------
+    @ConfigItem(keyName = "lootEnabled", name = "Loot items", description = "Loot items from the configured list", position = 0, section = lootSection)
+    default boolean lootEnabled() { return true; }
 
-    @ConfigItem(
-            keyName = "lootEnabled",
-            name = "Loot items",
-            description = "Pick up configured Flesh Crawler drops",
-            position = 0,
-            section = lootSection
-    )
-    default boolean lootEnabled() {
-        return true;
-    }
+    @ConfigItem(keyName = "lootOwnDrops", name = "Loot own drops", description = "Loot every ground item owned by the local player", position = 1, section = lootSection)
+    default boolean lootOwnDrops() { return true; }
 
-    @ConfigItem(
-            keyName = "lootOwnDrops",
-            name = "Loot own drops",
-            description = "Loot ground items owned by your character, even when they are not in the configured loot list",
-            position = 1,
-            section = lootSection
-    )
-    default boolean lootOwnDrops() {
-        return true;
-    }
-
-    @ConfigItem(
-            keyName = "lootItems",
-            name = "Loot list",
-            description = "Comma-separated item names. Matching is case-insensitive and exact.",
-            position = 2,
-            section = lootSection
-    )
+    @ConfigItem(keyName = "lootItems", name = "Loot list", description = "Comma-separated exact item names", position = 2, section = lootSection)
     default String lootItems() {
         return "Grimy ranarr weed, Grimy avantoe, Grimy kwuarm, Grimy cadantine, Grimy lantadyme, Nature rune, Dust rune, Fire rune, Iron ore, Silver bar, Coins, Bottom of sceptre, Uncut sapphire, Uncut emerald, Uncut ruby, Uncut diamond, Loop half of key, Tooth half of key";
     }
 
     @Range(min = 1, max = 20)
-    @ConfigItem(
-            keyName = "lootRadius",
-            name = "Loot radius",
-            description = "Maximum tile radius used for configured ground-item looting",
-            position = 3,
-            section = lootSection
-    )
-    default int lootRadius() {
-        return 8;
-    }
+    @ConfigItem(keyName = "lootRadius", name = "Loot radius", description = "Ground-item search radius", position = 3, section = lootSection)
+    default int lootRadius() { return 8; }
 
-    @ConfigItem(
-            keyName = "buryBones",
-            name = "Bury bones",
-            description = "Pick up and bury configured bone items when safe to do so",
-            position = 4,
-            section = lootSection
-    )
-    default boolean buryBones() {
-        return false;
-    }
+    @ConfigItem(keyName = "buryBones", name = "Bury bones", description = "Pick up and bury configured bones when out of combat", position = 4, section = lootSection)
+    default boolean buryBones() { return false; }
 
-    @ConfigItem(
-            keyName = "boneItems",
-            name = "Bone list",
-            description = "Comma-separated bone names to pick up and bury",
-            position = 5,
-            section = lootSection
-    )
-    default String boneItems() {
-        return "Bones, Big bones";
-    }
+    @ConfigItem(keyName = "boneItems", name = "Bone list", description = "Comma-separated bone item names", position = 5, section = lootSection)
+    default String boneItems() { return "Bones, Big bones"; }
 
-    // -------------------- Supplies --------------------
+    @ConfigItem(keyName = "useHealing", name = "Use healing", description = "Eat the configured food at the HP threshold", position = 0, section = suppliesSection)
+    default boolean useHealing() { return true; }
 
-    @ConfigItem(
-            keyName = "useHealing",
-            name = "Use healing",
-            description = "Eat the configured food when enough hitpoints are missing or HP is critically low",
-            position = 0,
-            section = suppliesSection
-    )
-    default boolean useHealing() {
-        return true;
-    }
-
-    @ConfigItem(
-            keyName = "foodName",
-            name = "Food name",
-            description = "Food item to eat and optionally withdraw",
-            position = 1,
-            section = suppliesSection
-    )
-    default String foodName() {
-        return "Trout";
-    }
+    @ConfigItem(keyName = "foodName", name = "Food name", description = "Food to eat and withdraw", position = 1, section = suppliesSection)
+    default String foodName() { return "Trout"; }
 
     @Range(min = 1, max = 28)
-    @ConfigItem(
-            keyName = "foodAmount",
-            name = "Food amount",
-            description = "Desired number of food items after an optional bank restock",
-            position = 2,
-            section = suppliesSection
-    )
-    default int foodAmount() {
-        return 10;
-    }
+    @ConfigItem(keyName = "foodAmount", name = "Food amount", description = "Food amount to withdraw when banking", position = 2, section = suppliesSection)
+    default int foodAmount() { return 10; }
 
     @Range(min = 1, max = 99)
-    @ConfigItem(
-            keyName = "unknownFoodHeal",
-            name = "Unknown food heal",
-            description = "Fallback heal amount when the configured food is not present in Microbot's Rs2Food table",
-            position = 3,
-            section = suppliesSection
-    )
-    default int unknownFoodHeal() {
-        return 12;
-    }
+    @ConfigItem(keyName = "unknownFoodHeal", name = "Unknown food heal", description = "Fallback heal value if the food is not in Rs2Food", position = 3, section = suppliesSection)
+    default int unknownFoodHeal() { return 12; }
 
     @Range(min = 2, max = 99)
-    @ConfigItem(
-            keyName = "healAtHp",
-            name = "Heal at HP",
-            description = "Eat only when current HP reaches this value. The Flesh Crawler safety floor prevents waiting at 1 HP",
-            position = 4,
-            section = suppliesSection
-    )
-    default int healAtHp() {
-        return 6;
-    }
+    @ConfigItem(keyName = "healAtHp", name = "Heal at HP", description = "Eat at or below this HP. Flesh Crawlers have a max hit of 1, so low values are efficient.", position = 4, section = suppliesSection)
+    default int healAtHp() { return 6; }
 
-    @ConfigItem(
-            keyName = "usePotions",
-            name = "Use potions",
-            description = "Use available melee combat/Attack/Strength/Defence potions when the corresponding boost has expired",
-            position = 5,
-            section = suppliesSection
-    )
-    default boolean usePotions() {
-        return true;
-    }
+    @ConfigItem(keyName = "usePotions", name = "Use potions", description = "Use available melee boosting potions", position = 5, section = suppliesSection)
+    default boolean usePotions() { return true; }
 
-    @ConfigItem(
-            keyName = "bankForFood",
-            name = "Bank for food",
-            description = "When out of food, use Rs2Bank/Rs2Walker to bank loot, withdraw Food amount, then return to the saved Flesh Crawler tile",
-            position = 6,
-            section = suppliesSection
-    )
-    default boolean bankForFood() {
-        return false;
-    }
+    @ConfigItem(keyName = "bankForFood", name = "Bank for food", description = "When food is depleted, use the floor-2 rope shortcut, exit the Stronghold, bank, then return", position = 6, section = suppliesSection)
+    default boolean bankForFood() { return true; }
 
-    // -------------------- Area --------------------
+    @ConfigItem(keyName = "autoTravel", name = "Auto travel", description = "Automatically travel between the bank and the confirmed Flesh Crawler room", position = 0, section = navigationSection)
+    default boolean autoTravel() { return true; }
 
-    @ConfigItem(
-            keyName = "autoTravel",
-            name = "Auto walk to crawlers",
-            description = "Automatically travel to Flesh Crawlers. Web-walking is used only to reach the Stronghold entrance; underground navigation uses portals and a custom anti-loop door handler",
-            position = 0,
-            section = areaSection
-    )
-    default boolean autoTravel() {
-        return true;
-    }
+    @ConfigItem(keyName = "useWarPortal", name = "Use War portal", description = "Use the Vault of War portal from floor 1 whenever available. This is the supported inbound route in v2.", position = 1, section = navigationSection)
+    default boolean useWarPortal() { return true; }
 
-    @ConfigItem(
-            keyName = "useStrongholdPortals",
-            name = "Use Stronghold portals",
-            description = "Use unlocked shortcut portals when they shorten the route. The Vault of War portal is preferred to skip floor-1 doors before descending to Flesh Crawlers.",
-            position = 1,
-            section = areaSection
-    )
-    default boolean useStrongholdPortals() {
-        return true;
-    }
+    @Range(min = 3, max = 20)
+    @ConfigItem(keyName = "fightRadius", name = "Fight radius", description = "Maximum target distance from 2040,5188", position = 2, section = navigationSection)
+    default int fightRadius() { return 12; }
 
-    @Range(min = 3, max = 30)
-    @ConfigItem(
-            keyName = "fightRadius",
-            name = "Fight radius",
-            description = "Maximum distance from the preferred near-entry Flesh Crawler room anchor that targets may be selected",
-            position = 2,
-            section = areaSection
-    )
-    default int fightRadius() {
-        return 14;
-    }
-
-    @ConfigItem(
-            keyName = "autoRetaliate",
-            name = "Auto retaliate",
-            description = "Keep auto-retaliate enabled while fighting Flesh Crawlers",
-            position = 3,
-            section = areaSection
-    )
-    default boolean autoRetaliate() {
-        return true;
-    }
+    @ConfigItem(keyName = "autoRetaliate", name = "Auto retaliate", description = "Keep auto-retaliate enabled", position = 3, section = navigationSection)
+    default boolean autoRetaliate() { return true; }
 }

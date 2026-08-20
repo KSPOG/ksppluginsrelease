@@ -14,7 +14,7 @@ import java.time.Instant;
 
 @PluginDescriptor(
         name = PluginConstants.KSP + "Flesh Crawlers",
-        description = "Fights Flesh Crawlers in the Stronghold of Security with melee goal balancing, looting, bone burying and supply handling.",
+        description = "Deterministic Stronghold Flesh Crawler trainer with fixed room navigation, combat balancing, looting and food banking.",
         tags = {"ksp", "microbot", "combat", "flesh crawler", "stronghold of security", "training"},
         authors = {"KSP"},
         version = KspFleshCrawlerPlugin.VERSION,
@@ -23,19 +23,12 @@ import java.time.Instant;
         enabledByDefault = false
 )
 public class KspFleshCrawlerPlugin extends Plugin {
-    public static final String VERSION = "1.0.11";
+    public static final String VERSION = "2.0.0";
 
-    @Inject
-    private KspFleshCrawlerConfig config;
-
-    @Inject
-    private KspFleshCrawlerScript script;
-
-    @Inject
-    private KspFleshCrawlerOverlay overlay;
-
-    @Inject
-    private OverlayManager overlayManager;
+    @Inject private KspFleshCrawlerConfig config;
+    @Inject private KspFleshCrawlerScript script;
+    @Inject private KspFleshCrawlerOverlay overlay;
+    @Inject private OverlayManager overlayManager;
 
     private Instant startedAt;
     private long startXp;
@@ -62,20 +55,13 @@ public class KspFleshCrawlerPlugin extends Plugin {
     }
 
     String getRuntimeText() {
-        if (startedAt == null) {
-            return "00:00:00";
-        }
+        if (startedAt == null) return "00:00:00";
         long seconds = Duration.between(startedAt, Instant.now()).getSeconds();
-        long hours = seconds / 3600;
-        long minutes = (seconds % 3600) / 60;
-        long secs = seconds % 60;
-        return String.format("%02d:%02d:%02d", hours, minutes, secs);
+        return String.format("%02d:%02d:%02d", seconds / 3600, (seconds % 3600) / 60, seconds % 60);
     }
 
     long getXpGained() {
-        if (!Microbot.isLoggedIn() || startXp <= 0L) {
-            return 0L;
-        }
+        if (!Microbot.isLoggedIn() || startXp <= 0L) return 0L;
         return Math.max(0L, Microbot.getClient().getOverallExperience() - startXp);
     }
 
@@ -90,9 +76,6 @@ public class KspFleshCrawlerPlugin extends Plugin {
     }
 
     private long getRuntimeSeconds() {
-        if (startedAt == null) {
-            return 0L;
-        }
-        return Math.max(0L, Duration.between(startedAt, Instant.now()).getSeconds());
+        return startedAt == null ? 0L : Math.max(0L, Duration.between(startedAt, Instant.now()).getSeconds());
     }
 }

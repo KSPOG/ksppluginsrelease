@@ -3,6 +3,8 @@ package net.runelite.client.plugins.microbot.kspfleshcrawlers;
 import net.runelite.api.Skill;
 import net.runelite.api.coords.WorldPoint;
 import net.runelite.client.plugins.microbot.Microbot;
+import net.runelite.client.plugins.microbot.util.inventory.Rs2Inventory;
+import net.runelite.client.plugins.microbot.util.player.Rs2Player;
 import net.runelite.client.ui.overlay.OverlayPanel;
 import net.runelite.client.ui.overlay.OverlayPosition;
 import net.runelite.client.ui.overlay.components.LineComponent;
@@ -19,11 +21,7 @@ public class KspFleshCrawlerOverlay extends OverlayPanel {
     private final KspFleshCrawlerConfig config;
 
     @Inject
-    KspFleshCrawlerOverlay(
-            KspFleshCrawlerPlugin plugin,
-            KspFleshCrawlerScript script,
-            KspFleshCrawlerConfig config
-    ) {
+    KspFleshCrawlerOverlay(KspFleshCrawlerPlugin plugin, KspFleshCrawlerScript script, KspFleshCrawlerConfig config) {
         super(plugin);
         this.plugin = plugin;
         this.script = script;
@@ -33,25 +31,29 @@ public class KspFleshCrawlerOverlay extends OverlayPanel {
 
     @Override
     public Dimension render(Graphics2D graphics) {
-        panelComponent.setPreferredSize(new Dimension(235, 0));
+        panelComponent.setPreferredSize(new Dimension(285, 0));
 
         panelComponent.getChildren().add(TitleComponent.builder()
                 .text("Flesh Crawlers v" + KspFleshCrawlerPlugin.VERSION)
-                .color(Color.BLACK)
+                .color(Color.YELLOW)
                 .build());
 
         addLine("Runtime", plugin.getRuntimeText());
         addLine("State", prettyState(script.getState()));
         addLine("Action", script.getLastAction());
+        addLine("Nav stage", script.getNavigationStage());
+        addLine("Zone", script.getNavigationZone());
         addLine("Location", locationText());
-        addLine("Target", targetText());
+        addLine("Target", "2040,5188,0");
+        if (script.getNavigationError() != null) addLine("Nav error", script.getNavigationError());
+
         addLine("Training", trainingText());
         addLine("Attack", levelText(Skill.ATTACK, config.attackTarget(), config.trainAttack()));
         addLine("Strength", levelText(Skill.STRENGTH, config.strengthTarget(), config.trainStrength()));
         addLine("Defence", levelText(Skill.DEFENCE, config.defenceTarget(), config.trainDefence()));
         addLine("HP", hpText());
         addLine("Heal at", config.useHealing() ? config.healAtHp() + " HP" : "Off");
-        addLine("Food", String.valueOf(Rs2InventoryFacade.foodCount(config.foodName())));
+        addLine("Food", String.valueOf(Rs2Inventory.count(config.foodName(), false)));
         addLine("Kills", String.valueOf(script.getKills()));
         addLine("Kills/hr", String.valueOf(plugin.getKillsPerHour()));
         addLine("Looted", String.valueOf(script.getItemsLooted()));
@@ -59,7 +61,6 @@ public class KspFleshCrawlerOverlay extends OverlayPanel {
         addLine("Food eaten", String.valueOf(script.getFoodEaten()));
         addLine("XP gained", String.format("%,d", plugin.getXpGained()));
         addLine("XP/hr", String.format("%,d", plugin.getXpPerHour()));
-        addLine("Version", KspFleshCrawlerPlugin.VERSION);
 
         return super.render(graphics);
     }
@@ -72,22 +73,9 @@ public class KspFleshCrawlerOverlay extends OverlayPanel {
     }
 
     private String locationText() {
-        if (!Microbot.isLoggedIn()) {
-            return "-";
-        }
-        WorldPoint point = net.runelite.client.plugins.microbot.util.player.Rs2Player.getWorldLocation();
-        if (point == null) {
-            return "-";
-        }
-        return point.getX() + "," + point.getY() + "," + point.getPlane();
-    }
-
-    private String targetText() {
-        WorldPoint target = script.getFightTarget();
-        if (target == null) {
-            return "-";
-        }
-        return target.getX() + "," + target.getY() + "," + target.getPlane();
+        if (!Microbot.isLoggedIn()) return "-";
+        WorldPoint point = Rs2Player.getWorldLocation();
+        return point == null ? "-" : point.getX() + "," + point.getY() + "," + point.getPlane();
     }
 
     private String trainingText() {
@@ -96,37 +84,17 @@ public class KspFleshCrawlerOverlay extends OverlayPanel {
     }
 
     private String levelText(Skill skill, int target, boolean enabled) {
-        if (!enabled || !Microbot.isLoggedIn()) {
-            return "Off";
-        }
+        if (!enabled || !Microbot.isLoggedIn()) return "Off";
         return Microbot.getClient().getRealSkillLevel(skill) + " / " + target;
     }
 
     private String hpText() {
-        if (!Microbot.isLoggedIn()) {
-            return "-";
-        }
-        int current = Microbot.getClient().getBoostedSkillLevel(Skill.HITPOINTS);
-        int max = Microbot.getClient().getRealSkillLevel(Skill.HITPOINTS);
-        return current + " / " + max;
+        if (!Microbot.isLoggedIn()) return "-";
+        return Microbot.getClient().getBoostedSkillLevel(Skill.HITPOINTS)
+                + " / " + Microbot.getClient().getRealSkillLevel(Skill.HITPOINTS);
     }
 
     private String prettyState(FleshCrawlerState state) {
-        if (state == null) {
-            return "-";
-        }
-        return state.name().replace('_', ' ');
-    }
-
-    /**
-     * Keeps the overlay isolated from the rest of the script logic.
-     */
-    private static final class Rs2InventoryFacade {
-        private static int foodCount(String foodName) {
-            if (!Microbot.isLoggedIn() || foodName == null || foodName.trim().isEmpty()) {
-                return 0;
-            }
-            return net.runelite.client.plugins.microbot.util.inventory.Rs2Inventory.count(foodName, false);
-        }
+        return state == null ? "-" : state.name().replace('_', ' ');
     }
 }
