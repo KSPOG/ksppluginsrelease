@@ -15,9 +15,6 @@ import java.util.concurrent.TimeUnit;
 public class KspAutoRunScript extends Script
 {
     private static final long CHECK_INTERVAL_MS = 250L;
-    // The client can take longer than one polling interval to publish the run-state change.
-    // Do not issue another toggle while the previous one is still awaiting that postcondition.
-    private static final long RUN_TOGGLE_CONFIRMATION_TIMEOUT_MS = 1_500L;
 
     private long runToggleRequestedAt = 0L;
     private long runDisabledObservedAt = 0L;
@@ -72,18 +69,23 @@ public class KspAutoRunScript extends Script
 
         if (runEnergy < threshold)
         {
+            // A request that did not reach its postcondition can be retried only after
+            // this energy cycle ends. Toggle Run is non-idempotent, so retrying an
+            // ambiguous request while the original invoke may still be queued can turn
+            // Run back off.
+            runToggleRequestedAt = 0L;
             runDisabledObservedAt = 0L;
             state = "waiting for energy";
             return;
         }
 
-        final long now = System.currentTimeMillis();
-        if (runToggleRequestedAt != 0L
-                && now - runToggleRequestedAt < RUN_TOGGLE_CONFIRMATION_TIMEOUT_MS)
+        if (runToggleRequestedAt != 0L)
         {
             state = "waiting for run toggle";
             return;
         }
+
+        final long now = System.currentTimeMillis();
 
         // A different script can enable Run between polling iterations. Require the
         // disabled postcondition to remain true across two observations before
