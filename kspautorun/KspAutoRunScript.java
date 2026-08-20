@@ -177,40 +177,44 @@ public class KspAutoRunScript extends Script
     private boolean invokeRunOrb()
     {
         final int packedWidgetId = WidgetInfo.MINIMAP_TOGGLE_RUN_ORB.getId();
-        final Rectangle bounds = Microbot.getClientThread()
+        return Microbot.getClientThread()
                 .runOnClientThreadOptional(() ->
                 {
+                    // Keep the final postcondition check with the invoke itself. The
+                    // scheduled thread can only make a best-effort observation; Run
+                    // may be enabled by another script before this client action runs.
+                    // Toggle Run is non-idempotent, so invoking in that case would
+                    // disable it again.
+                    if (Rs2Player.isRunEnabled())
+                    {
+                        return false;
+                    }
+
                     final Widget currentWidget = Microbot.getClient().getWidget(packedWidgetId);
-                    return currentWidget != null && !currentWidget.isHidden()
-                            ? currentWidget.getBounds()
-                            : null;
+                    if (currentWidget == null || currentWidget.isHidden())
+                    {
+                        return false;
+                    }
+
+                    final Rectangle bounds = currentWidget.getBounds();
+                    final Rectangle invokeRectangle =
+                            Rs2UiHelper.isRectangleWithinCanvas(bounds)
+                                    ? bounds
+                                    : Rs2UiHelper.getDefaultRectangle();
+
+                    final NewMenuEntry menuEntry = new NewMenuEntry()
+                            .option("Toggle Run")
+                            .target("")
+                            .identifier(1)
+                            .type(MenuAction.CC_OP)
+                            .param0(-1)
+                            .param1(packedWidgetId)
+                            .forceLeftClick(false);
+
+                    Microbot.doInvoke(menuEntry, invokeRectangle);
+                    return true;
                 })
-                .orElse(null);
-
-        // A widget reference is only valid while the client is on the same interface state.
-        // Do not invoke a stale or hidden Run orb (or fall back to a synthetic click location)
-        // after the live widget is no longer actionable.
-        if (bounds == null)
-        {
-            return false;
-        }
-
-        final Rectangle invokeRectangle =
-                Rs2UiHelper.isRectangleWithinCanvas(bounds)
-                        ? bounds
-                        : Rs2UiHelper.getDefaultRectangle();
-
-        final NewMenuEntry menuEntry = new NewMenuEntry()
-                .option("Toggle Run")
-                .target("")
-                .identifier(1)
-                .type(MenuAction.CC_OP)
-                .param0(-1)
-                .param1(packedWidgetId)
-                .forceLeftClick(false);
-
-        Microbot.doInvoke(menuEntry, invokeRectangle);
-        return true;
+                .orElse(false);
     }
 
     @Override
