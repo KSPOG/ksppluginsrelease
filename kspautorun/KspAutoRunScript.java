@@ -16,9 +16,11 @@ import java.util.concurrent.TimeUnit;
 public class KspAutoRunScript extends Script
 {
     private static final long CHECK_INTERVAL_MS = 250L;
-    private static final long INVOKE_COOLDOWN_MS = 600L;
+    // The client can take longer than one polling interval to publish the run-state change.
+    // Do not issue another toggle while the previous one is still awaiting that postcondition.
+    private static final long RUN_TOGGLE_CONFIRMATION_TIMEOUT_MS = 1_500L;
 
-    private long lastInvokeAt = 0L;
+    private long runToggleRequestedAt = 0L;
     // Kept locally so runtime state collection does not fall back to another plugin's shared Microbot.status.
     private volatile String state = "waiting to log in";
 
@@ -56,6 +58,7 @@ public class KspAutoRunScript extends Script
     {
         if (Rs2Player.isRunEnabled())
         {
+            runToggleRequestedAt = 0L;
             state = "run enabled";
             return;
         }
@@ -70,7 +73,8 @@ public class KspAutoRunScript extends Script
         }
 
         final long now = System.currentTimeMillis();
-        if (now - lastInvokeAt < INVOKE_COOLDOWN_MS)
+        if (runToggleRequestedAt != 0L
+                && now - runToggleRequestedAt < RUN_TOGGLE_CONFIRMATION_TIMEOUT_MS)
         {
             state = "waiting for run toggle";
             return;
@@ -79,7 +83,7 @@ public class KspAutoRunScript extends Script
         state = "enabling run";
         if (invokeRunOrb())
         {
-            lastInvokeAt = now;
+            runToggleRequestedAt = now;
         }
     }
 
@@ -132,7 +136,7 @@ public class KspAutoRunScript extends Script
     public void shutdown()
     {
         super.shutdown();
-        lastInvokeAt = 0L;
+        runToggleRequestedAt = 0L;
         state = "stopped";
     }
 }
