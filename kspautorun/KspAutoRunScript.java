@@ -86,6 +86,13 @@ public class KspAutoRunScript extends Script
         if (invokeRunOrb())
         {
             runToggleRequestedAt = now;
+            // The invoke has been submitted; wait for the run-state postcondition rather
+            // than continuing to report the completed action while the client updates.
+            state = "waiting for run toggle";
+        }
+        else
+        {
+            state = "run orb unavailable";
         }
     }
 
