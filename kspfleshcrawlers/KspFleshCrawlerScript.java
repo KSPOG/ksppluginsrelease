@@ -3,12 +3,16 @@ package net.runelite.client.plugins.microbot.kspfleshcrawlers;
 import net.runelite.api.Actor;
 import net.runelite.api.NPC;
 import net.runelite.api.Skill;
+import net.runelite.api.TileObject;
 import net.runelite.api.coords.WorldPoint;
+import net.runelite.api.gameval.ObjectID;
+import net.runelite.api.gameval.VarbitID;
 import net.runelite.client.plugins.microbot.Microbot;
 import net.runelite.client.plugins.microbot.Script;
 import net.runelite.client.plugins.microbot.util.bank.Rs2Bank;
 import net.runelite.client.plugins.microbot.util.combat.Rs2Combat;
 import net.runelite.client.plugins.microbot.util.dialogues.Rs2Dialogue;
+import net.runelite.client.plugins.microbot.util.gameobject.Rs2GameObject;
 import net.runelite.client.plugins.microbot.util.grounditem.Rs2GroundItem;
 import net.runelite.client.plugins.microbot.util.inventory.Rs2Inventory;
 import net.runelite.client.plugins.microbot.util.misc.Rs2Food;
@@ -19,7 +23,10 @@ import net.runelite.client.plugins.microbot.util.walker.Rs2Walker;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -30,10 +37,17 @@ import java.util.stream.Collectors;
 public class KspFleshCrawlerScript extends Script {
     private static final String NPC_NAME = "Flesh Crawler";
 
-    /** Dense Flesh Crawler room in the south-east of the Catacomb of Famine. */
-    private static final WorldPoint DEFAULT_FIGHT_POINT = new WorldPoint(2041, 5189, 0);
+    /*
+     * The v1.0.1 target was the deep south-east room. That forced the generic
+     * web-walker through most of Catacomb of Famine. The near-entry crawler
+     * room is a much better operational target: after the floor-1 shortcut
+     * portal + ladder, only the entry-room rickety door pair must be crossed.
+     */
+    private static final WorldPoint DEFAULT_FIGHT_POINT = new WorldPoint(2042, 5230, 0);
+    private static final WorldPoint STRONGHOLD_SURFACE_ENTRANCE = new WorldPoint(3081, 3420, 0);
+    private static final WorldPoint WAR_PORTAL_POINT = new WorldPoint(1863, 5238, 0);
+    private static final WorldPoint WAR_LADDER_DOWN_POINT = new WorldPoint(1902, 5222, 0);
 
-    /** Current Stronghold of Security floor coordinate bands used to describe navigation progress. */
     private static final int FLOOR_1_MIN_X = 1855;
     private static final int FLOOR_1_MAX_X = 1920;
     private static final int FLOOR_1_MIN_Y = 5184;
@@ -43,7 +57,50 @@ public class KspFleshCrawlerScript extends Script {
     private static final int FLOOR_2_MIN_Y = 5184;
     private static final int FLOOR_2_MAX_Y = 5248;
 
-    /** Security-question answers used by the Stronghold QuestHelper. */
+    private static final int FLOOR_1_START_MIN_X = 1855;
+    private static final int FLOOR_1_START_MAX_X = 1867;
+    private static final int FLOOR_1_START_MIN_Y = 5237;
+    private static final int FLOOR_1_START_MAX_Y = 5247;
+
+    private static final long MOVE_CLICK_COOLDOWN_MS = 850L;
+    private static final long DOOR_RETRY_COOLDOWN_MS = 6_000L;
+    private static final long DOOR_NUDGE_MIN_DELAY_MS = 350L;
+    private static final long PORTAL_RETRY_COOLDOWN_MS = 4_000L;
+
+    /*
+     * Route used only when the Vault of War portal is unavailable.
+     * These are the current Stronghold QuestHelper line points to the
+     * Gift of Peace / ladder area. We deliberately do NOT call web-walk
+     * on this floor: local waypoint clicks + our own door resolver own it.
+     */
+    private static final List<WorldPoint> FLOOR_1_ROUTE = Arrays.asList(
+            new WorldPoint(1859, 5243, 0),
+            new WorldPoint(1859, 5232, 0),
+            new WorldPoint(1864, 5227, 0),
+            new WorldPoint(1870, 5227, 0),
+            new WorldPoint(1875, 5239, 0),
+            new WorldPoint(1880, 5240, 0),
+            new WorldPoint(1883, 5243, 0),
+            new WorldPoint(1912, 5242, 0),
+            new WorldPoint(1912, 5237, 0),
+            new WorldPoint(1905, 5234, 0),
+            new WorldPoint(1905, 5228, 0),
+            WAR_LADDER_DOWN_POINT
+    );
+
+    /*
+     * The useful Flesh Crawler room directly south of the Famine entry
+     * contains spawns around 2044,5233 and 2040,5228. Staying here avoids
+     * dragging the generic web-walker through the whole Famine maze.
+     */
+    private static final List<WorldPoint> FLOOR_2_ENTRY_ROUTE = Arrays.asList(
+            new WorldPoint(2043, 5242, 0),
+            new WorldPoint(2043, 5238, 0),
+            new WorldPoint(2043, 5234, 0),
+            DEFAULT_FIGHT_POINT
+    );
+
+    /** Security-question answers used by the current Stronghold QuestHelper. */
     private static final String[] STRONGHOLD_CORRECT_ANSWERS = {
             "No.",
             "Me.",
@@ -83,6 +140,7 @@ public class KspFleshCrawlerScript extends Script {
     };
 
     private final CombatTrainingController trainingController = new CombatTrainingController();
+    private final Map<WorldPoint, Long> recentlyClickedDoors = new HashMap<>();
 
     private volatile FleshCrawlerState state = FleshCrawlerState.INITIALIZING;
     private volatile String lastAction = "Starting";
@@ -93,11 +151,28 @@ public class KspFleshCrawlerScript extends Script {
 
     private volatile WorldPoint fightAnchor;
 
+    /*
+     * The blocking web-walker is retained only for the overworld leg to the
+     * Barbarian Village entrance. Stronghold floors use the local navigator.
+     */
     private ExecutorService navigationExecutor;
     private volatile Future<?> navigationFuture;
     private volatile WorldPoint navigationTarget;
+
     private volatile int trackedNpcIndex = -1;
     private volatile boolean trackedNpcCounted;
+
+    private int floor1RouteIndex;
+    private int floor2RouteIndex;
+    private long lastMoveClickMs;
+    private long lastPortalAttemptMs;
+    private WorldPoint lastTravelPoint;
+    private long lastTravelProgressMs;
+
+    private WorldPoint pendingDoorLocation;
+    private WorldPoint pendingDoorApproachPoint;
+    private WorldPoint pendingDoorWaypoint;
+    private long pendingDoorClickedAtMs;
 
     public boolean run(KspFleshCrawlerConfig config) {
         Microbot.enableAutoRunOn = true;
@@ -113,6 +188,10 @@ public class KspFleshCrawlerScript extends Script {
                 updateKillTracking();
 
                 if (handleStrongholdDialogue()) {
+                    return;
+                }
+
+                if (handlePendingDoorCrossing()) {
                     return;
                 }
 
@@ -194,6 +273,15 @@ public class KspFleshCrawlerScript extends Script {
         navigationFuture = null;
         trackedNpcIndex = -1;
         trackedNpcCounted = false;
+
+        floor1RouteIndex = 0;
+        floor2RouteIndex = 0;
+        lastMoveClickMs = 0L;
+        lastPortalAttemptMs = 0L;
+        lastTravelPoint = null;
+        lastTravelProgressMs = System.currentTimeMillis();
+        recentlyClickedDoors.clear();
+        clearPendingDoor();
     }
 
     private boolean ensureAtFleshCrawlerRoom(KspFleshCrawlerConfig config) {
@@ -208,31 +296,395 @@ public class KspFleshCrawlerScript extends Script {
             return true;
         }
 
-        if (isNavigationRunning()) {
-            state = FleshCrawlerState.WALKING_TO_FIGHT;
-            lastAction = navigationStatus(player);
-            return true;
+        updateTravelProgress(player);
+
+        /*
+         * If the user starts the plugin already beside Flesh Crawlers on floor 2,
+         * use that room rather than forcing a walk back to our preferred entry room.
+         */
+        if (isOnFloor2(player)) {
+            Rs2NpcModel nearbyCrawler = Rs2Npc.getNpcs(npc ->
+                            npc.getName() != null
+                                    && NPC_NAME.equalsIgnoreCase(npc.getName())
+                                    && !npc.isDead()
+                                    && npc.getWorldLocation().distanceTo(player) <= 12
+                                    && Rs2Walker.canReach(npc.getWorldLocation()))
+                    .findFirst()
+                    .orElse(null);
+            if (nearbyCrawler != null) {
+                fightAnchor = nearbyCrawler.getWorldLocation();
+                cancelNavigationIfOwned();
+                return false;
+            }
         }
 
         int arrivalRadius = Math.min(Math.max(config.fightRadius() / 2, 4), 8);
         if (isOnFloor2(player) && player.distanceTo(DEFAULT_FIGHT_POINT) <= arrivalRadius) {
+            fightAnchor = DEFAULT_FIGHT_POINT;
+            cancelNavigationIfOwned();
             return false;
         }
 
+        if (isOnFloor1(player)) {
+            cancelNavigationIfOwned();
+            state = FleshCrawlerState.WALKING_TO_FIGHT;
+            return handleFloor1Navigation(config, player);
+        }
+
+        if (isOnFloor2(player)) {
+            cancelNavigationIfOwned();
+            state = FleshCrawlerState.WALKING_TO_FIGHT;
+            return handleFloor2Navigation(player);
+        }
+
+        /*
+         * Outside the Stronghold: web-walk only to the SURFACE entrance.
+         * Once underground, control is handed to our Stronghold navigator so the
+         * generic walker cannot get trapped repeatedly selecting the same gate.
+         */
         state = FleshCrawlerState.WALKING_TO_FIGHT;
-        lastAction = navigationStatus(player);
-        startNavigation(DEFAULT_FIGHT_POINT, 4);
+        if (player.distanceTo(STRONGHOLD_SURFACE_ENTRANCE) <= 5) {
+            cancelNavigationIfOwned();
+            lastAction = "Entering Stronghold of Security";
+            if (Rs2GameObject.interact(ObjectID.SOS_DUNG_ENT_OPEN, "Climb-down")) {
+                sleep(500, 800);
+            } else {
+                Rs2GameObject.interact(ObjectID.SOS_DUNG_ENT_OPEN);
+            }
+            return true;
+        }
+
+        if (isNavigationRunning()) {
+            lastAction = "Web-walking to Stronghold entrance";
+            return true;
+        }
+
+        lastAction = "Web-walking to Stronghold entrance";
+        startNavigation(STRONGHOLD_SURFACE_ENTRANCE, 3);
         return true;
     }
 
-    private String navigationStatus(WorldPoint player) {
-        if (isOnFloor1(player)) {
-            return "Crossing Stronghold floor 1";
+    private boolean handleFloor1Navigation(KspFleshCrawlerConfig config, WorldPoint player) {
+        if (player.distanceTo(WAR_LADDER_DOWN_POINT) <= 8) {
+            lastAction = "Descending to Catacomb of Famine";
+            if (player.distanceTo(WAR_LADDER_DOWN_POINT) > 3) {
+                moveLocally(WAR_LADDER_DOWN_POINT);
+                return true;
+            }
+
+            if (!Rs2Player.isMoving() && !Rs2Dialogue.isInDialogue()) {
+                if (!Rs2GameObject.interact(ObjectID.SOS_WAR_LADD_DOWN, "Climb-down")) {
+                    Rs2GameObject.interact(ObjectID.SOS_WAR_LADD_DOWN);
+                }
+                sleep(450, 700);
+            }
+            return true;
         }
-        if (isOnFloor2(player)) {
-            return "Walking through Catacomb of Famine";
+
+        if (config.useStrongholdPortals()
+                && isInFloor1StartRoom(player)
+                && canUseWarPortal()
+                && System.currentTimeMillis() - lastPortalAttemptMs >= PORTAL_RETRY_COOLDOWN_MS) {
+            lastPortalAttemptMs = System.currentTimeMillis();
+            lastAction = "Using Vault of War shortcut portal";
+
+            /*
+             * Interact with the portal directly rather than trying to stand on its
+             * object tile. The start room is small and the portal is already in scene.
+             */
+            if (Rs2GameObject.interact(ObjectID.SOS_WAR_PORTAL)) {
+                sleep(500, 850);
+                return true;
+            }
         }
-        return "Walking to Stronghold of Security";
+
+        lastAction = config.useStrongholdPortals() && canUseWarPortal()
+                ? "Reaching Vault of War portal"
+                : "Crossing Vault of War (custom doors)";
+
+        floor1RouteIndex = normalizeRouteIndex(FLOOR_1_ROUTE, floor1RouteIndex, player);
+        if (floor1RouteIndex >= FLOOR_1_ROUTE.size()) {
+            moveLocally(WAR_LADDER_DOWN_POINT);
+            return true;
+        }
+
+        WorldPoint waypoint = FLOOR_1_ROUTE.get(floor1RouteIndex);
+        if (player.distanceTo(waypoint) <= 3) {
+            floor1RouteIndex++;
+            return true;
+        }
+
+        navigateStrongholdWaypoint(player, waypoint, "Gate of War");
+        return true;
+    }
+
+    private boolean handleFloor2Navigation(WorldPoint player) {
+        lastAction = "Entering nearby Flesh Crawler room";
+
+        floor2RouteIndex = normalizeRouteIndex(FLOOR_2_ENTRY_ROUTE, floor2RouteIndex, player);
+        if (floor2RouteIndex >= FLOOR_2_ENTRY_ROUTE.size()) {
+            fightAnchor = DEFAULT_FIGHT_POINT;
+            return false;
+        }
+
+        WorldPoint waypoint = FLOOR_2_ENTRY_ROUTE.get(floor2RouteIndex);
+        if (player.distanceTo(waypoint) <= 3) {
+            floor2RouteIndex++;
+            return true;
+        }
+
+        navigateStrongholdWaypoint(player, waypoint, "Rickety door");
+        return true;
+    }
+
+    private int normalizeRouteIndex(List<WorldPoint> route, int currentIndex, WorldPoint player) {
+        int index = Math.max(0, Math.min(currentIndex, route.size()));
+
+        while (index < route.size() && player.distanceTo(route.get(index)) <= 3) {
+            index++;
+        }
+
+        if (index == 0 && !route.isEmpty() && player.distanceTo(route.get(0)) > 10) {
+            int closestIndex = 0;
+            int closestDistance = Integer.MAX_VALUE;
+            for (int i = 0; i < route.size(); i++) {
+                int distance = player.distanceTo(route.get(i));
+                if (distance < closestDistance) {
+                    closestDistance = distance;
+                    closestIndex = i;
+                }
+            }
+            if (closestDistance <= 14) {
+                index = closestIndex;
+            }
+        }
+
+        return index;
+    }
+
+    private void navigateStrongholdWaypoint(WorldPoint player, WorldPoint waypoint, String doorName) {
+        if (Rs2Dialogue.isInDialogue()) {
+            return;
+        }
+
+        long stationaryFor = System.currentTimeMillis() - lastTravelProgressMs;
+        boolean waypointReachable = Rs2Walker.canReach(waypoint);
+
+        if (!waypointReachable || stationaryFor >= 1_200L) {
+            if (tryOpenProgressDoor(player, waypoint, doorName)) {
+                return;
+            }
+        }
+
+        if (Rs2Player.isMoving()) {
+            return;
+        }
+
+        moveLocally(waypoint);
+    }
+
+    private boolean tryOpenProgressDoor(WorldPoint player, WorldPoint waypoint, String expectedName) {
+        pruneRecentDoors();
+
+        List<TileObject> matching = Rs2GameObject.getAll().stream()
+                .filter(obj -> obj != null && obj.getWorldLocation() != null)
+                .filter(obj -> obj.getWorldLocation().distanceTo(player) <= 7)
+                .filter(obj -> Rs2GameObject.getCompositionName(obj)
+                        .map(name -> name.equalsIgnoreCase(expectedName))
+                        .orElse(false))
+                .filter(obj -> Rs2GameObject.hasAction(obj, "Open", false))
+                .filter(obj -> !isDoorOnCooldown(obj.getWorldLocation()))
+                .sorted(Comparator.comparingInt(obj -> doorScore(player, waypoint, obj.getWorldLocation())))
+                .collect(Collectors.toList());
+
+        if (matching.isEmpty()) {
+            return false;
+        }
+
+        TileObject door = matching.get(0);
+        WorldPoint doorLocation = door.getWorldLocation();
+
+        /*
+         * Stronghold-specific anti-loop rule:
+         * once a gate/door was clicked, it is ineligible for six seconds.
+         * The second door of the pair therefore wins the next selection instead
+         * of the navigator hammering the first door over and over.
+         */
+        recentlyClickedDoors.put(doorLocation, System.currentTimeMillis());
+        pendingDoorLocation = doorLocation;
+        pendingDoorApproachPoint = player;
+        pendingDoorWaypoint = waypoint;
+        pendingDoorClickedAtMs = System.currentTimeMillis();
+
+        lastAction = "Opening next " + expectedName;
+        if (Rs2GameObject.interact(door, "Open")) {
+            sleep(250, 400);
+            return true;
+        }
+
+        clearPendingDoor();
+        return false;
+    }
+
+    private int doorScore(WorldPoint player, WorldPoint waypoint, WorldPoint door) {
+        int fromPlayer = player.distanceTo(door);
+        int toWaypoint = door.distanceTo(waypoint);
+        int currentToWaypoint = player.distanceTo(waypoint);
+
+        /*
+         * Prefer nearby doors which actually advance toward the current route
+         * waypoint. The penalty prevents grabbing another visible room's door.
+         */
+        int backwardsPenalty = toWaypoint > currentToWaypoint + 3 ? 100 : 0;
+        return (fromPlayer * 5) + (toWaypoint * 2) + backwardsPenalty;
+    }
+
+    private boolean handlePendingDoorCrossing() {
+        if (pendingDoorLocation == null) {
+            return false;
+        }
+
+        if (Rs2Dialogue.isInDialogue()) {
+            return false; // dialogue handler owns this tick
+        }
+
+        WorldPoint player = Rs2Player.getWorldLocation();
+        if (player == null) {
+            return true;
+        }
+
+        if (player.distanceTo(pendingDoorLocation) >= 3) {
+            clearPendingDoor();
+            return false;
+        }
+
+        long age = System.currentTimeMillis() - pendingDoorClickedAtMs;
+        if (age < DOOR_NUDGE_MIN_DELAY_MS) {
+            return true;
+        }
+
+        if (age > 3_500L) {
+            clearPendingDoor();
+            return false;
+        }
+
+        if (Rs2Player.isMoving() || Rs2Player.isAnimating()) {
+            return true;
+        }
+
+        WorldPoint crossTile = chooseDoorCrossTile();
+        if (crossTile != null) {
+            lastAction = "Crossing opened Stronghold door";
+            Rs2Walker.walkFastCanvas(crossTile);
+            lastMoveClickMs = System.currentTimeMillis();
+            return true;
+        }
+
+        clearPendingDoor();
+        return false;
+    }
+
+    private WorldPoint chooseDoorCrossTile() {
+        if (pendingDoorLocation == null || pendingDoorWaypoint == null || pendingDoorApproachPoint == null) {
+            return null;
+        }
+
+        List<WorldPoint> candidates = new ArrayList<>();
+        for (int dx = -2; dx <= 2; dx++) {
+            for (int dy = -2; dy <= 2; dy++) {
+                if (dx == 0 && dy == 0) {
+                    continue;
+                }
+                WorldPoint point = new WorldPoint(
+                        pendingDoorLocation.getX() + dx,
+                        pendingDoorLocation.getY() + dy,
+                        pendingDoorLocation.getPlane()
+                );
+
+                if (point.distanceTo(pendingDoorApproachPoint) <= 1) {
+                    continue;
+                }
+                if (point.distanceTo(pendingDoorWaypoint) >= pendingDoorApproachPoint.distanceTo(pendingDoorWaypoint)) {
+                    continue;
+                }
+                if (Rs2Walker.canReach(point)) {
+                    candidates.add(point);
+                }
+            }
+        }
+
+        return candidates.stream()
+                .min(Comparator.comparingInt(point ->
+                        point.distanceTo(pendingDoorWaypoint) * 10
+                                - point.distanceTo(pendingDoorApproachPoint) * 2))
+                .orElse(null);
+    }
+
+    private void moveLocally(WorldPoint target) {
+        if (target == null || Rs2Player.isMoving() || Rs2Dialogue.isInDialogue()) {
+            return;
+        }
+
+        long now = System.currentTimeMillis();
+        if (now - lastMoveClickMs < MOVE_CLICK_COOLDOWN_MS) {
+            return;
+        }
+        lastMoveClickMs = now;
+
+        WorldPoint player = Rs2Player.getWorldLocation();
+        if (player == null) {
+            return;
+        }
+
+        int distance = player.distanceTo(target);
+        if (distance <= 8) {
+            if (!Rs2Walker.walkFastCanvas(target)) {
+                Rs2Walker.walkMiniMap(target);
+            }
+        } else {
+            Rs2Walker.walkMiniMap(target);
+        }
+    }
+
+    private void updateTravelProgress(WorldPoint player) {
+        if (lastTravelPoint == null || !lastTravelPoint.equals(player)) {
+            lastTravelPoint = player;
+            lastTravelProgressMs = System.currentTimeMillis();
+        }
+    }
+
+    private void pruneRecentDoors() {
+        long now = System.currentTimeMillis();
+        recentlyClickedDoors.entrySet().removeIf(entry -> now - entry.getValue() >= DOOR_RETRY_COOLDOWN_MS);
+    }
+
+    private boolean isDoorOnCooldown(WorldPoint location) {
+        Long clickedAt = recentlyClickedDoors.get(location);
+        return clickedAt != null && System.currentTimeMillis() - clickedAt < DOOR_RETRY_COOLDOWN_MS;
+    }
+
+    private void clearPendingDoor() {
+        pendingDoorLocation = null;
+        pendingDoorApproachPoint = null;
+        pendingDoorWaypoint = null;
+        pendingDoorClickedAtMs = 0L;
+    }
+
+    private boolean canUseWarPortal() {
+        int combatLevel = Microbot.getClientThread().runOnClientThreadOptional(() -> {
+            if (Microbot.getClient().getLocalPlayer() == null) {
+                return 0;
+            }
+            return Microbot.getClient().getLocalPlayer().getCombatLevel();
+        }).orElse(0);
+
+        return combatLevel >= 26 || Microbot.getVarbitValue(VarbitID.SOS_EMOTE_FLAP) == 1;
+    }
+
+    private boolean isInFloor1StartRoom(WorldPoint point) {
+        return isInside(point,
+                FLOOR_1_START_MIN_X, FLOOR_1_START_MAX_X,
+                FLOOR_1_START_MIN_Y, FLOOR_1_START_MAX_Y);
     }
 
     private boolean isOnFloor1(WorldPoint point) {
@@ -251,7 +703,13 @@ public class KspFleshCrawlerScript extends Script {
     }
 
     private boolean handleStrongholdDialogue() {
-        if (!isNavigationRunning() || !Rs2Dialogue.isInDialogue()) {
+        if (!Rs2Dialogue.isInDialogue()) {
+            return false;
+        }
+
+        WorldPoint player = Rs2Player.getWorldLocation();
+        boolean strongholdTravel = isNavigationRunning() || isOnFloor1(player) || isOnFloor2(player);
+        if (!strongholdTravel) {
             return false;
         }
 
@@ -302,13 +760,13 @@ public class KspFleshCrawlerScript extends Script {
             try {
                 boolean arrived = Rs2Walker.walkTo(target, distance);
                 if (arrived) {
-                    lastAction = "Arrived at Flesh Crawler room";
+                    lastAction = "Arrived at Stronghold entrance";
                 } else if (!Thread.currentThread().isInterrupted()) {
-                    lastAction = "Walker stopped before destination - retrying";
+                    lastAction = "Overworld walker stopped - retrying";
                 }
             } catch (Exception ex) {
                 Microbot.logStackTrace("KspFleshCrawlerNavigation", ex);
-                lastAction = "Navigation error - retrying";
+                lastAction = "Overworld navigation error - retrying";
             } finally {
                 navigationTarget = null;
             }
@@ -318,6 +776,12 @@ public class KspFleshCrawlerScript extends Script {
     private boolean isNavigationRunning() {
         Future<?> future = navigationFuture;
         return future != null && !future.isDone() && !future.isCancelled();
+    }
+
+    private synchronized void cancelNavigationIfOwned() {
+        if (isNavigationRunning() || navigationTarget != null) {
+            cancelNavigation();
+        }
     }
 
     private synchronized void cancelNavigation() {
@@ -421,7 +885,11 @@ public class KspFleshCrawlerScript extends Script {
         Rs2Bank.closeBank();
         state = FleshCrawlerState.RETURNING_TO_FIGHT;
         lastAction = "Returning to Flesh Crawlers";
-        startNavigation(fightAnchor, 4);
+        /*
+         * Do not web-walk directly to the underground crawler tile. On the next
+         * tick ensureAtFleshCrawlerRoom() will web-walk only to the surface
+         * entrance, then switch to portal/custom-door navigation underground.
+         */
         return true;
     }
 

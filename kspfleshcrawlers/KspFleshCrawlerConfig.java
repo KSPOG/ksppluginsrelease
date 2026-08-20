@@ -279,7 +279,7 @@ public interface KspFleshCrawlerConfig extends Config {
     @ConfigItem(
             keyName = "autoTravel",
             name = "Auto walk to crawlers",
-            description = "Automatically web-walk from your current location to the south-east Flesh Crawler room on Stronghold floor 2",
+            description = "Automatically travel to Flesh Crawlers. Web-walking is used only to reach the Stronghold entrance; underground navigation uses portals and a custom anti-loop door handler",
             position = 0,
             section = areaSection
     )
@@ -287,12 +287,23 @@ public interface KspFleshCrawlerConfig extends Config {
         return true;
     }
 
+    @ConfigItem(
+            keyName = "useStrongholdPortals",
+            name = "Use Stronghold portals",
+            description = "Use unlocked shortcut portals when they shorten the route. The Vault of War portal is preferred to skip floor-1 doors before descending to Flesh Crawlers.",
+            position = 1,
+            section = areaSection
+    )
+    default boolean useStrongholdPortals() {
+        return true;
+    }
+
     @Range(min = 3, max = 30)
     @ConfigItem(
             keyName = "fightRadius",
             name = "Fight radius",
-            description = "Maximum distance from the south-east Flesh Crawler room anchor that targets may be selected",
-            position = 1,
+            description = "Maximum distance from the preferred near-entry Flesh Crawler room anchor that targets may be selected",
+            position = 2,
             section = areaSection
     )
     default int fightRadius() {
@@ -303,7 +314,7 @@ public interface KspFleshCrawlerConfig extends Config {
             keyName = "autoRetaliate",
             name = "Auto retaliate",
             description = "Keep auto-retaliate enabled while fighting Flesh Crawlers",
-            position = 2,
+            position = 3,
             section = areaSection
     )
     default boolean autoRetaliate() {
