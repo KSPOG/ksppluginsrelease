@@ -47,6 +47,7 @@ public class KspFleshCrawlerOverlay extends OverlayPanel {
         addLine("Strength", levelText(Skill.STRENGTH, config.strengthTarget(), config.trainStrength()));
         addLine("Defence", levelText(Skill.DEFENCE, config.defenceTarget(), config.trainDefence()));
         addLine("HP", hpText());
+        addLine("Heal at", config.useHealing() ? config.healAtHp() + " HP" : "Off");
         addLine("Food", String.valueOf(Rs2InventoryFacade.foodCount(config.foodName())));
         addLine("Kills", String.valueOf(script.getKills()));
         addLine("Kills/hr", String.valueOf(plugin.getKillsPerHour()));

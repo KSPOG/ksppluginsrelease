@@ -4,9 +4,11 @@ import net.runelite.api.Actor;
 import net.runelite.api.NPC;
 import net.runelite.api.Skill;
 import net.runelite.api.TileObject;
+import net.runelite.api.TileItem;
 import net.runelite.api.coords.WorldPoint;
 import net.runelite.api.gameval.ObjectID;
 import net.runelite.api.gameval.VarbitID;
+import net.runelite.client.plugins.grounditems.GroundItem;
 import net.runelite.client.plugins.microbot.Microbot;
 import net.runelite.client.plugins.microbot.Script;
 import net.runelite.client.plugins.microbot.util.bank.Rs2Bank;
@@ -27,6 +29,7 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -43,7 +46,7 @@ public class KspFleshCrawlerScript extends Script {
      * room is a much better operational target: after the floor-1 shortcut
      * portal + ladder, only the entry-room rickety door pair must be crossed.
      */
-    private static final WorldPoint DEFAULT_FIGHT_POINT = new WorldPoint(2042, 5230, 0);
+    private static final WorldPoint DEFAULT_FIGHT_POINT = new WorldPoint(2032, 5242, 0);
     private static final WorldPoint STRONGHOLD_SURFACE_ENTRANCE = new WorldPoint(3081, 3420, 0);
     private static final WorldPoint WAR_PORTAL_POINT = new WorldPoint(1863, 5238, 0);
     private static final WorldPoint WAR_LADDER_DOWN_POINT = new WorldPoint(1902, 5222, 0);
@@ -63,7 +66,7 @@ public class KspFleshCrawlerScript extends Script {
     private static final int FLOOR_1_START_MAX_Y = 5247;
 
     private static final long MOVE_CLICK_COOLDOWN_MS = 850L;
-    private static final long DOOR_RETRY_COOLDOWN_MS = 6_000L;
+    private static final long DOOR_RETRY_COOLDOWN_MS = 12_000L;
     private static final long DOOR_NUDGE_MIN_DELAY_MS = 350L;
     private static final long PORTAL_RETRY_COOLDOWN_MS = 4_000L;
 
@@ -89,16 +92,22 @@ public class KspFleshCrawlerScript extends Script {
     );
 
     /*
-     * The useful Flesh Crawler room directly south of the Famine entry
-     * contains spawns around 2044,5233 and 2040,5228. Staying here avoids
-     * dragging the generic web-walker through the whole Famine maze.
+     * Floor 2 starts in the north-east room.  The nearest Flesh Crawler
+     * group is immediately west of that start room, not south.  The old
+     * v1.0.2 route therefore aimed at the wrong wall and could sit forever
+     * on the first floor-2 waypoint.  These points follow the first segment
+     * of Microbot QuestHelper's Catacomb of Famine route and then stop in
+     * the adjacent crawler room.
      */
     private static final List<WorldPoint> FLOOR_2_ENTRY_ROUTE = Arrays.asList(
-            new WorldPoint(2043, 5242, 0),
-            new WorldPoint(2043, 5238, 0),
-            new WorldPoint(2043, 5234, 0),
+            new WorldPoint(2042, 5245, 0),
+            new WorldPoint(2034, 5244, 0),
             DEFAULT_FIGHT_POINT
     );
+
+    private static final int RICKETY_DOOR_ID_A = 16065;
+    private static final int RICKETY_DOOR_ID_B = 16066;
+    private static final int FLOOR_2_CRAWLER_SCAN_RADIUS = 24;
 
     /** Security-question answers used by the current Stronghold QuestHelper. */
     private static final String[] STRONGHOLD_CORRECT_ANSWERS = {
@@ -231,6 +240,10 @@ public class KspFleshCrawlerScript extends Script {
                 }
 
                 if (config.buryBones() && handleBones(config)) {
+                    return;
+                }
+
+                if (config.lootOwnDrops() && handleOwnDrops(config)) {
                     return;
                 }
 
@@ -419,7 +432,26 @@ public class KspFleshCrawlerScript extends Script {
     }
 
     private boolean handleFloor2Navigation(WorldPoint player) {
-        lastAction = "Entering nearby Flesh Crawler room";
+        Rs2NpcModel nearestCrawler = findNearestFloor2Crawler(player, FLOOR_2_CRAWLER_SCAN_RADIUS);
+        if (nearestCrawler != null) {
+            WorldPoint crawlerLocation = nearestCrawler.getWorldLocation();
+
+            // As soon as the first rickety-door airlock has been crossed, the
+            // adjacent Flesh Crawlers become locally reachable. Stop routing and
+            // let the normal combat loop take over immediately.
+            if (crawlerLocation != null
+                    && player.distanceTo(crawlerLocation) <= 14
+                    && Rs2Walker.canReach(crawlerLocation)) {
+                fightAnchor = crawlerLocation;
+                lastAction = "Reached Flesh Crawler room";
+                floor2RouteIndex = FLOOR_2_ENTRY_ROUTE.size();
+                return false;
+            }
+        }
+
+        lastAction = nearestCrawler != null
+                ? "Crossing rickety doors to Flesh Crawlers"
+                : "Entering nearest Flesh Crawler room";
 
         floor2RouteIndex = normalizeRouteIndex(FLOOR_2_ENTRY_ROUTE, floor2RouteIndex, player);
         if (floor2RouteIndex >= FLOOR_2_ENTRY_ROUTE.size()) {
@@ -433,8 +465,35 @@ public class KspFleshCrawlerScript extends Script {
             return true;
         }
 
-        navigateStrongholdWaypoint(player, waypoint, "Rickety door");
+        /*
+         * Once the west-side waypoint is active and a crawler is visible, use
+         * the crawler itself as the direction-of-travel hint for door scoring.
+         * This prevents a south/east door from winning merely because it is a
+         * little closer to the player.
+         */
+        WorldPoint navigationHint = waypoint;
+        if (floor2RouteIndex >= 1 && nearestCrawler != null && nearestCrawler.getWorldLocation() != null) {
+            navigationHint = nearestCrawler.getWorldLocation();
+        }
+
+        navigateStrongholdWaypoint(player, navigationHint, "Rickety door");
         return true;
+    }
+
+    private Rs2NpcModel findNearestFloor2Crawler(WorldPoint player, int radius) {
+        if (player == null) {
+            return null;
+        }
+
+        return Rs2Npc.getNpcs(npc -> npc != null
+                        && npc.getName() != null
+                        && NPC_NAME.equalsIgnoreCase(npc.getName())
+                        && !npc.isDead()
+                        && npc.getWorldLocation() != null
+                        && isOnFloor2(npc.getWorldLocation())
+                        && npc.getWorldLocation().distanceTo(player) <= radius)
+                .min(Comparator.comparingInt(npc -> npc.getWorldLocation().distanceTo(player)))
+                .orElse(null);
     }
 
     private int normalizeRouteIndex(List<WorldPoint> route, int currentIndex, WorldPoint player) {
@@ -489,9 +548,7 @@ public class KspFleshCrawlerScript extends Script {
         List<TileObject> matching = Rs2GameObject.getAll().stream()
                 .filter(obj -> obj != null && obj.getWorldLocation() != null)
                 .filter(obj -> obj.getWorldLocation().distanceTo(player) <= 7)
-                .filter(obj -> Rs2GameObject.getCompositionName(obj)
-                        .map(name -> name.equalsIgnoreCase(expectedName))
-                        .orElse(false))
+                .filter(obj -> isExpectedStrongholdDoor(obj, expectedName))
                 .filter(obj -> Rs2GameObject.hasAction(obj, "Open", false))
                 .filter(obj -> !isDoorOnCooldown(obj.getWorldLocation()))
                 .sorted(Comparator.comparingInt(obj -> doorScore(player, waypoint, obj.getWorldLocation())))
@@ -506,7 +563,7 @@ public class KspFleshCrawlerScript extends Script {
 
         /*
          * Stronghold-specific anti-loop rule:
-         * once a gate/door was clicked, it is ineligible for six seconds.
+         * once a gate/door was clicked, it is ineligible for twelve seconds.
          * The second door of the pair therefore wins the next selection instead
          * of the navigator hammering the first door over and over.
          */
@@ -524,6 +581,22 @@ public class KspFleshCrawlerScript extends Script {
 
         clearPendingDoor();
         return false;
+    }
+
+
+    private boolean isExpectedStrongholdDoor(TileObject obj, String expectedName) {
+        if (obj == null) {
+            return false;
+        }
+
+        if ("Rickety door".equalsIgnoreCase(expectedName)
+                && (obj.getId() == RICKETY_DOOR_ID_A || obj.getId() == RICKETY_DOOR_ID_B)) {
+            return true;
+        }
+
+        return Rs2GameObject.getCompositionName(obj)
+                .map(name -> name.equalsIgnoreCase(expectedName))
+                .orElse(false);
     }
 
     private int doorScore(WorldPoint player, WorldPoint waypoint, WorldPoint door) {
@@ -569,6 +642,13 @@ public class KspFleshCrawlerScript extends Script {
         }
 
         if (Rs2Player.isMoving() || Rs2Player.isAnimating()) {
+            return true;
+        }
+
+        // Do not hammer the same post-door tile every script tick. A single
+        // canvas click gets time to move the player through the airlock before
+        // another nudge is allowed.
+        if (System.currentTimeMillis() - lastMoveClickMs < MOVE_CLICK_COOLDOWN_MS) {
             return true;
         }
 
@@ -805,10 +885,18 @@ public class KspFleshCrawlerScript extends Script {
         int currentHp = Microbot.getClient().getBoostedSkillLevel(Skill.HITPOINTS);
         int maxHp = Microbot.getClient().getRealSkillLevel(Skill.HITPOINTS);
         int foodHeal = resolveFoodHeal(config.foodName(), config.unknownFoodHeal());
-        int missingHp = Math.max(0, maxHp - currentHp);
-        int emergencyHp = Math.max(3, maxHp / 3);
 
-        if (missingHp < foodHeal && currentHp > emergencyHp) {
+        // Flesh Crawlers only chip for very small hits, so healing at one food's
+        // missing-HP value wastes supplies and interrupts combat far too often.
+        // Use a low absolute HP threshold instead. We still avoid sitting at 1 HP,
+        // and when possible we wait until the food can heal without wasting points.
+        final int fleshCrawlerMaxHit = 1;
+        final int safetyFloor = fleshCrawlerMaxHit + 1;
+        final int configuredThreshold = Math.min(maxHp, Math.max(safetyFloor, config.healAtHp()));
+        final int noWasteThreshold = Math.max(1, maxHp - foodHeal);
+        final int healAtHp = Math.max(safetyFloor, Math.min(configuredThreshold, noWasteThreshold));
+
+        if (currentHp > healAtHp) {
             return false;
         }
 
@@ -832,10 +920,10 @@ public class KspFleshCrawlerScript extends Script {
 
         if (!config.bankForFood()) {
             int currentHp = Microbot.getClient().getBoostedSkillLevel(Skill.HITPOINTS);
-            int maxHp = Microbot.getClient().getRealSkillLevel(Skill.HITPOINTS);
-            if (currentHp <= Math.max(3, maxHp / 2)) {
+            int pauseAtHp = Math.max(2, config.healAtHp());
+            if (currentHp <= pauseAtHp) {
                 state = FleshCrawlerState.OUT_OF_FOOD;
-                lastAction = "Out of food - combat paused";
+                lastAction = "Out of food - combat paused at " + currentHp + " HP";
                 return true;
             }
             return false;
@@ -949,6 +1037,35 @@ public class KspFleshCrawlerScript extends Script {
                 sleep(450, 700);
                 return true;
             }
+        }
+        return false;
+    }
+
+    private boolean handleOwnDrops(KspFleshCrawlerConfig config) {
+        WorldPoint playerLocation = Rs2Player.getWorldLocation();
+        if (playerLocation == null) {
+            return false;
+        }
+
+        GroundItem ownDrop = Rs2GroundItem.getGroundItems().values().stream()
+                .filter(Objects::nonNull)
+                .filter(item -> item.getOwnership() == TileItem.OWNERSHIP_SELF)
+                .filter(item -> item.getLocation() != null)
+                .filter(item -> item.getLocation().distanceTo(playerLocation) <= config.lootRadius())
+                .filter(Rs2GroundItem::canTakeGroundItem)
+                .min(Comparator.comparingInt(item -> item.getLocation().distanceTo(playerLocation)))
+                .orElse(null);
+
+        if (ownDrop == null) {
+            return false;
+        }
+
+        state = FleshCrawlerState.LOOTING;
+        lastAction = "Looting own drop: " + ownDrop.getName();
+        if (Rs2GroundItem.interact(ownDrop)) {
+            itemsLooted++;
+            sleep(450, 750);
+            return true;
         }
         return false;
     }

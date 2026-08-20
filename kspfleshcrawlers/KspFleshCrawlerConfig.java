@@ -160,10 +160,21 @@ public interface KspFleshCrawlerConfig extends Config {
     }
 
     @ConfigItem(
+            keyName = "lootOwnDrops",
+            name = "Loot own drops",
+            description = "Loot ground items owned by your character, even when they are not in the configured loot list",
+            position = 1,
+            section = lootSection
+    )
+    default boolean lootOwnDrops() {
+        return true;
+    }
+
+    @ConfigItem(
             keyName = "lootItems",
             name = "Loot list",
             description = "Comma-separated item names. Matching is case-insensitive and exact.",
-            position = 1,
+            position = 2,
             section = lootSection
     )
     default String lootItems() {
@@ -175,7 +186,7 @@ public interface KspFleshCrawlerConfig extends Config {
             keyName = "lootRadius",
             name = "Loot radius",
             description = "Maximum tile radius used for configured ground-item looting",
-            position = 2,
+            position = 3,
             section = lootSection
     )
     default int lootRadius() {
@@ -186,7 +197,7 @@ public interface KspFleshCrawlerConfig extends Config {
             keyName = "buryBones",
             name = "Bury bones",
             description = "Pick up and bury configured bone items when safe to do so",
-            position = 3,
+            position = 4,
             section = lootSection
     )
     default boolean buryBones() {
@@ -197,7 +208,7 @@ public interface KspFleshCrawlerConfig extends Config {
             keyName = "boneItems",
             name = "Bone list",
             description = "Comma-separated bone names to pick up and bury",
-            position = 4,
+            position = 5,
             section = lootSection
     )
     default String boneItems() {
@@ -252,11 +263,23 @@ public interface KspFleshCrawlerConfig extends Config {
         return 12;
     }
 
+    @Range(min = 2, max = 99)
+    @ConfigItem(
+            keyName = "healAtHp",
+            name = "Heal at HP",
+            description = "Eat only when current HP reaches this value. The Flesh Crawler safety floor prevents waiting at 1 HP",
+            position = 4,
+            section = suppliesSection
+    )
+    default int healAtHp() {
+        return 6;
+    }
+
     @ConfigItem(
             keyName = "usePotions",
             name = "Use potions",
             description = "Use available melee combat/Attack/Strength/Defence potions when the corresponding boost has expired",
-            position = 4,
+            position = 5,
             section = suppliesSection
     )
     default boolean usePotions() {
@@ -267,7 +290,7 @@ public interface KspFleshCrawlerConfig extends Config {
             keyName = "bankForFood",
             name = "Bank for food",
             description = "When out of food, use Rs2Bank/Rs2Walker to bank loot, withdraw Food amount, then return to the saved Flesh Crawler tile",
-            position = 5,
+            position = 6,
             section = suppliesSection
     )
     default boolean bankForFood() {
