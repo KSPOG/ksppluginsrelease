@@ -2,6 +2,7 @@ package net.runelite.client.plugins.microbot.kspdirectfishing;
 
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.AnimationID;
+import net.runelite.api.GameObject;
 import net.runelite.api.Skill;
 import net.runelite.api.coords.WorldPoint;
 import net.runelite.api.gameval.ItemID;
@@ -11,6 +12,7 @@ import net.runelite.client.plugins.microbot.Script;
 import net.runelite.client.plugins.microbot.api.npc.models.Rs2NpcModel;
 import net.runelite.client.plugins.microbot.api.tileobject.models.Rs2TileObjectModel;
 import net.runelite.client.plugins.microbot.util.bank.Rs2Bank;
+import net.runelite.client.plugins.microbot.util.gameobject.Rs2GameObject;
 import net.runelite.client.plugins.microbot.util.inventory.Rs2Inventory;
 import net.runelite.client.plugins.microbot.util.inventory.Rs2ItemModel;
 import net.runelite.client.plugins.microbot.util.keyboard.Rs2Keyboard;
@@ -28,10 +30,12 @@ import java.util.concurrent.TimeUnit;
 @Slf4j
 public class KspDirectFishingScript extends Script
 {
-    private static final int DIRECT_BANK_DISTANCE = 8;
+    private static final int DIRECT_BANK_OBJECT_SEARCH_RADIUS = 20;
+    private static final long BANK_OPEN_RETRY_DELAY = 6_000L;
     private static final int DIRECT_FIRE_DISTANCE = 4;
     private static final long FISH_INTERACTION_TIMEOUT = 15_000L;
     private static final long FAILED_CLICK_RETRY_DELAY = 2_000L;
+    private static final int FIRE_OBJECT_43475 = 43475;
 
     private KspDirectFishingConfig config;
     private KspDirectFishingMode mode;
@@ -93,13 +97,26 @@ public class KspDirectFishingScript extends Script
 
     public int getBaitCount()
     {
-        return mode != null && mode.usesBait()
-                ? Rs2Inventory.count("Fishing bait")
-                : 0;
+        if (mode == null || !mode.usesBait())
+        {
+            return 0;
+        }
+
+        /*
+         * Fishing bait is stackable. Rs2Inventory.count(...) counts matching
+         * inventory entries/slots, which reports 1 for one bait stack.
+         * Sum the actual stack quantities instead.
+         */
+        return Rs2Inventory.all().stream()
+                .filter(item -> item.getId() == ItemID.FISHING_BAIT)
+                .mapToInt(item -> Math.max(0, item.getQuantity()))
+                .sum();
     }
 
     private long lastFishingClick;
     private long lastFailedFishingClick;
+    private long lastBankOpenAttempt;
+    private boolean bankOpenRequested;
 
     public boolean run(KspDirectFishingConfig config)
     {
@@ -109,6 +126,8 @@ public class KspDirectFishingScript extends Script
         this.status = "Locating fishing spot";
         this.lastFishingClick = 0L;
         this.lastFailedFishingClick = 0L;
+        this.lastBankOpenAttempt = 0L;
+        this.bankOpenRequested = false;
         this.fireAvailable = false;
         this.lastFirePoint = null;
 
@@ -453,31 +472,67 @@ public class KspDirectFishingScript extends Script
     {
         if (Rs2Bank.isOpen())
         {
+            bankOpenRequested = false;
             state = KspDirectFishingState.BANKING;
             bankInventoryAndRestock();
             return;
         }
 
-        if (config.directBankFirst() && Rs2Bank.isNearBank(DIRECT_BANK_DISTANCE))
+        /*
+         * Direct-bank path:
+         * If a bank booth is loaded in the local scene, interact with that
+         * exact object. RuneScape handles the short movement required by the
+         * object click itself, so we do not pathfind to the bank first.
+         */
+        if (config.directBankFirst())
         {
-            state = KspDirectFishingState.BANKING;
-            status = "Direct click: bank";
-            Rs2Bank.openBank();
-            sleepUntil(Rs2Bank::isOpen, 5_000);
-            return;
+            GameObject bankBooth = Rs2GameObject.findBank(DIRECT_BANK_OBJECT_SEARCH_RADIUS);
+
+            if (bankBooth != null)
+            {
+                state = KspDirectFishingState.BANKING;
+
+                long now = System.currentTimeMillis();
+
+                if (bankOpenRequested
+                        && now - lastBankOpenAttempt < BANK_OPEN_RETRY_DELAY)
+                {
+                    status = "Opening bank booth";
+                    return;
+                }
+
+                bankOpenRequested = true;
+                lastBankOpenAttempt = now;
+                status = "Direct click: bank booth";
+
+                boolean opened = Rs2Bank.openBank(bankBooth);
+
+                if (opened || Rs2Bank.isOpen())
+                {
+                    bankOpenRequested = false;
+                    return;
+                }
+
+                /*
+                 * Do not immediately pathfind after a failed booth click.
+                 * The next loop may find the booth again after the scene/camera
+                 * updates. Retry is rate-limited above.
+                 */
+                status = "Bank booth click failed - retrying";
+                return;
+            }
         }
 
+        /*
+         * Recovery only: no bank booth is currently available in the local
+         * scene, so walk toward the nearest bank. Do not call openBank() here.
+         * Once the booth becomes visible, the next loop takes the direct path
+         * above and clicks it exactly once.
+         */
+        bankOpenRequested = false;
         state = KspDirectFishingState.WALKING_TO_BANK;
-        status = "Walking to nearest bank";
+        status = "Bank booth not visible - walking closer";
         Rs2Bank.walkToBank();
-        Rs2Player.waitForWalking();
-
-        if (Rs2Bank.isNearBank(DIRECT_BANK_DISTANCE))
-        {
-            status = "Direct click: bank";
-            Rs2Bank.openBank();
-            sleepUntil(Rs2Bank::isOpen, 5_000);
-        }
     }
 
     private void bankInventoryAndRestock()
@@ -558,6 +613,8 @@ public class KspDirectFishingScript extends Script
 
         Rs2Bank.closeBank();
         sleepUntil(() -> !Rs2Bank.isOpen(), 3_000);
+        bankOpenRequested = false;
+        lastBankOpenAttempt = 0L;
 
         state = KspDirectFishingState.RETURNING_TO_FISH;
         status = "Returning to fishing spot";
@@ -619,7 +676,8 @@ public class KspDirectFishingScript extends Script
                 ObjectID.FIRE,
                 ObjectID.FORESTRY_FIRE,
                 ObjectID.EAGLEPEAK_CAMPFIRE_TIDY,
-                ObjectID.FIRE_COOK
+                ObjectID.FIRE_COOK,
+                FIRE_OBJECT_43475
         };
 
         try

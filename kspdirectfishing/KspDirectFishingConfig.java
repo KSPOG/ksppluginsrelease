@@ -45,7 +45,7 @@ public interface KspDirectFishingConfig extends Config
     @ConfigItem(
             keyName = "directBankFirst",
             name = "Direct bank interaction",
-            description = "When a bank is within interaction range, click it directly before using walking recovery.",
+            description = "If a bank booth is visible in the local scene, click that booth directly. Walking is recovery only.",
             position = 3
     )
     default boolean directBankFirst()
