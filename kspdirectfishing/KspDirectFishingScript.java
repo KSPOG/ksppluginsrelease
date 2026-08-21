@@ -35,7 +35,6 @@ public class KspDirectFishingScript extends Script
     private static final int DIRECT_FIRE_DISTANCE = 4;
     private static final long FISH_INTERACTION_TIMEOUT = 15_000L;
     private static final long FAILED_CLICK_RETRY_DELAY = 2_000L;
-    private static final long FIRE_WALK_START_TIMEOUT = 2_000L;
     private static final int FIRE_OBJECT_43475 = 43475;
 
     private KspDirectFishingConfig config;
@@ -383,29 +382,13 @@ public class KspDirectFishingScript extends Script
         {
             state = KspDirectFishingState.WALKING_TO_FIRE;
             status = "Walking to nearest fire";
-
-            /*
-             * Do not replace an active path every scheduled loop. Reissuing
-             * walkTo while the player is already moving can prevent the
-             * client from completing the approach to a campfire.
-             */
-            if (Rs2Player.isMoving())
-            {
-                return;
-            }
-
             Rs2Walker.walkTo(firePoint);
-
             /*
-             * The walk request is asynchronous. Wait only for its meaningful
-             * postcondition (movement started or the fire is in range), so a
-             * pending path is not replaced by the next loop.
+             * A walk request is asynchronous. Checking for "not moving" here
+             * can succeed before the client has started moving, which causes
+             * the next loop to rediscover the fire and issue another walk.
              */
-            sleepUntil(
-                    () -> Rs2Player.isMoving()
-                            || Rs2Player.getWorldLocation().distanceTo(firePoint) <= DIRECT_FIRE_DISTANCE,
-                    FIRE_WALK_START_TIMEOUT
-            );
+            Rs2Player.waitForWalking();
             return;
         }
 
