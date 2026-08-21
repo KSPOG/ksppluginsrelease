@@ -1,6 +1,5 @@
 package net.runelite.client.plugins.microbot.kspdirectfishing;
 
-import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.Actor;
 import net.runelite.api.AnimationID;
@@ -37,14 +36,26 @@ public class KspDirectFishingScript extends Script
     private KspDirectFishingConfig config;
     private KspDirectFishingMode mode;
 
-    @Getter
     private volatile KspDirectFishingState state = KspDirectFishingState.STARTING;
 
-    @Getter
     private volatile String status = "Starting";
 
-    @Getter
     private volatile WorldPoint fishingAnchor;
+
+    public KspDirectFishingState getState()
+    {
+        return state;
+    }
+
+    public String getStatus()
+    {
+        return status;
+    }
+
+    public WorldPoint getFishingAnchor()
+    {
+        return fishingAnchor;
+    }
 
     private long lastFishingClick;
     private int lastFishingSpotIndex = -1;

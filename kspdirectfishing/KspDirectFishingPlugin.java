@@ -13,7 +13,7 @@ import javax.inject.Inject;
 import java.awt.AWTException;
 
 @PluginDescriptor(
-        name = PluginConstants.KSP + "Fisher",
+        name = PluginConstants.KSP + "Fishing",
         description = "Direct fishing, fire/campfire cooking and banking for F2P fish.",
         tags = {"ksp", "fishing", "cooking", "banking", "f2p"},
         authors = {"KSP"},
