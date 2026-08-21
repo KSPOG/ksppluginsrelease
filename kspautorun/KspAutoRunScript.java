@@ -300,11 +300,10 @@ public class KspAutoRunScript extends Script
 
     private String enabledState(int runEnergy, int threshold)
     {
-        // Keep the confirmed cycle in the stable part of the state text. Runtime
-        // state collection intentionally discards parenthesized detail, which
-        // otherwise makes distinct, successfully completed energy cycles appear
-        // as the same repeating state.
-        return "run enabled for energy cycle " + confirmedRunEnableCycles
+        // A confirmed toggle completes one threshold cycle. Keep that completed
+        // cycle as the leading state value so state monitoring can distinguish
+        // successive postcondition-confirmed cycles from a stalled toggle.
+        return "energy cycle " + confirmedRunEnableCycles + " complete: run enabled"
                 + " at " + runEnergy + "/" + threshold;
     }
 
