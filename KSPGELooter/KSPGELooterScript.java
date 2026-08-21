@@ -483,6 +483,19 @@ public class KSPGELooterScript extends Script
     private boolean bankNonRunes()
     {
         /*
+         * A bank that was already open belongs to another script.  Never turn
+         * that script's bank session into this looter's deposit transaction:
+         * doing so can leave the other script to withdraw/process items that
+         * this looter just deposited.  The second check closes the small race
+         * between observing the bank and claiming the shared pause.
+         */
+        if (Rs2Bank.isOpen())
+        {
+            status = "Waiting for shared bank";
+            return false;
+        }
+
+        /*
          * Banking changes the shared inventory and bank widget.  When another
          * script is active it can otherwise act on the open bank between this
          * script's deposit and close operations, undoing the space we just made.
@@ -493,6 +506,12 @@ public class KSPGELooterScript extends Script
 
         try
         {
+            if (Rs2Bank.isOpen())
+            {
+                status = "Waiting for shared bank";
+                return false;
+            }
+
             WorldPoint before = Rs2Player.getWorldLocation();
             if (!KSPGELooterArea.contains(before))
             {
