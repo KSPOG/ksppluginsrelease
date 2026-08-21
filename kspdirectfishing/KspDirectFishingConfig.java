@@ -1,0 +1,55 @@
+package net.runelite.client.plugins.microbot.kspdirectfishing;
+
+import net.runelite.client.config.Config;
+import net.runelite.client.config.ConfigGroup;
+import net.runelite.client.config.ConfigItem;
+import net.runelite.client.config.Range;
+
+@ConfigGroup("kspDirectFishing")
+public interface KspDirectFishingConfig extends Config
+{
+    @ConfigItem(
+            keyName = "fishingMode",
+            name = "Fish",
+            description = "Choose Shrimp/Anchovies (small net) or Sardine/Herring (fishing rod + bait).",
+            position = 0
+    )
+    default KspDirectFishingMode fishingMode()
+    {
+        return KspDirectFishingMode.SHRIMP_ANCHOVIES;
+    }
+
+    @Range(min = 8, max = 50)
+    @ConfigItem(
+            keyName = "fireSearchRadius",
+            name = "Fire search radius",
+            description = "Maximum local search radius for a normal Fire or Forester's Campfire.",
+            position = 1
+    )
+    default int fireSearchRadius()
+    {
+        return 30;
+    }
+
+    @ConfigItem(
+            keyName = "waitForFire",
+            name = "Wait for fire",
+            description = "If no Fire/Forester's Campfire is available, wait instead of banking raw fish.",
+            position = 2
+    )
+    default boolean waitForFire()
+    {
+        return true;
+    }
+
+    @ConfigItem(
+            keyName = "directBankFirst",
+            name = "Direct bank interaction",
+            description = "When a bank is within interaction range, click it directly before using walking recovery.",
+            position = 3
+    )
+    default boolean directBankFirst()
+    {
+        return true;
+    }
+}
