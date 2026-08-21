@@ -1,16 +1,14 @@
 package net.runelite.client.plugins.microbot.kspbankorganizer;
 
+import lombok.RequiredArgsConstructor;
+
+@RequiredArgsConstructor
 public enum OperationMode
 {
     PREVIEW("Preview only"),
     ORGANIZE("Organize bank");
 
     private final String displayName;
-
-    OperationMode(String displayName)
-    {
-        this.displayName = displayName;
-    }
 
     public String displayName()
     {
