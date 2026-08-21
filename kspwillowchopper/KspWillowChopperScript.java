@@ -811,12 +811,19 @@ public class KspWillowChopperScript extends Script {
             return;
         }
 
-        immediateRetargetRequested = true;
+        // A spawn/despawn event is an authoritative postcondition for the click that
+        // selected this tree: it is no longer a valid target. Clear the completed
+        // interaction and let the normal 300 ms worker select the next live tree.
+        // Scheduling a second, immediate click here made ordinary willow depletion
+        // alternate indefinitely through the retarget state machine even while the
+        // regular worker was already responsible for the next action.
+        activeTargetLocation = null;
+        activeTargetObjectId = -1;
+        immediateRetargetRequested = false;
         immediateRetargetAttempts = 0;
         treeInteractionIssued = false;
         lastTreeClickMillis = 0L;
         status = "Target changed - selecting next " + activeTree;
-        queueImmediateRetarget(20L);
     }
 
     private void queueImmediateRetarget(long delayMillis) {
