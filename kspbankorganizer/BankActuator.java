@@ -66,8 +66,7 @@ final class BankActuator
             // Give the bank container a short settling window, but do not require
             // rearrangement controls for Preview/Scan. Those controls are only
             // needed later when Organize actually starts moving items.
-            Global.sleepUntil(this::isLiveBankItemWidgetPresent, 4000);
-            return true;
+            return Global.sleepUntil(this::isLiveBankItemWidgetPresent, 4000);
         }
 
         // Only attempt Rs2Bank.openBank() when the bank UI is genuinely closed.
@@ -76,7 +75,11 @@ final class BankActuator
             return false;
         }
 
-        return Global.sleepUntil(this::isBankUiOpenOnClient, 5000);
+        // A visible bank root can precede the usable item container while the
+        // interface is rebuilding. Do not report the bank interaction as
+        // complete until the same live container required by snapshot reads is
+        // available.
+        return Global.sleepUntil(this::isLiveBankItemWidgetPresent, 5000);
     }
 
     private boolean isBankUiOpenOnClient()
