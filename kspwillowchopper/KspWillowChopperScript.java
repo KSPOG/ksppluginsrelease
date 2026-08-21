@@ -19,8 +19,10 @@ import net.runelite.client.plugins.microbot.util.widget.Rs2Widget;
 import javax.inject.Inject;
 import javax.inject.Singleton;
 import java.awt.event.KeyEvent;
+import java.util.Objects;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 
 @Slf4j
 @Singleton
@@ -44,7 +46,7 @@ public class KspWillowChopperScript extends Script {
     private volatile WorldPoint activeTargetLocation;
     private volatile int activeTargetObjectId = -1;
     private volatile boolean immediateRetargetRequested;
-    private volatile int immediateRetargetAttempts;
+    private final AtomicInteger immediateRetargetAttempts = new AtomicInteger();
     private final AtomicBoolean immediateRetargetQueued = new AtomicBoolean(false);
     private final Object targetInteractionLock = new Object();
 
@@ -61,7 +63,7 @@ public class KspWillowChopperScript extends Script {
     // burn timers/animations are ignored and recovery must reacquire or create
     // a fire before the remaining logs can continue.
     private volatile boolean campfireLostConfirmed;
-    private volatile int immediateCampfireRetargetAttempts;
+    private final AtomicInteger immediateCampfireRetargetAttempts = new AtomicInteger();
     private volatile boolean burnModeEnabled;
     private volatile boolean burnCycleActive;
     private volatile boolean treeInteractionIssued;
@@ -124,7 +126,7 @@ public class KspWillowChopperScript extends Script {
         activeTargetLocation = null;
         activeTargetObjectId = -1;
         immediateRetargetRequested = false;
-        immediateRetargetAttempts = 0;
+        immediateRetargetAttempts.set(0);
         immediateRetargetQueued.set(false);
         activeCampfireLocation = null;
         activeCampfireObjectId = -1;
@@ -132,7 +134,7 @@ public class KspWillowChopperScript extends Script {
         invalidatedCampfireObjectId = -1;
         immediateCampfireRetargetRequested = false;
         campfireLostConfirmed = false;
-        immediateCampfireRetargetAttempts = 0;
+        immediateCampfireRetargetAttempts.set(0);
         immediateCampfireRetargetQueued.set(false);
         burnModeEnabled = !config.bankLogs() && activeTree.isCampfireBurnable();
         burnCycleActive = false;
@@ -235,7 +237,7 @@ public class KspWillowChopperScript extends Script {
         activeTargetLocation = null;
         activeTargetObjectId = -1;
         immediateRetargetRequested = false;
-        immediateRetargetAttempts = 0;
+        immediateRetargetAttempts.set(0);
         immediateRetargetQueued.set(false);
         burnModeEnabled = false;
         burnCycleActive = false;
@@ -249,7 +251,7 @@ public class KspWillowChopperScript extends Script {
         invalidatedCampfireObjectId = -1;
         immediateCampfireRetargetRequested = false;
         campfireLostConfirmed = false;
-        immediateCampfireRetargetAttempts = 0;
+        immediateCampfireRetargetAttempts.set(0);
         immediateCampfireRetargetQueued.set(false);
         status = "Idle";
     }
@@ -279,13 +281,13 @@ public class KspWillowChopperScript extends Script {
         activeTargetLocation = null;
         activeTargetObjectId = -1;
         immediateRetargetRequested = false;
-        immediateRetargetAttempts = 0;
+        immediateRetargetAttempts.set(0);
         clearActiveCampfireTarget();
         invalidatedCampfireLocation = null;
         invalidatedCampfireObjectId = -1;
         immediateCampfireRetargetRequested = false;
         campfireLostConfirmed = false;
-        immediateCampfireRetargetAttempts = 0;
+        immediateCampfireRetargetAttempts.set(0);
         status = "Tree changed to " + activeTree;
     }
 
@@ -441,7 +443,7 @@ public class KspWillowChopperScript extends Script {
                 activeCampfireObjectId = fire.getId();
                 campfireLostConfirmed = false;
                 immediateCampfireRetargetRequested = false;
-                immediateCampfireRetargetAttempts = 0;
+                immediateCampfireRetargetAttempts.set(0);
                 startCampfireBurn(fire, true);
                 return;
             }
@@ -556,7 +558,7 @@ public class KspWillowChopperScript extends Script {
             campfireInteractionIssued = false;
             campfireLostConfirmed = false;
             immediateCampfireRetargetRequested = false;
-            immediateCampfireRetargetAttempts = 0;
+            immediateCampfireRetargetAttempts.set(0);
             status = "Campfire created";
             return;
         }
@@ -590,9 +592,8 @@ public class KspWillowChopperScript extends Script {
             }
 
             if (forceImmediate
-                    && immediateCampfireRetargetAttempts <= 2
-                    && invalidatedCampfireLocation != null
-                    && invalidatedCampfireLocation.equals(fire.getWorldLocation())
+                    && immediateCampfireRetargetAttempts.get() <= 2
+                    && Objects.equals(invalidatedCampfireLocation, fire.getWorldLocation())
                     && invalidatedCampfireObjectId == fire.getId()) {
                 return false;
             }
@@ -636,7 +637,7 @@ public class KspWillowChopperScript extends Script {
             lastBurnProgressMillis = lastCampfireInteractionMillis;
             immediateCampfireRetargetRequested = false;
             campfireLostConfirmed = false;
-            immediateCampfireRetargetAttempts = 0;
+            immediateCampfireRetargetAttempts.set(0);
             invalidatedCampfireLocation = null;
             invalidatedCampfireObjectId = -1;
             status = "Burning " + activeTree.getResourceName();
@@ -774,8 +775,7 @@ public class KspWillowChopperScript extends Script {
             }
 
             if (forceImmediate
-                    && activeTargetLocation != null
-                    && activeTargetLocation.equals(tree.getWorldLocation())
+                    && Objects.equals(activeTargetLocation, tree.getWorldLocation())
                     && activeTargetObjectId == tree.getId()) {
                 return false;
             }
@@ -786,7 +786,7 @@ public class KspWillowChopperScript extends Script {
                 activeTargetLocation = tree.getWorldLocation();
                 activeTargetObjectId = tree.getId();
                 immediateRetargetRequested = false;
-                immediateRetargetAttempts = 0;
+                immediateRetargetAttempts.set(0);
                 treeInteractionIssued = true;
                 lastTreeClickMillis = now;
                 lastTreeProgressMillis = now;
@@ -865,7 +865,7 @@ public class KspWillowChopperScript extends Script {
 
             if (!exactTargetStillLive) {
                 immediateRetargetRequested = true;
-                immediateRetargetAttempts = 0;
+                immediateRetargetAttempts.set(0);
                 treeInteractionIssued = false;
                 lastTreeClickMillis = 0L;
                 status = "Target gone - selecting next " + activeTree;
@@ -896,7 +896,7 @@ public class KspWillowChopperScript extends Script {
         }
 
         immediateRetargetRequested = true;
-        immediateRetargetAttempts = 0;
+        immediateRetargetAttempts.set(0);
         treeInteractionIssued = false;
         lastTreeClickMillis = 0L;
         status = "Target changed - selecting next " + activeTree;
@@ -933,9 +933,9 @@ public class KspWillowChopperScript extends Script {
                 if (isPlayerBusyForAction()) {
                     retry = true;
                 } else {
-                    immediateRetargetAttempts++;
+                    immediateRetargetAttempts.incrementAndGet();
                     boolean clicked = clickSelectedTreeDirect(true);
-                    retry = !clicked && immediateRetargetRequested && immediateRetargetAttempts < 8;
+                    retry = !clicked && immediateRetargetRequested && immediateRetargetAttempts.get() < 8;
                 }
             } catch (Exception ex) {
                 Microbot.logStackTrace("KspWillowChopperScript immediate retarget", ex);
@@ -943,7 +943,7 @@ public class KspWillowChopperScript extends Script {
                 immediateRetargetQueued.set(false);
                 if (retry) {
                     queueImmediateRetarget(80L);
-                } else if (immediateRetargetAttempts >= 8) {
+                } else if (immediateRetargetAttempts.get() >= 8) {
                     immediateRetargetRequested = false;
                 }
             }
@@ -973,7 +973,7 @@ public class KspWillowChopperScript extends Script {
         invalidatedCampfireLocation = targetLocation;
         invalidatedCampfireObjectId = targetId;
         immediateCampfireRetargetRequested = true;
-        immediateCampfireRetargetAttempts = 0;
+        immediateCampfireRetargetAttempts.set(0);
 
         if (currentCampfireRemoved) {
             // The exact campfire we were feeding disappeared. Clear the stale
@@ -1034,11 +1034,11 @@ public class KspWillowChopperScript extends Script {
                         campfireNearby = true;
                         campfireLostConfirmed = false;
                         immediateCampfireRetargetRequested = false;
-                        immediateCampfireRetargetAttempts = 0;
+                        immediateCampfireRetargetAttempts.set(0);
                         startCampfireBurn(replacement, true);
                     } else {
-                        immediateCampfireRetargetAttempts++;
-                        if (immediateCampfireRetargetAttempts < 3) {
+                        immediateCampfireRetargetAttempts.incrementAndGet();
+                        if (immediateCampfireRetargetAttempts.get() < 3) {
                             retry = true;
                         } else {
                             immediateCampfireRetargetRequested = false;
@@ -1057,8 +1057,7 @@ public class KspWillowChopperScript extends Script {
 
                 Rs2TileObjectModel replacement = findCampfire(Rs2Player.getWorldLocation(), 15);
                 if (replacement != null
-                        && !(invalidatedCampfireLocation != null
-                        && invalidatedCampfireLocation.equals(replacement.getWorldLocation())
+                        && !(Objects.equals(invalidatedCampfireLocation, replacement.getWorldLocation())
                         && invalidatedCampfireObjectId == replacement.getId())) {
                     activeCampfireLocation = replacement.getWorldLocation();
                     activeCampfireObjectId = replacement.getId();
@@ -1066,20 +1065,20 @@ public class KspWillowChopperScript extends Script {
 
                     if (isCampfireProcessingActive()) {
                         immediateCampfireRetargetRequested = false;
-                        immediateCampfireRetargetAttempts = 0;
+                        immediateCampfireRetargetAttempts.set(0);
                         status = "Campfire changed - continuing burn";
                     } else {
-                        immediateCampfireRetargetAttempts++;
+                        immediateCampfireRetargetAttempts.incrementAndGet();
                         boolean restarted = startCampfireBurn(replacement, true);
-                        retry = !restarted && immediateCampfireRetargetRequested && immediateCampfireRetargetAttempts < 8;
+                        retry = !restarted && immediateCampfireRetargetRequested && immediateCampfireRetargetAttempts.get() < 8;
                     }
                 } else if (isCampfireProcessingActive()) {
                     // Existing Make-X is still consuming logs. Wait for it to finish
                     // or stall before deciding the campfire is truly gone.
                     retry = true;
                 } else {
-                    immediateCampfireRetargetAttempts++;
-                    if (immediateCampfireRetargetAttempts < 6) {
+                    immediateCampfireRetargetAttempts.incrementAndGet();
+                    if (immediateCampfireRetargetAttempts.get() < 6) {
                         retry = true;
                     } else {
                         immediateCampfireRetargetRequested = false;
@@ -1096,7 +1095,7 @@ public class KspWillowChopperScript extends Script {
                 immediateCampfireRetargetQueued.set(false);
                 if (retry) {
                     queueImmediateCampfireRetarget(100L);
-                } else if (immediateCampfireRetargetAttempts >= 8) {
+                } else if (immediateCampfireRetargetAttempts.get() >= 8) {
                     immediateCampfireRetargetRequested = false;
                 }
             }
@@ -1114,7 +1113,7 @@ public class KspWillowChopperScript extends Script {
         campfireInteractionIssued = false;
         campfireNearby = false;
         immediateCampfireRetargetRequested = true;
-        immediateCampfireRetargetAttempts = 0;
+        immediateCampfireRetargetAttempts.set(0);
         if (activeCampfireLocation != null) {
             invalidatedCampfireLocation = activeCampfireLocation;
             invalidatedCampfireObjectId = activeCampfireObjectId;

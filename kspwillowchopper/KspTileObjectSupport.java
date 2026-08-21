@@ -32,7 +32,7 @@ public final class KspTileObjectSupport {
                 if (action == null) {
                     continue;
                 }
-                String clean = Rs2UiHelper.stripColTags(action);
+                String clean = Rs2UiHelper.stripTags(action);
                 if (expectedAction.equalsIgnoreCase(clean)) {
                     return true;
                 }

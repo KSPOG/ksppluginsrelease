@@ -13,6 +13,7 @@ import net.runelite.client.plugins.microbot.util.player.Rs2Player;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Objects;
 
 import static net.runelite.client.plugins.microbot.util.Global.sleep;
 import static net.runelite.client.plugins.microbot.util.Global.sleepUntil;
@@ -20,16 +21,22 @@ import static net.runelite.client.plugins.microbot.util.Global.sleepUntil;
 /**
  * Friendly Ent / Entling Forestry event.
  *
- * A requested haircut is a set of one or two pruning operations.  The original
- * Microbot handler collapsed the two-operation requests to only Prune-top or
- * Prune-back, which can never complete those hairstyles.  Track progress per NPC
- * index so a combo request advances to its second cut instead of re-clicking the
- * first action every BlockingEvent tick.
+ * Important mechanics:
+ * - A regular Entling remains NPC_01 until it is fully satisfied.
+ * - The request text determines which prune options are valid.
+ * - A correct Entling must be pruned repeatedly until it morphs to the pruned NPC.
+ * - Player#getInteracting() can remain pointed at the Entling after a prune animation,
+ *   so the generic Forestry actor-interaction guard must not be used for the repeat cuts.
+ *   Movement + animation + an Entling-local click latch provide the anti-spam guard here.
  */
 @Slf4j
 public class KspEntlingsEvent implements BlockingEvent {
     private static final int REGULAR_ENTLING_ID = NpcID.GATHERING_EVENT_ENTLINGS_NPC_01;
-    private static final long SATISFACTION_GRACE_MS = 4_000L;
+
+    // One game tick is 600 ms.  Keep a little extra headroom so the same menu
+    // action cannot be emitted twice before the server has acknowledged the first.
+    private static final long MIN_PRUNE_INTERVAL_MS = 700L;
+    private static final long FAILED_CLICK_RETRY_MS = 1_200L;
 
     private final KspWillowChopperPlugin plugin;
     private final Map<Integer, EntlingProgress> progressByIndex = new HashMap<>();
@@ -64,75 +71,106 @@ public class KspEntlingsEvent implements BlockingEvent {
             boolean interactionIssued = false;
 
             for (Rs2NpcModel entling : entlings) {
-                String rawRequest = entling.getOverheadText();
-                String request = normalizeRequest(rawRequest);
-                String[] actions = actionsForRequest(request);
-                if (actions == null) {
-                    // Satisfaction / countdown overhead text must never be pruned.
+                if (entling == null || entling.getId() != REGULAR_ENTLING_ID) {
+                    continue;
+                }
+
+                String request = normalizeRequest(entling.getOverheadText());
+                String[] validActions = actionsForRequest(request);
+                if (validActions == null || validActions.length == 0) {
+                    // Fully-pruned/satisfaction/countdown text is deliberately ignored.
                     continue;
                 }
 
                 int npcIndex = entling.getIndex();
                 EntlingProgress progress = progressByIndex.get(npcIndex);
-                if (progress == null || !request.equals(progress.request)) {
+                if (progress == null || !Objects.equals(progress.request, request)) {
                     progress = new EntlingProgress(request);
                     progressByIndex.put(npcIndex, progress);
                 }
 
-                // Once every required part of the haircut has been cut, wait for the
-                // NPC to morph to the pruned state.  Do not instantly start the plan
-                // over, because pruning an already completed Entling stuns the player.
-                if (progress.nextAction >= actions.length) {
-                    if (System.currentTimeMillis() - progress.lastActionMillis < SATISFACTION_GRACE_MS) {
-                        continue;
-                    }
-
-                    // If the server has left the Entling in the regular state with the
-                    // exact same request for several seconds, allow one controlled
-                    // retry of the haircut plan.  This recovers from a dropped click
-                    // without creating the old every-tick spam loop.
-                    progress.nextAction = 0;
-                }
-
-                String action = actions[progress.nextAction];
-                long targetKey = entlingTargetKey(entling);
-                if (!plugin.canStartForestryInteraction(targetKey, action)) {
+                if (!canPruneNow(progress)) {
                     continue;
                 }
 
-                log.debug("Entlings: {} -> {} ({}/{})",
-                        request, action, progress.nextAction + 1, actions.length);
+                // For requests that permit two pruning locations, alternate between
+                // them.  Both are correct choices; the important part is to keep
+                // performing correct prunes until the Entling actually morphs.
+                String action = validActions[progress.nextActionIndex % validActions.length];
+                long targetKey = entlingTargetKey(entling);
 
-                entling.click(action);
+                log.debug("Entlings: npc={} request='{}' action='{}' trim={}",
+                        npcIndex, request, action, progress.successfulClicks + 1);
+
+                String requestBefore = request;
+                int idBefore = entling.getId();
+                long now = System.currentTimeMillis();
+
+                boolean clicked = entling.click(action);
+                progress.lastAttemptMillis = now;
+
+                if (!clicked) {
+                    progress.lastFailureMillis = now;
+                    continue;
+                }
+
                 plugin.markForestryInteraction(targetKey, action);
-                progress.nextAction++;
-                progress.lastActionMillis = System.currentTimeMillis();
+                progress.successfulClicks++;
+                progress.nextActionIndex = (progress.nextActionIndex + 1) % validActions.length;
                 interactionIssued = true;
 
-                // Wait only for acknowledgement / the short prune animation.  A combo
-                // haircut can then advance to its second distinct action promptly.
-                sleepUntil(() -> Rs2Player.isAnimating()
-                        || entling.getId() != REGULAR_ENTLING_ID
-                        || !request.equals(normalizeRequest(entling.getOverheadText())), 1_200);
-                sleepUntil(() -> !Rs2Player.isAnimating(), 2_500);
-                break; // at most one Forestry interaction per pass
+                // Wait for a real acknowledgement: prune animation, request text
+                // transition, or NPC morph.  Do not use Player#isInteracting here;
+                // it can stay latched to the same Entling after the action is done.
+                sleepUntil(() ->
+                                entling.getId() != idBefore
+                                || !Objects.equals(requestBefore, normalizeRequest(entling.getOverheadText()))
+                                || Rs2Player.isAnimating(),
+                        1_800);
+
+                // If the Entling has not morphed, let the prune animation finish
+                // before issuing the next correct cut.
+                if (entling.getId() == REGULAR_ENTLING_ID && Rs2Player.isAnimating()) {
+                    sleepUntil(() -> !Rs2Player.isAnimating(), 3_000);
+                }
+
+                break; // at most one Entling click per loop pass
             }
 
-            // Avoid a hot loop when all visible Entlings are already satisfied,
-            // awaiting morph, or showing non-haircut countdown text.
+            // Remove state for Entlings that morphed to the fully-pruned NPC or
+            // despawned. A reused NPC index must start with a fresh trim counter.
+            progressByIndex.keySet().removeIf(index ->
+                    entlings.stream().noneMatch(entling -> entling.getIndex() == index));
+
             if (!interactionIssued) {
                 sleep(100);
             }
-
-            // Remove progress for NPC indices that have morphed/despawned so a newly
-            // spawned Entling reusing an old index cannot inherit a previous haircut.
-            progressByIndex.keySet().removeIf(index ->
-                    entlings.stream().noneMatch(entling -> entling.getIndex() == index));
         }
 
         progressByIndex.clear();
         plugin.completeForestryEvent(KspForestryEvent.FRIENDLY_ENTLINGS);
         return true;
+    }
+
+    /**
+     * Entlings are intentionally special-cased instead of using the generic
+     * Forestry interaction guard. RuneLite may keep LocalPlayer#getInteracting()
+     * set to the same Entling between repeated prunes; treating that stale actor
+     * pointer as "busy" prevents the second and later trims forever.
+     */
+    private boolean canPruneNow(EntlingProgress progress) {
+        long now = System.currentTimeMillis();
+
+        if (Rs2Player.isMoving() || Rs2Player.isAnimating(900)) {
+            return false;
+        }
+
+        if (now - progress.lastAttemptMillis < MIN_PRUNE_INTERVAL_MS) {
+            return false;
+        }
+
+        return progress.lastFailureMillis == 0L
+                || now - progress.lastFailureMillis >= FAILED_CLICK_RETRY_MS;
     }
 
     private java.util.List<Rs2NpcModel> getRegularEntlings() {
@@ -142,8 +180,8 @@ public class KspEntlingsEvent implements BlockingEvent {
     }
 
     /**
-     * Keep current in-game wording plus older wording aliases so a minor wording
-     * variation does not make an Entling invisible to the handler.
+     * Keep the exact current in-game wording shown by the Entlings and accept a
+     * couple of historical aliases for compatibility.
      */
     private String normalizeRequest(String request) {
         if (request == null) {
@@ -154,8 +192,8 @@ public class KspEntlingsEvent implements BlockingEvent {
         if (normalized.equalsIgnoreCase("Breezy at the back!")) {
             return "Breezy on the back!";
         }
-        if (normalized.equalsIgnoreCase("Short back and sides!")) {
-            return "Short on back and sides!";
+        if (normalized.equalsIgnoreCase("Short on back and sides!")) {
+            return "Short back and sides!";
         }
         return normalized;
     }
@@ -172,7 +210,7 @@ public class KspEntlingsEvent implements BlockingEvent {
                 return new String[] {"Prune-top"};
             case "A leafy mullet!":
                 return new String[] {"Prune-top", "Prune-sides"};
-            case "Short on back and sides!":
+            case "Short back and sides!":
                 return new String[] {"Prune-back", "Prune-sides"};
             default:
                 return null;
@@ -180,9 +218,6 @@ public class KspEntlingsEvent implements BlockingEvent {
     }
 
     private long entlingTargetKey(Rs2NpcModel entling) {
-        // NPC hash can change when compositions transform. Index + world tile remains
-        // stable enough for the short interaction latch while still distinguishing
-        // the five Entlings in the event.
         long location = entling.getWorldLocation() == null
                 ? 0L
                 : (((long) entling.getWorldLocation().getX()) << 32)
@@ -197,13 +232,17 @@ public class KspEntlingsEvent implements BlockingEvent {
 
     private static final class EntlingProgress {
         private final String request;
-        private int nextAction;
-        private long lastActionMillis;
+        private int nextActionIndex;
+        private int successfulClicks;
+        private long lastAttemptMillis;
+        private long lastFailureMillis;
 
         private EntlingProgress(String request) {
             this.request = request;
-            this.nextAction = 0;
-            this.lastActionMillis = 0L;
+            this.nextActionIndex = 0;
+            this.successfulClicks = 0;
+            this.lastAttemptMillis = 0L;
+            this.lastFailureMillis = 0L;
         }
     }
 }

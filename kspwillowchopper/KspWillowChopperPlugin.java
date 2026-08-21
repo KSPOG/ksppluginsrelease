@@ -5,6 +5,8 @@ import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.ChatMessageType;
 import net.runelite.api.GameObject;
 import net.runelite.api.NPC;
+import net.runelite.api.Point;
+import net.runelite.api.coords.WorldPoint;
 import net.runelite.api.events.ChatMessage;
 import net.runelite.api.events.GameObjectDespawned;
 import net.runelite.api.events.GameObjectSpawned;
@@ -39,6 +41,7 @@ import net.runelite.client.ui.overlay.OverlayManager;
 
 import javax.inject.Inject;
 import java.awt.AWTException;
+import java.awt.Polygon;
 import java.util.ArrayList;
 import java.util.EnumMap;
 import java.util.List;
@@ -364,6 +367,40 @@ public class KspWillowChopperPlugin extends Plugin {
         return !Rs2Player.isMoving()
                 && !Rs2Player.isAnimating(1500)
                 && !Rs2Player.isInteracting();
+    }
+
+    /**
+     * Direct movement helper shared by Forestry handlers. It intentionally does not
+     * use Rs2Walker/web walking: click the target's minimap point when available,
+     * otherwise its canvas tile. The existing Forestry interaction latch prevents
+     * the same movement target from being clicked repeatedly.
+     */
+    public boolean moveDirectlyToForestryTarget(long targetHash,
+                                                 WorldPoint targetLocation,
+                                                 Point minimapLocation,
+                                                 Polygon canvasTilePoly) {
+        if (targetLocation == null) {
+            return false;
+        }
+
+        if (targetLocation.equals(Rs2Player.getWorldLocation())) {
+            return true;
+        }
+
+        if (!canStartForestryInteraction(targetHash, "Move")) {
+            return false;
+        }
+
+        if (minimapLocation != null) {
+            Microbot.getMouse().click(minimapLocation);
+        } else if (canvasTilePoly != null) {
+            Microbot.getMouse().click(canvasTilePoly.getBounds());
+        } else {
+            return false;
+        }
+
+        markForestryInteraction(targetHash, "Move");
+        return true;
     }
 
     public void markForestryInteraction() {

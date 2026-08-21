@@ -9,7 +9,6 @@ import net.runelite.client.plugins.microbot.kspwillowchopper.KspWillowChopperPlu
 import net.runelite.client.plugins.microbot.util.npc.Rs2NpcModel;
 import net.runelite.client.plugins.microbot.util.player.Rs2Player;
 
-import java.awt.Polygon;
 
 import java.util.List;
 
@@ -44,19 +43,14 @@ public class KspRitualEvent implements BlockingEvent {
             }
 
             if (!Rs2Player.getWorldLocation().equals(target.getWorldLocation())) {
-                if (!plugin.canStartForestryInteraction(target.getHash(), "Move")) {
+                if (!plugin.moveDirectlyToForestryTarget(
+                        target.getHash(),
+                        target.getWorldLocation(),
+                        target.getMinimapLocation(),
+                        target.getCanvasTilePoly())) {
                     sleepUntil(() -> false, 150);
                     continue;
                 }
-                if (target.getMinimapLocation() != null) {
-                    Microbot.getMouse().click(target.getMinimapLocation());
-                } else {
-                    Polygon poly = target.getCanvasTilePoly();
-                    if (poly != null) {
-                        Microbot.getMouse().click(poly.getBounds());
-                    }
-                }
-                plugin.markForestryInteraction(target.getHash(), "Move");
                 sleepUntil(() -> Rs2Player.getWorldLocation().equals(target.getWorldLocation()) || !validate(), 2500);
             } else {
                 sleepUntil(() -> false, 400);

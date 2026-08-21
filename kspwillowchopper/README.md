@@ -153,3 +153,5 @@ The optimal stage 1 / 2 / 3 ingredient combination is learned from the game's me
 - Waits for the selected resource stack to reach zero before closing the bank.
 
 - Microbot 2.1+ compatibility: migrated legacy `Rs2GameObject` calls to `Rs2TileObjectQueryable` / `Rs2TileObjectModel`.
+
+- Friendly Ent fix: repeatedly performs valid prune actions until the Entling actually morphs to the pruned state; the Entling loop no longer treats the player's stale NPC interaction pointer as an active prune, and uses the exact current `Short back and sides!` wording.
