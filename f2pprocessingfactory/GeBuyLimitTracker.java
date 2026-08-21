@@ -2,6 +2,9 @@ package net.runelite.client.plugins.microbot.f2pprocessingfactory;
 
 import com.google.gson.Gson;
 import com.google.gson.reflect.TypeToken;
+import lombok.AllArgsConstructor;
+import lombok.NoArgsConstructor;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.client.config.ConfigManager;
 
@@ -21,6 +24,7 @@ import java.util.concurrent.TimeUnit;
  * four hours later. Additional purchases increase usage but do not move the reset time.</p>
  */
 @Slf4j
+@RequiredArgsConstructor
 public final class GeBuyLimitTracker
 {
     static final long LIMIT_WINDOW_MILLIS = TimeUnit.HOURS.toMillis(4);
@@ -30,14 +34,7 @@ public final class GeBuyLimitTracker
     private final Gson gson;
     private final Map<Integer, LimitWindow> ledger = new HashMap<>();
     private final Set<Integer> coldStartItems = new HashSet<>();
-
     private String storageKey = "buyLimitLedger_unknown";
-
-    public GeBuyLimitTracker(ConfigManager configManager, Gson gson)
-    {
-        this.configManager = configManager;
-        this.gson = gson;
-    }
 
     public synchronized void loadForAccount(String accountName)
     {
@@ -220,21 +217,12 @@ public final class GeBuyLimitTracker
         return accountName.toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9]+", "_");
     }
 
+    @NoArgsConstructor
+    @AllArgsConstructor
     static final class LimitWindow
     {
         long startedAt;
         int quantity;
         boolean conservativeReserveApplied;
-
-        LimitWindow()
-        {
-        }
-
-        LimitWindow(long startedAt, int quantity, boolean conservativeReserveApplied)
-        {
-            this.startedAt = startedAt;
-            this.quantity = quantity;
-            this.conservativeReserveApplied = conservativeReserveApplied;
-        }
     }
 }
