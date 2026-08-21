@@ -1,7 +1,9 @@
 package net.runelite.client.plugins.microbot.kspwillowchopper;
 
+import lombok.Getter;
 import net.runelite.api.gameval.ItemID;
 
+@Getter
 public enum KspTree {
     TREE("Tree", "tree", "Logs", ItemID.LOGS, 1, "Chop down"),
     TIRANNWN_TREE("Tree (Tirannwn)", "tree", "Logs", ItemID.LOGS, 1, "Chop down"),
@@ -47,30 +49,6 @@ public enum KspTree {
         this.resourceId = resourceId;
         this.woodcuttingLevel = woodcuttingLevel;
         this.action = action;
-    }
-
-    public String getDisplayName() {
-        return displayName;
-    }
-
-    public String getObjectName() {
-        return objectName;
-    }
-
-    public String getResourceName() {
-        return resourceName;
-    }
-
-    public int getResourceId() {
-        return resourceId;
-    }
-
-    public int getWoodcuttingLevel() {
-        return woodcuttingLevel;
-    }
-
-    public String getAction() {
-        return action;
     }
 
     public boolean isCampfireBurnable() {
