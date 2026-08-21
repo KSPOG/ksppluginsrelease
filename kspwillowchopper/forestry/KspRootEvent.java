@@ -7,7 +7,7 @@ import net.runelite.client.plugins.microbot.BlockingEventPriority;
 import net.runelite.client.plugins.microbot.Microbot;
 import net.runelite.client.plugins.microbot.kspwillowchopper.KspForestryEvent;
 import net.runelite.client.plugins.microbot.kspwillowchopper.KspWillowChopperPlugin;
-import net.runelite.client.plugins.microbot.util.gameobject.Rs2GameObject;
+import net.runelite.client.plugins.microbot.kspwillowchopper.KspTileObjectSupport;
 import net.runelite.client.plugins.microbot.util.player.Rs2Player;
 
 import static net.runelite.client.plugins.microbot.util.Global.sleepUntil;
@@ -29,7 +29,7 @@ public class KspRootEvent implements BlockingEvent {
                     .where(x -> x.getId() == ObjectID.GATHERING_EVENT_RISING_ROOTS_SPECIAL)
                     .nearest();
 
-            if (special != null && Rs2GameObject.hasAction(special.getObjectComposition(), "Chop down")) {
+            if (special != null && KspTileObjectSupport.hasAction(special, "Chop down")) {
                 return true;
             }
 
@@ -37,7 +37,7 @@ public class KspRootEvent implements BlockingEvent {
                     .where(x -> x.getId() == ObjectID.GATHERING_EVENT_RISING_ROOTS)
                     .nearest();
 
-            return normal != null && Rs2GameObject.hasAction(normal.getObjectComposition(), "Chop down");
+            return normal != null && KspTileObjectSupport.hasAction(normal, "Chop down");
         } catch (Exception ex) {
             log.error("Rising Roots validation failed", ex);
             return false;

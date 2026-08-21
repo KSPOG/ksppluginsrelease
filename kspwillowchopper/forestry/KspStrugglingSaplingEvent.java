@@ -10,7 +10,7 @@ import net.runelite.client.plugins.microbot.Microbot;
 import net.runelite.client.plugins.microbot.api.tileobject.models.Rs2TileObjectModel;
 import net.runelite.client.plugins.microbot.kspwillowchopper.KspForestryEvent;
 import net.runelite.client.plugins.microbot.kspwillowchopper.KspWillowChopperPlugin;
-import net.runelite.client.plugins.microbot.util.gameobject.Rs2GameObject;
+import net.runelite.client.plugins.microbot.kspwillowchopper.KspTileObjectSupport;
 import net.runelite.client.plugins.microbot.util.inventory.Rs2Inventory;
 import net.runelite.client.plugins.microbot.util.player.Rs2Player;
 
@@ -59,7 +59,7 @@ public class KspStrugglingSaplingEvent implements BlockingEvent {
                     .toListOnClientThread()
                     .stream()
                     .anyMatch(obj ->
-                            Rs2GameObject.hasAction(obj.getObjectComposition(), "Add-mulch")
+                            KspTileObjectSupport.hasAction(obj, "Add-mulch")
                                     && obj.getWorldLocation().distanceTo(Rs2Player.getWorldLocation()) <= FORESTRY_DISTANCE);
         } catch (Exception ex) {
             log.error("Struggling Sapling validation failed", ex);
@@ -207,7 +207,7 @@ public class KspStrugglingSaplingEvent implements BlockingEvent {
                 .toListOnClientThread()
                 .stream()
                 .filter(obj ->
-                        Rs2GameObject.hasAction(obj.getObjectComposition(), "Add-mulch")
+                        KspTileObjectSupport.hasAction(obj, "Add-mulch")
                                 && obj.getWorldLocation().distanceTo(Rs2Player.getWorldLocation()) <= FORESTRY_DISTANCE)
                 .findFirst()
                 .orElse(null);
@@ -219,7 +219,7 @@ public class KspStrugglingSaplingEvent implements BlockingEvent {
                 .where(obj -> INGREDIENT_IDS.contains(obj.getId()))
                 .toListOnClientThread()
                 .stream()
-                .filter(obj -> Rs2GameObject.hasAction(obj.getObjectComposition(), "Collect"))
+                .filter(obj -> KspTileObjectSupport.hasAction(obj, "Collect"))
                 .collect(Collectors.toList());
     }
 

@@ -21,6 +21,7 @@ import net.runelite.client.plugins.microbot.BlockingEvent;
 import net.runelite.client.plugins.microbot.Microbot;
 import net.runelite.client.plugins.microbot.PluginConstants;
 import net.runelite.client.plugins.microbot.api.tileobject.Rs2TileObjectCache;
+import net.runelite.client.plugins.microbot.api.tileobject.models.Rs2TileObjectModel;
 import net.runelite.client.plugins.microbot.kspwillowchopper.forestry.KspEggEvent;
 import net.runelite.client.plugins.microbot.kspwillowchopper.forestry.KspEntlingsEvent;
 import net.runelite.client.plugins.microbot.kspwillowchopper.forestry.KspFlowersEvent;
@@ -30,7 +31,6 @@ import net.runelite.client.plugins.microbot.kspwillowchopper.forestry.KspLeprech
 import net.runelite.client.plugins.microbot.kspwillowchopper.forestry.KspRitualEvent;
 import net.runelite.client.plugins.microbot.kspwillowchopper.forestry.KspRootEvent;
 import net.runelite.client.plugins.microbot.kspwillowchopper.forestry.KspStrugglingSaplingEvent;
-import net.runelite.client.plugins.microbot.util.gameobject.Rs2GameObject;
 import net.runelite.client.plugins.microbot.util.inventory.InteractOrder;
 import net.runelite.client.plugins.microbot.util.inventory.Rs2Inventory;
 import net.runelite.client.plugins.microbot.util.npc.Rs2NpcModel;
@@ -60,14 +60,16 @@ import java.util.regex.Pattern;
 )
 @Slf4j
 public class KspWillowChopperPlugin extends Plugin {
-    public static final String VERSION = "0.0.9";
+    public static final String VERSION = "0.1.0";
 
     private static final Pattern ANIMA_BARK_PATTERN =
             Pattern.compile("You've been awarded <col=[0-9a-f]+>(\\d+) Anima-infused bark</col>\\.");
 
+    //noinspection LombokGetterMayBeUsed
     @Inject private KspWillowChopperConfig config;
     @Inject private OverlayManager overlayManager;
     @Inject private KspWillowChopperOverlay overlay;
+    //noinspection LombokGetterMayBeUsed
     @Inject private KspWillowChopperScript script;
     @Inject public Rs2TileObjectCache rs2TileObjectCache;
 
@@ -92,6 +94,7 @@ public class KspWillowChopperPlugin extends Plugin {
     private KspRootEvent rootEvent;
     private KspStrugglingSaplingEvent saplingEvent;
 
+    //noinspection LombokGetterMayBeUsed
     private volatile KspForestryEvent currentForestryEvent = KspForestryEvent.NONE;
 
     @Provides
@@ -430,6 +433,14 @@ public class KspWillowChopperPlugin extends Plugin {
     }
 
     public String getObjectName(GameObject object) {
-        return Rs2GameObject.getCompositionName(object).orElse("Unknown");
+        if (object == null) {
+            return "Unknown";
+        }
+        try {
+            String name = new Rs2TileObjectModel(object).getName();
+            return name == null || name.isEmpty() ? "Unknown" : name;
+        } catch (Exception ex) {
+            return "Unknown";
+        }
     }
 }

@@ -11,7 +11,6 @@ import net.runelite.client.plugins.microbot.Script;
 import net.runelite.client.plugins.microbot.api.tileobject.models.Rs2TileObjectModel;
 import net.runelite.client.plugins.microbot.util.bank.Rs2Bank;
 import net.runelite.client.plugins.microbot.util.equipment.Rs2Equipment;
-import net.runelite.client.plugins.microbot.util.gameobject.Rs2GameObject;
 import net.runelite.client.plugins.microbot.util.inventory.Rs2Inventory;
 import net.runelite.client.plugins.microbot.util.keyboard.Rs2Keyboard;
 import net.runelite.client.plugins.microbot.util.player.Rs2Player;
@@ -70,6 +69,18 @@ public class KspWillowChopperScript extends Script {
     private final AtomicBoolean immediateCampfireRetargetQueued = new AtomicBoolean(false);
     private final Object campfireInteractionLock = new Object();
 
+    // Bank interaction latch. Rs2Bank.openBank() performs one direct object/NPC
+    // interaction and then waits up to five seconds. If the player needs longer
+    // than that to reach the bank, the old loop immediately called openBank()
+    // again and clicked the same bank a second time. Keep the first interaction
+    // latched while the player is still travelling/acting and only permit a retry
+    // after the attempt has genuinely stalled.
+    private volatile boolean bankInteractionIssued;
+    private volatile long bankInteractionIssuedMillis;
+    private volatile long lastBankBusyMillis;
+    private static final long BANK_INTERACTION_RETRY_MS = 10_000L;
+    private static final long BANK_IDLE_SETTLE_MS = 1_200L;
+
     private long startTimeMillis;
     private int startWoodcuttingXp;
     private int startFiremakingXp;
@@ -85,11 +96,7 @@ public class KspWillowChopperScript extends Script {
     private int suppressedResourceLoss = 0;
     private long lastBurnProgressMillis = 0L;
     private long lastTreeClickMillis = 0L;
-    // This timestamp is both the no-progress recovery guard and the observable
-    // postcondition of a successful chop. The immediate-retarget task runs on
-    // the same scheduler as the main worker, so retain its latest value across
-    // those task boundaries.
-    private volatile long lastTreeProgressMillis = 0L;
+    private long lastTreeProgressMillis = 0L;
     private long lastCampfireInteractionMillis = 0L;
     private long lastCampfireCreateAttemptMillis = 0L;
 
@@ -131,6 +138,9 @@ public class KspWillowChopperScript extends Script {
         burnCycleActive = false;
         treeInteractionIssued = false;
         campfireInteractionIssued = false;
+        bankInteractionIssued = false;
+        bankInteractionIssuedMillis = 0L;
+        lastBankBusyMillis = 0L;
         lastTreeProgressMillis = System.currentTimeMillis();
         lastCampfireInteractionMillis = 0L;
         lastCampfireCreateAttemptMillis = 0L;
@@ -231,6 +241,9 @@ public class KspWillowChopperScript extends Script {
         burnCycleActive = false;
         treeInteractionIssued = false;
         campfireInteractionIssued = false;
+        bankInteractionIssued = false;
+        bankInteractionIssuedMillis = 0L;
+        lastBankBusyMillis = 0L;
         clearActiveCampfireTarget();
         invalidatedCampfireLocation = null;
         invalidatedCampfireObjectId = -1;
@@ -255,6 +268,9 @@ public class KspWillowChopperScript extends Script {
         burnCycleActive = false;
         treeInteractionIssued = false;
         campfireInteractionIssued = false;
+        bankInteractionIssued = false;
+        bankInteractionIssuedMillis = 0L;
+        lastBankBusyMillis = 0L;
         campfireNearby = false;
         lastBurnResourceCount = -1;
         suppressedResourceLoss = 0;
@@ -286,25 +302,89 @@ public class KspWillowChopperScript extends Script {
     private void handleDirectBanking() {
         int resourceId = activeTree.getResourceId();
         int before = Rs2Inventory.count(resourceId);
-        status = "Opening bank directly";
 
-        if (!Rs2Bank.openBank()) {
-            status = "Nearby bank not clickable";
-            return;
+        // If the bank has already opened from the original interaction, do not
+        // issue another world-object click. Move straight to the deposit phase.
+        if (!Rs2Bank.isOpen()) {
+            long now = System.currentTimeMillis();
+
+            if (bankInteractionIssued) {
+                boolean playerStillGoingToBank = Rs2Player.isMoving()
+                        || Rs2Player.isInteracting()
+                        || Rs2Player.isAnimating(1200);
+
+                if (playerStillGoingToBank) {
+                    lastBankBusyMillis = now;
+                    status = "Going to bank";
+                    return;
+                }
+
+                // Give the bank interface a short settling window after movement
+                // stops. This prevents a second click on the exact tick the player
+                // arrives beside the booth/chest.
+                if (lastBankBusyMillis > 0L
+                        && now - lastBankBusyMillis < BANK_IDLE_SETTLE_MS) {
+                    status = "Waiting for bank";
+                    return;
+                }
+
+                // A direct bank click may legitimately take longer than
+                // Rs2Bank.openBank()'s internal 5s wait when the bank is several
+                // tiles away. Keep the original click latched for a full retry
+                // window before allowing another interaction.
+                if (now - bankInteractionIssuedMillis < BANK_INTERACTION_RETRY_MS) {
+                    status = "Waiting for bank";
+                    return;
+                }
+
+                // The original interaction has genuinely stalled. Only now may a
+                // fresh bank interaction be sent.
+                bankInteractionIssued = false;
+                bankInteractionIssuedMillis = 0L;
+                lastBankBusyMillis = 0L;
+            }
+
+            status = "Opening bank directly";
+            bankInteractionIssued = true;
+            bankInteractionIssuedMillis = now;
+            lastBankBusyMillis = now;
+
+            boolean opened = Rs2Bank.openBank();
+            if (!opened && !Rs2Bank.isOpen()) {
+                // Keep the latch set. The interaction may still be walking the
+                // player toward the bank even though openBank() timed out.
+                status = Rs2Player.isMoving() ? "Going to bank" : "Waiting for bank";
+                return;
+            }
         }
 
-        if (!sleepUntil(Rs2Bank::isOpen, 5000)) {
+        // Bank is open: the world-object interaction is complete and can be
+        // released. Future banking cycles may issue a new bank click.
+        bankInteractionIssued = false;
+        bankInteractionIssuedMillis = 0L;
+        lastBankBusyMillis = 0L;
+
+        if (!Rs2Bank.isOpen()) {
             status = "Waiting for bank";
             return;
         }
 
         status = "Banking " + activeTree.getResourceName();
         Rs2Bank.depositAll(resourceId);
-        sleepUntil(() -> Rs2Inventory.count(resourceId) < before, 3000);
+
+        // Deposit-all should empty this resource stack. Waiting for zero instead
+        // of merely 'less than before' prevents a partial/lagging inventory update
+        // from closing the bank and immediately starting another bank cycle.
+        sleepUntil(() -> Rs2Inventory.count(resourceId) == 0, 4000);
 
         int after = Rs2Inventory.count(resourceId);
         resourcesBanked += Math.max(0, before - after);
         lastObservedResourceCount = after;
+
+        if (after > 0) {
+            status = "Waiting for bank deposit";
+            return;
+        }
 
         Rs2Bank.closeBank();
         sleepUntil(() -> !Rs2Bank.isOpen(), 3000);
@@ -541,7 +621,7 @@ public class KspWillowChopperScript extends Script {
                 return false;
             }
 
-            Rs2GameObject.interact(fire);
+            fire.click();
             if (!sleepUntil(() -> Rs2Widget.getWidget(BURN_INTERFACE_WIDGET) != null, 5000)) {
                 status = forceImmediate ? "Campfire changed - waiting" : "Waiting for Burn dialog";
                 return false;
@@ -650,16 +730,6 @@ public class KspWillowChopperScript extends Script {
     private boolean clickSelectedTreeDirect(boolean forceImmediate) {
         synchronized (targetInteractionLock) {
             if (Rs2Bank.isOpen()) {
-                return false;
-            }
-
-            // A target transition owns the next click until it has either selected a
-            // replacement or exhausted its guarded retries. Letting the regular
-            // worker click while that handoff is pending races the queued retarget
-            // and produces a target -> no-target -> target loop on normal tree
-            // depletion.
-            if (!forceImmediate && immediateRetargetRequested) {
-                status = "Selecting next " + activeTree;
                 return false;
             }
 
@@ -825,16 +895,12 @@ public class KspWillowChopperScript extends Script {
             return;
         }
 
-        // A spawn/despawn event is an authoritative postcondition for the click that
-        // selected this tree: it is no longer a valid target. Keep its identity only
-        // until the queued handoff can replace it; clearing it first exposes an
-        // observable no-target state and lets the regular worker race the retarget.
         immediateRetargetRequested = true;
         immediateRetargetAttempts = 0;
         treeInteractionIssued = false;
         lastTreeClickMillis = 0L;
         status = "Target changed - selecting next " + activeTree;
-        queueImmediateRetarget(0L);
+        queueImmediateRetarget(20L);
     }
 
     private void queueImmediateRetarget(long delayMillis) {
