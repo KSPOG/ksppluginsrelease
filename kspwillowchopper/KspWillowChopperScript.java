@@ -916,6 +916,17 @@ public class KspWillowChopperScript extends Script {
         // click latch select the next live tree after its normal cooldown. This
         // avoids repeatedly scheduling a retarget for every successful depletion.
         long now = System.currentTimeMillis();
+        // Scene updates can publish the replacement stump/object before the
+        // despawn event for the tree that produced the log. Treat that spawn as
+        // part of the successful chop while the resource-gain postcondition is
+        // fresh; otherwise it races the following despawn and starts an
+        // unnecessary immediate-retarget cycle.
+        if (sameTileMorphedToDifferentId
+                && treeInteractionIssued
+                && now - lastTreeProgressMillis <= TREE_COMPLETION_WINDOW_MS) {
+            return;
+        }
+
         if (currentTargetRemoved
                 && treeInteractionIssued
                 && now - lastTreeProgressMillis <= TREE_COMPLETION_WINDOW_MS) {
