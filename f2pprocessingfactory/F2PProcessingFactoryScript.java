@@ -61,6 +61,10 @@ public class F2PProcessingFactoryScript extends Script
     private static final int MAX_PROCESS_WITHDRAW_X_ATTEMPTS = 3;
     private static final long WATCHDOG_MIN_RETRY_GAP_MILLIS = 1_500L;
     private static final long WATCHDOG_STUCK_EDITOR_TIMEOUT_MILLIS = 8_000L;
+    // Fixed mode must never fall into the generic multi-minute "no recipe" wait
+    // because of a single transient market quote. Keep the selected recipe pinned
+    // and re-evaluate its margin on a short cadence instead.
+    private static final long FIXED_RECIPE_MARKET_RECHECK_MILLIS = 10_000L;
     // Keyboard actions are permitted only while the exact target widget is still
     // visible. This prevents a stale state-machine tick from sending Space into
     // chat/dialogue/GE after the production interface has already closed.
@@ -4609,12 +4613,12 @@ public class F2PProcessingFactoryScript extends Script
 
     private void waitForFixedRecipeMarket(String reason)
     {
-        // Keep the selected recipe pinned, but respect the configured market
-        // recheck interval. Reopening the bank and repricing every few seconds when
-        // a recipe remains below margin produces no actionable progress and can
-        // repeatedly hit the price service during a sustained market condition.
-        waitingUntil = System.currentTimeMillis()
-            + TimeUnit.MINUTES.toMillis(config.reevaluateMinutes());
+        // Do not use the configured multi-minute automatic-market wait here. Fixed
+        // mode is already pinned to one recipe, so a transient quote should be
+        // sampled again quickly instead of looking like a permanent "no recipe"
+        // failure. FactoryPriceService/Microbot price caching prevents this cadence
+        // from turning into an API request loop.
+        waitingUntil = System.currentTimeMillis() + FIXED_RECIPE_MARKET_RECHECK_MILLIS;
         state = FactoryState.WAITING_FOR_MARKET;
         status = reason;
     }
