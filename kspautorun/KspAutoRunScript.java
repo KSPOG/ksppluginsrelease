@@ -108,10 +108,12 @@ public class KspAutoRunScript extends Script
             runEnabledObserved = true;
             runToggleRequestedAt = 0L;
             runDisabledObservedAt = 0L;
-            // Enabling Run is the postcondition of this cycle, not a terminal
-            // state. The next valid action cannot occur until Run is disabled
-            // below the threshold, so report that intentional wait explicitly.
-            state = energyState("waiting for energy reset", runEnergy, threshold);
+            // Run enabled is the completed postcondition of this cycle. Keep this
+            // status independent of changing energy: energy can regenerate while
+            // Run remains enabled, but that is neither a new action nor a reset.
+            // The latch below still prevents a second non-idempotent toggle until
+            // Run is disabled below the threshold.
+            state = "run enabled";
             return;
         }
 
