@@ -25,6 +25,7 @@ import net.runelite.client.plugins.microbot.util.menu.NewMenuEntry;
 import net.runelite.client.plugins.microbot.util.misc.Rs2UiHelper;
 import net.runelite.client.plugins.microbot.util.npc.Rs2Npc;
 import net.runelite.client.plugins.microbot.util.npc.Rs2NpcModel;
+import net.runelite.client.plugins.microbot.util.player.Rs2Player;
 
 /**
  * Real-bank movement primitive. The widget IDs and drag flow mirror the current
@@ -42,6 +43,7 @@ final class BankActuator
     private static final int ACTION_SETTLE_MS = 750;
     private static final int MOVE_VERIFY_MS = 5000;
     private static final int INITIAL_OPEN_VERIFY_MS = 1500;
+    private static final int BANK_APPROACH_SETTLE_MS = 3500;
 
     private static final int[] TAB_COUNT_VARBITS = {
         Varbits.BANK_TAB_ONE_COUNT,
@@ -101,13 +103,38 @@ final class BankActuator
             return true;
         }
 
-        // The first interaction can be a stale booth click while the scene is
-        // still settling. Re-evaluate the live bank postcondition promptly, then
-        // retry against a now-near banker before falling back to openBank().
-        // This is a postcondition-driven retry, not a blind delay.
+        // Rs2Bank.openBank() can return after its internal wait while the client
+        // is still completing the approach started by its first booth click.
+        // Re-clicking during that approach produces the duplicate booth actions
+        // seen in the replay and can make the first action time out before the
+        // interface has a chance to open. Wait for either the actual bank
+        // postcondition or the approach to finish before retrying.
+        if (waitForBankOpenOrApproachToFinish())
+        {
+            return isBankReadyForSnapshotOnClient();
+        }
+
+        // The approach has stopped without opening a bank. A fresh interaction
+        // is now justified; prefer a nearby banker and retain Rs2Bank's normal
+        // discovery fallback for booths/chests.
         bankInteractionStarted = openNearbyBanker() || Rs2Bank.openBank();
         return bankInteractionStarted
             && Global.sleepUntil(this::isBankReadyForSnapshotOnClient, 5000);
+    }
+
+    private boolean waitForBankOpenOrApproachToFinish()
+    {
+        Global.sleepUntil(() ->
+            isBankReadyForSnapshotOnClient() || !isPlayerApproachingBank(),
+            BANK_APPROACH_SETTLE_MS);
+        return isBankReadyForSnapshotOnClient();
+    }
+
+    private boolean isPlayerApproachingBank()
+    {
+        return Rs2Player.isMoving()
+            || Rs2Player.isInteracting()
+            || Rs2Player.isAnimating(1200);
     }
 
     private boolean openNearbyBanker()
