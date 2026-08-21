@@ -5,8 +5,10 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import lombok.Getter;
+import lombok.RequiredArgsConstructor;
 
 @Getter
+@RequiredArgsConstructor
 public enum ItemCategory
 {
     TELEPORTS("Teleports", new Color(0, 150, 255), Arrays.asList(
@@ -64,13 +66,6 @@ public enum ItemCategory
     private final String displayName;
     private final Color color;
     private final List<String> keywords;
-
-    ItemCategory(String displayName, Color color, List<String> keywords)
-    {
-        this.displayName = displayName;
-        this.color = color;
-        this.keywords = keywords;
-    }
 
     @Override
     public String toString()
