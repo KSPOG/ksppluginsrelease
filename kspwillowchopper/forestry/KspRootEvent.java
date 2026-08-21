@@ -1,5 +1,6 @@
 package net.runelite.client.plugins.microbot.kspwillowchopper.forestry;
 
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.gameval.ObjectID;
 import net.runelite.client.plugins.microbot.BlockingEvent;
@@ -13,30 +14,21 @@ import net.runelite.client.plugins.microbot.util.player.Rs2Player;
 import static net.runelite.client.plugins.microbot.util.Global.sleepUntil;
 
 @Slf4j
+@RequiredArgsConstructor
 public class KspRootEvent implements BlockingEvent {
     private final KspWillowChopperPlugin plugin;
-
-    public KspRootEvent(KspWillowChopperPlugin plugin) {
-        this.plugin = plugin;
-    }
 
     @Override
     public boolean validate() {
         try {
             if (!Microbot.isPluginEnabled(plugin) || !Microbot.isLoggedIn()) return false;
 
-            var special = plugin.rs2TileObjectCache.query()
-                    .where(x -> x.getId() == ObjectID.GATHERING_EVENT_RISING_ROOTS_SPECIAL)
-                    .nearest();
-
+            var special = findRoot(ObjectID.GATHERING_EVENT_RISING_ROOTS_SPECIAL);
             if (special != null && KspTileObjectSupport.hasAction(special, "Chop down")) {
                 return true;
             }
 
-            var normal = plugin.rs2TileObjectCache.query()
-                    .where(x -> x.getId() == ObjectID.GATHERING_EVENT_RISING_ROOTS)
-                    .nearest();
-
+            var normal = findRoot(ObjectID.GATHERING_EVENT_RISING_ROOTS);
             return normal != null && KspTileObjectSupport.hasAction(normal, "Chop down");
         } catch (Exception ex) {
             log.error("Rising Roots validation failed", ex);
@@ -49,16 +41,10 @@ public class KspRootEvent implements BlockingEvent {
         plugin.setCurrentForestryEvent(KspForestryEvent.RISING_ROOTS);
 
         while (validate()) {
-            var root = plugin.rs2TileObjectCache.query()
-                    .where(x -> x.getId() == ObjectID.GATHERING_EVENT_RISING_ROOTS_SPECIAL)
-                    .nearest();
-
+            var root = findRoot(ObjectID.GATHERING_EVENT_RISING_ROOTS_SPECIAL);
             if (root == null) {
-                root = plugin.rs2TileObjectCache.query()
-                        .where(x -> x.getId() == ObjectID.GATHERING_EVENT_RISING_ROOTS)
-                        .nearest();
+                root = findRoot(ObjectID.GATHERING_EVENT_RISING_ROOTS);
             }
-
             if (root == null) {
                 continue;
             }
@@ -76,6 +62,10 @@ public class KspRootEvent implements BlockingEvent {
 
         plugin.completeForestryEvent(KspForestryEvent.RISING_ROOTS);
         return true;
+    }
+
+    private net.runelite.client.plugins.microbot.api.tileobject.models.Rs2TileObjectModel findRoot(int id) {
+        return plugin.rs2TileObjectCache.query().where(x -> x.getId() == id).nearest();
     }
 
     @Override
