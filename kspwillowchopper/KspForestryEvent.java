@@ -1,5 +1,8 @@
 package net.runelite.client.plugins.microbot.kspwillowchopper;
 
+import lombok.RequiredArgsConstructor;
+
+@RequiredArgsConstructor
 public enum KspForestryEvent {
     NONE("None"),
     RISING_ROOTS("Rising Roots"),
@@ -13,10 +16,6 @@ public enum KspForestryEvent {
     FLOWERING_TREE("Flowering Tree");
 
     private final String label;
-
-    KspForestryEvent(String label) {
-        this.label = label;
-    }
 
     @Override
     public String toString() {
