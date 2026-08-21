@@ -124,27 +124,7 @@ public class KspDirectFishingOverlay extends OverlayPanel
 
     private String fireStatus()
     {
-        KspDirectFishingState state = script().getState();
-
-        if (state == null)
-        {
-            return "Not checked";
-        }
-
-        switch (state)
-        {
-            case FINDING_FIRE:
-                return "Searching";
-            case WAITING_FOR_FIRE:
-                return "Not found";
-            case WALKING_TO_FIRE:
-            case USING_FIRE:
-            case WAITING_FOR_COOK_INTERFACE:
-            case COOKING:
-                return script().isFireAvailable() ? "Available" : "Searching";
-            default:
-                return script().isFireAvailable() ? "Last seen" : "Not checked";
-        }
+        return script().isFireAvailable() ? "Found" : "Not Found";
     }
 
     private String formatNumber(int value)

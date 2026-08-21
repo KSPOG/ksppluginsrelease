@@ -2,7 +2,6 @@ package net.runelite.client.plugins.microbot.kspdirectfishing;
 
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.AnimationID;
-import net.runelite.api.GameObject;
 import net.runelite.api.Skill;
 import net.runelite.api.coords.WorldPoint;
 import net.runelite.api.gameval.ItemID;
@@ -12,7 +11,7 @@ import net.runelite.client.plugins.microbot.Script;
 import net.runelite.client.plugins.microbot.api.npc.models.Rs2NpcModel;
 import net.runelite.client.plugins.microbot.api.tileobject.models.Rs2TileObjectModel;
 import net.runelite.client.plugins.microbot.util.bank.Rs2Bank;
-import net.runelite.client.plugins.microbot.util.gameobject.Rs2GameObject;
+import net.runelite.client.plugins.microbot.util.camera.Rs2Camera;
 import net.runelite.client.plugins.microbot.util.inventory.Rs2Inventory;
 import net.runelite.client.plugins.microbot.util.inventory.Rs2ItemModel;
 import net.runelite.client.plugins.microbot.util.keyboard.Rs2Keyboard;
@@ -31,11 +30,13 @@ import java.util.concurrent.TimeUnit;
 public class KspDirectFishingScript extends Script
 {
     private static final int DIRECT_BANK_OBJECT_SEARCH_RADIUS = 20;
-    private static final long BANK_OPEN_RETRY_DELAY = 6_000L;
+    private static final long BANK_OPEN_RETRY_DELAY = 8_000L;
+    private static final long FIRE_STATUS_REFRESH_DELAY = 1_500L;
     private static final int DIRECT_FIRE_DISTANCE = 4;
     private static final long FISH_INTERACTION_TIMEOUT = 15_000L;
     private static final long FAILED_CLICK_RETRY_DELAY = 2_000L;
     private static final int FIRE_OBJECT_43475 = 43475;
+    private static final WorldPoint FORESTERS_CAMPFIRE_POINT = new WorldPoint(3096, 3237, 0);
 
     private KspDirectFishingConfig config;
     private KspDirectFishingMode mode;
@@ -117,6 +118,7 @@ public class KspDirectFishingScript extends Script
     private long lastFailedFishingClick;
     private long lastBankOpenAttempt;
     private boolean bankOpenRequested;
+    private long lastFireStatusCheck;
 
     public boolean run(KspDirectFishingConfig config)
     {
@@ -128,6 +130,7 @@ public class KspDirectFishingScript extends Script
         this.lastFailedFishingClick = 0L;
         this.lastBankOpenAttempt = 0L;
         this.bankOpenRequested = false;
+        this.lastFireStatusCheck = 0L;
         this.fireAvailable = false;
         this.lastFirePoint = null;
 
@@ -157,6 +160,8 @@ public class KspDirectFishingScript extends Script
             }
 
             mode = config.fishingMode();
+
+            refreshFireStatusIfDue();
 
             if (fishingAnchor == null)
             {
@@ -378,6 +383,8 @@ public class KspDirectFishingScript extends Script
         fireAvailable = true;
         lastFirePoint = firePoint;
 
+        turnCameraTowardCampfire(firePoint);
+
         int distance = Rs2Player.getWorldLocation().distanceTo(firePoint);
 
         if (distance > DIRECT_FIRE_DISTANCE)
@@ -436,8 +443,15 @@ public class KspDirectFishingScript extends Script
             }
 
             state = KspDirectFishingState.USING_FIRE;
-            status = "Using " + rawFish + " on fire";
+            status = "Turning camera to campfire";
 
+            WorldPoint activeFirePoint = getTileObjectWorldPoint(fire);
+            if (activeFirePoint != null)
+            {
+                turnCameraTowardCampfire(activeFirePoint);
+            }
+
+            status = "Using " + rawFish + " on fire";
             Rs2Inventory.useUnNotedItemOnObject(rawFish, fireId);
 
             state = KspDirectFishingState.WAITING_FOR_COOK_INTERFACE;
@@ -496,61 +510,89 @@ public class KspDirectFishingScript extends Script
         if (Rs2Bank.isOpen())
         {
             bankOpenRequested = false;
+            lastBankOpenAttempt = 0L;
             state = KspDirectFishingState.BANKING;
             bankInventoryAndRestock();
             return;
         }
 
-        /*
-         * Direct-bank path:
-         * If a bank booth is loaded in the local scene, interact with that
-         * exact object. RuneScape handles the short movement required by the
-         * object click itself, so we do not pathfind to the bank first.
-         */
         if (config.directBankFirst())
         {
-            GameObject bankBooth = Rs2GameObject.findBank(DIRECT_BANK_OBJECT_SEARCH_RADIUS);
+            Rs2TileObjectModel bankBooth = null;
+
+            try
+            {
+                bankBooth = Microbot.getRs2TileObjectCache()
+                        .query()
+                        .withNames("Bank booth", "Bank chest", "Bank")
+                        .within(DIRECT_BANK_OBJECT_SEARCH_RADIUS)
+                        .nearestOnClientThread();
+            }
+            catch (RuntimeException ex)
+            {
+                log.debug("Bank booth query failed: {}", ex.getMessage());
+            }
 
             if (bankBooth != null)
             {
                 state = KspDirectFishingState.BANKING;
-
                 long now = System.currentTimeMillis();
 
-                if (bankOpenRequested
-                        && now - lastBankOpenAttempt < BANK_OPEN_RETRY_DELAY)
+                /*
+                 * Important: bankOpenRequested is NOT cleared merely because
+                 * the click call returned true. It is only cleared once the
+                 * actual bank interface is open. This prevents the second
+                 * click that happened on the next scheduled loop while the
+                 * bank widget was still opening.
+                 */
+                if (!bankOpenRequested)
                 {
-                    status = "Opening bank booth";
+                    bankOpenRequested = true;
+                    lastBankOpenAttempt = now;
+                    status = "Clicking bank booth once";
+
+                    boolean clicked = bankBooth.click("Bank");
+
+                    if (!clicked)
+                    {
+                        status = "Bank booth click failed";
+                    }
+                    else
+                    {
+                        status = "Waiting for bank to open";
+                    }
+
+                    sleepUntil(Rs2Bank::isOpen, 5_000);
+
+                    if (Rs2Bank.isOpen())
+                    {
+                        bankOpenRequested = false;
+                        lastBankOpenAttempt = 0L;
+                    }
+
                     return;
                 }
 
-                bankOpenRequested = true;
-                lastBankOpenAttempt = now;
-                status = "Direct click: bank booth";
-
-                boolean opened = Rs2Bank.openBank(bankBooth);
-
-                if (opened || Rs2Bank.isOpen())
+                if (now - lastBankOpenAttempt < BANK_OPEN_RETRY_DELAY)
                 {
-                    bankOpenRequested = false;
+                    status = "Waiting for bank to open";
                     return;
                 }
 
                 /*
-                 * Do not immediately pathfind after a failed booth click.
-                 * The next loop may find the booth again after the scene/camera
-                 * updates. Retry is rate-limited above.
+                 * A genuine timeout is the only condition that permits
+                 * another click.
                  */
-                status = "Bank booth click failed - retrying";
+                bankOpenRequested = false;
+                status = "Bank open timed out - retrying";
                 return;
             }
         }
 
         /*
-         * Recovery only: no bank booth is currently available in the local
-         * scene, so walk toward the nearest bank. Do not call openBank() here.
-         * Once the booth becomes visible, the next loop takes the direct path
-         * above and clicks it exactly once.
+         * Recovery only. No bank object is loaded, so move closer. We still
+         * do not call openBank() here; once a booth loads, the one-shot path
+         * above performs exactly one Bank interaction.
          */
         bankOpenRequested = false;
         state = KspDirectFishingState.WALKING_TO_BANK;
@@ -719,21 +761,86 @@ public class KspDirectFishingScript extends Script
         }
     }
 
-    private Rs2TileObjectModel findNearestFire()
+    private void turnCameraTowardCampfire(WorldPoint firePoint)
     {
-        int[] fireIds = {
+        if (firePoint == null)
+        {
+            return;
+        }
+
+        /*
+         * The known Forester's campfire / Fire is at 3096,3237,0.
+         * Prefer that exact point when it is the active fire, otherwise
+         * face whichever supported fire the script selected.
+         */
+        WorldPoint target = firePoint.equals(FORESTERS_CAMPFIRE_POINT)
+                ? FORESTERS_CAMPFIRE_POINT
+                : firePoint;
+
+        try
+        {
+            int angle = (Rs2Camera.angleToTile(target) - 90) % 360;
+            if (angle < 0)
+            {
+                angle += 360;
+            }
+
+            // 25 degrees keeps the campfire clearly inside the viewport.
+            Rs2Camera.setAngle(angle, 25);
+        }
+        catch (RuntimeException ex)
+        {
+            log.debug("Camera turn toward campfire failed: {}", ex.getMessage());
+        }
+    }
+
+    private int[] supportedFireIds()
+    {
+        return new int[] {
                 ObjectID.FIRE,
                 ObjectID.FORESTRY_FIRE,
                 ObjectID.EAGLEPEAK_CAMPFIRE_TIDY,
                 ObjectID.FIRE_COOK,
                 FIRE_OBJECT_43475
         };
+    }
+
+    private void refreshFireStatusIfDue()
+    {
+        long now = System.currentTimeMillis();
+        if (now - lastFireStatusCheck < FIRE_STATUS_REFRESH_DELAY)
+        {
+            return;
+        }
+
+        lastFireStatusCheck = now;
 
         try
         {
             Rs2TileObjectModel fire = Microbot.getRs2TileObjectCache()
                     .query()
-                    .withIds(fireIds)
+                    .withIds(supportedFireIds())
+                    .within(config.fireSearchRadius())
+                    .nearestOnClientThread();
+
+            fireAvailable = fire != null;
+            lastFirePoint = fire == null ? null : getTileObjectWorldPoint(fire);
+        }
+        catch (RuntimeException ex)
+        {
+            fireAvailable = false;
+            lastFirePoint = null;
+            log.debug("Fire status refresh failed: {}", ex.getMessage());
+        }
+    }
+
+    private Rs2TileObjectModel findNearestFire()
+    {
+        try
+        {
+            Rs2TileObjectModel fire = Microbot.getRs2TileObjectCache()
+                    .query()
+                    .withIds(supportedFireIds())
                     .within(config.fireSearchRadius())
                     .nearestOnClientThread();
 
