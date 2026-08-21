@@ -1,7 +1,6 @@
 package net.runelite.client.plugins.microbot.kspwillowchopper.forestry;
 
 import lombok.extern.slf4j.Slf4j;
-import net.runelite.api.Actor;
 import net.runelite.api.gameval.ObjectID;
 import net.runelite.client.plugins.microbot.BlockingEvent;
 import net.runelite.client.plugins.microbot.BlockingEventPriority;
@@ -64,19 +63,18 @@ public class KspRootEvent implements BlockingEvent {
                 continue;
             }
 
-            if (Rs2Player.isInteracting() && Rs2Player.getInteracting() != null) {
-                Actor interacting = Microbot.getClient().getLocalPlayer().getInteracting();
-                if (interacting != null && interacting.getWorldLocation().equals(root.getWorldLocation())) {
-                    continue;
-                }
+            if (!plugin.canStartForestryInteraction(root.getHash(), "Chop down")) {
+                sleepUntil(() -> false, 150);
+                continue;
             }
 
             root.click("Chop down");
+            plugin.markForestryInteraction(root.getHash(), "Chop down");
             Rs2Player.waitForAnimation(5000);
             sleepUntil(() -> !Rs2Player.isInteracting(), 40000);
         }
 
-        plugin.incrementForestryEventCompleted();
+        plugin.completeForestryEvent(KspForestryEvent.RISING_ROOTS);
         return true;
     }
 

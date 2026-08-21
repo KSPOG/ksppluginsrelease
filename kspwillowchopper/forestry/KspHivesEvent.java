@@ -50,6 +50,8 @@ public class KspHivesEvent implements BlockingEvent {
         while (validate()) {
             if (Rs2Widget.findWidget("How many logs would you like to add", null, false) != null) {
                 Rs2Keyboard.keyPress(KeyEvent.VK_SPACE);
+                plugin.markForestryInteraction(0L, "Beehive-space");
+                sleepUntil(() -> Rs2Widget.findWidget("How many logs would you like to add", null, false) == null, 3000);
                 sleepUntil(() -> !Rs2Player.isInteracting() && !Rs2Player.isAnimating(), 6000);
                 continue;
             }
@@ -65,7 +67,13 @@ public class KspHivesEvent implements BlockingEvent {
             int before = Rs2Inventory.count(plugin.getSelectedResourceId());
             if (before <= 1) break;
 
+            if (!plugin.canStartForestryInteraction(hive.getHash(), "Build")) {
+                sleepUntil(() -> false, 150);
+                continue;
+            }
+
             if (hive.click("Build")) {
+                plugin.markForestryInteraction(hive.getHash(), "Build");
                 sleepUntil(() -> Rs2Player.isInteracting() || Rs2Player.isAnimating(), 3000);
                 sleepUntil(() -> !Rs2Player.isInteracting() && !Rs2Player.isAnimating(), 15000);
 
@@ -79,7 +87,7 @@ public class KspHivesEvent implements BlockingEvent {
             }
         }
 
-        plugin.incrementForestryEventCompleted();
+        plugin.completeForestryEvent(KspForestryEvent.BEEHIVE);
         return true;
     }
 

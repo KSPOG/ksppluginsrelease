@@ -47,7 +47,13 @@ public class KspFlowersEvent implements BlockingEvent {
                 continue;
             }
 
+            if (!plugin.canStartForestryInteraction(target.getHash(), "Tend-to")) {
+                sleepUntil(() -> false, 150);
+                continue;
+            }
+
             if (target.click("Tend-to")) {
+                plugin.markForestryInteraction(target.getHash(), "Tend-to");
                 Rs2Player.waitForAnimation();
                 sleepUntil(() -> !Rs2Player.isInteracting(), 8000);
             } else {
@@ -55,7 +61,7 @@ public class KspFlowersEvent implements BlockingEvent {
             }
         }
 
-        plugin.incrementForestryEventCompleted();
+        plugin.completeForestryEvent(KspForestryEvent.FLOWERING_TREE);
         return true;
     }
 

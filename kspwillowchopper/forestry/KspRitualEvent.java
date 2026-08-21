@@ -44,6 +44,10 @@ public class KspRitualEvent implements BlockingEvent {
             }
 
             if (!Rs2Player.getWorldLocation().equals(target.getWorldLocation())) {
+                if (!plugin.canStartForestryInteraction(target.getHash(), "Move")) {
+                    sleepUntil(() -> false, 150);
+                    continue;
+                }
                 if (target.getMinimapLocation() != null) {
                     Microbot.getMouse().click(target.getMinimapLocation());
                 } else {
@@ -52,13 +56,14 @@ public class KspRitualEvent implements BlockingEvent {
                         Microbot.getMouse().click(poly.getBounds());
                     }
                 }
+                plugin.markForestryInteraction(target.getHash(), "Move");
                 sleepUntil(() -> Rs2Player.getWorldLocation().equals(target.getWorldLocation()) || !validate(), 2500);
             } else {
                 sleepUntil(() -> false, 400);
             }
         }
 
-        plugin.incrementForestryEventCompleted();
+        plugin.completeForestryEvent(KspForestryEvent.ENCHANTMENT_RITUAL);
         return true;
     }
 

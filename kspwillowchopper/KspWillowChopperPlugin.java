@@ -34,20 +34,24 @@ import net.runelite.client.plugins.microbot.util.gameobject.Rs2GameObject;
 import net.runelite.client.plugins.microbot.util.inventory.InteractOrder;
 import net.runelite.client.plugins.microbot.util.inventory.Rs2Inventory;
 import net.runelite.client.plugins.microbot.util.npc.Rs2NpcModel;
+import net.runelite.client.plugins.microbot.util.player.Rs2Player;
 import net.runelite.client.ui.overlay.OverlayManager;
 
 import javax.inject.Inject;
 import java.awt.AWTException;
 import java.util.ArrayList;
+import java.util.EnumMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 @PluginDescriptor(
         name = PluginConstants.KSP + "Chopper",
-        description = "Direct Chopping with bank or Forester's Campfire log handling and Forestry events.",
-        tags = {"woodcutting", "firemaking", "forestry", "ksp", "microbot"},
+        description = "Direct willow chopping with bank or Forester's Campfire log handling and Forestry events.",
+        tags = {"willow", "woodcutting", "firemaking", "forestry", "ksp", "microbot"},
         authors = {"KSP"},
         version = KspWillowChopperPlugin.VERSION,
         minClientVersion = "2.1.32",
@@ -56,7 +60,7 @@ import java.util.regex.Pattern;
 )
 @Slf4j
 public class KspWillowChopperPlugin extends Plugin {
-    public static final String VERSION = "1.1.7";
+    public static final String VERSION = "0.0.9";
 
     private static final Pattern ANIMA_BARK_PATTERN =
             Pattern.compile("You've been awarded <col=[0-9a-f]+>(\\d+) Anima-infused bark</col>\\.");
@@ -73,6 +77,10 @@ public class KspWillowChopperPlugin extends Plugin {
     private final AtomicInteger completedForestryEvents = new AtomicInteger();
     private final AtomicInteger logsChopped = new AtomicInteger();
     private final AtomicInteger animaBarkGained = new AtomicInteger();
+    private final AtomicLong lastForestryInteractionMillis = new AtomicLong(0L);
+    private volatile long lastForestryInteractionKey = Long.MIN_VALUE;
+    private final Object forestryCompletionLock = new Object();
+    private final Map<KspForestryEvent, Long> forestryCompletionTimes = new EnumMap<>(KspForestryEvent.class);
 
     private KspEggEvent eggEvent;
     private KspEntlingsEvent entlingsEvent;
@@ -97,6 +105,11 @@ public class KspWillowChopperPlugin extends Plugin {
         logsChopped.set(0);
         animaBarkGained.set(0);
         currentForestryEvent = KspForestryEvent.NONE;
+        lastForestryInteractionMillis.set(0L);
+        lastForestryInteractionKey = Long.MIN_VALUE;
+        synchronized (forestryCompletionLock) {
+            forestryCompletionTimes.clear();
+        }
 
         overlayManager.add(overlay);
 
@@ -324,8 +337,73 @@ public class KspWillowChopperPlugin extends Plugin {
         return getSelectedTree().isCampfireBurnable();
     }
 
+    /**
+     * Shared guard used by every Forestry handler. Object interactions do not always
+     * populate Player#getInteracting(), so combine actor/movement/animation state with
+     * a short post-click latch to prevent repeated menu actions before the game reacts.
+     */
+    public boolean canStartForestryInteraction() {
+        return canStartForestryInteraction(Long.MIN_VALUE, "generic");
+    }
+
+    public boolean canStartForestryInteraction(long targetHash, String action) {
+        long now = System.currentTimeMillis();
+        long elapsed = now - lastForestryInteractionMillis.get();
+        long key = forestryInteractionKey(targetHash, action);
+
+        // Give the client time to acknowledge every click, even before movement or
+        // animation starts. Re-clicking the exact same target/action gets a longer
+        // latch, while a genuinely different Forestry target can be selected quickly.
+        if (elapsed < 900L || (key == lastForestryInteractionKey && elapsed < 2500L)) {
+            return false;
+        }
+
+        return !Rs2Player.isMoving()
+                && !Rs2Player.isAnimating(1500)
+                && !Rs2Player.isInteracting();
+    }
+
+    public void markForestryInteraction() {
+        markForestryInteraction(Long.MIN_VALUE, "generic");
+    }
+
+    public void markForestryInteraction(long targetHash, String action) {
+        lastForestryInteractionKey = forestryInteractionKey(targetHash, action);
+        lastForestryInteractionMillis.set(System.currentTimeMillis());
+    }
+
+    private long forestryInteractionKey(long targetHash, String action) {
+        int actionHash = action == null ? 0 : action.toLowerCase().hashCode();
+        return (targetHash * 31L) ^ (long) actionHash;
+    }
+
+    /**
+     * Counts a Forestry event once. Some event objects/NPCs briefly disappear or morph
+     * during their final phase, which can make BlockingEvent execute more than once for
+     * the same event instance. A same-type completion inside this debounce window is a
+     * duplicate, not another event.
+     */
+    public boolean completeForestryEvent(KspForestryEvent event) {
+        if (event == null || event == KspForestryEvent.NONE) {
+            return false;
+        }
+
+        long now = System.currentTimeMillis();
+        synchronized (forestryCompletionLock) {
+            long lastCompletion = forestryCompletionTimes.getOrDefault(event, 0L);
+            if (now - lastCompletion < 120_000L) {
+                return false;
+            }
+
+            completedForestryEvents.incrementAndGet();
+            forestryCompletionTimes.put(event, now);
+            return true;
+        }
+    }
+
+    /** Backward-compatible wrapper for any older runtime source. */
     public void incrementForestryEventCompleted() {
-        completedForestryEvents.incrementAndGet();
+        completeForestryEvent(currentForestryEvent);
     }
 
     public int getCompletedForestryEvents() { return completedForestryEvents.get(); }

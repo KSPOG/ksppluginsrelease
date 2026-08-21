@@ -44,11 +44,17 @@ public class KspFoxEvent implements BlockingEvent {
                 continue;
             }
 
+            if (!plugin.canStartForestryInteraction(trap.getHash(), "Disarm")) {
+                sleepUntil(() -> false, 150);
+                continue;
+            }
+
             trap.click("Disarm");
+            plugin.markForestryInteraction(trap.getHash(), "Disarm");
             Rs2Player.waitForAnimation(1000);
         }
 
-        plugin.incrementForestryEventCompleted();
+        plugin.completeForestryEvent(KspForestryEvent.POACHERS);
         return true;
     }
 

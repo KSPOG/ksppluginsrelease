@@ -52,7 +52,12 @@ public class KspEggEvent implements BlockingEvent {
             if (forester == null) break;
 
             if (Rs2Inventory.contains("Pheasant egg")) {
+                if (!plugin.canStartForestryInteraction(forester.getHash(), "Talk-to")) {
+                    sleepUntil(() -> false, 150);
+                    continue;
+                }
                 forester.click("Talk-to");
+                plugin.markForestryInteraction(forester.getHash(), "Talk-to");
                 sleepUntil(Rs2Dialogue::isInDialogue, 5000);
                 while (Rs2Dialogue.isInDialogue()) {
                     Rs2Dialogue.clickContinue();
@@ -79,14 +84,19 @@ public class KspEggEvent implements BlockingEvent {
                     .orElse(null);
 
             if (target != null) {
+                if (!plugin.canStartForestryInteraction(target.getHash(), "Nest")) {
+                    sleepUntil(() -> false, 150);
+                    continue;
+                }
                 target.click();
+                plugin.markForestryInteraction(target.getHash(), "Nest");
                 Rs2Player.waitForAnimation();
             } else {
                 sleepUntil(() -> false, 300);
             }
         }
 
-        plugin.incrementForestryEventCompleted();
+        plugin.completeForestryEvent(KspForestryEvent.PHEASANT);
         return true;
     }
 

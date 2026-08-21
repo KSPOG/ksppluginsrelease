@@ -83,7 +83,12 @@ public class KspStrugglingSaplingEvent implements BlockingEvent {
             }
 
             if (Rs2Inventory.contains(ItemID.GATHERING_EVENT_SAPLING_MULCH_STAGE3)) {
+                if (!plugin.canStartForestryInteraction(sapling.getHash(), "Add-mulch")) {
+                    sleepUntil(() -> false, 150);
+                    continue;
+                }
                 sapling.click("Add-mulch");
+                plugin.markForestryInteraction(sapling.getHash(), "Add-mulch");
                 Rs2Player.waitForAnimation();
                 sleepUntil(() -> !Rs2Player.isAnimating(), 5000);
                 continue;
@@ -112,7 +117,12 @@ public class KspStrugglingSaplingEvent implements BlockingEvent {
                     continue;
                 }
 
+                if (!plugin.canStartForestryInteraction(known.getHash(), "Collect")) {
+                    sleepUntil(() -> false, 150);
+                    continue;
+                }
                 known.click("Collect");
+                plugin.markForestryInteraction(known.getHash(), "Collect");
                 Rs2Player.waitForAnimation();
                 sleepUntil(() -> currentStage() != stage || !validate(), 4000);
                 continue;
@@ -130,13 +140,18 @@ public class KspStrugglingSaplingEvent implements BlockingEvent {
                 continue;
             }
 
+            if (!plugin.canStartForestryInteraction(candidate.getHash(), "Collect")) {
+                sleepUntil(() -> false, 150);
+                continue;
+            }
             tried.add(candidate.getId());
             candidate.click("Collect");
+            plugin.markForestryInteraction(candidate.getHash(), "Collect");
             Rs2Player.waitForAnimation();
             sleepUntil(() -> currentStage() != stage || learnedIds[stage] != -1 || !validate(), 4000);
         }
 
-        plugin.incrementForestryEventCompleted();
+        plugin.completeForestryEvent(KspForestryEvent.STRUGGLING_SAPLING);
         return true;
     }
 

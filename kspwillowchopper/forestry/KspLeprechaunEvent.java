@@ -49,6 +49,10 @@ public class KspLeprechaunEvent implements BlockingEvent {
             }
 
             if (!Rs2Player.getWorldLocation().equals(rainbow.getWorldLocation())) {
+                if (!plugin.canStartForestryInteraction(rainbow.getHash(), "Move")) {
+                    sleepUntil(() -> false, 150);
+                    continue;
+                }
                 if (rainbow.getMinimapLocation() != null) {
                     Microbot.getMouse().click(rainbow.getMinimapLocation());
                 } else {
@@ -57,13 +61,14 @@ public class KspLeprechaunEvent implements BlockingEvent {
                         Microbot.getMouse().click(poly.getBounds());
                     }
                 }
+                plugin.markForestryInteraction(rainbow.getHash(), "Move");
                 sleepUntil(() -> Rs2Player.getWorldLocation().equals(rainbow.getWorldLocation()) || !validate(), 2500);
             } else {
                 sleepUntil(() -> false, 350);
             }
         }
 
-        plugin.incrementForestryEventCompleted();
+        plugin.completeForestryEvent(KspForestryEvent.LEPRECHAUN);
         return true;
     }
 
