@@ -44,7 +44,7 @@ final class KspBankOrganizerOverlay extends OverlayPanel
 
         panelComponent.setPreferredSize(new Dimension(220, 0));
         panelComponent.getChildren().add(TitleComponent.builder()
-            .text("KSP Bank Organizer v" + KspBankOrganizerPlugin.version)
+            .text("KSP Bank Organizer v" + KspBankOrganizerPlugin.VERSION)
             .color(Color.GREEN)
             .build());
         panelComponent.getChildren().add(LineComponent.builder()
