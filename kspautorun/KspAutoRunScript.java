@@ -295,7 +295,12 @@ public class KspAutoRunScript extends Script
 
     private String energyState(String phase, int runEnergy, int threshold)
     {
-        return phase + " (energy " + runEnergy + "/" + threshold + ")";
+        // The monitor retains the stable part of this state and omits detail in
+        // parentheses. Include the pending threshold-cycle number in that stable
+        // part so the complete wait -> invoke -> confirmation lifecycle remains
+        // distinguishable from an actual stalled repetition.
+        return "energy cycle " + nextEnergyCycle() + ": " + phase
+                + " at " + runEnergy + "/" + threshold;
     }
 
     private String enabledState(int runEnergy, int threshold)
@@ -305,6 +310,11 @@ public class KspAutoRunScript extends Script
         // successive postcondition-confirmed cycles from a stalled toggle.
         return "energy cycle " + confirmedRunEnableCycles + " complete: run enabled"
                 + " at " + runEnergy + "/" + threshold;
+    }
+
+    private long nextEnergyCycle()
+    {
+        return confirmedRunEnableCycles + 1L;
     }
 
     private void setMicrobotAutoRun(boolean enabled)
