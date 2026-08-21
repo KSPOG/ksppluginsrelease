@@ -122,7 +122,7 @@ public class KspAutoRunScript extends Script
                 runToggleRequestedAt = 0L;
                 runDisabledObservedAt = 0L;
                 awaitingEnergyReset = true;
-                state = "waiting for next energy cycle";
+                state = energyState("waiting for next energy cycle", runEnergy, threshold);
                 return;
             }
 
@@ -130,7 +130,7 @@ public class KspAutoRunScript extends Script
             // result of a submitted invoke. Keep the request intact until its
             // postcondition is observed (or it times out), otherwise the next energy
             // cycle may submit a second, non-idempotent toggle.
-            state = "waiting for run toggle";
+            state = energyState("waiting for run toggle", runEnergy, threshold);
             return;
         }
 
@@ -184,7 +184,7 @@ public class KspAutoRunScript extends Script
             // future, single low-energy read clear the latch and reopen this
             // non-idempotent toggle cycle.
             runDisabledObservedAt = 0L;
-            state = "waiting for next energy cycle";
+            state = energyState("waiting for next energy cycle", runEnergy, threshold);
             return;
         }
 
@@ -216,7 +216,7 @@ public class KspAutoRunScript extends Script
             runDisabledObservedAt = 0L;
             // The invoke has been submitted; wait for the run-state postcondition rather
             // than continuing to report the completed action while the client updates.
-            state = "waiting for run toggle";
+            state = energyState("waiting for run toggle", runEnergy, threshold);
         }
         else
         {
