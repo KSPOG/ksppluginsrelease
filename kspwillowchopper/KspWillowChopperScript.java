@@ -40,9 +40,9 @@ public class KspWillowChopperScript extends Script {
     private volatile boolean sessionStarted;
     private volatile KspTree activeTree = KspTree.WILLOW;
 
-    // Tracks the exact scene object we most recently clicked. When RuneLite reports
-    // that object despawning/morphing to another ID, normal movement/animation
-    // throttles are bypassed and a replacement target is selected immediately.
+    // Tracks the exact scene object we most recently clicked. An unexpected
+    // despawn/morph requests a prompt replacement, while a despawn immediately
+    // following a successful chop returns through the ordinary click latch.
     private volatile WorldPoint activeTargetLocation;
     private volatile int activeTargetObjectId = -1;
     private volatile boolean immediateRetargetRequested;
@@ -99,6 +99,7 @@ public class KspWillowChopperScript extends Script {
     private long lastBurnProgressMillis = 0L;
     private long lastTreeClickMillis = 0L;
     private long lastTreeProgressMillis = 0L;
+    private static final long TREE_COMPLETION_WINDOW_MS = 1_500L;
     private long lastCampfireInteractionMillis = 0L;
     private long lastCampfireCreateAttemptMillis = 0L;
 
@@ -892,6 +893,24 @@ public class KspWillowChopperScript extends Script {
         boolean currentTargetRemoved = despawned && objectId == targetId;
         boolean sameTileMorphedToDifferentId = !despawned && objectId != targetId;
         if (!currentTargetRemoved && !sameTileMorphedToDifferentId) {
+            return;
+        }
+
+        // A resource gain immediately followed by the clicked tree despawning is
+        // the normal chop-completion postcondition. Do not turn that completion
+        // into an urgent retry: clearing the completed target lets the regular
+        // click latch select the next live tree after its normal cooldown. This
+        // avoids repeatedly scheduling a retarget for every successful depletion.
+        long now = System.currentTimeMillis();
+        if (currentTargetRemoved
+                && treeInteractionIssued
+                && now - lastTreeProgressMillis <= TREE_COMPLETION_WINDOW_MS) {
+            activeTargetLocation = null;
+            activeTargetObjectId = -1;
+            immediateRetargetRequested = false;
+            immediateRetargetAttempts.set(0);
+            treeInteractionIssued = false;
+            status = activeTree + " depleted - selecting next";
             return;
         }
 
