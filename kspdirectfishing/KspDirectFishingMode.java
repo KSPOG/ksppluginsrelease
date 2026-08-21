@@ -1,9 +1,11 @@
 package net.runelite.client.plugins.microbot.kspdirectfishing;
 
+import lombok.Getter;
 import net.runelite.client.game.FishingSpot;
 
 import java.util.List;
 
+@Getter
 public enum KspDirectFishingMode
 {
     SHRIMP_ANCHOVIES(
@@ -40,26 +42,6 @@ public enum KspDirectFishingMode
         this.requiredItems = requiredItems;
         this.rawFish = rawFish;
         this.fishingSpotIds = fishingSpotIds;
-    }
-
-    public String getPrimaryAction()
-    {
-        return primaryAction;
-    }
-
-    public List<String> getRequiredItems()
-    {
-        return requiredItems;
-    }
-
-    public List<String> getRawFish()
-    {
-        return rawFish;
-    }
-
-    public int[] getFishingSpotIds()
-    {
-        return fishingSpotIds;
     }
 
     public boolean usesBait()
