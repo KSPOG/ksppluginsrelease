@@ -649,6 +649,16 @@ public class KspWillowChopperScript extends Script {
                 return false;
             }
 
+            // A target transition owns the next click until it has either selected a
+            // replacement or exhausted its guarded retries. Letting the regular
+            // worker click while that handoff is pending races the queued retarget
+            // and produces a target -> no-target -> target loop on normal tree
+            // depletion.
+            if (!forceImmediate && immediateRetargetRequested) {
+                status = "Selecting next " + activeTree;
+                return false;
+            }
+
             // During an active burn cycle, chopping is forbidden until every log
             // from that cycle has been consumed.
             if (burnModeEnabled && burnCycleActive && Rs2Inventory.hasItem(activeTree.getResourceId())) {
@@ -812,18 +822,15 @@ public class KspWillowChopperScript extends Script {
         }
 
         // A spawn/despawn event is an authoritative postcondition for the click that
-        // selected this tree: it is no longer a valid target. Clear the completed
-        // interaction and let the normal 300 ms worker select the next live tree.
-        // Scheduling a second, immediate click here made ordinary willow depletion
-        // alternate indefinitely through the retarget state machine even while the
-        // regular worker was already responsible for the next action.
-        activeTargetLocation = null;
-        activeTargetObjectId = -1;
-        immediateRetargetRequested = false;
+        // selected this tree: it is no longer a valid target. Keep its identity only
+        // until the queued handoff can replace it; clearing it first exposes an
+        // observable no-target state and lets the regular worker race the retarget.
+        immediateRetargetRequested = true;
         immediateRetargetAttempts = 0;
         treeInteractionIssued = false;
         lastTreeClickMillis = 0L;
         status = "Target changed - selecting next " + activeTree;
+        queueImmediateRetarget(0L);
     }
 
     private void queueImmediateRetarget(long delayMillis) {
