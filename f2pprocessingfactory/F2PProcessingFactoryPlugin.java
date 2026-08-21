@@ -2,7 +2,6 @@ package net.runelite.client.plugins.microbot.f2pprocessingfactory;
 
 import com.google.gson.Gson;
 import com.google.inject.Provides;
-import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.plugins.Plugin;
@@ -28,11 +27,13 @@ public class F2PProcessingFactoryPlugin extends Plugin
     public static final String VERSION = "1.0.45";
 
     @Inject private F2PProcessingFactoryConfig config;
-    @Getter @Inject private F2PProcessingFactoryScript script;
+    @Inject private F2PProcessingFactoryScript script;
     @Inject private F2PProcessingFactoryOverlay overlay;
     @Inject private OverlayManager overlayManager;
     @Inject private ConfigManager configManager;
     @Inject private Gson gson;
+
+    F2PProcessingFactoryScript getScript() { return script; }
 
     @Provides
     F2PProcessingFactoryConfig provideConfig(ConfigManager configManager)
