@@ -85,7 +85,11 @@ public class KspWillowChopperScript extends Script {
     private int suppressedResourceLoss = 0;
     private long lastBurnProgressMillis = 0L;
     private long lastTreeClickMillis = 0L;
-    private long lastTreeProgressMillis = 0L;
+    // This timestamp is both the no-progress recovery guard and the observable
+    // postcondition of a successful chop. The immediate-retarget task runs on
+    // the same scheduler as the main worker, so retain its latest value across
+    // those task boundaries.
+    private volatile long lastTreeProgressMillis = 0L;
     private long lastCampfireInteractionMillis = 0L;
     private long lastCampfireCreateAttemptMillis = 0L;
 
