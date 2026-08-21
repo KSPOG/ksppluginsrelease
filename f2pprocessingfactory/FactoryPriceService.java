@@ -10,6 +10,7 @@ import net.runelite.client.plugins.microbot.util.item.Rs2ItemManager;
 import net.runelite.client.plugins.microbot.util.player.Rs2Player;
 
 import java.util.LinkedHashMap;
+import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -25,7 +26,8 @@ public final class FactoryPriceService
             return -1;
         }
 
-        String normalizedName = itemName.trim().toLowerCase();
+        String trimmed = itemName.trim();
+        String normalizedName = trimmed.toLowerCase(Locale.ROOT);
         if ("coins".equals(normalizedName) || "coin".equals(normalizedName))
         {
             return ItemID.COINS;
@@ -37,14 +39,12 @@ public final class FactoryPriceService
             return cached;
         }
 
-        // Prefer the exact-match resolver. Rs2ItemManager#getItemId(String) simply
-        // returns the first search result and can resolve similarly named items.
-        int itemId = Rs2ItemManager.getItemIdByName(itemName.trim(), false);
+        int itemId = Rs2ItemManager.getItemIdByName(trimmed, false);
         if (itemId <= 0)
         {
             try
             {
-                itemId = Microbot.getRs2ItemManager().getItemId(itemName.trim());
+                itemId = Microbot.getRs2ItemManager().getItemId(trimmed);
             }
             catch (Exception ignored)
             {
@@ -79,13 +79,10 @@ public final class FactoryPriceService
                 {
                     return ProfitQuote.invalid(recipe, "Could not resolve " + input.getItemName());
                 }
-
-                ItemMappingData mapping = Rs2GrandExchange.getItemMappingData(itemId);
-                if (mapping != null && mapping.members && !membersAccount)
+                if (!membersAccount && isMembersOnly(itemId))
                 {
                     return ProfitQuote.invalid(recipe, input.getItemName() + " is members-only");
                 }
-
                 if (!input.isConsumed())
                 {
                     continue;
@@ -105,9 +102,7 @@ public final class FactoryPriceService
             {
                 return ProfitQuote.invalid(recipe, "Could not resolve " + recipe.getOutputItemName());
             }
-
-            ItemMappingData outputMapping = Rs2GrandExchange.getItemMappingData(outputId);
-            if (outputMapping != null && outputMapping.members && !membersAccount)
+            if (!membersAccount && isMembersOnly(outputId))
             {
                 return ProfitQuote.invalid(recipe, recipe.getOutputItemName() + " is members-only");
             }
@@ -121,9 +116,6 @@ public final class FactoryPriceService
             long totalOutputRevenue = outputPrice;
             long totalTax = calculateEstimatedTax(outputPrice, config.geTaxPercent());
 
-            // Empty pots/jugs/buckets from dough and soft-clay processing are
-            // tradeable outputs too. Include their sale value in the profitability
-            // quote so Automatic mode does not undervalue these recipes.
             for (String secondaryOutputName : recipe.getSecondaryOutputItemNames())
             {
                 int secondaryOutputId = getItemId(secondaryOutputName);
@@ -131,9 +123,7 @@ public final class FactoryPriceService
                 {
                     return ProfitQuote.invalid(recipe, "Could not resolve " + secondaryOutputName);
                 }
-
-                ItemMappingData secondaryMapping = Rs2GrandExchange.getItemMappingData(secondaryOutputId);
-                if (secondaryMapping != null && secondaryMapping.members && !membersAccount)
+                if (!membersAccount && isMembersOnly(secondaryOutputId))
                 {
                     return ProfitQuote.invalid(recipe, secondaryOutputName + " is members-only");
                 }
@@ -164,7 +154,6 @@ public final class FactoryPriceService
         }
     }
 
-
     private boolean isMembersAccount()
     {
         try
@@ -176,6 +165,12 @@ public final class FactoryPriceService
             log.debug("Unable to resolve account membership: {}", ex.getMessage());
             return false;
         }
+    }
+
+    private boolean isMembersOnly(int itemId)
+    {
+        ItemMappingData mapping = Rs2GrandExchange.getItemMappingData(itemId);
+        return mapping != null && mapping.members;
     }
 
     public int getBuyOfferPrice(int itemId, int markupPercent, int retryAttempt)
@@ -191,10 +186,9 @@ public final class FactoryPriceService
         }
         catch (Exception ignored)
         {
-            // Fall through to local calculation.
         }
 
-        int marketPrice = getInstantBuyPrice(itemId);
+        int marketPrice = getInstantPrice(itemId, true);
         if (marketPrice <= 0)
         {
             return marketPrice;
@@ -216,10 +210,9 @@ public final class FactoryPriceService
         }
         catch (Exception ignored)
         {
-            // Fall through to local calculation.
         }
 
-        int marketPrice = getInstantSellPrice(itemId);
+        int marketPrice = getInstantPrice(itemId, false);
         if (marketPrice <= 0)
         {
             return marketPrice;
@@ -248,36 +241,19 @@ public final class FactoryPriceService
         return Math.max(1, unknownLimitFallback);
     }
 
-    private int getInstantBuyPrice(int itemId)
+    private int getInstantPrice(int itemId, boolean buy)
     {
         try
         {
             WikiPrice price = Rs2GrandExchange.getRealTimePrices(itemId);
-            if (price != null && price.buyPrice > 0)
+            int livePrice = price == null ? 0 : buy ? price.buyPrice : price.sellPrice;
+            if (livePrice > 0)
             {
-                return price.buyPrice;
+                return livePrice;
             }
         }
         catch (Exception ignored)
         {
-            // Fall back to the item manager's GE price.
-        }
-        return Microbot.getRs2ItemManager().getGEPrice(itemId);
-    }
-
-    private int getInstantSellPrice(int itemId)
-    {
-        try
-        {
-            WikiPrice price = Rs2GrandExchange.getRealTimePrices(itemId);
-            if (price != null && price.sellPrice > 0)
-            {
-                return price.sellPrice;
-            }
-        }
-        catch (Exception ignored)
-        {
-            // Fall back to the item manager's GE price.
         }
         return Microbot.getRs2ItemManager().getGEPrice(itemId);
     }
