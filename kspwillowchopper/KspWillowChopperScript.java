@@ -877,6 +877,17 @@ public class KspWillowChopperScript extends Script {
             return;
         }
 
+        // A successful chop removes its scene object before the matching
+        // despawn/morph notifications have necessarily reached this script.
+        // The resource-gain callback is the completion postcondition, so do
+        // not let this polling fallback race it into an immediate retarget.
+        // Once that short completion window expires, a missing target is still
+        // recovered through the normal immediate-retarget path below.
+        if (treeInteractionIssued
+                && System.currentTimeMillis() - lastTreeProgressMillis <= TREE_COMPLETION_WINDOW_MS) {
+            return;
+        }
+
         try {
             Rs2TileObjectModel liveTarget = Microbot.getRs2TileObjectCache()
                     .query()
