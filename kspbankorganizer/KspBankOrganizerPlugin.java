@@ -35,23 +35,12 @@ public class KspBankOrganizerPlugin extends Plugin
 {
     public static final String VERSION = "1.1.32";
 
-    @Inject
-    private KspBankOrganizerConfig config;
-
-    @Inject
-    private BankOrganizerEngine engine;
-
-    @Inject
-    private OverlayManager overlayManager;
-
-    @Inject
-    private KspBankOrganizerOverlay overlay;
-
-    @Inject
-    private KspBankOrganizerItemOverlay itemOverlay;
-
-    @Inject
-    private ClientToolbar clientToolbar;
+    @Inject private KspBankOrganizerConfig config;
+    @Inject private BankOrganizerEngine engine;
+    @Inject private OverlayManager overlayManager;
+    @Inject private KspBankOrganizerOverlay overlay;
+    @Inject private KspBankOrganizerItemOverlay itemOverlay;
+    @Inject private ClientToolbar clientToolbar;
 
     private ExecutorService executor;
     private Future<?> task;
@@ -69,13 +58,11 @@ public class KspBankOrganizerPlugin extends Plugin
     {
         overlayManager.add(overlay);
         overlayManager.add(itemOverlay);
-        itemOverlay.enableBankItems();
         executor = Executors.newSingleThreadExecutor(runnable -> {
             Thread thread = new Thread(runnable, "ksp-bank-organizer");
             thread.setDaemon(true);
             return thread;
         });
-
         addSidePanel();
         log.info("KSP Bank Organizer enabled. Use the sidebar to preview or organize the bank.");
     }
@@ -110,14 +97,8 @@ public class KspBankOrganizerPlugin extends Plugin
 
         task = executor.submit(() -> {
             BankOrganizerEngine.RunResult result = engine.run(config, mode);
-            if (result.success())
-            {
-                log.info("KSP Bank Organizer completed: {}", result.message());
-            }
-            else
-            {
-                log.warn("KSP Bank Organizer stopped: {}", result.message());
-            }
+            if (result.success()) log.info("KSP Bank Organizer completed: {}", result.message());
+            else log.warn("KSP Bank Organizer stopped: {}", result.message());
         });
     }
 
@@ -131,19 +112,12 @@ public class KspBankOrganizerPlugin extends Plugin
         task = null;
     }
 
-    synchronized boolean isRunActive()
-    {
-        return task != null && !task.isDone();
-    }
+    synchronized boolean isRunActive() { return task != null && !task.isDone(); }
 
     private void addSidePanel()
     {
         SwingUtilities.invokeLater(() -> {
-            if (panel != null)
-            {
-                return;
-            }
-
+            if (panel != null) return;
             panel = new KspBankOrganizerPanel(this, engine, config);
             navButton = NavigationButton.builder()
                 .tooltip("KSP Bank Organizer")
@@ -179,12 +153,8 @@ public class KspBankOrganizerPlugin extends Plugin
         {
             g.setColor(new Color(80, 220, 120));
             for (int row = 0; row < 3; row++)
-            {
                 for (int col = 0; col < 3; col++)
-                {
                     g.fillRoundRect(1 + col * 5, 1 + row * 5, 4, 4, 1, 1);
-                }
-            }
         }
         finally
         {
