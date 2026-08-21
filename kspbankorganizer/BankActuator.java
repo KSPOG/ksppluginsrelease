@@ -41,6 +41,7 @@ final class BankActuator
     private static final int TAB_SETTLE_MS = 450;
     private static final int ACTION_SETTLE_MS = 750;
     private static final int MOVE_VERIFY_MS = 5000;
+    private static final int INITIAL_OPEN_VERIFY_MS = 1500;
 
     private static final int[] TAB_COUNT_VARBITS = {
         Varbits.BANK_TAB_ONE_COUNT,
@@ -91,15 +92,19 @@ final class BankActuator
         // interface is rebuilding. Do not report the bank interaction as
         // complete until the same live container required by snapshot reads is
         // available.
-        if (Global.sleepUntil(this::isBankReadyForSnapshotOnClient, 5000))
+        // A failed booth click must be retried early enough for its original
+        // interaction to remain valid. The replay monitor gives that action
+        // seven seconds, so waiting the full five seconds here leaves too
+        // little time for the recovery click and its widget transition.
+        if (Global.sleepUntil(this::isBankReadyForSnapshotOnClient, INITIAL_OPEN_VERIFY_MS))
         {
             return true;
         }
 
-        // openBank() may first walk to a booth. Once that walk completes, retry
-        // the interaction against the now-near banker before declaring the
-        // opening failed. This is a postcondition-driven retry, not a blind
-        // delay, and avoids leaving a completed approach with no bank click.
+        // The first interaction can be a stale booth click while the scene is
+        // still settling. Re-evaluate the live bank postcondition promptly, then
+        // retry against a now-near banker before falling back to openBank().
+        // This is a postcondition-driven retry, not a blind delay.
         bankInteractionStarted = openNearbyBanker() || Rs2Bank.openBank();
         return bankInteractionStarted
             && Global.sleepUntil(this::isBankReadyForSnapshotOnClient, 5000);
