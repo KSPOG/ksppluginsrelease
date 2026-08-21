@@ -9,7 +9,10 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeSet;
 import javax.inject.Inject;
+import lombok.AccessLevel;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.client.plugins.microbot.Microbot;
 import net.runelite.client.plugins.microbot.util.bank.Rs2Bank;
@@ -58,16 +61,13 @@ final class BankOrganizerEngine
         try
         {
             setPhase("Opening bank");
-            if (!actuator.ensureBankOpen())
-            {
-                return fail("Could not open the nearest bank.");
-            }
+            if (!actuator.ensureBankOpen()) return fail("Could not open the nearest bank.");
 
             categorizer.configure(config);
             BankSnapshot initial = readSnapshot();
             List<PlannedItem> plan = buildPlan(initial, config);
             plannedCount = plan.size();
-            misplacedCount = countMisplaced(initial, plan);
+            misplacedCount = countMisplaced(initial);
 
             if (mode == OperationMode.PREVIEW)
             {
@@ -81,46 +81,28 @@ final class BankOrganizerEngine
 
             setPhase("Preparing bank rearrangement");
             BankActuator.ActuatorResult swapMode = actuator.ensureBankSwapMode();
-            if (!swapMode.success())
-            {
-                return fail(swapMode.message());
-            }
+            if (!swapMode.success()) return fail(swapMode.message());
 
             setPhase("Moving categories");
             String movementError = executeCategoryMoves(plan, config, baselineCount, baselineQuantities);
-            if (movementError != null)
-            {
-                return fail(movementError);
-            }
+            if (movementError != null) return fail(movementError);
 
             if (config.sortWithinTabs())
             {
                 BankActuator.ActuatorResult insertMode = actuator.ensureBankInsertMode();
-                if (!insertMode.success())
-                {
-                    return fail(insertMode.message());
-                }
+                if (!insertMode.success()) return fail(insertMode.message());
 
                 setPhase("Smart sorting");
                 String sortError = sortConfiguredTabs(plan, config, baselineCount, baselineQuantities);
-                if (sortError != null)
-                {
-                    return fail(sortError);
-                }
+                if (sortError != null) return fail(sortError);
             }
 
             BankSnapshot finalSnapshot = readSnapshot();
             String finalVerification = verifyUnchanged(baselineCount, baselineQuantities, finalSnapshot);
-            if (finalVerification != null)
-            {
-                return fail("Final bank verification failed: " + finalVerification);
-            }
+            if (finalVerification != null) return fail("Final bank verification failed: " + finalVerification);
 
-            misplacedCount = countMisplaced(finalSnapshot, plan);
-            if (config.closeBankWhenFinished())
-            {
-                Rs2Bank.closeBank();
-            }
+            misplacedCount = countMisplaced(finalSnapshot);
+            if (config.closeBankWhenFinished()) Rs2Bank.closeBank();
 
             setPhase("Complete");
             lastMessage = "Organized bank: moved " + movedCount + " stacks and sorted " + sortedCount
@@ -138,52 +120,31 @@ final class BankOrganizerEngine
     {
         List<PlannedItem> raw = new ArrayList<>();
         Map<Integer, ItemCategory> categories = new HashMap<>();
+        Map<ItemCategory, Integer> configuredTargets = new EnumMap<>(ItemCategory.class);
 
-        // First classify everything without assigning physical tab numbers.
-        Map<ItemCategory, Integer> categoryConfiguredTarget = new EnumMap<>(ItemCategory.class);
         for (BankSnapshot.BankStack stack : snapshot.items())
         {
             ItemCategory category = categorizer.categorize(stack);
-            int configuredTarget = targetFor(category, config);
-            categoryConfiguredTarget.putIfAbsent(category, configuredTarget);
+            int target = targetFor(category, config);
+            configuredTargets.putIfAbsent(category, target);
             categories.put(stack.itemId(), category);
-            raw.add(new PlannedItem(stack.itemId(), stack.name(), category, configuredTarget));
+            raw.add(new PlannedItem(stack.itemId(), stack.name(), category, target));
         }
 
-        // OSRS cannot create an empty tab gap. Treat configured tab numbers as
-        // category ordering priorities and compact only populated categories
-        // into sequential physical tabs. Main/Ignore remain fixed.
-        List<ItemCategory> populatedTabCategories = new ArrayList<>();
+        List<ItemCategory> tabCategories = new ArrayList<>();
         for (ItemCategory category : ItemCategory.values())
         {
-            int target = categoryConfiguredTarget.getOrDefault(category, -1);
-            if (target > 0)
-            {
-                populatedTabCategories.add(category);
-            }
+            if (configuredTargets.getOrDefault(category, -1) > 0) tabCategories.add(category);
         }
-        populatedTabCategories.sort(Comparator
-            .comparingInt((ItemCategory c) -> categoryConfiguredTarget.getOrDefault(c, Integer.MAX_VALUE))
+        tabCategories.sort(Comparator
+            .comparingInt((ItemCategory c) -> configuredTargets.getOrDefault(c, Integer.MAX_VALUE))
             .thenComparingInt(Enum::ordinal));
 
         Map<ItemCategory, Integer> effectiveTargets = new EnumMap<>(ItemCategory.class);
         int nextPhysicalTab = 1;
-        for (ItemCategory category : populatedTabCategories)
+        for (ItemCategory category : tabCategories)
         {
-            // Only categories actually present in the bank need a physical tab.
-            boolean populated = false;
-            for (PlannedItem item : raw)
-            {
-                if (item.category() == category)
-                {
-                    populated = true;
-                    break;
-                }
-            }
-            if (populated)
-            {
-                effectiveTargets.put(category, nextPhysicalTab++);
-            }
+            effectiveTargets.put(category, nextPhysicalTab++);
         }
 
         List<PlannedItem> plan = new ArrayList<>(raw.size());
@@ -191,22 +152,10 @@ final class BankOrganizerEngine
         for (PlannedItem item : raw)
         {
             int configuredTarget = item.targetTab();
-            int effectiveTarget;
-            if (configuredTarget < 0)
-            {
-                effectiveTarget = -1;
-            }
-            else if (configuredTarget == 0)
-            {
-                effectiveTarget = 0;
-            }
-            else
-            {
-                effectiveTarget = effectiveTargets.getOrDefault(item.category(), configuredTarget);
-            }
-
-            PlannedItem resolved = new PlannedItem(
-                item.itemId(), item.name(), item.category(), effectiveTarget);
+            int effectiveTarget = configuredTarget <= 0
+                ? configuredTarget
+                : effectiveTargets.getOrDefault(item.category(), configuredTarget);
+            PlannedItem resolved = new PlannedItem(item.itemId(), item.name(), item.category(), effectiveTarget);
             plan.add(resolved);
             targets.put(item.itemId(), effectiveTarget);
         }
@@ -223,21 +172,13 @@ final class BankOrganizerEngine
         Map<Integer, Integer> baselineQuantities)
     {
         List<PlannedItem> ordered = new ArrayList<>(plan);
-        ordered.sort(Comparator
-            .comparingInt(PlannedItem::targetTab)
-            .thenComparing(sorter.comparator(config)));
+        ordered.sort(Comparator.comparingInt(PlannedItem::targetTab).thenComparing(sorter.comparator(config)));
 
         for (PlannedItem planned : ordered)
         {
-            if (Thread.currentThread().isInterrupted())
-            {
-                return "Organizer interrupted.";
-            }
+            if (Thread.currentThread().isInterrupted()) return "Organizer interrupted.";
             int target = planned.targetTab();
-            if (target < 0)
-            {
-                continue;
-            }
+            if (target < 0) continue;
 
             BankSnapshot snapshot = readSnapshot();
             BankSnapshot.BankStack current = stackByItemId(snapshot, planned.itemId());
@@ -245,10 +186,7 @@ final class BankOrganizerEngine
             {
                 return "Could not find " + planned.name() + " (" + planned.itemId() + ") before moving it.";
             }
-            if (current.tab() == target)
-            {
-                continue;
-            }
+            if (current.tab() == target) continue;
 
             if (wouldCollapseSourceTab(current.tab()))
             {
@@ -280,22 +218,16 @@ final class BankOrganizerEngine
                 move = actuator.moveToNewTab(planned.itemId(), current.tab());
             }
 
-            if (!move.success())
-            {
-                return planned.name() + ": " + move.message();
-            }
+            if (!move.success()) return planned.name() + ": " + move.message();
             movedCount++;
 
             BankSnapshot after = readSnapshot();
             if (config.strictVerification())
             {
                 String verification = verifyUnchanged(baselineCount, baselineQuantities, after);
-                if (verification != null)
-                {
-                    return "After moving " + planned.name() + ": " + verification;
-                }
+                if (verification != null) return "After moving " + planned.name() + ": " + verification;
             }
-            misplacedCount = countMisplaced(after, plan);
+            misplacedCount = countMisplaced(after);
         }
         return null;
     }
@@ -306,84 +238,49 @@ final class BankOrganizerEngine
         int baselineCount,
         Map<Integer, Integer> baselineQuantities)
     {
-        Set<Integer> targetTabs = new HashSet<>();
+        Set<Integer> tabs = new TreeSet<>();
         for (PlannedItem item : plan)
         {
-            if (item.targetTab() > 0)
-            {
-                targetTabs.add(item.targetTab());
-            }
+            if (item.targetTab() > 0) tabs.add(item.targetTab());
         }
-        List<Integer> tabs = new ArrayList<>(targetTabs);
-        Collections.sort(tabs);
 
         for (int tab : tabs)
         {
-            if (actuator.tabCount(tab) <= 0)
-            {
-                continue;
-            }
+            if (actuator.tabCount(tab) <= 0) continue;
             BankActuator.ActuatorResult opened = actuator.openTab(tab);
-            if (!opened.success())
-            {
-                return opened.message();
-            }
+            if (!opened.success()) return opened.message();
 
             for (int targetPosition = 0; ; targetPosition++)
             {
-                if (Thread.currentThread().isInterrupted())
-                {
-                    return "Organizer interrupted while sorting.";
-                }
+                if (Thread.currentThread().isInterrupted()) return "Organizer interrupted while sorting.";
 
                 BankSnapshot snapshot = readSnapshot();
                 List<BankSnapshot.BankStack> stacks = tabStacks(snapshot, tab);
                 List<PlannedItem> desired = desiredPresent(plan, stacks, tab, config);
-                if (targetPosition >= desired.size())
-                {
-                    break;
-                }
-                if (targetPosition >= stacks.size())
-                {
-                    return "Tab " + tab + " has fewer stacks than expected during sorting.";
-                }
+                if (targetPosition >= desired.size()) break;
+                if (targetPosition >= stacks.size()) return "Tab " + tab + " has fewer stacks than expected during sorting.";
 
                 int desiredId = desired.get(targetPosition).itemId();
-                if (stacks.get(targetPosition).itemId() == desiredId)
-                {
-                    continue;
-                }
+                if (stacks.get(targetPosition).itemId() == desiredId) continue;
 
                 int sourcePosition = indexOf(stacks, desiredId);
-                if (sourcePosition < 0)
-                {
-                    return "Could not find item " + desiredId + " while sorting tab " + tab + ".";
-                }
-                if (sourcePosition < targetPosition)
-                {
-                    return "Sorting prefix drifted in tab " + tab + ".";
-                }
+                if (sourcePosition < 0) return "Could not find item " + desiredId + " while sorting tab " + tab + ".";
+                if (sourcePosition < targetPosition) return "Sorting prefix drifted in tab " + tab + ".";
 
                 BankSnapshot.BankStack source = stacks.get(sourcePosition);
                 BankSnapshot.BankStack target = stacks.get(targetPosition);
                 BankActuator.ActuatorResult drag = actuator.moveWithinOpenTab(source, target);
-                if (!drag.success())
-                {
-                    return "Tab " + tab + ": " + drag.message();
-                }
+                if (!drag.success()) return "Tab " + tab + ": " + drag.message();
                 sortedCount++;
 
-                final int prefixLength = targetPosition + 1;
+                int prefixLength = targetPosition + 1;
                 boolean verified = net.runelite.client.plugins.microbot.util.Global.sleepUntil(() -> {
                     BankSnapshot after = safeReadSnapshot();
                     return after != null
                         && verifyUnchanged(baselineCount, baselineQuantities, after) == null
                         && isOrderedPrefix(after, plan, tab, config, prefixLength);
                 }, 5000);
-                if (!verified)
-                {
-                    return "Tab " + tab + " order was not verified after moving " + source.name() + ".";
-                }
+                if (!verified) return "Tab " + tab + " order was not verified after moving " + source.name() + ".";
             }
         }
         return null;
@@ -396,18 +293,12 @@ final class BankOrganizerEngine
         KspBankOrganizerConfig config)
     {
         Set<Integer> presentIds = new HashSet<>();
-        for (BankSnapshot.BankStack stack : currentStacks)
-        {
-            presentIds.add(stack.itemId());
-        }
+        for (BankSnapshot.BankStack stack : currentStacks) presentIds.add(stack.itemId());
 
         List<PlannedItem> desired = new ArrayList<>();
         for (PlannedItem item : plan)
         {
-            if (item.targetTab() == tab && presentIds.contains(item.itemId()))
-            {
-                desired.add(item);
-            }
+            if (item.targetTab() == tab && presentIds.contains(item.itemId())) desired.add(item);
         }
         desired.sort(sorter.comparator(config));
         return desired;
@@ -422,16 +313,10 @@ final class BankOrganizerEngine
     {
         List<BankSnapshot.BankStack> stacks = tabStacks(snapshot, tab);
         List<PlannedItem> desired = desiredPresent(plan, stacks, tab, config);
-        if (stacks.size() < prefixLength || desired.size() < prefixLength)
-        {
-            return false;
-        }
+        if (stacks.size() < prefixLength || desired.size() < prefixLength) return false;
         for (int i = 0; i < prefixLength; i++)
         {
-            if (stacks.get(i).itemId() != desired.get(i).itemId())
-            {
-                return false;
-            }
+            if (stacks.get(i).itemId() != desired.get(i).itemId()) return false;
         }
         return true;
     }
@@ -464,10 +349,7 @@ final class BankOrganizerEngine
         List<BankSnapshot.BankStack> result = new ArrayList<>();
         for (BankSnapshot.BankStack stack : snapshot.items())
         {
-            if (stack.tab() == tab)
-            {
-                result.add(stack);
-            }
+            if (stack.tab() == tab) result.add(stack);
         }
         result.sort(Comparator.comparingInt(BankSnapshot.BankStack::allItemsIndex));
         return result;
@@ -477,10 +359,7 @@ final class BankOrganizerEngine
     {
         for (int i = 0; i < stacks.size(); i++)
         {
-            if (stacks.get(i).itemId() == itemId)
-            {
-                return i;
-            }
+            if (stacks.get(i).itemId() == itemId) return i;
         }
         return -1;
     }
@@ -489,29 +368,18 @@ final class BankOrganizerEngine
     {
         for (BankSnapshot.BankStack stack : snapshot.items())
         {
-            if (stack.itemId() == itemId)
-            {
-                return stack;
-            }
+            if (stack.itemId() == itemId) return stack;
         }
         return null;
     }
 
-    private int countMisplaced(BankSnapshot snapshot, List<PlannedItem> plan)
+    private int countMisplaced(BankSnapshot snapshot)
     {
-        Map<Integer, Integer> targets = new HashMap<>();
-        for (PlannedItem item : plan)
-        {
-            targets.put(item.itemId(), item.targetTab());
-        }
         int count = 0;
         for (BankSnapshot.BankStack stack : snapshot.items())
         {
-            Integer target = targets.get(stack.itemId());
-            if (target != null && target >= 0 && stack.tab() != target)
-            {
-                count++;
-            }
+            Integer target = targetsById.get(stack.itemId());
+            if (target != null && target >= 0 && stack.tab() != target) count++;
         }
         return count;
     }
@@ -532,8 +400,7 @@ final class BankOrganizerEngine
         {
             return "bank stack count changed from " + baselineCount + " to " + snapshot.stackCount() + ".";
         }
-        Map<Integer, Integer> current = quantityMap(snapshot);
-        if (!current.equals(baselineQuantities))
+        if (!quantityMap(snapshot).equals(baselineQuantities))
         {
             return "one or more item quantities changed during organization.";
         }
@@ -564,10 +431,7 @@ final class BankOrganizerEngine
         activeMode = mode == null ? OperationMode.PREVIEW : mode;
         phase = "Starting";
         lastMessage = "";
-        plannedCount = 0;
-        movedCount = 0;
-        sortedCount = 0;
-        misplacedCount = 0;
+        plannedCount = movedCount = sortedCount = misplacedCount = 0;
         latestSnapshot = null;
         categoriesById = Collections.emptyMap();
         targetsById = Collections.emptyMap();
@@ -605,20 +469,13 @@ final class BankOrganizerEngine
         Microbot.status = "Bank Organizer: Stopped by user.";
     }
 
+    @RequiredArgsConstructor(access = AccessLevel.PRIVATE)
     static final class RunResult
     {
         private final boolean success;
         private final String message;
         private final int moved;
         private final int sorted;
-
-        private RunResult(boolean success, String message, int moved, int sorted)
-        {
-            this.success = success;
-            this.message = message;
-            this.moved = moved;
-            this.sorted = sorted;
-        }
 
         static RunResult ok(String message, int moved, int sorted) { return new RunResult(true, message, moved, sorted); }
         static RunResult fail(String message, int moved, int sorted) { return new RunResult(false, message, moved, sorted); }
