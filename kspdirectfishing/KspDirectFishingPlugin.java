@@ -24,7 +24,7 @@ import java.awt.AWTException;
 )
 public class KspDirectFishingPlugin extends Plugin
 {
-    public static final String VERSION = "0.0.2";
+    public static final String VERSION = "0.0.4";
 
     @Inject
     private KspDirectFishingConfig config;
@@ -64,6 +64,11 @@ public class KspDirectFishingPlugin extends Plugin
     {
         script.shutdown();
         overlayManager.remove(overlay);
+    }
+
+    public KspDirectFishingScript getScript()
+    {
+        return script;
     }
 
     public int getFishingXpGained()

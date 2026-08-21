@@ -4,6 +4,7 @@ import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.AnimationID;
 import net.runelite.api.Skill;
 import net.runelite.api.coords.WorldPoint;
+import net.runelite.api.gameval.ItemID;
 import net.runelite.api.gameval.ObjectID;
 import net.runelite.client.plugins.microbot.Microbot;
 import net.runelite.client.plugins.microbot.Script;
@@ -70,17 +71,24 @@ public class KspDirectFishingScript extends Script
 
     public int getRawFishCount()
     {
-        int total = 0;
         if (mode == null)
         {
-            return total;
+            return 0;
         }
 
-        for (String raw : mode.getRawFish())
+        switch (mode)
         {
-            total += Rs2Inventory.count(raw);
+            case SHRIMP_ANCHOVIES:
+                return Rs2Inventory.count(ItemID.RAW_SHRIMP)
+                        + Rs2Inventory.count(ItemID.RAW_ANCHOVIES);
+
+            case SARDINE_HERRING:
+                return Rs2Inventory.count(ItemID.RAW_SARDINE)
+                        + Rs2Inventory.count(ItemID.RAW_HERRING);
+
+            default:
+                return 0;
         }
-        return total;
     }
 
     public int getBaitCount()

@@ -14,22 +14,24 @@ import java.awt.Graphics2D;
 public class KspDirectFishingOverlay extends OverlayPanel
 {
     private final KspDirectFishingPlugin plugin;
-    private final KspDirectFishingScript script;
     private final KspDirectFishingConfig config;
 
     @Inject
     KspDirectFishingOverlay(
             KspDirectFishingPlugin plugin,
-            KspDirectFishingScript script,
             KspDirectFishingConfig config)
     {
         super(plugin);
         this.plugin = plugin;
-        this.script = script;
         this.config = config;
 
         setPosition(OverlayPosition.TOP_LEFT);
         setNaughty();
+    }
+
+    private KspDirectFishingScript script()
+    {
+        return plugin.getScript();
     }
 
     @Override
@@ -47,7 +49,7 @@ public class KspDirectFishingOverlay extends OverlayPanel
 
         addLine("Mode", config.fishingMode().toString());
         addLine("State", prettyState());
-        addLine("Action", script.getStatus());
+        addLine("Action", script().getStatus());
 
         panelComponent.getChildren().add(LineComponent.builder().build());
 
@@ -58,11 +60,11 @@ public class KspDirectFishingOverlay extends OverlayPanel
 
         panelComponent.getChildren().add(LineComponent.builder().build());
 
-        addLine("Raw fish", String.valueOf(script.getRawFishCount()));
+        addLine("Raw fish", String.valueOf(script().getRawFishCount()));
 
         if (config.fishingMode().usesBait())
         {
-            addLine("Fishing bait", formatNumber(script.getBaitCount()));
+            addLine("Fishing bait", formatNumber(script().getBaitCount()));
         }
         else
         {
@@ -87,7 +89,7 @@ public class KspDirectFishingOverlay extends OverlayPanel
 
     private String prettyState()
     {
-        KspDirectFishingState state = script.getState();
+        KspDirectFishingState state = script().getState();
         if (state == null)
         {
             return "-";
@@ -122,7 +124,7 @@ public class KspDirectFishingOverlay extends OverlayPanel
 
     private String fireStatus()
     {
-        KspDirectFishingState state = script.getState();
+        KspDirectFishingState state = script().getState();
 
         if (state == null)
         {
@@ -137,9 +139,9 @@ public class KspDirectFishingOverlay extends OverlayPanel
                 return "Not found";
             case WALKING_TO_FIRE:
             case COOKING:
-                return script.isFireAvailable() ? "Available" : "Searching";
+                return script().isFireAvailable() ? "Available" : "Searching";
             default:
-                return script.isFireAvailable() ? "Last seen" : "Not checked";
+                return script().isFireAvailable() ? "Last seen" : "Not checked";
         }
     }
 
