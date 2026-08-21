@@ -300,8 +300,8 @@ public class KspAutoRunScript extends Script
 
     private String enabledState(int runEnergy, int threshold)
     {
-        return "run enabled (cycle " + confirmedRunEnableCycles
-                + ", energy " + runEnergy + "/" + threshold + ")";
+        return "run enabled for energy cycle " + confirmedRunEnableCycles
+                + " at " + runEnergy + "/" + threshold;
     }
 
     private void setMicrobotAutoRun(boolean enabled)
