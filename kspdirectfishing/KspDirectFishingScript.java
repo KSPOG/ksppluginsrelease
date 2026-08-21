@@ -30,6 +30,7 @@ public class KspDirectFishingScript extends Script
     private static final int DIRECT_BANK_DISTANCE = 8;
     private static final int DIRECT_FIRE_DISTANCE = 4;
     private static final long FISH_INTERACTION_TIMEOUT = 15_000L;
+    private static final long FAILED_CLICK_RETRY_DELAY = 2_000L;
 
     private KspDirectFishingConfig config;
     private KspDirectFishingMode mode;
@@ -90,6 +91,7 @@ public class KspDirectFishingScript extends Script
     }
 
     private long lastFishingClick;
+    private long lastFailedFishingClick;
 
     public boolean run(KspDirectFishingConfig config)
     {
@@ -98,6 +100,7 @@ public class KspDirectFishingScript extends Script
         this.state = KspDirectFishingState.STARTING;
         this.status = "Locating fishing spot";
         this.lastFishingClick = 0L;
+        this.lastFailedFishingClick = 0L;
         this.fireAvailable = false;
         this.lastFirePoint = null;
 
@@ -277,12 +280,20 @@ public class KspDirectFishingScript extends Script
             return;
         }
 
+        long now = System.currentTimeMillis();
+        if (now - lastFailedFishingClick < FAILED_CLICK_RETRY_DELAY)
+        {
+            status = "Waiting to retry fishing";
+            return;
+        }
+
         String action = mode.getPrimaryAction();
         status = "Direct click: " + action;
 
         if (fishingSpot.click(action))
         {
-            lastFishingClick = System.currentTimeMillis();
+            lastFishingClick = now;
+            lastFailedFishingClick = 0L;
 
             Rs2Player.waitForXpDrop(Skill.FISHING, true);
 
@@ -294,6 +305,11 @@ public class KspDirectFishingScript extends Script
             {
                 Rs2Player.waitForXpDrop(Skill.FISHING, 10_000, true);
             }
+        }
+        else
+        {
+            lastFailedFishingClick = now;
+            status = "Fishing click failed: " + action;
         }
     }
 

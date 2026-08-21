@@ -8,8 +8,8 @@ public enum KspDirectFishingMode
 {
     SHRIMP_ANCHOVIES(
             "Shrimp / Anchovies",
-            "Net",
-            List.of("Net", "Small net"),
+            "Small Net",
+            List.of("Small Net", "Net"),
             List.of("Small fishing net"),
             List.of("Raw shrimps", "Raw anchovies"),
             FishingSpot.SHRIMP.getIds()
