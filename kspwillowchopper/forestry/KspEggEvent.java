@@ -1,6 +1,6 @@
 package net.runelite.client.plugins.microbot.kspwillowchopper.forestry;
 
-import lombok.extern.slf4j.Slf4j;
+import lombok.RequiredArgsConstructor;
 import net.runelite.api.gameval.NpcID;
 import net.runelite.api.gameval.ObjectID;
 import net.runelite.client.plugins.microbot.BlockingEvent;
@@ -17,13 +17,9 @@ import java.util.stream.Collectors;
 
 import static net.runelite.client.plugins.microbot.util.Global.sleepUntil;
 
-@Slf4j
+@RequiredArgsConstructor
 public class KspEggEvent implements BlockingEvent {
     private final KspWillowChopperPlugin plugin;
-
-    public KspEggEvent(KspWillowChopperPlugin plugin) {
-        this.plugin = plugin;
-    }
 
     @Override
     public boolean validate() {
@@ -68,17 +64,12 @@ public class KspEggEvent implements BlockingEvent {
             var nests = Microbot.getRs2TileObjectCache().query()
                     .where(obj -> obj.getId() == ObjectID.GATHERING_EVENT_PHEASANT_NEST02)
                     .toList();
-
             var pheasants = Microbot.getRs2NpcCache().query()
                     .withId(NpcID.GATHERING_EVENT_PHEASANT)
                     .toList();
-
-            var emptyNests = nests.stream()
+            var target = nests.stream()
                     .filter(nest -> pheasants.stream()
                             .noneMatch(pheasant -> pheasant.getWorldLocation().equals(nest.getWorldLocation())))
-                    .collect(Collectors.toList());
-
-            var target = emptyNests.stream()
                     .min(Comparator.comparingInt(nest ->
                             nest.getWorldLocation().distanceTo(Rs2Player.getWorldLocation())))
                     .orElse(null);
