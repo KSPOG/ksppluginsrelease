@@ -12,6 +12,7 @@ import java.util.Set;
 import javax.inject.Inject;
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.client.plugins.microbot.Microbot;
+import net.runelite.client.plugins.microbot.util.bank.Rs2Bank;
 
 /** Plans, executes and verifies one complete bank organization pass. */
 @Slf4j
@@ -118,11 +119,7 @@ final class BankOrganizerEngine
             misplacedCount = countMisplaced(finalSnapshot, plan);
             if (config.closeBankWhenFinished())
             {
-                BankActuator.ActuatorResult closed = actuator.closeBank();
-                if (!closed.success())
-                {
-                    return fail(closed.message());
-                }
+                Rs2Bank.closeBank();
             }
 
             setPhase("Complete");
