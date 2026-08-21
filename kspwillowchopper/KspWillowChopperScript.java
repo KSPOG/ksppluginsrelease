@@ -85,7 +85,11 @@ public class KspWillowChopperScript extends Script {
     private int suppressedResourceLoss = 0;
     private long lastBurnProgressMillis = 0L;
     private long lastTreeClickMillis = 0L;
-    private long lastTreeProgressMillis = 0L;
+    // This timestamp is both the no-progress recovery guard and the observable
+    // postcondition of a successful chop. The immediate-retarget task runs on
+    // the same scheduler as the main worker, so retain its latest value across
+    // those task boundaries.
+    private volatile long lastTreeProgressMillis = 0L;
     private long lastCampfireInteractionMillis = 0L;
     private long lastCampfireCreateAttemptMillis = 0L;
 
@@ -649,6 +653,16 @@ public class KspWillowChopperScript extends Script {
                 return false;
             }
 
+            // A target transition owns the next click until it has either selected a
+            // replacement or exhausted its guarded retries. Letting the regular
+            // worker click while that handoff is pending races the queued retarget
+            // and produces a target -> no-target -> target loop on normal tree
+            // depletion.
+            if (!forceImmediate && immediateRetargetRequested) {
+                status = "Selecting next " + activeTree;
+                return false;
+            }
+
             // During an active burn cycle, chopping is forbidden until every log
             // from that cycle has been consumed.
             if (burnModeEnabled && burnCycleActive && Rs2Inventory.hasItem(activeTree.getResourceId())) {
@@ -811,12 +825,16 @@ public class KspWillowChopperScript extends Script {
             return;
         }
 
+        // A spawn/despawn event is an authoritative postcondition for the click that
+        // selected this tree: it is no longer a valid target. Keep its identity only
+        // until the queued handoff can replace it; clearing it first exposes an
+        // observable no-target state and lets the regular worker race the retarget.
         immediateRetargetRequested = true;
         immediateRetargetAttempts = 0;
         treeInteractionIssued = false;
         lastTreeClickMillis = 0L;
         status = "Target changed - selecting next " + activeTree;
-        queueImmediateRetarget(20L);
+        queueImmediateRetarget(0L);
     }
 
     private void queueImmediateRetarget(long delayMillis) {
