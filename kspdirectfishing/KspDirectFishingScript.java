@@ -391,7 +391,9 @@ public class KspDirectFishingScript extends Script
         {
             state = KspDirectFishingState.WALKING_TO_FIRE;
             status = "Walking to nearest fire";
-            Rs2Walker.walkTo(firePoint);
+            // A fire occupies its own tile, so path to the interaction range
+            // rather than requiring the walker to reach the occupied tile.
+            Rs2Walker.walkTo(firePoint, DIRECT_FIRE_DISTANCE);
             sleepUntil(() ->
                     !Rs2Player.isMoving()
                             || Rs2Player.getWorldLocation().distanceTo(firePoint) <= 3,
