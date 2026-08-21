@@ -5,13 +5,10 @@ import net.runelite.client.plugins.microbot.util.antiban.Rs2Antiban;
 import net.runelite.client.plugins.microbot.util.grandexchange.Rs2GrandExchange;
 import net.runelite.client.plugins.microbot.util.widget.Rs2Widget;
 
+import java.util.Locale;
 import java.util.concurrent.ThreadLocalRandom;
 
-/**
- * Factory-specific humanization that only acts in safe windows. The controller
- * never performs random clicks, never changes tabs, and never pauses while a GE
- * offer editor or production dialogue is open.
- */
+/** Factory-specific humanization that only acts in safe idle windows. */
 @Slf4j
 final class FactoryAntibanController
 {
@@ -33,13 +30,13 @@ final class FactoryAntibanController
 
     void reset()
     {
+        FactoryAntibanProfile profile = profile();
         sessionStartedAt = System.currentTimeMillis();
-        pauseUntil = 0L;
+        pauseUntil = nextWaitingMouseAt = 0L;
         pauseReason = null;
         mouseMovedForPause = false;
-        nextWaitingMouseAt = 0L;
         processedBatchesSinceLongBreak = 0;
-        nextLongBreakBatch = randomBetween(profile().longBreakBatchMin, profile().longBreakBatchMax);
+        nextLongBreakBatch = randomBetween(profile.longBreakBatchMin, profile.longBreakBatchMax);
         activity = enabled() ? "Active" : "Disabled";
     }
 
@@ -56,7 +53,6 @@ final class FactoryAntibanController
         {
             if (!isPauseSafeState(state) || criticalEditorOpen())
             {
-                // Never carry a humanization pause into a critical UI transition.
                 clearPause();
                 activity = "Active";
                 return false;
@@ -67,36 +63,23 @@ final class FactoryAntibanController
                 moveMouseAway("pause");
                 mouseMovedForPause = true;
             }
-            activity = (pauseReason == null ? "Pausing" : pauseReason)
-                + " (" + getPauseSeconds() + "s)";
+            activity = (pauseReason == null ? "Pausing" : pauseReason) + " (" + getPauseSeconds() + "s)";
             return true;
         }
 
-        if (pauseUntil > 0L)
-        {
-            clearPause();
-        }
-
+        if (pauseUntil > 0L) clearPause();
         if (state == FactoryState.WAITING_FOR_LIMIT || state == FactoryState.WAITING_FOR_MARKET)
         {
             handleWaitingIdle(now);
         }
-        else
-        {
-            activity = "Active";
-        }
+        else activity = "Active";
         return false;
     }
 
     void onProductionStarted()
     {
-        if (!enabled() || criticalEditorOpen())
-        {
-            return;
-        }
-        // Once Space has started a long make-all action, moving the pointer away
-        // is a safe factory-specific idle behavior and does not alter the action.
-        if (roll(profile().moveMouseAwayChance))
+        FactoryAntibanProfile profile = profile();
+        if (enabled() && !criticalEditorOpen() && roll(profile.moveMouseAwayChance))
         {
             moveMouseAway("production");
             activity = "Production idle";
@@ -105,43 +88,26 @@ final class FactoryAntibanController
 
     void onBatchBanked(boolean anotherBatchAvailable)
     {
-        if (!enabled() || !anotherBatchAvailable)
-        {
-            return;
-        }
+        if (!enabled() || !anotherBatchAvailable) return;
 
-        processedBatchesSinceLongBreak++;
-        if (processedBatchesSinceLongBreak >= nextLongBreakBatch)
+        FactoryAntibanProfile profile = profile();
+        if (++processedBatchesSinceLongBreak >= nextLongBreakBatch)
         {
             processedBatchesSinceLongBreak = 0;
-            nextLongBreakBatch = randomBetween(profile().longBreakBatchMin, profile().longBreakBatchMax);
-            schedulePause(
-                fatigueAdjusted(profile().longBreakMinMillis),
-                fatigueAdjusted(profile().longBreakMaxMillis),
-                "Bank break"
-            );
-            return;
+            nextLongBreakBatch = randomBetween(profile.longBreakBatchMin, profile.longBreakBatchMax);
+            schedulePause(fatigueAdjusted(profile.longBreakMinMillis),
+                fatigueAdjusted(profile.longBreakMaxMillis), "Bank break");
         }
-
-        if (roll(profile().shortPauseChance))
+        else if (roll(profile.shortPauseChance))
         {
-            schedulePause(
-                fatigueAdjusted(profile().shortPauseMinMillis),
-                fatigueAdjusted(profile().shortPauseMaxMillis),
-                "Batch pause"
-            );
+            schedulePause(fatigueAdjusted(profile.shortPauseMinMillis),
+                fatigueAdjusted(profile.shortPauseMaxMillis), "Batch pause");
         }
     }
 
     void onGeWaitStart()
     {
-        if (!enabled() || criticalEditorOpen())
-        {
-            return;
-        }
-        // GE offers can sit without pointer activity. Occasionally move away once
-        // at the start of a wait instead of repeatedly touching the interface.
-        if (roll(profile().moveMouseAwayChance * 0.75))
+        if (enabled() && !criticalEditorOpen() && roll(profile().moveMouseAwayChance * 0.75))
         {
             moveMouseAway("GE wait");
             activity = "Waiting on GE";
@@ -150,22 +116,15 @@ final class FactoryAntibanController
 
     int immediateCombineRhythmPauseMillis()
     {
-        if (!enabled() || !roll(profile().immediateCombinePauseChance))
-        {
-            return 0;
-        }
-        return randomBetween(
-            profile().immediateCombinePauseMinMillis,
-            profile().immediateCombinePauseMaxMillis
-        );
+        FactoryAntibanProfile profile = profile();
+        return enabled() && roll(profile.immediateCombinePauseChance)
+            ? randomBetween(profile.immediateCombinePauseMinMillis, profile.immediateCombinePauseMaxMillis)
+            : 0;
     }
 
     long jitterOfferTimeout(long baseMillis)
     {
-        if (!enabled() || baseMillis <= 1_000L)
-        {
-            return Math.max(1_000L, baseMillis);
-        }
+        if (!enabled() || baseMillis <= 1_000L) return Math.max(1_000L, baseMillis);
         double fraction = profile().offerTimeoutJitterFraction;
         double multiplier = ThreadLocalRandom.current().nextDouble(1.0 - fraction, 1.0 + fraction);
         return Math.max(1_000L, Math.round(baseMillis * multiplier));
@@ -173,13 +132,9 @@ final class FactoryAntibanController
 
     String getStatus()
     {
-        if (!enabled())
-        {
-            return "Disabled";
-        }
-        return profile().name().charAt(0)
-            + profile().name().substring(1).toLowerCase()
-            + " · " + activity;
+        if (!enabled()) return "Disabled";
+        String profileName = profile().name();
+        return profileName.charAt(0) + profileName.substring(1).toLowerCase(Locale.ROOT) + " · " + activity;
     }
 
     long getPauseSeconds()
@@ -189,38 +144,27 @@ final class FactoryAntibanController
 
     private void handleWaitingIdle(long now)
     {
+        FactoryAntibanProfile profile = profile();
         if (nextWaitingMouseAt == 0L)
         {
-            nextWaitingMouseAt = now + randomBetween(
-                profile().waitingMouseMinMillis,
-                profile().waitingMouseMaxMillis
-            );
+            nextWaitingMouseAt = now + randomBetween(profile.waitingMouseMinMillis, profile.waitingMouseMaxMillis);
             activity = "Market idle";
-            return;
         }
-
-        if (now >= nextWaitingMouseAt && !criticalEditorOpen())
+        else if (now >= nextWaitingMouseAt && !criticalEditorOpen())
         {
             moveMouseAway("market wait");
-            nextWaitingMouseAt = now + randomBetween(
-                profile().waitingMouseMinMillis,
-                profile().waitingMouseMaxMillis
-            );
+            nextWaitingMouseAt = now + randomBetween(profile.waitingMouseMinMillis, profile.waitingMouseMaxMillis);
             activity = "Market idle";
         }
     }
 
     private void schedulePause(int minimumMillis, int maximumMillis, String reason)
     {
-        if (criticalEditorOpen())
-        {
-            return;
-        }
+        if (criticalEditorOpen()) return;
         int duration = randomBetween(minimumMillis, maximumMillis);
         pauseUntil = System.currentTimeMillis() + duration;
-        pauseReason = reason;
+        pauseReason = activity = reason;
         mouseMovedForPause = false;
-        activity = reason;
         log.debug("KSP AIO Factory anti-ban scheduled {} for {}ms", reason, duration);
     }
 
@@ -243,7 +187,6 @@ final class FactoryAntibanController
         }
         catch (Exception ignored)
         {
-            // Failing closed here means no anti-ban action for this tick.
             return true;
         }
     }
@@ -272,24 +215,17 @@ final class FactoryAntibanController
 
     private int fatigueAdjusted(int baseMillis)
     {
-        long runtimeMillis = Math.max(0L, System.currentTimeMillis() - sessionStartedAt);
-        double hours = runtimeMillis / 3_600_000.0;
-        double multiplier = 1.0 + Math.min(0.25, hours * 0.06);
-        return Math.max(1, (int) Math.round(baseMillis * multiplier));
+        double hours = Math.max(0L, System.currentTimeMillis() - sessionStartedAt) / 3_600_000.0;
+        return Math.max(1, (int) Math.round(baseMillis * (1.0 + Math.min(0.25, hours * 0.06))));
     }
 
-    private boolean enabled()
-    {
-        return config != null && config.customAntiban();
-    }
+    private boolean enabled() { return config != null && config.customAntiban(); }
 
     private FactoryAntibanProfile profile()
     {
-        if (config == null || config.antibanProfile() == null)
-        {
-            return FactoryAntibanProfile.BALANCED;
-        }
-        return config.antibanProfile();
+        return config == null || config.antibanProfile() == null
+            ? FactoryAntibanProfile.BALANCED
+            : config.antibanProfile();
     }
 
     private static boolean roll(double chance)
@@ -301,10 +237,6 @@ final class FactoryAntibanController
     {
         int low = Math.min(minimum, maximum);
         int high = Math.max(minimum, maximum);
-        if (low == high)
-        {
-            return low;
-        }
-        return ThreadLocalRandom.current().nextInt(low, high + 1);
+        return low == high ? low : ThreadLocalRandom.current().nextInt(low, high + 1);
     }
 }
