@@ -3,6 +3,7 @@ package net.runelite.client.plugins.microbot.kspmadcow;
 import java.util.Collections;
 import java.util.EnumMap;
 import java.util.Map;
+import lombok.Getter;
 import net.runelite.api.gameval.ItemID;
 import net.runelite.client.plugins.microbot.util.magic.Rs2CombatSpells;
 import net.runelite.client.plugins.microbot.util.magic.Runes;
@@ -15,6 +16,7 @@ import net.runelite.client.plugins.microbot.util.magic.Runes;
  * supplies the matching elemental rune. When that staff is already equipped,
  * banking skips its matching elemental rune and withdraws the remaining spell runes.
  */
+@Getter
 public enum KspMadCowSpell {
     WIND_STRIKE("Wind Strike", Rs2CombatSpells.WIND_STRIKE, Runes.AIR, ItemID.STAFF_OF_AIR, req(Runes.AIR, 1, Runes.MIND, 1)),
     WATER_STRIKE("Water Strike", Rs2CombatSpells.WATER_STRIKE, Runes.WATER, ItemID.STAFF_OF_WATER, req(Runes.AIR, 1, Runes.WATER, 1, Runes.MIND, 1)),
@@ -58,22 +60,6 @@ public enum KspMadCowSpell {
         this.staffRune = staffRune;
         this.staffItemId = staffItemId;
         this.requiredRunes = requiredRunes;
-    }
-
-    public Rs2CombatSpells getCombatSpell() {
-        return combatSpell;
-    }
-
-    public Runes getStaffRune() {
-        return staffRune;
-    }
-
-    public int getStaffItemId() {
-        return staffItemId;
-    }
-
-    public Map<Runes, Integer> getRequiredRunes() {
-        return requiredRunes;
     }
 
     @Override
