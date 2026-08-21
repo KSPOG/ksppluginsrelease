@@ -4,6 +4,7 @@ import java.util.Collections;
 import java.util.EnumMap;
 import java.util.Map;
 import lombok.Getter;
+import lombok.RequiredArgsConstructor;
 import net.runelite.api.gameval.ItemID;
 import net.runelite.client.plugins.microbot.util.magic.Rs2CombatSpells;
 import net.runelite.client.plugins.microbot.util.magic.Runes;
@@ -17,6 +18,7 @@ import net.runelite.client.plugins.microbot.util.magic.Runes;
  * banking skips its matching elemental rune and withdraws the remaining spell runes.
  */
 @Getter
+@RequiredArgsConstructor
 public enum KspMadCowSpell {
     WIND_STRIKE("Wind Strike", Rs2CombatSpells.WIND_STRIKE, Runes.AIR, ItemID.STAFF_OF_AIR, req(Runes.AIR, 1, Runes.MIND, 1)),
     WATER_STRIKE("Water Strike", Rs2CombatSpells.WATER_STRIKE, Runes.WATER, ItemID.STAFF_OF_WATER, req(Runes.AIR, 1, Runes.WATER, 1, Runes.MIND, 1)),
@@ -48,19 +50,6 @@ public enum KspMadCowSpell {
     private final Runes staffRune;
     private final int staffItemId;
     private final Map<Runes, Integer> requiredRunes;
-
-    KspMadCowSpell(
-            String displayName,
-            Rs2CombatSpells combatSpell,
-            Runes staffRune,
-            int staffItemId,
-            Map<Runes, Integer> requiredRunes) {
-        this.displayName = displayName;
-        this.combatSpell = combatSpell;
-        this.staffRune = staffRune;
-        this.staffItemId = staffItemId;
-        this.requiredRunes = requiredRunes;
-    }
 
     @Override
     public String toString() {
