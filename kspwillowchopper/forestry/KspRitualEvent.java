@@ -1,5 +1,6 @@
 package net.runelite.client.plugins.microbot.kspwillowchopper.forestry;
 
+import lombok.RequiredArgsConstructor;
 import net.runelite.api.gameval.NpcID;
 import net.runelite.client.plugins.microbot.BlockingEvent;
 import net.runelite.client.plugins.microbot.BlockingEventPriority;
@@ -9,17 +10,13 @@ import net.runelite.client.plugins.microbot.kspwillowchopper.KspWillowChopperPlu
 import net.runelite.client.plugins.microbot.util.npc.Rs2NpcModel;
 import net.runelite.client.plugins.microbot.util.player.Rs2Player;
 
-
 import java.util.List;
 
 import static net.runelite.client.plugins.microbot.util.Global.sleepUntil;
 
+@RequiredArgsConstructor
 public class KspRitualEvent implements BlockingEvent {
     private final KspWillowChopperPlugin plugin;
-
-    public KspRitualEvent(KspWillowChopperPlugin plugin) {
-        this.plugin = plugin;
-    }
 
     @Override
     public boolean validate() {
@@ -44,10 +41,8 @@ public class KspRitualEvent implements BlockingEvent {
 
             if (!Rs2Player.getWorldLocation().equals(target.getWorldLocation())) {
                 if (!plugin.moveDirectlyToForestryTarget(
-                        target.getHash(),
-                        target.getWorldLocation(),
-                        target.getMinimapLocation(),
-                        target.getCanvasTilePoly())) {
+                        target.getHash(), target.getWorldLocation(),
+                        target.getMinimapLocation(), target.getCanvasTilePoly())) {
                     sleepUntil(() -> false, 150);
                     continue;
                 }
@@ -66,22 +61,19 @@ public class KspRitualEvent implements BlockingEvent {
 
         int xor = 0;
         for (Rs2NpcModel npc : circles) {
-            int offset = npc.getId() - NpcID.GATHERING_EVENT_ENCHANTED_RITUAL_A_1;
-            int shape = offset / 4;
-            int color = offset % 4;
-            int value = (16 << shape) | (1 << color);
-            xor ^= value;
+            xor ^= ritualValue(npc);
         }
 
         for (Rs2NpcModel npc : circles) {
-            int offset = npc.getId() - NpcID.GATHERING_EVENT_ENCHANTED_RITUAL_A_1;
-            int shape = offset / 4;
-            int color = offset % 4;
-            int value = (16 << shape) | (1 << color);
+            int value = ritualValue(npc);
             if ((value & xor) == value) return npc;
         }
-
         return null;
+    }
+
+    private int ritualValue(Rs2NpcModel npc) {
+        int offset = npc.getId() - NpcID.GATHERING_EVENT_ENCHANTED_RITUAL_A_1;
+        return (16 << (offset / 4)) | (1 << (offset % 4));
     }
 
     @Override
