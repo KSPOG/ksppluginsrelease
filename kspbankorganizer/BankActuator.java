@@ -91,7 +91,18 @@ final class BankActuator
         // interface is rebuilding. Do not report the bank interaction as
         // complete until the same live container required by snapshot reads is
         // available.
-        return Global.sleepUntil(this::isBankReadyForSnapshotOnClient, 5000);
+        if (Global.sleepUntil(this::isBankReadyForSnapshotOnClient, 5000))
+        {
+            return true;
+        }
+
+        // openBank() may first walk to a booth. Once that walk completes, retry
+        // the interaction against the now-near banker before declaring the
+        // opening failed. This is a postcondition-driven retry, not a blind
+        // delay, and avoids leaving a completed approach with no bank click.
+        bankInteractionStarted = openNearbyBanker() || Rs2Bank.openBank();
+        return bankInteractionStarted
+            && Global.sleepUntil(this::isBankReadyForSnapshotOnClient, 5000);
     }
 
     private boolean openNearbyBanker()
