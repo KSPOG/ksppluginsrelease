@@ -78,6 +78,22 @@ public class KspDirectFishingPlugin extends Plugin
                 Microbot.getClient().getSkillExperience(Skill.COOKING) - startCookingXp);
     }
 
+    public int getFishingXpPerHour()
+    {
+        return perHour(getFishingXpGained());
+    }
+
+    public int getCookingXpPerHour()
+    {
+        return perHour(getCookingXpGained());
+    }
+
+    private int perHour(int gained)
+    {
+        long elapsed = Math.max(1L, System.currentTimeMillis() - startTime);
+        return (int) Math.round(gained * 3_600_000.0 / elapsed);
+    }
+
     public String getFormattedRuntime()
     {
         long elapsed = Math.max(0L, System.currentTimeMillis() - startTime);

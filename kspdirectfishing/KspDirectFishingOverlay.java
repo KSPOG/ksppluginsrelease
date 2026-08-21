@@ -1,5 +1,6 @@
 package net.runelite.client.plugins.microbot.kspdirectfishing;
 
+import net.runelite.client.plugins.microbot.util.inventory.Rs2Inventory;
 import net.runelite.client.ui.overlay.OverlayPanel;
 import net.runelite.client.ui.overlay.OverlayPosition;
 import net.runelite.client.ui.overlay.components.LineComponent;
@@ -34,58 +35,116 @@ public class KspDirectFishingOverlay extends OverlayPanel
     @Override
     public Dimension render(Graphics2D graphics)
     {
-        panelComponent.setPreferredSize(new Dimension(220, 150));
-        panelComponent.setBackgroundColor(new Color(0, 0, 0, 155));
+        panelComponent.setPreferredSize(new Dimension(255, 250));
+        panelComponent.setBackgroundColor(new Color(0, 0, 0, 175));
 
         panelComponent.getChildren().add(
                 TitleComponent.builder()
-                        .text("KSP Direct Fishing v" + KspDirectFishingPlugin.VERSION)
+                        .text("KSP Fishing v" + KspDirectFishingPlugin.VERSION)
                         .color(Color.BLUE)
                         .build()
         );
 
-        panelComponent.getChildren().add(
-                LineComponent.builder()
-                        .left("Mode:")
-                        .right(config.fishingMode().toString())
-                        .build()
-        );
+        addLine("Mode", config.fishingMode().toString());
+        addLine("State", prettyState());
+        addLine("Action", script.getStatus());
 
-        panelComponent.getChildren().add(
-                LineComponent.builder()
-                        .left("State:")
-                        .right(script.getState().toString())
-                        .build()
-        );
+        panelComponent.getChildren().add(LineComponent.builder().build());
 
-        panelComponent.getChildren().add(
-                LineComponent.builder()
-                        .left("Fishing XP:")
-                        .right(String.valueOf(plugin.getFishingXpGained()))
-                        .build()
-        );
+        addLine("Fishing XP", formatNumber(plugin.getFishingXpGained()));
+        addLine("Fishing XP/h", formatNumber(plugin.getFishingXpPerHour()));
+        addLine("Cooking XP", formatNumber(plugin.getCookingXpGained()));
+        addLine("Cooking XP/h", formatNumber(plugin.getCookingXpPerHour()));
 
-        panelComponent.getChildren().add(
-                LineComponent.builder()
-                        .left("Cooking XP:")
-                        .right(String.valueOf(plugin.getCookingXpGained()))
-                        .build()
-        );
+        panelComponent.getChildren().add(LineComponent.builder().build());
 
-        panelComponent.getChildren().add(
-                LineComponent.builder()
-                        .left("Runtime:")
-                        .right(plugin.getFormattedRuntime())
-                        .build()
-        );
+        addLine("Raw fish", String.valueOf(script.getRawFishCount()));
 
-        panelComponent.getChildren().add(
-                LineComponent.builder()
-                        .left("Status:")
-                        .right(script.getStatus())
-                        .build()
-        );
+        if (config.fishingMode().usesBait())
+        {
+            addLine("Fishing bait", formatNumber(script.getBaitCount()));
+        }
+        else
+        {
+            addLine("Small net", Rs2Inventory.hasItem("Small fishing net") ? "Ready" : "Missing");
+        }
+
+        addLine("Fire", fireStatus());
+        addLine("Runtime", plugin.getFormattedRuntime());
 
         return super.render(graphics);
+    }
+
+    private void addLine(String left, String right)
+    {
+        panelComponent.getChildren().add(
+                LineComponent.builder()
+                        .left(left + ":")
+                        .right(right == null ? "-" : right)
+                        .build()
+        );
+    }
+
+    private String prettyState()
+    {
+        KspDirectFishingState state = script.getState();
+        if (state == null)
+        {
+            return "-";
+        }
+
+        String raw = state.name().replace('_', ' ').toLowerCase();
+        StringBuilder result = new StringBuilder(raw.length());
+        boolean upperNext = true;
+
+        for (int i = 0; i < raw.length(); i++)
+        {
+            char c = raw.charAt(i);
+
+            if (upperNext && Character.isLetter(c))
+            {
+                result.append(Character.toUpperCase(c));
+                upperNext = false;
+            }
+            else
+            {
+                result.append(c);
+            }
+
+            if (c == ' ')
+            {
+                upperNext = true;
+            }
+        }
+
+        return result.toString();
+    }
+
+    private String fireStatus()
+    {
+        KspDirectFishingState state = script.getState();
+
+        if (state == null)
+        {
+            return "Not checked";
+        }
+
+        switch (state)
+        {
+            case FINDING_FIRE:
+                return "Searching";
+            case WAITING_FOR_FIRE:
+                return "Not found";
+            case WALKING_TO_FIRE:
+            case COOKING:
+                return script.isFireAvailable() ? "Available" : "Searching";
+            default:
+                return script.isFireAvailable() ? "Last seen" : "Not checked";
+        }
+    }
+
+    private String formatNumber(int value)
+    {
+        return String.format("%,d", value);
     }
 }

@@ -1,9 +1,7 @@
 package net.runelite.client.plugins.microbot.kspdirectfishing;
 
 import lombok.extern.slf4j.Slf4j;
-import net.runelite.api.Actor;
 import net.runelite.api.AnimationID;
-import net.runelite.api.NPC;
 import net.runelite.api.Skill;
 import net.runelite.api.coords.WorldPoint;
 import net.runelite.api.gameval.ObjectID;
@@ -41,6 +39,8 @@ public class KspDirectFishingScript extends Script
     private volatile String status = "Starting";
 
     private volatile WorldPoint fishingAnchor;
+    private volatile boolean fireAvailable;
+    private volatile WorldPoint lastFirePoint;
 
     public KspDirectFishingState getState()
     {
@@ -57,8 +57,39 @@ public class KspDirectFishingScript extends Script
         return fishingAnchor;
     }
 
+    public boolean isFireAvailable()
+    {
+        return fireAvailable;
+    }
+
+    public WorldPoint getLastFirePoint()
+    {
+        return lastFirePoint;
+    }
+
+    public int getRawFishCount()
+    {
+        int total = 0;
+        if (mode == null)
+        {
+            return total;
+        }
+
+        for (String raw : mode.getRawFish())
+        {
+            total += Rs2Inventory.count(raw);
+        }
+        return total;
+    }
+
+    public int getBaitCount()
+    {
+        return mode != null && mode.usesBait()
+                ? Rs2Inventory.count("Fishing bait")
+                : 0;
+    }
+
     private long lastFishingClick;
-    private int lastFishingSpotIndex = -1;
 
     public boolean run(KspDirectFishingConfig config)
     {
@@ -67,7 +98,8 @@ public class KspDirectFishingScript extends Script
         this.state = KspDirectFishingState.STARTING;
         this.status = "Locating fishing spot";
         this.lastFishingClick = 0L;
-        this.lastFishingSpotIndex = -1;
+        this.fireAvailable = false;
+        this.lastFirePoint = null;
 
         mainScheduledFuture = scheduledExecutorService.scheduleWithFixedDelay(
                 this::loop,
@@ -99,9 +131,9 @@ public class KspDirectFishingScript extends Script
             if (fishingAnchor == null)
             {
                 Rs2NpcModel initialSpot = findNearestFishingSpot();
-                if (initialSpot != null && initialSpot.getNpc() != null)
+                if (initialSpot != null)
                 {
-                    fishingAnchor = initialSpot.getNpc().getWorldLocation();
+                    fishingAnchor = initialSpot.getWorldLocation();
                 }
             }
 
@@ -145,6 +177,7 @@ public class KspDirectFishingScript extends Script
             state = KspDirectFishingState.ERROR;
             status = "Error - check client log";
             log.error("KSP Direct Fishing loop error", ex);
+            sleep(1_500);
         }
     }
 
@@ -200,9 +233,9 @@ public class KspDirectFishingScript extends Script
     private void handleStart()
     {
         Rs2NpcModel spot = findNearestFishingSpot();
-        if (spot != null && spot.getNpc() != null)
+        if (spot != null)
         {
-            fishingAnchor = spot.getNpc().getWorldLocation();
+            fishingAnchor = spot.getWorldLocation();
             status = "Fishing spot locked";
             state = KspDirectFishingState.FISHING;
             return;
@@ -224,90 +257,44 @@ public class KspDirectFishingScript extends Script
         }
 
         Rs2NpcModel fishingSpot = findNearestFishingSpot();
-        if (fishingSpot == null || fishingSpot.getNpc() == null)
+        if (fishingSpot == null)
         {
             status = "Finding fishing spot";
             return;
         }
 
-        fishingAnchor = fishingSpot.getNpc().getWorldLocation();
-
-        Actor interacting = Rs2Player.getInteracting();
-        if (interacting instanceof NPC)
+        // Rs2NpcModel performs the required client-thread dispatch internally.
+        WorldPoint spotPoint = fishingSpot.getWorldLocation();
+        if (spotPoint != null)
         {
-            NPC npc = (NPC) interacting;
-            if (npc.getIndex() == fishingSpot.getNpc().getIndex()
-                    && System.currentTimeMillis() - lastFishingClick < FISH_INTERACTION_TIMEOUT)
-            {
-                status = "Fishing " + mode;
-                return;
-            }
+            fishingAnchor = spotPoint;
         }
 
-        if (Rs2Player.isAnimating()
+        if ((Rs2Player.isAnimating() || Rs2Player.isInteracting())
                 && System.currentTimeMillis() - lastFishingClick < FISH_INTERACTION_TIMEOUT)
         {
             status = "Fishing " + mode;
             return;
         }
 
-        String action = getAvailableFishingAction(fishingSpot);
-        if (action == null)
-        {
-            status = "No " + mode.getPrimaryAction() + " action on spot";
-            return;
-        }
-
+        String action = mode.getPrimaryAction();
         status = "Direct click: " + action;
+
         if (fishingSpot.click(action))
         {
             lastFishingClick = System.currentTimeMillis();
-            lastFishingSpotIndex = fishingSpot.getNpc().getIndex();
 
             Rs2Player.waitForXpDrop(Skill.FISHING, true);
 
             while (!Thread.currentThread().isInterrupted()
                     && Microbot.isLoggedIn()
                     && !Rs2Inventory.isFull()
-                    && hasFishingSupplies())
+                    && hasFishingSupplies()
+                    && (Rs2Player.isAnimating() || Rs2Player.isInteracting()))
             {
-                Actor current = Rs2Player.getInteracting();
-                if (!(current instanceof NPC)
-                        || ((NPC) current).getIndex() != lastFishingSpotIndex)
-                {
-                    break;
-                }
-
                 Rs2Player.waitForXpDrop(Skill.FISHING, 10_000, true);
             }
         }
-    }
-
-    private String getAvailableFishingAction(Rs2NpcModel fishingSpot)
-    {
-        if (fishingSpot.getNpc() == null || fishingSpot.getNpc().getComposition() == null)
-        {
-            return null;
-        }
-
-        String[] npcActions = fishingSpot.getNpc().getComposition().getActions();
-        if (npcActions == null)
-        {
-            return null;
-        }
-
-        for (String wanted : mode.getActions())
-        {
-            for (String available : npcActions)
-            {
-                if (available != null && available.equalsIgnoreCase(wanted))
-                {
-                    return available;
-                }
-            }
-        }
-
-        return null;
     }
 
     private void handleCookingFlow()
@@ -334,7 +321,18 @@ public class KspDirectFishingScript extends Script
             return;
         }
 
-        WorldPoint firePoint = fire.getWorldLocation();
+        WorldPoint firePoint = getTileObjectWorldPoint(fire);
+        if (firePoint == null)
+        {
+            fireAvailable = false;
+            lastFirePoint = null;
+            status = "Fire location unavailable";
+            return;
+        }
+
+        fireAvailable = true;
+        lastFirePoint = firePoint;
+
         int distance = Rs2Player.getWorldLocation().distanceTo(firePoint);
 
         if (distance > DIRECT_FIRE_DISTANCE)
@@ -383,7 +381,16 @@ public class KspDirectFishingScript extends Script
              * Works for both normal Fires and Forester's Campfires because the
              * actual object id discovered from the cache is used here.
              */
-            Rs2Inventory.useUnNotedItemOnObject(rawFish, fire.getId());
+            Integer fireId = Microbot.getClientThread().invoke(fire::getId);
+            if (fireId == null)
+            {
+                fireAvailable = false;
+                lastFirePoint = null;
+                status = "Fire disappeared";
+                return;
+            }
+
+            Rs2Inventory.useUnNotedItemOnObject(rawFish, fireId);
 
             boolean cookWidget = sleepUntil(
                     () -> Rs2Widget.findWidget("How many would you like to cook?", null) != null,
@@ -593,20 +600,45 @@ public class KspDirectFishingScript extends Script
 
         try
         {
-            return Microbot.getRs2TileObjectCache()
+            Rs2TileObjectModel fire = Microbot.getRs2TileObjectCache()
                     .query()
                     .withIds(fireIds)
                     .within(config.fireSearchRadius())
                     .nearestOnClientThread();
+
+            fireAvailable = fire != null;
+            lastFirePoint = fire == null ? null : getTileObjectWorldPoint(fire);
+            return fire;
         }
         catch (RuntimeException ex)
         {
+            fireAvailable = false;
+            lastFirePoint = null;
+
             if (Thread.currentThread().isInterrupted())
             {
                 return null;
             }
 
             log.debug("Fire query failed: {}", ex.getMessage());
+            return null;
+        }
+    }
+
+    private WorldPoint getTileObjectWorldPoint(Rs2TileObjectModel object)
+    {
+        if (object == null)
+        {
+            return null;
+        }
+
+        try
+        {
+            return Microbot.getClientThread().invoke(object::getWorldLocation);
+        }
+        catch (RuntimeException ex)
+        {
+            log.debug("Tile object location lookup failed: {}", ex.getMessage());
             return null;
         }
     }
@@ -642,8 +674,6 @@ public class KspDirectFishingScript extends Script
 
     private String firstCookableRawFish()
     {
-        int cookingLevel = Microbot.getClient().getRealSkillLevel(Skill.COOKING);
-
         for (String raw : mode.getRawFish())
         {
             if (!Rs2Inventory.hasItem(raw))
@@ -651,7 +681,7 @@ public class KspDirectFishingScript extends Script
                 continue;
             }
 
-            if (requiredCookingLevel(raw) <= cookingLevel)
+            if (Rs2Player.getSkillRequirement(Skill.COOKING, requiredCookingLevel(raw)))
             {
                 return raw;
             }
