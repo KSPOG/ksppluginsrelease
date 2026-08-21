@@ -92,12 +92,15 @@ public class KspAutoRunScript extends Script
         final int runEnergy = runState.runEnergy;
         if (runState.runEnabled)
         {
-            // A successful toggle is acknowledged only once. Keep the completed
-            // energy cycle latched until Run is observed disabled below the
-            // threshold. Clearing it while Run is still enabled would allow a
-            // transient disabled-state update at high energy to submit a second,
-            // non-idempotent toggle.
-            if (!runEnabledObserved)
+            // Only a toggle submitted by this script owns an energy-cycle latch.
+            // Run can also be enabled by another active plugin; treating that
+            // external transition as this script's completed action would block
+            // this script until an unrelated below-threshold reset occurs.
+            //
+            // A submitted Toggle Run remains non-idempotent, so retain the latch
+            // for this script's own confirmation until the normal reset
+            // postcondition is observed.
+            if (!runEnabledObserved && runToggleRequestedAt != 0L)
             {
                 awaitingEnergyReset = true;
             }
