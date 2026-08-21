@@ -9,7 +9,6 @@ public enum KspDirectFishingMode
     SHRIMP_ANCHOVIES(
             "Shrimp / Anchovies",
             "Small Net",
-            List.of("Small Net", "Net"),
             List.of("Small fishing net"),
             List.of("Raw shrimps", "Raw anchovies"),
             FishingSpot.SHRIMP.getIds()
@@ -18,7 +17,6 @@ public enum KspDirectFishingMode
     SARDINE_HERRING(
             "Sardine / Herring",
             "Bait",
-            List.of("Bait"),
             List.of("Fishing rod", "Fishing bait"),
             List.of("Raw sardine", "Raw herring"),
             FishingSpot.SHRIMP.getIds()
@@ -26,7 +24,6 @@ public enum KspDirectFishingMode
 
     private final String displayName;
     private final String primaryAction;
-    private final List<String> actions;
     private final List<String> requiredItems;
     private final List<String> rawFish;
     private final int[] fishingSpotIds;
@@ -34,14 +31,12 @@ public enum KspDirectFishingMode
     KspDirectFishingMode(
             String displayName,
             String primaryAction,
-            List<String> actions,
             List<String> requiredItems,
             List<String> rawFish,
             int[] fishingSpotIds)
     {
         this.displayName = displayName;
         this.primaryAction = primaryAction;
-        this.actions = actions;
         this.requiredItems = requiredItems;
         this.rawFish = rawFish;
         this.fishingSpotIds = fishingSpotIds;
@@ -50,11 +45,6 @@ public enum KspDirectFishingMode
     public String getPrimaryAction()
     {
         return primaryAction;
-    }
-
-    public List<String> getActions()
-    {
-        return actions;
     }
 
     public List<String> getRequiredItems()
