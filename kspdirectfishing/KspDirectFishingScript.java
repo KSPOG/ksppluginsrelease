@@ -645,29 +645,55 @@ public class KspDirectFishingScript extends Script
 
     private void handleReturnToFishing()
     {
+        /*
+         * Do not use Rs2Walker/WebWalker to return from the bank.
+         * The fishing spot NPC is normally still loaded in the local scene
+         * around Draynor. Interact with it directly and let the game perform
+         * the short movement required to reach the spot.
+         */
         Rs2NpcModel visibleSpot = findNearestFishingSpot();
-        if (visibleSpot != null)
-        {
-            state = KspDirectFishingState.FISHING;
-            status = "Fishing spot in range";
-            return;
-        }
-
-        if (fishingAnchor == null)
-        {
-            status = "Start near a compatible fishing spot";
-            return;
-        }
-
-        if (Rs2Player.getWorldLocation().distanceTo(fishingAnchor) > 5)
+        if (visibleSpot == null)
         {
             state = KspDirectFishingState.RETURNING_TO_FISH;
-            status = "Walking back to fishing";
-            Rs2Walker.walkTo(fishingAnchor);
+            status = "Waiting for fishing spot to load";
             return;
         }
 
-        status = "Waiting for fishing spot";
+        if (Rs2Inventory.isFull() || !hasFishingSupplies())
+        {
+            status = "Cannot return to fish yet";
+            return;
+        }
+
+        WorldPoint spotPoint = visibleSpot.getWorldLocation();
+        if (spotPoint != null)
+        {
+            fishingAnchor = spotPoint;
+        }
+
+        long now = System.currentTimeMillis();
+        if (now - lastFailedFishingClick < FAILED_CLICK_RETRY_DELAY)
+        {
+            status = "Waiting to retry fishing";
+            return;
+        }
+
+        String action = mode.getPrimaryAction();
+        state = KspDirectFishingState.FISHING;
+        status = "Direct return: " + action;
+
+        if (visibleSpot.click(action))
+        {
+            lastFishingClick = now;
+            lastFailedFishingClick = 0L;
+            status = "Fishing " + mode;
+        }
+        else
+        {
+            lastFailedFishingClick = now;
+            state = KspDirectFishingState.RETURNING_TO_FISH;
+            status = "Return click failed: " + action;
+        }
     }
 
     private Rs2NpcModel findNearestFishingSpot()
