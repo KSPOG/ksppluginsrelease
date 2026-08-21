@@ -238,6 +238,7 @@ public class KspWillowChopperPlugin extends Plugin {
 
         if (lower.startsWith("you get") && lower.contains("willow logs")) {
             logsChopped.incrementAndGet();
+            script.notifyResourceChopped();
         }
 
         Matcher bark = ANIMA_BARK_PATTERN.matcher(msg);

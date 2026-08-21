@@ -45,6 +45,15 @@ public class KspWillowChopperScript extends Script {
     // following a successful chop returns through the ordinary click latch.
     private volatile WorldPoint activeTargetLocation;
     private volatile int activeTargetObjectId = -1;
+    // Chat confirmation is the authoritative postcondition for a completed chop.
+    // Keep a session-scoped, observable count separate from the inventory poll so
+    // successful depletion/reselection cycles remain distinguishable from a retry
+    // loop while the inventory cache catches up.
+    private volatile int confirmedResourceChops;
+    // A successful depletion removes the scene object before the next scheduled
+    // selection. Keep its identity until that selection has completed so object
+    // events cannot turn the normal completion handoff into a retarget loop.
+    private volatile boolean completedTargetPending;
     private volatile boolean immediateRetargetRequested;
     private final AtomicInteger immediateRetargetAttempts = new AtomicInteger();
     private final AtomicBoolean immediateRetargetQueued = new AtomicBoolean(false);
@@ -126,6 +135,8 @@ public class KspWillowChopperScript extends Script {
         activeTree = safeTree(config.tree());
         activeTargetLocation = null;
         activeTargetObjectId = -1;
+        confirmedResourceChops = 0;
+        completedTargetPending = false;
         immediateRetargetRequested = false;
         immediateRetargetAttempts.set(0);
         immediateRetargetQueued.set(false);
@@ -237,6 +248,8 @@ public class KspWillowChopperScript extends Script {
         suppressedResourceLoss = 0;
         activeTargetLocation = null;
         activeTargetObjectId = -1;
+        confirmedResourceChops = 0;
+        completedTargetPending = false;
         immediateRetargetRequested = false;
         immediateRetargetAttempts.set(0);
         immediateRetargetQueued.set(false);
@@ -281,6 +294,7 @@ public class KspWillowChopperScript extends Script {
         lastTreeClickMillis = 0L;
         activeTargetLocation = null;
         activeTargetObjectId = -1;
+        completedTargetPending = false;
         immediateRetargetRequested = false;
         immediateRetargetAttempts.set(0);
         clearActiveCampfireTarget();
@@ -786,6 +800,7 @@ public class KspWillowChopperScript extends Script {
             if (tree.click(activeTree.getAction())) {
                 activeTargetLocation = tree.getWorldLocation();
                 activeTargetObjectId = tree.getId();
+                completedTargetPending = false;
                 immediateRetargetRequested = false;
                 immediateRetargetAttempts.set(0);
                 treeInteractionIssued = true;
@@ -819,6 +834,21 @@ public class KspWillowChopperScript extends Script {
     }
 
     /**
+     * Records a confirmed resource gain as soon as the game reports it. Scene object
+     * despawn notifications can arrive before the scheduled inventory poll observes
+     * the new log, so this keeps a normal tree depletion from being treated as an
+     * unexpected target loss.
+     */
+    public void notifyResourceChopped() {
+        if (!sessionStarted || !treeInteractionIssued) {
+            return;
+        }
+
+        confirmedResourceChops++;
+        lastTreeProgressMillis = System.currentTimeMillis();
+    }
+
+    /**
      * Rs2TileObjectModel normalizes multi-tile GameObjects to their scene-min tile.
      * The clicked target is stored using that model location, so event locations
      * must use the same normalization or large trees will never compare equal.
@@ -843,6 +873,7 @@ public class KspWillowChopperScript extends Script {
         if (!sessionStarted
                 || activeTargetLocation == null
                 || activeTargetObjectId < 0
+                || completedTargetPending
                 || immediateRetargetRequested
                 || Rs2Bank.isOpen()
                 || plugin.getCurrentForestryEvent() != KspForestryEvent.NONE) {
@@ -851,6 +882,17 @@ public class KspWillowChopperScript extends Script {
 
         // Do not start a new chop while burn mode owns the inventory.
         if (burnModeEnabled && burnCycleActive) {
+            return;
+        }
+
+        // A successful chop removes its scene object before the matching
+        // despawn/morph notifications have necessarily reached this script.
+        // The resource-gain callback is the completion postcondition, so do
+        // not let this polling fallback race it into an immediate retarget.
+        // Once that short completion window expires, a missing target is still
+        // recovered through the normal immediate-retarget path below.
+        if (treeInteractionIssued
+                && System.currentTimeMillis() - lastTreeProgressMillis <= TREE_COMPLETION_WINDOW_MS) {
             return;
         }
 
@@ -886,7 +928,8 @@ public class KspWillowChopperScript extends Script {
                 || targetLocation == null
                 || location == null
                 || !targetLocation.equals(location)
-                || targetId < 0) {
+                || targetId < 0
+                || completedTargetPending) {
             return;
         }
 
@@ -898,15 +941,29 @@ public class KspWillowChopperScript extends Script {
 
         // A resource gain immediately followed by the clicked tree despawning is
         // the normal chop-completion postcondition. Do not turn that completion
-        // into an urgent retry: clearing the completed target lets the regular
-        // click latch select the next live tree after its normal cooldown. This
-        // avoids repeatedly scheduling a retarget for every successful depletion.
+        // into an urgent retry: the regular click latch records the next live
+        // tree after the completed-target handoff. This avoids repeatedly
+        // scheduling a retarget for every successful depletion.
         long now = System.currentTimeMillis();
+        // Scene updates can publish the replacement stump/object before the
+        // despawn event for the tree that produced the log. Treat that spawn as
+        // part of the successful chop while the resource-gain postcondition is
+        // fresh; otherwise it races the following despawn and starts an
+        // unnecessary immediate-retarget cycle.
+        if (sameTileMorphedToDifferentId
+                && treeInteractionIssued
+                && now - lastTreeProgressMillis <= TREE_COMPLETION_WINDOW_MS) {
+            return;
+        }
+
         if (currentTargetRemoved
                 && treeInteractionIssued
                 && now - lastTreeProgressMillis <= TREE_COMPLETION_WINDOW_MS) {
-            activeTargetLocation = null;
-            activeTargetObjectId = -1;
+            // The logged resource gain is the chop postcondition. Retain the
+            // completed target identity only until the regular selection path
+            // records its replacement; liveness and object-event recovery both
+            // ignore this completed handoff state.
+            completedTargetPending = true;
             immediateRetargetRequested = false;
             immediateRetargetAttempts.set(0);
             treeInteractionIssued = false;
