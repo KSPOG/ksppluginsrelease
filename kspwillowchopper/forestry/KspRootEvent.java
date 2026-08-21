@@ -6,6 +6,7 @@ import net.runelite.api.gameval.ObjectID;
 import net.runelite.client.plugins.microbot.BlockingEvent;
 import net.runelite.client.plugins.microbot.BlockingEventPriority;
 import net.runelite.client.plugins.microbot.Microbot;
+import net.runelite.client.plugins.microbot.api.tileobject.models.Rs2TileObjectModel;
 import net.runelite.client.plugins.microbot.kspwillowchopper.KspForestryEvent;
 import net.runelite.client.plugins.microbot.kspwillowchopper.KspWillowChopperPlugin;
 import net.runelite.client.plugins.microbot.kspwillowchopper.KspTileObjectSupport;
@@ -41,7 +42,7 @@ public class KspRootEvent implements BlockingEvent {
         plugin.setCurrentForestryEvent(KspForestryEvent.RISING_ROOTS);
 
         while (validate()) {
-            var root = findRoot(ObjectID.GATHERING_EVENT_RISING_ROOTS_SPECIAL);
+            Rs2TileObjectModel root = findRoot(ObjectID.GATHERING_EVENT_RISING_ROOTS_SPECIAL);
             if (root == null) {
                 root = findRoot(ObjectID.GATHERING_EVENT_RISING_ROOTS);
             }
@@ -64,7 +65,7 @@ public class KspRootEvent implements BlockingEvent {
         return true;
     }
 
-    private net.runelite.client.plugins.microbot.api.tileobject.models.Rs2TileObjectModel findRoot(int id) {
+    private Rs2TileObjectModel findRoot(int id) {
         return plugin.rs2TileObjectCache.query().where(x -> x.getId() == id).nearest();
     }
 
