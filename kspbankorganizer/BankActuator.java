@@ -63,10 +63,10 @@ final class BankActuator
         // on screen. The live RuneLite widget tree is the authoritative UI signal.
         if (isBankUiOpenOnClient())
         {
-            // Give the bank container a short settling window, but do not require
-            // rearrangement controls for Preview/Scan. Those controls are only
-            // needed later when Organize actually starts moving items.
-            return Global.sleepUntil(this::isLiveBankItemWidgetPresent, 4000);
+            // Do not advance merely because the bank root is visible. A newly
+            // opened bank rebuilds its item widget before the live BANK
+            // ItemContainer used by BankSnapshotReader is always available.
+            return Global.sleepUntil(this::isBankReadyForSnapshotOnClient, 4000);
         }
 
         // Only attempt Rs2Bank.openBank() when the bank UI is genuinely closed.
@@ -79,7 +79,7 @@ final class BankActuator
         // interface is rebuilding. Do not report the bank interaction as
         // complete until the same live container required by snapshot reads is
         // available.
-        return Global.sleepUntil(this::isLiveBankItemWidgetPresent, 5000);
+        return Global.sleepUntil(this::isBankReadyForSnapshotOnClient, 5000);
     }
 
     private boolean isBankUiOpenOnClient()
@@ -130,24 +130,34 @@ final class BankActuator
         return isRs2BankOpen();
     }
 
-    private boolean isLiveBankItemWidgetPresent()
+    /**
+     * The organizer reads the live BANK ItemContainer immediately after
+     * opening. A rendered item widget alone is therefore insufficient: it can
+     * briefly survive a bank-interface rebuild after its backing container has
+     * been cleared. Keep the UI and data postconditions together.
+     */
+    private boolean isBankReadyForSnapshotOnClient()
     {
         return Microbot.getClientThread().runOnClientThreadOptional(() ->
         {
-            // Current Bankmain layout exposes the actual item widget at 12:12.
-            // Keep the container fallback because some builds expose 12:9 first.
-            Widget items = client.getWidget(BANK_GROUP_ID, 12);
-            if (items != null && !items.isHidden())
+            Widget universe = client.getWidget(BANK_GROUP_ID, 1);
+            if (universe == null || universe.isHidden() || !hasUsableCanvasRectangle(universe.getBounds()))
             {
-                return items.getBounds() != null && items.getBounds().width > 0 && items.getBounds().height > 0;
+                return false;
             }
 
-            Widget container = client.getWidget(BANK_GROUP_ID, 9);
-            return container != null
-                && !container.isHidden()
-                && container.getBounds() != null
-                && container.getBounds().width > 0
-                && container.getBounds().height > 0;
+            Widget items = client.getWidget(BANK_GROUP_ID, 12);
+            if (items == null || items.isHidden() || !hasUsableCanvasRectangle(items.getBounds()))
+            {
+                items = client.getWidget(BANK_GROUP_ID, 9);
+                if (items == null || items.isHidden() || !hasUsableCanvasRectangle(items.getBounds()))
+                {
+                    return false;
+                }
+            }
+
+            ItemContainer bankContainer = client.getItemContainer(InventoryID.BANK);
+            return bankContainer != null;
         }).orElse(false);
     }
 
