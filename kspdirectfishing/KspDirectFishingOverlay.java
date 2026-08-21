@@ -138,6 +138,8 @@ public class KspDirectFishingOverlay extends OverlayPanel
             case WAITING_FOR_FIRE:
                 return "Not found";
             case WALKING_TO_FIRE:
+            case USING_FIRE:
+            case WAITING_FOR_COOK_INTERFACE:
             case COOKING:
                 return script().isFireAvailable() ? "Available" : "Searching";
             default:

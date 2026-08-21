@@ -183,6 +183,8 @@ public class KspDirectFishingScript extends Script
 
                 case FINDING_FIRE:
                 case WALKING_TO_FIRE:
+                case USING_FIRE:
+                case WAITING_FOR_COOK_INTERFACE:
                 case COOKING:
                 case WAITING_FOR_FIRE:
                     handleCookingFlow();
@@ -383,16 +385,16 @@ public class KspDirectFishingScript extends Script
             state = KspDirectFishingState.WALKING_TO_FIRE;
             status = "Walking to nearest fire";
             Rs2Walker.walkTo(firePoint);
-            /*
-             * A walk request is asynchronous. Checking for "not moving" here
-             * can succeed before the client has started moving, which causes
-             * the next loop to rediscover the fire and issue another walk.
-             */
-            Rs2Player.waitForWalking();
+            sleepUntil(() ->
+                    !Rs2Player.isMoving()
+                            || Rs2Player.getWorldLocation().distanceTo(firePoint) <= 3,
+                    10_000
+            );
             return;
         }
 
-        state = KspDirectFishingState.COOKING;
+        state = KspDirectFishingState.USING_FIRE;
+        status = "Preparing fish for fire";
         cookAllOn(fire);
     }
 
@@ -404,37 +406,42 @@ public class KspDirectFishingScript extends Script
         {
             if (Rs2Player.isMoving())
             {
+                state = KspDirectFishingState.WALKING_TO_FIRE;
+                status = "Finishing movement to fire";
                 return;
             }
 
             if (Rs2Player.isAnimating() || Rs2Player.isInteracting())
             {
+                state = KspDirectFishingState.COOKING;
+                status = "Cooking in progress";
                 sleepUntil(() -> !Rs2Player.isAnimating() && !Rs2Player.isInteracting(), 15_000);
             }
 
             String rawFish = firstCookableRawFish();
             if (rawFish == null)
             {
+                status = "No cookable raw fish";
                 return;
             }
 
-            status = "Cooking " + rawFish;
-
-            /*
-             * Direct item -> object interaction.
-             * Works for both normal Fires and Forester's Campfires because the
-             * actual object id discovered from the cache is used here.
-             */
             Integer fireId = Microbot.getClientThread().invoke(fire::getId);
             if (fireId == null)
             {
                 fireAvailable = false;
                 lastFirePoint = null;
+                state = KspDirectFishingState.FINDING_FIRE;
                 status = "Fire disappeared";
                 return;
             }
 
+            state = KspDirectFishingState.USING_FIRE;
+            status = "Using " + rawFish + " on fire";
+
             Rs2Inventory.useUnNotedItemOnObject(rawFish, fireId);
+
+            state = KspDirectFishingState.WAITING_FOR_COOK_INTERFACE;
+            status = "Waiting for cook interface";
 
             boolean cookWidget = sleepUntil(
                     () -> Rs2Widget.findWidget("How many would you like to cook?", null) != null,
@@ -443,19 +450,33 @@ public class KspDirectFishingScript extends Script
 
             if (!cookWidget)
             {
-                /*
-                 * Campfire may have despawned between discovery and interaction.
-                 * Re-query next loop rather than spam-clicking the stale object.
-                 */
-                status = "Fire changed - finding another";
+                state = KspDirectFishingState.FINDING_FIRE;
+                status = "Cook interface did not open";
                 sleep(1_000, 1_600);
                 return;
             }
 
+            status = "Starting " + rawFish;
             Rs2Keyboard.keyPress(KeyEvent.VK_SPACE);
 
+            boolean cookingStarted = sleepUntil(
+                    () -> Rs2Player.isAnimating()
+                            || Rs2Player.getAnimation() != AnimationID.IDLE,
+                    5_000
+            );
+
+            if (!cookingStarted)
+            {
+                state = KspDirectFishingState.WAITING_FOR_COOK_INTERFACE;
+                status = "Cooking did not start - retrying";
+                sleep(800, 1_300);
+                return;
+            }
+
+            state = KspDirectFishingState.COOKING;
+            status = "Cooking " + rawFish;
+
             Rs2Player.waitForXpDrop(Skill.COOKING, true);
-            sleepUntil(() -> Rs2Player.getAnimation() != AnimationID.IDLE, 5_000);
 
             final String cookingThis = rawFish;
             sleepUntilTrue(
@@ -466,6 +487,7 @@ public class KspDirectFishingScript extends Script
             );
         }
 
+        state = KspDirectFishingState.WALKING_TO_BANK;
         status = "Cooking complete";
     }
 

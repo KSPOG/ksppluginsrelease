@@ -7,6 +7,8 @@ public enum KspDirectFishingState
     WALKING_TO_FISH,
     FINDING_FIRE,
     WALKING_TO_FIRE,
+    USING_FIRE,
+    WAITING_FOR_COOK_INTERFACE,
     COOKING,
     WALKING_TO_BANK,
     BANKING,

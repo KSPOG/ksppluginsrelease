@@ -24,7 +24,7 @@ import java.awt.AWTException;
 )
 public class KspDirectFishingPlugin extends Plugin
 {
-    public static final String VERSION = "0.0.7";
+    public static final String VERSION = "0.0.8";
 
     @Inject
     private KspDirectFishingConfig config;
