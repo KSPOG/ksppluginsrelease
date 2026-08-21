@@ -300,7 +300,7 @@ public class KspAutoRunScript extends Script
         // part so the complete wait -> invoke -> confirmation lifecycle remains
         // distinguishable from an actual stalled repetition.
         return "energy cycle " + nextEnergyCycle() + ": " + phase
-                + " at " + runEnergy + "/" + threshold;
+                + " (energy " + runEnergy + "/" + threshold + ")";
     }
 
     private String enabledState(int runEnergy, int threshold)
@@ -309,7 +309,7 @@ public class KspAutoRunScript extends Script
         // cycle as the leading state value so state monitoring can distinguish
         // successive postcondition-confirmed cycles from a stalled toggle.
         return "energy cycle " + confirmedRunEnableCycles + " complete: run enabled"
-                + " at " + runEnergy + "/" + threshold;
+                + " (energy " + runEnergy + "/" + threshold + ")";
     }
 
     private long nextEnergyCycle()
