@@ -84,6 +84,14 @@ final class BankActuator
             return Global.sleepUntil(this::isBankReadyForSnapshotOnClient, 4000);
         }
 
+        // A nearby banker is the most reliable local bank target. Prefer its
+        // direct Bank action over a booth when both are loaded: the booth
+        // helper may initiate an unnecessary approach before invoking it.
+        if (openNearbyBanker())
+        {
+            return Global.sleepUntil(this::isBankReadyForSnapshotOnClient, 5000);
+        }
+
         /*
          * Rs2Bank.openBank(GameObject) invokes the booth immediately, even
          * when the loaded object is still outside interaction range. That
@@ -110,16 +118,28 @@ final class BankActuator
                 return Global.sleepUntil(this::isBankReadyForSnapshotOnClient, INITIAL_OPEN_VERIFY_MS);
             }
 
-            return Rs2Bank.openBank(localBankBooth)
+            if (Rs2Bank.openBank(localBankBooth)
+                && Global.sleepUntil(this::isBankReadyForSnapshotOnClient, INITIAL_OPEN_VERIFY_MS))
+            {
+                return true;
+            }
+
+            // A booth can remain loaded while its first menu invocation is
+            // discarded during a scene or movement update. Confirm that the
+            // required bank postcondition is still absent before issuing one
+            // fresh interaction; do not leave the caller waiting on a stale
+            // booth click.
+            if (isBankReadyForSnapshotOnClient()
+                || !isNearPlayerOnClient(localBankBooth, BANK_INTERACTION_DISTANCE))
+            {
+                return isBankReadyForSnapshotOnClient();
+            }
+
+            return (openNearbyBanker() || Rs2Bank.openBank(localBankBooth))
                 && Global.sleepUntil(this::isBankReadyForSnapshotOnClient, 5000);
         }
 
-        // When a banker is already beside the player, invoke its Bank option
-        // directly. Rs2Bank.openBank() correctly handles distant banks, but its
-        // shared unreachable-target recovery can enqueue a redundant walk before
-        // reaching this interaction. That stale walk is cancelled when the bank
-        // opens and can outlive the successful bank action.
-        boolean bankInteractionStarted = openNearbyBanker() || Rs2Bank.openBank();
+        boolean bankInteractionStarted = Rs2Bank.openBank();
         if (!bankInteractionStarted && !isBankUiOpenOnClient())
         {
             return false;
@@ -150,7 +170,7 @@ final class BankActuator
         }
 
         // The approach has stopped without opening a bank. A fresh interaction
-        // is now justified; prefer a nearby banker and retain Rs2Bank's normal
+        // is now justified. Recheck for a banker before using Rs2Bank's normal
         // discovery fallback for booths/chests.
         bankInteractionStarted = openNearbyBanker() || Rs2Bank.openBank();
         return bankInteractionStarted
