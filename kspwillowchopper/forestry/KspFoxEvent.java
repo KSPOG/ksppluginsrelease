@@ -1,5 +1,6 @@
 package net.runelite.client.plugins.microbot.kspwillowchopper.forestry;
 
+import lombok.RequiredArgsConstructor;
 import net.runelite.api.gameval.NpcID;
 import net.runelite.client.plugins.microbot.BlockingEvent;
 import net.runelite.client.plugins.microbot.BlockingEventPriority;
@@ -10,12 +11,9 @@ import net.runelite.client.plugins.microbot.util.player.Rs2Player;
 
 import static net.runelite.client.plugins.microbot.util.Global.sleepUntil;
 
+@RequiredArgsConstructor
 public class KspFoxEvent implements BlockingEvent {
     private final KspWillowChopperPlugin plugin;
-
-    public KspFoxEvent(KspWillowChopperPlugin plugin) {
-        this.plugin = plugin;
-    }
 
     @Override
     public boolean validate() {
