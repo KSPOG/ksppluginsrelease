@@ -10,6 +10,8 @@ import net.runelite.api.Client;
 import net.runelite.api.Item;
 import net.runelite.api.ItemContainer;
 import net.runelite.api.ItemComposition;
+import net.runelite.api.MenuAction;
+import net.runelite.api.NPCComposition;
 import net.runelite.api.gameval.InventoryID;
 import net.runelite.api.gameval.VarbitID;
 import net.runelite.api.Varbits;
@@ -17,7 +19,12 @@ import net.runelite.api.widgets.Widget;
 import net.runelite.client.plugins.microbot.Microbot;
 import net.runelite.client.plugins.microbot.util.Global;
 import net.runelite.client.plugins.microbot.util.bank.Rs2Bank;
+import net.runelite.client.plugins.microbot.util.camera.Rs2Camera;
 import net.runelite.client.plugins.microbot.util.inventory.Rs2ItemModel;
+import net.runelite.client.plugins.microbot.util.menu.NewMenuEntry;
+import net.runelite.client.plugins.microbot.util.misc.Rs2UiHelper;
+import net.runelite.client.plugins.microbot.util.npc.Rs2Npc;
+import net.runelite.client.plugins.microbot.util.npc.Rs2NpcModel;
 
 /**
  * Real-bank movement primitive. The widget IDs and drag flow mirror the current
@@ -69,8 +76,13 @@ final class BankActuator
             return Global.sleepUntil(this::isBankReadyForSnapshotOnClient, 4000);
         }
 
-        // Only attempt Rs2Bank.openBank() when the bank UI is genuinely closed.
-        if (!Rs2Bank.openBank() && !isBankUiOpenOnClient())
+        // When a banker is already beside the player, invoke its Bank option
+        // directly. Rs2Bank.openBank() correctly handles distant banks, but its
+        // shared unreachable-target recovery can enqueue a redundant walk before
+        // reaching this interaction. That stale walk is cancelled when the bank
+        // opens and can outlive the successful bank action.
+        boolean bankInteractionStarted = openNearbyBanker() || Rs2Bank.openBank();
+        if (!bankInteractionStarted && !isBankUiOpenOnClient())
         {
             return false;
         }
@@ -80,6 +92,97 @@ final class BankActuator
         // complete until the same live container required by snapshot reads is
         // available.
         return Global.sleepUntil(this::isBankReadyForSnapshotOnClient, 5000);
+    }
+
+    private boolean openNearbyBanker()
+    {
+        Rs2NpcModel banker = Rs2Npc.getBankerNPC();
+        if (banker == null || !isNearPlayerOnClient(banker, 4))
+        {
+            return false;
+        }
+
+        return invokeNpcBankAction(banker);
+    }
+
+    private boolean isNearPlayerOnClient(Rs2NpcModel npc, int maxDistance)
+    {
+        return Microbot.getClientThread().runOnClientThreadOptional(() ->
+        {
+            if (client.getLocalPlayer() == null
+                || client.getLocalPlayer().getWorldLocation() == null
+                || npc.getWorldLocation() == null)
+            {
+                return false;
+            }
+            return npc.getWorldLocation().distanceTo(client.getLocalPlayer().getWorldLocation()) <= maxDistance;
+        }).orElse(false);
+    }
+
+    /**
+     * This is the same client-menu invocation used by Rs2Npc.interact, without
+     * the global unreachable-target recovery that is unnecessary for a banker
+     * already within interaction range.
+     */
+    private boolean invokeNpcBankAction(Rs2NpcModel npc)
+    {
+        NPCComposition composition = Microbot.getClientThread().runOnClientThreadOptional(
+            () -> client.getNpcDefinition(npc.getId())).orElse(null);
+        if (composition == null || composition.getActions() == null)
+        {
+            return false;
+        }
+
+        String[] actions = composition.getActions();
+        for (int index = 0; index < actions.length; index++)
+        {
+            if (!"Bank".equalsIgnoreCase(actions[index]))
+            {
+                continue;
+            }
+
+            MenuAction menuAction = npcMenuAction(index);
+            if (menuAction == null || npc.getLocalLocation() == null)
+            {
+                return false;
+            }
+            if (!Rs2Camera.isTileOnScreen(npc.getLocalLocation()))
+            {
+                Rs2Camera.turnTo(npc);
+            }
+
+            Microbot.doInvoke(new NewMenuEntry()
+                    .param0(0)
+                    .param1(0)
+                    .opcode(menuAction.getId())
+                    .identifier(npc.getIndex())
+                    .itemId(-1)
+                    .target(npc.getName())
+                    .actor(npc)
+                    .option(actions[index]),
+                Rs2UiHelper.getActorClickbox(npc));
+            return true;
+        }
+        return false;
+    }
+
+    private MenuAction npcMenuAction(int index)
+    {
+        switch (index)
+        {
+            case 0:
+                return MenuAction.NPC_FIRST_OPTION;
+            case 1:
+                return MenuAction.NPC_SECOND_OPTION;
+            case 2:
+                return MenuAction.NPC_THIRD_OPTION;
+            case 3:
+                return MenuAction.NPC_FOURTH_OPTION;
+            case 4:
+                return MenuAction.NPC_FIFTH_OPTION;
+            default:
+                return null;
+        }
     }
 
     private boolean isBankUiOpenOnClient()

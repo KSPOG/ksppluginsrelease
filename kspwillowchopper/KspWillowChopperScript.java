@@ -49,7 +49,7 @@ public class KspWillowChopperScript extends Script {
     // Keep a session-scoped, observable count separate from the inventory poll so
     // successful depletion/reselection cycles remain distinguishable from a retry
     // loop while the inventory cache catches up.
-    private volatile int confirmedResourceChops;
+    private volatile int activeTargetCompletionCount;
     // A successful depletion removes the scene object before the next scheduled
     // selection. Keep its identity until that selection has completed so object
     // events cannot turn the normal completion handoff into a retarget loop.
@@ -135,7 +135,7 @@ public class KspWillowChopperScript extends Script {
         activeTree = safeTree(config.tree());
         activeTargetLocation = null;
         activeTargetObjectId = -1;
-        confirmedResourceChops = 0;
+        activeTargetCompletionCount = 0;
         completedTargetPending = false;
         immediateRetargetRequested = false;
         immediateRetargetAttempts.set(0);
@@ -248,7 +248,7 @@ public class KspWillowChopperScript extends Script {
         suppressedResourceLoss = 0;
         activeTargetLocation = null;
         activeTargetObjectId = -1;
-        confirmedResourceChops = 0;
+        activeTargetCompletionCount = 0;
         completedTargetPending = false;
         immediateRetargetRequested = false;
         immediateRetargetAttempts.set(0);
@@ -844,7 +844,7 @@ public class KspWillowChopperScript extends Script {
             return;
         }
 
-        confirmedResourceChops++;
+        activeTargetCompletionCount++;
         lastTreeProgressMillis = System.currentTimeMillis();
     }
 
