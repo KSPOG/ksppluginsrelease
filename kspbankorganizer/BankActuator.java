@@ -157,6 +157,24 @@ final class BankActuator
             && Global.sleepUntil(this::isBankReadyForSnapshotOnClient, 5000);
     }
 
+    ActuatorResult closeBank()
+    {
+        if (!isBankUiOpenOnClient())
+        {
+            return ActuatorResult.ok("Bank is already closed.");
+        }
+
+        // Closing the bank is asynchronous. Do not let the caller begin a
+        // subsequent workflow while this interface can still receive clicks.
+        Rs2Bank.closeBank();
+        if (Global.sleepUntil(() -> !isBankUiOpenOnClient(), 2000))
+        {
+            return ActuatorResult.ok("Bank closed.");
+        }
+
+        return ActuatorResult.fail("Bank interface did not close within 2 seconds.");
+    }
+
     private boolean waitForBankOpenOrApproachToFinish()
     {
         Global.sleepUntil(() ->
