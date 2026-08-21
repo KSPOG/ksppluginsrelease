@@ -59,7 +59,6 @@ public class KspBryophytaPlugin extends Plugin
     @Inject
     private ItemManager itemManager;
 
-    private KspBryophytaEquipmentPanel equipmentPanel;
     private NavigationButton navigationButton;
 
     @Provides
@@ -94,12 +93,8 @@ public class KspBryophytaPlugin extends Plugin
         }
 
         String message = event.getMessage();
-        if (message == null)
-        {
-            return;
-        }
-
-        if (config.shutdownAfterDeath()
+        if (message != null
+                && config.shutdownAfterDeath()
                 && message.toLowerCase().contains("oh dear, you are dead"))
         {
             script.setStopped("Stopped after death.");
@@ -114,21 +109,19 @@ public class KspBryophytaPlugin extends Plugin
             return;
         }
 
-        equipmentPanel = new KspBryophytaEquipmentPanel(equipmentSettings, equipmentIndex, itemManager, config.strategy());
-
+        KspBryophytaEquipmentPanel equipmentPanel = new KspBryophytaEquipmentPanel(
+                equipmentSettings, equipmentIndex, itemManager, config.strategy());
         BufferedImage source = BryophytaEquipmentAssets.loadEquipmentSlots();
         BufferedImage iconSource = source != null && source.getWidth() >= 170 && source.getHeight() >= 61
                 ? source.getSubimage(117, 8, 53, 53)
                 : source;
-        BufferedImage icon = resize(iconSource, 16, 16);
 
         navigationButton = NavigationButton.builder()
                 .tooltip("KSP Bryophyta Equipment")
                 .priority(8)
-                .icon(icon)
+                .icon(resize(iconSource, 16, 16))
                 .panel(equipmentPanel)
                 .build();
-
         clientToolbar.addNavigation(navigationButton);
     }
 
@@ -139,7 +132,6 @@ public class KspBryophytaPlugin extends Plugin
             clientToolbar.removeNavigation(navigationButton);
             navigationButton = null;
         }
-        equipmentPanel = null;
     }
 
     private static BufferedImage resize(BufferedImage source, int width, int height)
