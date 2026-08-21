@@ -482,68 +482,109 @@ public class KSPGELooterScript extends Script
 
     private boolean bankNonRunes()
     {
-        WorldPoint before = Rs2Player.getWorldLocation();
-        if (!KSPGELooterArea.contains(before))
-        {
-            status = "OUTSIDE AREA - PAUSED";
-            return false;
-        }
-
-        status = "Opening GE bank";
-
         /*
-         * Deliberately do NOT call walkToBank()/walkToBankAndUseBank().
-         * openBank() interacts with a bank already available in the current
-         * scene, and the area guard is checked before and after opening.
+         * Banking changes the shared inventory and bank widget.  When another
+         * script is active it can otherwise act on the open bank between this
+         * script's deposit and close operations, undoing the space we just made.
+         * Keep that short transaction exclusive, without taking ownership of an
+         * existing pause created by another script.
          */
-        if (!Rs2Bank.isOpen())
+        boolean releaseBankPause = acquireBankPause();
+
+        try
         {
-            if (!Rs2Bank.openBank())
+            WorldPoint before = Rs2Player.getWorldLocation();
+            if (!KSPGELooterArea.contains(before))
             {
-                status = "Unable to open GE bank";
+                status = "OUTSIDE AREA - PAUSED";
                 return false;
             }
 
-            if (!sleepUntil(Rs2Bank::isOpen, 3_000))
+            status = "Opening GE bank";
+
+            /*
+             * Deliberately do NOT call walkToBank()/walkToBankAndUseBank().
+             * openBank() interacts with a bank already available in the current
+             * scene, and the area guard is checked before and after opening.
+             */
+            if (!Rs2Bank.isOpen())
             {
-                status = "Waiting for GE bank";
+                if (!Rs2Bank.openBank())
+                {
+                    status = "Unable to open GE bank";
+                    return false;
+                }
+
+                if (!sleepUntil(Rs2Bank::isOpen, 3_000))
+                {
+                    status = "Waiting for GE bank";
+                    return false;
+                }
+            }
+
+            WorldPoint atBank = Rs2Player.getWorldLocation();
+            if (!KSPGELooterArea.contains(atBank))
+            {
+                Rs2Bank.closeBank();
+                status = "AREA GUARD - bank cancelled";
                 return false;
             }
-        }
 
-        WorldPoint atBank = Rs2Player.getWorldLocation();
-        if (!KSPGELooterArea.contains(atBank))
-        {
+            boolean staffOfFireEquipped = hasFireRuneStaff();
+            status = staffOfFireEquipped
+                    ? "Depositing - keeping Nature runes"
+                    : "Depositing - keeping Nature + Fire";
+
+            if (staffOfFireEquipped)
+            {
+                Rs2Bank.depositAllExcept(NATURE_RUNE_ID);
+            }
+            else
+            {
+                Rs2Bank.depositAllExcept(NATURE_RUNE_ID, FIRE_RUNE_ID);
+            }
+
+            sleepUntil(() -> !Rs2Inventory.isFull(), 2_000);
             Rs2Bank.closeBank();
-            status = "AREA GUARD - bank cancelled";
+
+            if (!KSPGELooterArea.contains(Rs2Player.getWorldLocation()))
+            {
+                status = "OUTSIDE AREA - PAUSED";
+                return false;
+            }
+
+            status = "Returning to looting";
+            return true;
+        }
+        finally
+        {
+            if (releaseBankPause)
+            {
+                releasePriorityPause("Bank transaction complete");
+            }
+        }
+    }
+
+    /**
+     * Acquires the same pause used by Priority Mode only for an inventory/bank
+     * transaction.  The return value records whether this invocation owns the
+     * pause and must release it.
+     */
+    private boolean acquireBankPause()
+    {
+        if (ownsPriorityPause)
+        {
             return false;
         }
 
-        boolean staffOfFireEquipped = hasFireRuneStaff();
-        status = staffOfFireEquipped
-                ? "Depositing - keeping Nature runes"
-                : "Depositing - keeping Nature + Fire";
-
-        if (staffOfFireEquipped)
+        if (Microbot.pauseAllScripts.compareAndSet(false, true))
         {
-            Rs2Bank.depositAllExcept(NATURE_RUNE_ID);
-        }
-        else
-        {
-            Rs2Bank.depositAllExcept(NATURE_RUNE_ID, FIRE_RUNE_ID);
+            ownsPriorityPause = true;
+            priorityPauseOwned = true;
+            return true;
         }
 
-        sleepUntil(() -> !Rs2Inventory.isFull(), 2_000);
-        Rs2Bank.closeBank();
-
-        if (!KSPGELooterArea.contains(Rs2Player.getWorldLocation()))
-        {
-            status = "OUTSIDE AREA - PAUSED";
-            return false;
-        }
-
-        status = "Returning to looting";
-        return true;
+        return false;
     }
 
     private void refreshRunePricesIfNeeded()
