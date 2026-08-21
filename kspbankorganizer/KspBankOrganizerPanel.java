@@ -6,6 +6,7 @@ import java.awt.Component;
 import java.awt.Dimension;
 import java.awt.Font;
 import java.awt.GridLayout;
+import java.util.Locale;
 import javax.swing.BorderFactory;
 import javax.swing.Box;
 import javax.swing.BoxLayout;
@@ -64,7 +65,7 @@ public final class KspBankOrganizerPanel extends PluginPanel
         title.setAlignmentX(Component.LEFT_ALIGNMENT);
         content.add(title);
 
-        JLabel version = new JLabel("v" + KspBankOrganizerPlugin.version);
+        JLabel version = new JLabel("v" + KspBankOrganizerPlugin.VERSION);
         version.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
         version.setFont(FontManager.getRunescapeSmallFont());
         version.setAlignmentX(Component.LEFT_ALIGNMENT);
@@ -104,10 +105,6 @@ public final class KspBankOrganizerPanel extends PluginPanel
         grid.setOpaque(false);
         grid.setAlignmentX(Component.LEFT_ALIGNMENT);
         grid.setMaximumSize(new Dimension(Integer.MAX_VALUE, 200));
-
-        // Display mappings in physical tab order (1 -> 9). A single readable
-        // column prevents the category names and tab numbers from being
-        // compressed into unreadable three-column cells in the narrow sidebar.
         grid.add(mappingCell("Tab 1", "Teleports", config.teleportsTarget(), ItemCategory.TELEPORTS));
         grid.add(mappingCell("Tab 2", "Combat", config.gearTarget(), ItemCategory.GEAR));
         grid.add(mappingCell("Tab 3", "Potions", config.potionsTarget(), ItemCategory.POTIONS));
@@ -125,7 +122,6 @@ public final class KspBankOrganizerPanel extends PluginPanel
         compactNote.setAlignmentX(Component.LEFT_ALIGNMENT);
         mappings.add(Box.createVerticalStrut(2));
         mappings.add(compactNote);
-
         content.add(mappings);
         content.add(Box.createVerticalStrut(3));
 
@@ -141,9 +137,6 @@ public final class KspBankOrganizerPanel extends PluginPanel
         messageValue.setAlignmentX(Component.LEFT_ALIGNMENT);
         result.add(messageValue);
         content.add(result);
-
-        // Deliberately no JScrollPane: the complete control surface is sized to
-        // fit the normal RuneLite plugin sidebar.
         add(content, BorderLayout.NORTH);
 
         refreshTimer = new Timer(250, e -> refresh());
@@ -151,10 +144,7 @@ public final class KspBankOrganizerPanel extends PluginPanel
         refresh();
     }
 
-    void dispose()
-    {
-        refreshTimer.stop();
-    }
+    void dispose() { refreshTimer.stop(); }
 
     private void refresh()
     {
@@ -173,10 +163,7 @@ public final class KspBankOrganizerPanel extends PluginPanel
         sortedValue.setText(String.valueOf(engine.sortedCount()));
 
         String message = engine.lastMessage();
-        if (message == null || message.isBlank())
-        {
-            message = running ? "Organizer is running..." : "Idle";
-        }
+        if (message == null || message.isBlank()) message = running ? "Organizer is running..." : "Idle";
         messageValue.setText(message);
         messageValue.setForeground(messageLooksLikeError(message)
             ? new Color(255, 125, 125)
@@ -217,7 +204,6 @@ public final class KspBankOrganizerPanel extends PluginPanel
         left.setForeground(Color.WHITE);
         left.setFont(FontManager.getRunescapeSmallFont());
         right.setHorizontalAlignment(JLabel.RIGHT);
-
         row.add(left, BorderLayout.WEST);
         row.add(right, BorderLayout.EAST);
         return row;
@@ -276,11 +262,8 @@ public final class KspBankOrganizerPanel extends PluginPanel
 
     private static boolean messageLooksLikeError(String message)
     {
-        String lower = message.toLowerCase();
-        return lower.contains("could not")
-            || lower.contains("cannot")
-            || lower.contains("failed")
-            || lower.contains("error")
-            || lower.contains("stopped");
+        String lower = message.toLowerCase(Locale.ROOT);
+        return lower.contains("could not") || lower.contains("cannot") || lower.contains("failed")
+            || lower.contains("error") || lower.contains("stopped");
     }
 }
