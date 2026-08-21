@@ -7,6 +7,7 @@ import java.util.List;
 import java.util.Set;
 import javax.inject.Inject;
 import net.runelite.api.Client;
+import net.runelite.api.GameObject;
 import net.runelite.api.Item;
 import net.runelite.api.ItemContainer;
 import net.runelite.api.ItemComposition;
@@ -20,11 +21,13 @@ import net.runelite.client.plugins.microbot.Microbot;
 import net.runelite.client.plugins.microbot.util.Global;
 import net.runelite.client.plugins.microbot.util.bank.Rs2Bank;
 import net.runelite.client.plugins.microbot.util.camera.Rs2Camera;
+import net.runelite.client.plugins.microbot.util.gameobject.Rs2GameObject;
 import net.runelite.client.plugins.microbot.util.inventory.Rs2ItemModel;
 import net.runelite.client.plugins.microbot.util.menu.NewMenuEntry;
 import net.runelite.client.plugins.microbot.util.misc.Rs2UiHelper;
 import net.runelite.client.plugins.microbot.util.npc.Rs2Npc;
 import net.runelite.client.plugins.microbot.util.npc.Rs2NpcModel;
+import net.runelite.client.plugins.microbot.util.walker.Rs2Walker;
 
 /**
  * Real-bank movement primitive. The widget IDs and drag flow mirror the current
@@ -42,6 +45,9 @@ final class BankActuator
     private static final int ACTION_SETTLE_MS = 750;
     private static final int MOVE_VERIFY_MS = 5000;
     private static final int INITIAL_OPEN_VERIFY_MS = 1500;
+    private static final int LOCAL_BANK_SEARCH_RADIUS = 20;
+    private static final int BANK_INTERACTION_DISTANCE = 4;
+    private static final int WALK_TO_LOCAL_BANK_TIMEOUT_MS = 15000;
 
     private static final int[] TAB_COUNT_VARBITS = {
         Varbits.BANK_TAB_ONE_COUNT,
@@ -77,11 +83,43 @@ final class BankActuator
             return Global.sleepUntil(this::isBankReadyForSnapshotOnClient, 4000);
         }
 
+        /*
+         * Never invoke a loaded booth while it is still out of interaction
+         * range. Rs2Bank.openBank() sends the booth click first and then waits
+         * internally; in the replay that produced a second click only after the
+         * action monitor's seven-second widget deadline had nearly expired.
+         *
+         * Reaching the booth is a separate, observable postcondition. Once it
+         * is satisfied, use the same supported direct object interaction used
+         * elsewhere in this repository and wait for the live bank UI.
+         */
+        GameObject localBankBooth = Rs2GameObject.findBank(LOCAL_BANK_SEARCH_RADIUS);
+        if (localBankBooth != null)
+        {
+            if (!isNearPlayerOnClient(localBankBooth, BANK_INTERACTION_DISTANCE))
+            {
+                if (!Rs2Walker.walkTo(localBankBooth.getWorldLocation(), BANK_INTERACTION_DISTANCE)
+                    || !Global.sleepUntil(
+                        () -> isBankUiOpenOnClient()
+                            || isNearPlayerOnClient(localBankBooth, BANK_INTERACTION_DISTANCE),
+                        WALK_TO_LOCAL_BANK_TIMEOUT_MS))
+                {
+                    return false;
+                }
+            }
+
+            if (isBankUiOpenOnClient())
+            {
+                return Global.sleepUntil(this::isBankReadyForSnapshotOnClient, INITIAL_OPEN_VERIFY_MS);
+            }
+
+            return Rs2GameObject.interact(localBankBooth, "Bank")
+                && Global.sleepUntil(this::isBankReadyForSnapshotOnClient, 5000);
+        }
+
         // When a banker is already beside the player, invoke its Bank option
-        // directly. Rs2Bank.openBank() correctly handles distant banks, but its
-        // shared unreachable-target recovery can enqueue a redundant walk before
-        // reaching this interaction. That stale walk is cancelled when the bank
-        // opens and can outlive the successful bank action.
+        // directly. Rs2Bank.openBank() remains the fallback when no bank booth
+        // is loaded in the local scene.
         boolean bankInteractionStarted = openNearbyBanker() || Rs2Bank.openBank();
         if (!bankInteractionStarted && !isBankUiOpenOnClient())
         {
@@ -132,6 +170,20 @@ final class BankActuator
                 return false;
             }
             return npc.getWorldLocation().distanceTo(client.getLocalPlayer().getWorldLocation()) <= maxDistance;
+        }).orElse(false);
+    }
+
+    private boolean isNearPlayerOnClient(GameObject object, int maxDistance)
+    {
+        return Microbot.getClientThread().runOnClientThreadOptional(() ->
+        {
+            if (client.getLocalPlayer() == null
+                || client.getLocalPlayer().getWorldLocation() == null
+                || object.getWorldLocation() == null)
+            {
+                return false;
+            }
+            return object.getWorldLocation().distanceTo(client.getLocalPlayer().getWorldLocation()) <= maxDistance;
         }).orElse(false);
     }
 
