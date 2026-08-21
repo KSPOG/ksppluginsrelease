@@ -1,6 +1,7 @@
 package net.runelite.client.plugins.microbot.kspautorun;
 
 import net.runelite.api.MenuAction;
+import net.runelite.api.GameState;
 import net.runelite.api.widgets.Widget;
 import net.runelite.api.widgets.WidgetInfo;
 import net.runelite.client.plugins.microbot.Microbot;
@@ -57,7 +58,11 @@ public class KspAutoRunScript extends Script
                     return;
                 }
 
-                if (!Microbot.isLoggedIn())
+                // Microbot's cached login flag can lag the client's LOGGED_IN event.
+                // Reading the state on the client thread keeps this guard aligned with
+                // the run-energy snapshot below, so a completed Run cycle is not
+                // spuriously reset to "waiting to log in" during that transition.
+                if (!isClientLoggedIn())
                 {
                     state = "waiting to log in";
                     return;
@@ -296,6 +301,14 @@ public class KspAutoRunScript extends Script
                         Rs2Player.isRunEnabled()
                 ))
                 .orElse(null);
+    }
+
+    private boolean isClientLoggedIn()
+    {
+        return Microbot.getClientThread()
+                .runOnClientThreadOptional(() ->
+                        Microbot.getClient().getGameState() == GameState.LOGGED_IN)
+                .orElse(false);
     }
 
     private static final class RunState
