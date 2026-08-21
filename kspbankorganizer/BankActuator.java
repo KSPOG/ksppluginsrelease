@@ -139,7 +139,34 @@ final class BankActuator
                 && Global.sleepUntil(this::isBankReadyForSnapshotOnClient, 5000);
         }
 
-        boolean bankInteractionStarted = Rs2Bank.openBank();
+        /*
+         * Do not let Rs2Bank's broad fallback click a booth that is merely
+         * loaded in the scene.  Its interaction can start an approach, but
+         * the menu action itself then has no chance of producing the required
+         * bank-widget transition before the action monitor expires.  Walk
+         * first, then resolve the now-local target again (scene objects are
+         * rebuilt while walking).
+         */
+        if (!Rs2Bank.walkToBank()
+            || !Global.sleepUntil(
+                () -> isBankUiOpenOnClient()
+                    || openNearbyBanker()
+                    || isLocalBankBoothAvailable(),
+                WALK_TO_LOCAL_BANK_TIMEOUT_MS))
+        {
+            return false;
+        }
+
+        if (isBankUiOpenOnClient())
+        {
+            return Global.sleepUntil(this::isBankReadyForSnapshotOnClient, INITIAL_OPEN_VERIFY_MS);
+        }
+
+        GameObject reachableBankBooth = Rs2GameObject.findBank(LOCAL_BANK_SEARCH_RADIUS);
+        boolean bankInteractionStarted = openNearbyBanker()
+            || (reachableBankBooth != null
+                && isNearPlayerOnClient(reachableBankBooth, BANK_INTERACTION_DISTANCE)
+                && Rs2Bank.openBank(reachableBankBooth));
         if (!bankInteractionStarted && !isBankUiOpenOnClient())
         {
             return false;
@@ -190,6 +217,12 @@ final class BankActuator
         return Rs2Player.isMoving()
             || Rs2Player.isInteracting()
             || Rs2Player.isAnimating(1200);
+    }
+
+    private boolean isLocalBankBoothAvailable()
+    {
+        GameObject bankBooth = Rs2GameObject.findBank(LOCAL_BANK_SEARCH_RADIUS);
+        return bankBooth != null && isNearPlayerOnClient(bankBooth, BANK_INTERACTION_DISTANCE);
     }
 
     private boolean openNearbyBanker()
