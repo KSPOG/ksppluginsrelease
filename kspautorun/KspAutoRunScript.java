@@ -20,6 +20,7 @@ public class KspAutoRunScript extends Script
 
     private long runToggleRequestedAt = 0L;
     private long runDisabledObservedAt = 0L;
+    private long confirmedRunEnableCycles = 0L;
     private boolean awaitingEnergyReset = false;
     private boolean runEnabledObserved = false;
     private Boolean previousMicrobotAutoRun;
@@ -96,12 +97,13 @@ public class KspAutoRunScript extends Script
             if (!runEnabledObserved)
             {
                 awaitingEnergyReset = true;
+                confirmedRunEnableCycles++;
             }
 
             runEnabledObserved = true;
             runToggleRequestedAt = 0L;
             runDisabledObservedAt = 0L;
-            state = energyState("monitoring run energy", runEnergy, threshold);
+            state = enabledState(runEnergy, threshold);
             return;
         }
 
@@ -296,6 +298,12 @@ public class KspAutoRunScript extends Script
         return phase + " (energy " + runEnergy + "/" + threshold + ")";
     }
 
+    private String enabledState(int runEnergy, int threshold)
+    {
+        return "run enabled (cycle " + confirmedRunEnableCycles
+                + ", energy " + runEnergy + "/" + threshold + ")";
+    }
+
     private void setMicrobotAutoRun(boolean enabled)
     {
         Microbot.enableAutoRunOn = enabled;
@@ -319,6 +327,7 @@ public class KspAutoRunScript extends Script
 
         runToggleRequestedAt = 0L;
         runDisabledObservedAt = 0L;
+        confirmedRunEnableCycles = 0L;
         awaitingEnergyReset = false;
         runEnabledObserved = false;
         state = "stopped";
