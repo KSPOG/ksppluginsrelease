@@ -3,7 +3,9 @@ package net.runelite.client.plugins.microbot.f2pprocessingfactory;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import lombok.Getter;
 
+@Getter
 public final class ProfitQuote
 {
     private final FactoryRecipe recipe;
@@ -69,56 +71,6 @@ public final class ProfitQuote
     public static ProfitQuote invalid(FactoryRecipe recipe, String error)
     {
         return new ProfitQuote(recipe, false, error, Collections.emptyMap(), 0, 0, 0, 0, 0.0, 0);
-    }
-
-    public FactoryRecipe getRecipe()
-    {
-        return recipe;
-    }
-
-    public boolean isValid()
-    {
-        return valid;
-    }
-
-    public String getError()
-    {
-        return error;
-    }
-
-    public Map<String, Integer> getInputPrices()
-    {
-        return inputPrices;
-    }
-
-    public int getOutputPrice()
-    {
-        return outputPrice;
-    }
-
-    public int getInputCostPerUnit()
-    {
-        return inputCostPerUnit;
-    }
-
-    public int getTaxPerUnit()
-    {
-        return taxPerUnit;
-    }
-
-    public int getProfitPerUnit()
-    {
-        return profitPerUnit;
-    }
-
-    public double getRoiPercent()
-    {
-        return roiPercent;
-    }
-
-    public int getEstimatedProfitPerHour()
-    {
-        return estimatedProfitPerHour;
     }
 
     public boolean meets(F2PProcessingFactoryConfig config)
