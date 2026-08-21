@@ -168,12 +168,12 @@ public class KSPGELooterScript extends Script
                 }
 
                 /*
-                 * Full inventory rule:
+                 * Full inventory rule when eligible loot needs space:
                  * 1) If High Alch is enabled and an actionable profitable alch exists, alch it.
                  * 2) Otherwise bank all non-rune items.
                  * Priority takeover remains active while qualifying ground loot still exists.
                  */
-                if (Rs2Inventory.isFull())
+                if (Rs2Inventory.isFull() && lootTarget != null)
                 {
                     if (config.highAlch() && tryHighAlch())
                     {
