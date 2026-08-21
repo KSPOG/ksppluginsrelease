@@ -1,10 +1,13 @@
 package net.runelite.client.plugins.microbot.f2pprocessingfactory;
 
+import lombok.RequiredArgsConstructor;
+
 /**
  * Presets for the factory-local humanization layer. These values intentionally
  * affect only safe idle windows between factory actions; they never inject
  * misclicks or interrupt a production/GE editor.
  */
+@RequiredArgsConstructor
 public enum FactoryAntibanProfile
 {
     LIGHT(
@@ -43,36 +46,4 @@ public enum FactoryAntibanProfile
     final int immediateCombinePauseMinMillis;
     final int immediateCombinePauseMaxMillis;
     final double offerTimeoutJitterFraction;
-
-    FactoryAntibanProfile(
-        double shortPauseChance,
-        int shortPauseMinMillis,
-        int shortPauseMaxMillis,
-        int longBreakBatchMin,
-        int longBreakBatchMax,
-        int longBreakMinMillis,
-        int longBreakMaxMillis,
-        double moveMouseAwayChance,
-        int waitingMouseMinMillis,
-        int waitingMouseMaxMillis,
-        double immediateCombinePauseChance,
-        int immediateCombinePauseMinMillis,
-        int immediateCombinePauseMaxMillis,
-        double offerTimeoutJitterFraction)
-    {
-        this.shortPauseChance = shortPauseChance;
-        this.shortPauseMinMillis = shortPauseMinMillis;
-        this.shortPauseMaxMillis = shortPauseMaxMillis;
-        this.longBreakBatchMin = longBreakBatchMin;
-        this.longBreakBatchMax = longBreakBatchMax;
-        this.longBreakMinMillis = longBreakMinMillis;
-        this.longBreakMaxMillis = longBreakMaxMillis;
-        this.moveMouseAwayChance = moveMouseAwayChance;
-        this.waitingMouseMinMillis = waitingMouseMinMillis;
-        this.waitingMouseMaxMillis = waitingMouseMaxMillis;
-        this.immediateCombinePauseChance = immediateCombinePauseChance;
-        this.immediateCombinePauseMinMillis = immediateCombinePauseMinMillis;
-        this.immediateCombinePauseMaxMillis = immediateCombinePauseMaxMillis;
-        this.offerTimeoutJitterFraction = offerTimeoutJitterFraction;
-    }
 }

@@ -1,5 +1,6 @@
 package net.runelite.client.plugins.microbot.kspf2phighalchtrader;
 
+import lombok.RequiredArgsConstructor;
 import net.runelite.api.Client;
 import net.runelite.api.Menu;
 import net.runelite.api.MenuAction;
@@ -20,29 +21,20 @@ import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.Callable;
-import java.util.concurrent.ThreadLocalRandom;
 
 import static net.runelite.client.plugins.microbot.util.Global.sleep;
 import static net.runelite.client.plugins.microbot.util.Global.sleepUntil;
 
-/**
- * GE interaction layer hardened from the behavior observed in the supplied
- * FlipperPlugin-1.0.0.jar. The important difference from a blind CC_OP invoke is
- * that slot context actions are resolved from the live slot widget, verified
- * against the live client menu, required to remain stable for several polls, and
- * only then clicked.
- */
+/** Hardened GE interaction helpers for live slot/menu verification. */
 final class KspGeInteraction {
     private static final int FIRST_GE_SLOT_CHILD = 7;
-    private static final int GE_SLOT_WIDGET_COUNT = 8; // Client layout; plugin still owns only one pending offer.
+    private static final int GE_SLOT_WIDGET_COUNT = 8;
     private static final int COLLECT_CONTAINER_CHILD = 6;
-
     private static final long MENU_OPEN_TIMEOUT_MS = 2500L;
     private static final int MENU_STABLE_POLLS = 3;
     private static final int MENU_POLL_MIN_MS = 65;
     private static final int MENU_POLL_MAX_MS = 95;
     private static final int MENU_ENTRY_HEIGHT = 15;
-
     private static final long BUY_SLOT_RESOLVE_TIMEOUT_MS = 3500L;
 
     boolean ensureOverview() {
@@ -53,26 +45,19 @@ final class KspGeInteraction {
         return Rs2GrandExchange.isOpen() && !Rs2GrandExchange.isOfferScreenOpen();
     }
 
-    /**
-     * Place a buy and confirm that a live GE slot for the requested item exists.
-     * This prevents the state machine from advancing merely because buyItem()
-     * returned after a UI interaction while the offer never actually reached a slot.
-     */
     GrandExchangeSlots placeBuyOffer(String itemName, int itemId, int price, int quantity) {
         GrandExchangeSlots existing = Rs2GrandExchange.findSlotForItem(itemId, false);
         if (existing != null) {
             return existing;
         }
-
         if (!ensureOverview()) {
             return null;
         }
 
         boolean requestStarted = Rs2GrandExchange.buyItem(itemName, price, quantity);
         long deadline = System.currentTimeMillis() + BUY_SLOT_RESOLVE_TIMEOUT_MS;
-        GrandExchangeSlots resolved = null;
         while (System.currentTimeMillis() < deadline && !Thread.currentThread().isInterrupted()) {
-            resolved = Rs2GrandExchange.findSlotForItem(itemId, false);
+            GrandExchangeSlots resolved = Rs2GrandExchange.findSlotForItem(itemId, false);
             if (resolved == null && itemName != null) {
                 resolved = Rs2GrandExchange.findSlotForItem(itemName, false);
             }
@@ -82,23 +67,13 @@ final class KspGeInteraction {
             sleep(70, 120);
         }
 
-        // A failed/partial helper interaction can leave the setup screen open. Reset
-        // it before the caller retries so the next buy starts from a known GE overview.
         if (Rs2GrandExchange.isOfferScreenOpen()) {
             Rs2GrandExchange.backToOverview();
             sleepUntil(() -> !Rs2GrandExchange.isOfferScreenOpen(), 1500);
         }
-
-        // If buyItem said it started but a slot never materialized, returning null is
-        // safer than assuming success and later losing track of the offer.
         return requestStarted ? Rs2GrandExchange.findSlotForItem(itemId, false) : null;
     }
 
-    /**
-     * Click the visible overview Collect control itself, matching the supplied
-     * Flipper JAR's preferred behavior. The fixed Rs2GrandExchange invocation is
-     * retained only as a fallback when the live widget cannot be resolved/clicked.
-     */
     boolean collectOverviewToInventory() {
         if (!ensureOverview()) {
             return false;
@@ -118,16 +93,9 @@ final class KspGeInteraction {
                 return true;
             }
         }
-
         return Rs2GrandExchange.collectAllToInventory();
     }
 
-    /**
-     * Use the same robust right-click menu strategy observed in the supplied Flipper
-     * JAR for "Abort offer": resolve the current slot, close stale menus, right-click
-     * the slot, wait for a stable matching menu entry, verify param1 still references
-     * the exact slot widget, and then click the calculated row bounds.
-     */
     boolean abortOfferViaStableMenu(GrandExchangeSlots slot) {
         if (slot == null || !ensureOverview()) {
             return false;
@@ -138,14 +106,14 @@ final class KspGeInteraction {
             if (target == null) {
                 return false;
             }
-
             if (!closeOpenMenu()) {
                 continue;
             }
 
-            int x = target.clickBounds.x + target.clickBounds.width / 2;
-            int y = target.clickBounds.y + target.clickBounds.height / 2;
-            Microbot.getMouse().click(x, y, true);
+            Microbot.getMouse().click(
+                    target.clickBounds.x + target.clickBounds.width / 2,
+                    target.clickBounds.y + target.clickBounds.height / 2,
+                    true);
 
             MenuSnapshot snapshot = waitForStableSlotMenu("Abort offer", target.widgetId);
             if (snapshot == null || snapshot.entry.param1 != target.widgetId) {
@@ -169,7 +137,6 @@ final class KspGeInteraction {
             sleep(120, 220);
             return true;
         }
-
         return false;
     }
 
@@ -187,11 +154,7 @@ final class KspGeInteraction {
             }
 
             Rectangle bounds = widget.getBounds();
-            if (!validBounds(bounds)) {
-                return null;
-            }
-
-            return new SlotTarget(widget.getId(), new Rectangle(bounds));
+            return validBounds(bounds) ? new SlotTarget(widget.getId(), new Rectangle(bounds)) : null;
         }, null);
     }
 
@@ -221,8 +184,7 @@ final class KspGeInteraction {
                 previous = null;
                 stablePolls = 0;
             } else if (current.sameLayoutAndEntry(previous)) {
-                stablePolls++;
-                if (stablePolls >= MENU_STABLE_POLLS) {
+                if (++stablePolls >= MENU_STABLE_POLLS) {
                     return current;
                 }
             } else {
@@ -231,7 +193,6 @@ final class KspGeInteraction {
             }
             sleep(MENU_POLL_MIN_MS, MENU_POLL_MAX_MS);
         }
-
         return null;
     }
 
@@ -258,17 +219,12 @@ final class KspGeInteraction {
 
             for (int i = entries.length - 1; i >= 0; i--) {
                 MenuEntry entry = entries[i];
-                if (entry == null) {
-                    continue;
+                if (entry != null
+                        && entry.getParam1() == expectedWidgetId
+                        && normalize(entry.getOption()).equalsIgnoreCase(desiredOption)) {
+                    return new MenuSnapshot(menuX, menuY, menuWidth, menuHeight,
+                            entries.length, i, SlotMenuEntry.copyOf(entry));
                 }
-                if (entry.getParam1() != expectedWidgetId) {
-                    continue;
-                }
-                if (!normalize(entry.getOption()).equalsIgnoreCase(desiredOption)) {
-                    continue;
-                }
-                return new MenuSnapshot(menuX, menuY, menuWidth, menuHeight,
-                        entries.length, i, SlotMenuEntry.copyOf(entry));
             }
             return null;
         }, null);
@@ -282,9 +238,7 @@ final class KspGeInteraction {
         return sleepUntil(() -> !isMenuOpen(), 800);
     }
 
-    private boolean isMenuOpen() {
-        return onClientThread(() -> Microbot.getClient().isMenuOpen(), false);
-    }
+    private boolean isMenuOpen() { return onClientThread(() -> Microbot.getClient().isMenuOpen(), false); }
 
     private List<Widget> descendants(Widget root) {
         List<Widget> result = new ArrayList<>();
@@ -319,35 +273,20 @@ final class KspGeInteraction {
             return true;
         }
         String[] actions = widget.getActions();
-        if (actions == null) {
-            return false;
-        }
-        for (String action : actions) {
-            if (label.equalsIgnoreCase(normalize(action))) {
-                return true;
+        if (actions != null) {
+            for (String action : actions) {
+                if (label.equalsIgnoreCase(normalize(action))) {
+                    return true;
+                }
             }
         }
         return false;
     }
 
-    private boolean isVisible(Widget widget) {
-        return widget != null && !widget.isHidden() && validBounds(widget.getBounds());
-    }
-
-    private Rectangle copyBounds(Widget widget) {
-        if (widget == null || widget.getBounds() == null) {
-            return null;
-        }
-        return new Rectangle(widget.getBounds());
-    }
-
-    private boolean validBounds(Rectangle rectangle) {
-        return rectangle != null && rectangle.width > 0 && rectangle.height > 0;
-    }
-
-    private String normalize(String value) {
-        return value == null ? "" : value.replaceAll("<[^>]+>", "").trim();
-    }
+    private boolean isVisible(Widget widget) { return widget != null && !widget.isHidden() && validBounds(widget.getBounds()); }
+    private Rectangle copyBounds(Widget widget) { return widget == null || widget.getBounds() == null ? null : new Rectangle(widget.getBounds()); }
+    private boolean validBounds(Rectangle rectangle) { return rectangle != null && rectangle.width > 0 && rectangle.height > 0; }
+    private static String normalize(String value) { return value == null ? "" : value.replaceAll("<[^>]+>", "").trim(); }
 
     private <T> T onClientThread(Callable<T> callable, T fallback) {
         try {
@@ -357,16 +296,13 @@ final class KspGeInteraction {
         }
     }
 
+    @RequiredArgsConstructor
     private static final class SlotTarget {
         private final int widgetId;
         private final Rectangle clickBounds;
-
-        private SlotTarget(int widgetId, Rectangle clickBounds) {
-            this.widgetId = widgetId;
-            this.clickBounds = clickBounds;
-        }
     }
 
+    @RequiredArgsConstructor
     private static final class MenuSnapshot {
         private final int menuX;
         private final int menuY;
@@ -375,17 +311,6 @@ final class KspGeInteraction {
         private final int entryCount;
         private final int entryIndex;
         private final SlotMenuEntry entry;
-
-        private MenuSnapshot(int menuX, int menuY, int menuWidth, int menuHeight,
-                             int entryCount, int entryIndex, SlotMenuEntry entry) {
-            this.menuX = menuX;
-            this.menuY = menuY;
-            this.menuWidth = menuWidth;
-            this.menuHeight = menuHeight;
-            this.entryCount = entryCount;
-            this.entryIndex = entryIndex;
-            this.entry = entry;
-        }
 
         private boolean sameLayoutAndEntry(MenuSnapshot other) {
             return other != null
@@ -404,12 +329,12 @@ final class KspGeInteraction {
                 return null;
             }
             int rowCenterY = menuY + menuHeight - 8 - entryIndex * MENU_ENTRY_HEIGHT;
-            int top = rowCenterY - 7 + 1;
-            return new Rectangle(menuX + 2, top,
+            return new Rectangle(menuX + 2, rowCenterY - 6,
                     Math.max(1, menuWidth - 4), 13);
         }
     }
 
+    @RequiredArgsConstructor
     private static final class SlotMenuEntry {
         private final String option;
         private final int identifier;
@@ -418,17 +343,6 @@ final class KspGeInteraction {
         private final int param1;
         private final int itemId;
         private final int worldViewId;
-
-        private SlotMenuEntry(String option, int identifier, MenuAction type,
-                              int param0, int param1, int itemId, int worldViewId) {
-            this.option = option;
-            this.identifier = identifier;
-            this.type = type;
-            this.param0 = param0;
-            this.param1 = param1;
-            this.itemId = itemId;
-            this.worldViewId = worldViewId;
-        }
 
         private static SlotMenuEntry copyOf(MenuEntry entry) {
             return new SlotMenuEntry(entry.getOption(), entry.getIdentifier(), entry.getType(),
@@ -443,11 +357,7 @@ final class KspGeInteraction {
                     && param1 == other.param1
                     && itemId == other.itemId
                     && worldViewId == other.worldViewId
-                    && normalizeStatic(option).equalsIgnoreCase(normalizeStatic(other.option));
-        }
-
-        private static String normalizeStatic(String value) {
-            return value == null ? "" : value.replaceAll("<[^>]+>", "").trim();
+                    && normalize(option).equalsIgnoreCase(normalize(other.option));
         }
     }
 }

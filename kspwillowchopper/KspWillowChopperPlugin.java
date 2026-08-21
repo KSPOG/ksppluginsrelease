@@ -1,7 +1,7 @@
 package net.runelite.client.plugins.microbot.kspwillowchopper;
 
 import com.google.inject.Provides;
-import lombok.extern.slf4j.Slf4j;
+import lombok.Getter;
 import net.runelite.api.ChatMessageType;
 import net.runelite.api.GameObject;
 import net.runelite.api.NPC;
@@ -40,7 +40,6 @@ import net.runelite.client.plugins.microbot.util.player.Rs2Player;
 import net.runelite.client.ui.overlay.OverlayManager;
 
 import javax.inject.Inject;
-import java.awt.AWTException;
 import java.awt.Polygon;
 import java.util.ArrayList;
 import java.util.EnumMap;
@@ -61,19 +60,16 @@ import java.util.regex.Pattern;
         enabledByDefault = PluginConstants.DEFAULT_ENABLED,
         isExternal = PluginConstants.IS_EXTERNAL
 )
-@Slf4j
 public class KspWillowChopperPlugin extends Plugin {
     public static final String VERSION = "0.1.0";
 
     private static final Pattern ANIMA_BARK_PATTERN =
             Pattern.compile("You've been awarded <col=[0-9a-f]+>(\\d+) Anima-infused bark</col>\\.");
 
-    //noinspection LombokGetterMayBeUsed
-    @Inject private KspWillowChopperConfig config;
+    @Getter @Inject private KspWillowChopperConfig config;
     @Inject private OverlayManager overlayManager;
     @Inject private KspWillowChopperOverlay overlay;
-    //noinspection LombokGetterMayBeUsed
-    @Inject private KspWillowChopperScript script;
+    @Getter @Inject private KspWillowChopperScript script;
     @Inject public Rs2TileObjectCache rs2TileObjectCache;
 
     public final List<Rs2NpcModel> ritualCircles = new ArrayList<>();
@@ -82,23 +78,13 @@ public class KspWillowChopperPlugin extends Plugin {
     private final AtomicInteger completedForestryEvents = new AtomicInteger();
     private final AtomicInteger logsChopped = new AtomicInteger();
     private final AtomicInteger animaBarkGained = new AtomicInteger();
-    private final AtomicLong lastForestryInteractionMillis = new AtomicLong(0L);
-    private volatile long lastForestryInteractionKey = Long.MIN_VALUE;
+    private final AtomicLong lastForestryInteractionMillis = new AtomicLong();
     private final Object forestryCompletionLock = new Object();
     private final Map<KspForestryEvent, Long> forestryCompletionTimes = new EnumMap<>(KspForestryEvent.class);
-
-    private KspEggEvent eggEvent;
-    private KspEntlingsEvent entlingsEvent;
-    private KspFlowersEvent flowersEvent;
-    private KspFoxEvent foxEvent;
-    private KspHivesEvent hivesEvent;
-    private KspLeprechaunEvent leprechaunEvent;
-    private KspRitualEvent ritualEvent;
-    private KspRootEvent rootEvent;
+    private final List<BlockingEvent> forestryEvents = new ArrayList<>();
+    private volatile long lastForestryInteractionKey = Long.MIN_VALUE;
+    @Getter private volatile KspForestryEvent currentForestryEvent = KspForestryEvent.NONE;
     private KspStrugglingSaplingEvent saplingEvent;
-
-    //noinspection LombokGetterMayBeUsed
-    private volatile KspForestryEvent currentForestryEvent = KspForestryEvent.NONE;
 
     @Provides
     KspWillowChopperConfig provideConfig(ConfigManager configManager) {
@@ -106,7 +92,7 @@ public class KspWillowChopperPlugin extends Plugin {
     }
 
     @Override
-    protected void startUp() throws AWTException {
+    protected void startUp() {
         completedForestryEvents.set(0);
         logsChopped.set(0);
         animaBarkGained.set(0);
@@ -118,11 +104,9 @@ public class KspWillowChopperPlugin extends Plugin {
         }
 
         overlayManager.add(overlay);
-
         if (config.enableForestry()) {
             addForestryEvents();
         }
-
         script.run(config);
     }
 
@@ -139,70 +123,31 @@ public class KspWillowChopperPlugin extends Plugin {
     private void addForestryEvents() {
         removeForestryEvents();
 
-        if (config.rootEvent()) {
-            rootEvent = new KspRootEvent(this);
-            Microbot.getBlockingEventManager().add(rootEvent);
-        }
+        if (config.rootEvent()) addForestryEvent(new KspRootEvent(this));
         if (config.saplingEvent()) {
             saplingEvent = new KspStrugglingSaplingEvent(this);
-            Microbot.getBlockingEventManager().add(saplingEvent);
+            addForestryEvent(saplingEvent);
         }
-        if (config.entlingsEvent()) {
-            entlingsEvent = new KspEntlingsEvent(this);
-            Microbot.getBlockingEventManager().add(entlingsEvent);
-        }
-        if (config.hivesEvent()) {
-            hivesEvent = new KspHivesEvent(this);
-            Microbot.getBlockingEventManager().add(hivesEvent);
-        }
-        if (config.eggEvent()) {
-            eggEvent = new KspEggEvent(this);
-            Microbot.getBlockingEventManager().add(eggEvent);
-        }
-        if (config.foxEvent()) {
-            foxEvent = new KspFoxEvent(this);
-            Microbot.getBlockingEventManager().add(foxEvent);
-        }
-        if (config.ritualEvent()) {
-            ritualEvent = new KspRitualEvent(this);
-            Microbot.getBlockingEventManager().add(ritualEvent);
-        }
-        if (config.leprechaunEvent()) {
-            leprechaunEvent = new KspLeprechaunEvent(this);
-            Microbot.getBlockingEventManager().add(leprechaunEvent);
-        }
-        if (config.flowersEvent()) {
-            flowersEvent = new KspFlowersEvent(this);
-            Microbot.getBlockingEventManager().add(flowersEvent);
-        }
+        if (config.entlingsEvent()) addForestryEvent(new KspEntlingsEvent(this));
+        if (config.hivesEvent()) addForestryEvent(new KspHivesEvent(this));
+        if (config.eggEvent()) addForestryEvent(new KspEggEvent(this));
+        if (config.foxEvent()) addForestryEvent(new KspFoxEvent(this));
+        if (config.ritualEvent()) addForestryEvent(new KspRitualEvent(this));
+        if (config.leprechaunEvent()) addForestryEvent(new KspLeprechaunEvent(this));
+        if (config.flowersEvent()) addForestryEvent(new KspFlowersEvent(this));
+    }
+
+    private void addForestryEvent(BlockingEvent event) {
+        forestryEvents.add(event);
+        Microbot.getBlockingEventManager().add(event);
     }
 
     private void removeForestryEvents() {
-        removeEvent(rootEvent);
-        removeEvent(saplingEvent);
-        removeEvent(entlingsEvent);
-        removeEvent(hivesEvent);
-        removeEvent(eggEvent);
-        removeEvent(foxEvent);
-        removeEvent(ritualEvent);
-        removeEvent(leprechaunEvent);
-        removeEvent(flowersEvent);
-
-        rootEvent = null;
-        saplingEvent = null;
-        entlingsEvent = null;
-        hivesEvent = null;
-        eggEvent = null;
-        foxEvent = null;
-        ritualEvent = null;
-        leprechaunEvent = null;
-        flowersEvent = null;
-    }
-
-    private void removeEvent(BlockingEvent event) {
-        if (event != null) {
+        for (BlockingEvent event : forestryEvents) {
             Microbot.getBlockingEventManager().remove(event);
         }
+        forestryEvents.clear();
+        saplingEvent = null;
     }
 
     @Subscribe
@@ -291,8 +236,6 @@ public class KspWillowChopperPlugin extends Plugin {
         }
 
         saplingIngredients.remove(object);
-
-        // Keep the learned optimal combination until the event itself has actually ended.
         if (saplingIngredients.isEmpty() && saplingEvent != null) {
             saplingEvent.resetLearnedCombination();
         }
@@ -358,9 +301,6 @@ public class KspWillowChopperPlugin extends Plugin {
         long elapsed = now - lastForestryInteractionMillis.get();
         long key = forestryInteractionKey(targetHash, action);
 
-        // Give the client time to acknowledge every click, even before movement or
-        // animation starts. Re-clicking the exact same target/action gets a longer
-        // latch, while a genuinely different Forestry target can be selected quickly.
         if (elapsed < 900L || (key == lastForestryInteractionKey && elapsed < 2500L)) {
             return false;
         }
@@ -370,12 +310,7 @@ public class KspWillowChopperPlugin extends Plugin {
                 && !Rs2Player.isInteracting();
     }
 
-    /**
-     * Direct movement helper shared by Forestry handlers. It intentionally does not
-     * use Rs2Walker/web walking: click the target's minimap point when available,
-     * otherwise its canvas tile. The existing Forestry interaction latch prevents
-     * the same movement target from being clicked repeatedly.
-     */
+    /** Direct movement helper shared by Forestry handlers. */
     public boolean moveDirectlyToForestryTarget(long targetHash,
                                                  WorldPoint targetLocation,
                                                  Point minimapLocation,
@@ -418,12 +353,7 @@ public class KspWillowChopperPlugin extends Plugin {
         return (targetHash * 31L) ^ (long) actionHash;
     }
 
-    /**
-     * Counts a Forestry event once. Some event objects/NPCs briefly disappear or morph
-     * during their final phase, which can make BlockingEvent execute more than once for
-     * the same event instance. A same-type completion inside this debounce window is a
-     * duplicate, not another event.
-     */
+    /** Counts a Forestry event once within a two-minute debounce window. */
     public boolean completeForestryEvent(KspForestryEvent event) {
         if (event == null || event == KspForestryEvent.NONE) {
             return false;
@@ -451,14 +381,9 @@ public class KspWillowChopperPlugin extends Plugin {
     public int getLogsChopped() { return logsChopped.get(); }
     public int getAnimaBarkGained() { return animaBarkGained.get(); }
 
-    public KspForestryEvent getCurrentForestryEvent() { return currentForestryEvent; }
-
     public void setCurrentForestryEvent(KspForestryEvent event) {
         currentForestryEvent = event == null ? KspForestryEvent.NONE : event;
     }
-
-    public KspWillowChopperConfig getConfig() { return config; }
-    public KspWillowChopperScript getScript() { return script; }
 
     public boolean hasLearnedSaplingCombination() {
         return saplingEvent != null && saplingEvent.hasCompleteCombination();

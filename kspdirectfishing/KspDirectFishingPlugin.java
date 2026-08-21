@@ -10,7 +10,6 @@ import net.runelite.client.plugins.microbot.PluginConstants;
 import net.runelite.client.ui.overlay.OverlayManager;
 
 import javax.inject.Inject;
-import java.awt.AWTException;
 
 @PluginDescriptor(
         name = PluginConstants.KSP + "Fishing",
@@ -49,12 +48,11 @@ public class KspDirectFishingPlugin extends Plugin
     }
 
     @Override
-    protected void startUp() throws AWTException
+    protected void startUp()
     {
         startTime = System.currentTimeMillis();
         startFishingXp = Microbot.getClient().getSkillExperience(Skill.FISHING);
         startCookingXp = Microbot.getClient().getSkillExperience(Skill.COOKING);
-
         overlayManager.add(overlay);
         script.run(config);
     }
@@ -73,14 +71,12 @@ public class KspDirectFishingPlugin extends Plugin
 
     public int getFishingXpGained()
     {
-        return Math.max(0,
-                Microbot.getClient().getSkillExperience(Skill.FISHING) - startFishingXp);
+        return Math.max(0, Microbot.getClient().getSkillExperience(Skill.FISHING) - startFishingXp);
     }
 
     public int getCookingXpGained()
     {
-        return Math.max(0,
-                Microbot.getClient().getSkillExperience(Skill.COOKING) - startCookingXp);
+        return Math.max(0, Microbot.getClient().getSkillExperience(Skill.COOKING) - startCookingXp);
     }
 
     public int getFishingXpPerHour()
@@ -105,7 +101,6 @@ public class KspDirectFishingPlugin extends Plugin
         long hours = elapsed / 3_600_000L;
         long minutes = (elapsed % 3_600_000L) / 60_000L;
         long seconds = (elapsed % 60_000L) / 1_000L;
-
         return String.format("%02d:%02d:%02d", hours, minutes, seconds);
     }
 }

@@ -1,17 +1,11 @@
 package net.runelite.client.plugins.microbot.kspfleshcrawlers;
 
+import lombok.Getter;
 import net.runelite.api.coords.WorldPoint;
 
-import java.util.Arrays;
-import java.util.Collections;
 import java.util.List;
 
-/**
- * Ground-truth Stronghold areas supplied from the live client.
- *
- * These are intentionally polygons rather than broad rectangular floor checks.
- * Navigation state is derived from the room/airlock the player is actually in.
- */
+/** Ground-truth Stronghold polygons supplied from the live client. */
 final class StrongholdZones {
     private StrongholdZones() {}
 
@@ -37,11 +31,6 @@ final class StrongholdZones {
             p(2035, 5204), p(2036, 5220), p(2043, 5221), p(2043, 5225),
             p(2038, 5225), p(2038, 5235), p(2042, 5236), p(2043, 5236));
 
-    /*
-     * The user labelled this "floor 1 ladder room", but these 203x/520x
-     * coordinates are on Stronghold floor 2.  The original coordinates are
-     * preserved exactly; only the internal label is corrected.
-     */
     static final PolygonZone FLOOR_2_LADDER_ROOM = zone("Floor 2 ladder room",
             p(2035, 5200), p(2036, 5198), p(2046, 5198), p(2046, 5207),
             p(2042, 5209), p(2039, 5209), p(2039, 5205), p(2039, 5200), p(2035, 5200));
@@ -55,16 +44,9 @@ final class StrongholdZones {
             p(2037, 5191), p(2034, 5191), p(2034, 5195), p(2041, 5195),
             p(2042, 5194), p(2045, 5194), p(2046, 5194));
 
-    static final List<PolygonZone> ALL = Collections.unmodifiableList(Arrays.asList(
-            FLESH_CRAWLER_ROOM,
-            ROOM_2_ENTER,
-            FLOOR_2_LADDER_ROOM,
-            ROOM_1_ENTER,
-            FLOOR_2_START,
-            ROOM_1_EXIT,
-            FLOOR_1_START,
-            FLOOR_1_TREASURE
-    ));
+    static final List<PolygonZone> ALL = List.of(
+            FLESH_CRAWLER_ROOM, ROOM_2_ENTER, FLOOR_2_LADDER_ROOM, ROOM_1_ENTER,
+            FLOOR_2_START, ROOM_1_EXIT, FLOOR_1_START, FLOOR_1_TREASURE);
 
     static PolygonZone locate(WorldPoint point) {
         if (point == null) return null;
@@ -86,16 +68,11 @@ final class StrongholdZones {
                 && point.getY() >= 5184 && point.getY() <= 5248;
     }
 
-    private static WorldPoint p(int x, int y) {
-        return new WorldPoint(x, y, 0);
-    }
-
-    private static PolygonZone zone(String name, WorldPoint... points) {
-        return new PolygonZone(name, points);
-    }
+    private static WorldPoint p(int x, int y) { return new WorldPoint(x, y, 0); }
+    private static PolygonZone zone(String name, WorldPoint... points) { return new PolygonZone(name, points); }
 
     static final class PolygonZone {
-        private final String name;
+        @Getter private final String name;
         private final WorldPoint[] vertices;
 
         PolygonZone(String name, WorldPoint[] vertices) {
@@ -103,15 +80,9 @@ final class StrongholdZones {
             this.vertices = vertices.clone();
         }
 
-        String getName() {
-            return name;
-        }
-
         boolean contains(WorldPoint point) {
             if (point == null || point.getPlane() != 0 || vertices.length < 3) return false;
 
-            // First treat polygon edges as inside. This matters for the supplied
-            // airlock polygons, where valid standing tiles lie exactly on an edge.
             for (int i = 0, j = vertices.length - 1; i < vertices.length; j = i++) {
                 if (onSegment(vertices[j], vertices[i], point)) return true;
             }
@@ -124,7 +95,6 @@ final class StrongholdZones {
                 double yi = vertices[i].getY();
                 double xj = vertices[j].getX();
                 double yj = vertices[j].getY();
-
                 boolean intersects = ((yi > py) != (yj > py))
                         && (px < (xj - xi) * (py - yi) / (yj - yi) + xi);
                 if (intersects) inside = !inside;

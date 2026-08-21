@@ -3,6 +3,7 @@ package net.runelite.client.plugins.microbot.kspbankorganizer;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import lombok.RequiredArgsConstructor;
 
 /** Immutable view of the real bank layout at one point in time. */
 final class BankSnapshot
@@ -48,6 +49,7 @@ final class BankSnapshot
         return Math.max(0, stackCount() - tabbedStackCount());
     }
 
+    @RequiredArgsConstructor
     static final class BankStack
     {
         private final int itemId;
@@ -60,30 +62,6 @@ final class BankSnapshot
         private final boolean tradeable;
         private final boolean geTradeable;
         private final boolean equipable;
-
-        BankStack(
-            int itemId,
-            String name,
-            int quantity,
-            int slot,
-            int allItemsIndex,
-            int tab,
-            boolean stackable,
-            boolean tradeable,
-            boolean geTradeable,
-            boolean equipable)
-        {
-            this.itemId = itemId;
-            this.name = name;
-            this.quantity = quantity;
-            this.slot = slot;
-            this.allItemsIndex = allItemsIndex;
-            this.tab = tab;
-            this.stackable = stackable;
-            this.tradeable = tradeable;
-            this.geTradeable = geTradeable;
-            this.equipable = equipable;
-        }
 
         int itemId() { return itemId; }
         String name() { return name; }

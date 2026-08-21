@@ -1,7 +1,11 @@
 package net.runelite.client.plugins.microbot.kspbryophyta;
 
+import lombok.Getter;
+import lombok.RequiredArgsConstructor;
 import net.runelite.client.plugins.skillcalculator.skills.MagicAction;
 
+@Getter
+@RequiredArgsConstructor
 public enum BryophytaFireSpell
 {
     FIRE_STRIKE("Fire Strike", MagicAction.FIRE_STRIKE, 3, 2, "Mind rune"),
@@ -15,40 +19,6 @@ public enum BryophytaFireSpell
     private final int airRunesPerCast;
     private final int fireRunesPerCast;
     private final String catalystRuneName;
-
-    BryophytaFireSpell(
-            String displayName,
-            MagicAction magicAction,
-            int airRunesPerCast,
-            int fireRunesPerCast,
-            String catalystRuneName)
-    {
-        this.displayName = displayName;
-        this.magicAction = magicAction;
-        this.airRunesPerCast = airRunesPerCast;
-        this.fireRunesPerCast = fireRunesPerCast;
-        this.catalystRuneName = catalystRuneName;
-    }
-
-    public MagicAction getMagicAction()
-    {
-        return magicAction;
-    }
-
-    public int getAirRunesPerCast()
-    {
-        return airRunesPerCast;
-    }
-
-    public int getFireRunesPerCast()
-    {
-        return fireRunesPerCast;
-    }
-
-    public String getCatalystRuneName()
-    {
-        return catalystRuneName;
-    }
 
     @Override
     public String toString()

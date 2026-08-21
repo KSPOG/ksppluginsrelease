@@ -41,9 +41,6 @@ public class KspDisableRenderPlugin extends Plugin
     private ClientThread clientThread;
 
     @Inject
-    private ConfigManager configManager;
-
-    @Inject
     private KspDisableRenderConfig config;
 
     @Inject
@@ -97,7 +94,6 @@ public class KspDisableRenderPlugin extends Plugin
         filterEntities = false;
         filterTileObjects = false;
         filterSceneTiles = false;
-
         renderCallbackManager.unregister(renderFilter);
         clientThread.invokeLater(this::restoreClientSettings);
     }
@@ -117,13 +113,9 @@ public class KspDisableRenderPlugin extends Plugin
         }
 
         refreshFilterFlags();
-
         clientThread.invokeLater(() ->
         {
-            restoreRendererOnly();
-            restore2DMask();
-            restoreSceneSettings();
-
+            restoreClientSettings();
             applyClientSettings();
         });
     }
@@ -131,12 +123,10 @@ public class KspDisableRenderPlugin extends Plugin
     @Subscribe
     public void onGameStateChanged(GameStateChanged event)
     {
-        if (event.getGameState() != GameState.LOGGED_IN)
+        if (event.getGameState() == GameState.LOGGED_IN)
         {
-            return;
+            clientThread.invokeLater(this::applySceneSettings);
         }
-
-        clientThread.invokeLater(this::applySceneSettings);
     }
 
     private void refreshFilterFlags()
@@ -175,13 +165,11 @@ public class KspDisableRenderPlugin extends Plugin
 
     private void restore2DMask()
     {
-        if (!original2DMaskCaptured)
+        if (original2DMaskCaptured)
         {
-            return;
+            client.setDraw2DMask(original2DMask);
+            original2DMaskCaptured = false;
         }
-
-        client.setDraw2DMask(original2DMask);
-        original2DMaskCaptured = false;
     }
 
     private void applySceneSettings()
@@ -204,8 +192,7 @@ public class KspDisableRenderPlugin extends Plugin
             originalDrawDistance = scene.getDrawDistance();
         }
 
-        int requestedDistance = Math.max(0, config.drawDistance());
-        scene.setDrawDistance(requestedDistance);
+        scene.setDrawDistance(Math.max(0, config.drawDistance()));
     }
 
     private void restoreSceneSettings()
@@ -227,13 +214,6 @@ public class KspDisableRenderPlugin extends Plugin
         }
 
         DrawCallbacks current = client.getDrawCallbacks();
-
-        /*
-         * Do not install a synthetic DrawCallbacks implementation when no renderer
-         * currently owns DrawCallbacks. That path is not guaranteed to behave like
-         * the normal software renderer. In that case the plugin simply keeps the
-         * safe rendering reductions active.
-         */
         if (current == null)
         {
             return;
@@ -246,18 +226,7 @@ public class KspDisableRenderPlugin extends Plugin
 
     private void restoreRendererOnly()
     {
-        if (frozenDrawCallbacks == null)
-        {
-            originalDrawCallbacks = null;
-            return;
-        }
-
-        /*
-         * Only restore our saved callback if we still own the callback slot.
-         * This avoids overwriting a renderer that may have been enabled while
-         * KSP Disable Render was running.
-         */
-        if (client.getDrawCallbacks() == frozenDrawCallbacks)
+        if (frozenDrawCallbacks != null && client.getDrawCallbacks() == frozenDrawCallbacks)
         {
             client.setDrawCallbacks(originalDrawCallbacks);
         }
@@ -273,11 +242,6 @@ public class KspDisableRenderPlugin extends Plugin
         restoreSceneSettings();
     }
 
-    /**
-     * Suppresses the renderer's final frame output while forwarding scene lifecycle
-     * changes to the renderer that originally owned DrawCallbacks. This keeps its
-     * static scene state reasonably current so restoring rendering is reversible.
-     */
     private static final class FrozenDrawCallbacks implements DrawCallbacks
     {
         private final DrawCallbacks delegate;
@@ -290,7 +254,7 @@ public class KspDisableRenderPlugin extends Plugin
         @Override
         public void draw(int overlayColor)
         {
-            // Intentionally do nothing: this is the render freeze.
+            // Freeze the final frame while preserving renderer lifecycle callbacks.
         }
 
         @Override

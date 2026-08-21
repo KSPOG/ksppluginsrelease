@@ -14,12 +14,13 @@ import javax.inject.Inject;
         description = "Market-aware High Alchemy trader with automatic F2P/members candidate selection and Grand Exchange restocking.",
         tags = {"ksp", "f2p", "members", "highalch", "alchemy", "magic", "profit", "grandexchange", "ge"},
         authors = {"KSP"},
-        version = "0.2.7",
+        version = KspF2PHighAlchTraderPlugin.VERSION,
         minClientVersion = "2.6.18",
         enabledByDefault = PluginConstants.DEFAULT_ENABLED,
         isExternal = PluginConstants.IS_EXTERNAL
 )
-public class KspF2PHighAlchTraderPlugin extends Plugin {
+public class KspF2PHighAlchTraderPlugin extends Plugin
+{
     public static final String VERSION = "0.2.7";
 
     @Inject
@@ -35,18 +36,21 @@ public class KspF2PHighAlchTraderPlugin extends Plugin {
     private OverlayManager overlayManager;
 
     @Provides
-    KspF2PHighAlchTraderConfig provideConfig(ConfigManager configManager) {
+    KspF2PHighAlchTraderConfig provideConfig(ConfigManager configManager)
+    {
         return configManager.getConfig(KspF2PHighAlchTraderConfig.class);
     }
 
     @Override
-    protected void startUp() {
+    protected void startUp()
+    {
         overlayManager.add(overlay);
         script.run(config);
     }
 
     @Override
-    protected void shutDown() {
+    protected void shutDown()
+    {
         script.shutdown();
         overlayManager.remove(overlay);
     }

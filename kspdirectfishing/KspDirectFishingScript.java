@@ -1,5 +1,6 @@
 package net.runelite.client.plugins.microbot.kspdirectfishing;
 
+import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.AnimationID;
 import net.runelite.api.Skill;
@@ -22,7 +23,7 @@ import net.runelite.client.plugins.microbot.util.widget.Rs2Widget;
 import java.awt.event.KeyEvent;
 import java.util.Arrays;
 import java.util.HashSet;
-import java.util.List;
+import java.util.Locale;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
@@ -35,84 +36,19 @@ public class KspDirectFishingScript extends Script
     private static final int DIRECT_FIRE_DISTANCE = 4;
     private static final long FISH_INTERACTION_TIMEOUT = 15_000L;
     private static final long FAILED_CLICK_RETRY_DELAY = 2_000L;
-    private static final int FIRE_OBJECT_43475 = 43475;
-    private static final WorldPoint FORESTERS_CAMPFIRE_POINT = new WorldPoint(3096, 3237, 0);
+    private static final int[] SUPPORTED_FIRE_IDS = {
+            ObjectID.FIRE, ObjectID.FORESTRY_FIRE, ObjectID.EAGLEPEAK_CAMPFIRE_TIDY,
+            ObjectID.FIRE_COOK, 43475
+    };
 
     private KspDirectFishingConfig config;
     private KspDirectFishingMode mode;
 
-    private volatile KspDirectFishingState state = KspDirectFishingState.STARTING;
-
-    private volatile String status = "Starting";
-
-    private volatile WorldPoint fishingAnchor;
-    private volatile boolean fireAvailable;
-    private volatile WorldPoint lastFirePoint;
-
-    public KspDirectFishingState getState()
-    {
-        return state;
-    }
-
-    public String getStatus()
-    {
-        return status;
-    }
-
-    public WorldPoint getFishingAnchor()
-    {
-        return fishingAnchor;
-    }
-
-    public boolean isFireAvailable()
-    {
-        return fireAvailable;
-    }
-
-    public WorldPoint getLastFirePoint()
-    {
-        return lastFirePoint;
-    }
-
-    public int getRawFishCount()
-    {
-        if (mode == null)
-        {
-            return 0;
-        }
-
-        switch (mode)
-        {
-            case SHRIMP_ANCHOVIES:
-                return Rs2Inventory.count(ItemID.RAW_SHRIMP)
-                        + Rs2Inventory.count(ItemID.RAW_ANCHOVIES);
-
-            case SARDINE_HERRING:
-                return Rs2Inventory.count(ItemID.RAW_SARDINE)
-                        + Rs2Inventory.count(ItemID.RAW_HERRING);
-
-            default:
-                return 0;
-        }
-    }
-
-    public int getBaitCount()
-    {
-        if (mode == null || !mode.usesBait())
-        {
-            return 0;
-        }
-
-        /*
-         * Fishing bait is stackable. Rs2Inventory.count(...) counts matching
-         * inventory entries/slots, which reports 1 for one bait stack.
-         * Sum the actual stack quantities instead.
-         */
-        return Rs2Inventory.all().stream()
-                .filter(item -> item.getId() == ItemID.FISHING_BAIT)
-                .mapToInt(item -> Math.max(0, item.getQuantity()))
-                .sum();
-    }
+    @Getter private volatile KspDirectFishingState state = KspDirectFishingState.STARTING;
+    @Getter private volatile String status = "Starting";
+    @Getter private volatile WorldPoint fishingAnchor;
+    @Getter private volatile boolean fireAvailable;
+    @Getter private volatile WorldPoint lastFirePoint;
 
     private long lastFishingClick;
     private long lastFailedFishingClick;
@@ -120,27 +56,40 @@ public class KspDirectFishingScript extends Script
     private boolean bankOpenRequested;
     private long lastFireStatusCheck;
 
+    public int getRawFishCount()
+    {
+        if (mode == null) return 0;
+        switch (mode)
+        {
+            case SHRIMP_ANCHOVIES:
+                return Rs2Inventory.count(ItemID.RAW_SHRIMP) + Rs2Inventory.count(ItemID.RAW_ANCHOVIES);
+            case SARDINE_HERRING:
+                return Rs2Inventory.count(ItemID.RAW_SARDINE) + Rs2Inventory.count(ItemID.RAW_HERRING);
+            default:
+                return 0;
+        }
+    }
+
+    public int getBaitCount()
+    {
+        if (mode == null || !mode.usesBait()) return 0;
+        return Rs2Inventory.all().stream()
+                .filter(item -> item.getId() == ItemID.FISHING_BAIT)
+                .mapToInt(item -> Math.max(0, item.getQuantity()))
+                .sum();
+    }
+
     public boolean run(KspDirectFishingConfig config)
     {
         this.config = config;
-        this.mode = config.fishingMode();
-        this.state = KspDirectFishingState.STARTING;
-        this.status = "Locating fishing spot";
-        this.lastFishingClick = 0L;
-        this.lastFailedFishingClick = 0L;
-        this.lastBankOpenAttempt = 0L;
-        this.bankOpenRequested = false;
-        this.lastFireStatusCheck = 0L;
-        this.fireAvailable = false;
-        this.lastFirePoint = null;
+        mode = config.fishingMode();
+        state = KspDirectFishingState.STARTING;
+        status = "Locating fishing spot";
+        lastFishingClick = lastFailedFishingClick = lastBankOpenAttempt = lastFireStatusCheck = 0L;
+        bankOpenRequested = fireAvailable = false;
+        lastFirePoint = null;
 
-        mainScheduledFuture = scheduledExecutorService.scheduleWithFixedDelay(
-                this::loop,
-                0,
-                500,
-                TimeUnit.MILLISECONDS
-        );
-
+        mainScheduledFuture = scheduledExecutorService.scheduleWithFixedDelay(this::loop, 0, 500, TimeUnit.MILLISECONDS);
         return true;
     }
 
@@ -148,10 +97,7 @@ public class KspDirectFishingScript extends Script
     {
         try
         {
-            if (!super.run() || !Microbot.isLoggedIn())
-            {
-                return;
-            }
+            if (!super.run() || !Microbot.isLoggedIn()) return;
 
             if (Rs2Bank.isOpen() && state != KspDirectFishingState.BANKING)
             {
@@ -160,32 +106,25 @@ public class KspDirectFishingScript extends Script
             }
 
             mode = config.fishingMode();
-
             refreshFireStatusIfDue();
 
             if (fishingAnchor == null)
             {
                 Rs2NpcModel initialSpot = findNearestFishingSpot();
-                if (initialSpot != null)
-                {
-                    fishingAnchor = initialSpot.getWorldLocation();
-                }
+                if (initialSpot != null) fishingAnchor = initialSpot.getWorldLocation();
             }
 
             KspDirectFishingState next = determineState();
             state = next;
-
             switch (next)
             {
                 case FISHING:
                     handleFishing();
                     break;
-
                 case WALKING_TO_FISH:
                 case RETURNING_TO_FISH:
                     handleReturnToFishing();
                     break;
-
                 case FINDING_FIRE:
                 case WALKING_TO_FIRE:
                 case USING_FIRE:
@@ -194,16 +133,13 @@ public class KspDirectFishingScript extends Script
                 case WAITING_FOR_FIRE:
                     handleCookingFlow();
                     break;
-
                 case WALKING_TO_BANK:
                 case BANKING:
                     handleBanking();
                     break;
-
                 case STARTING:
                     handleStart();
                     break;
-
                 case ERROR:
                 default:
                     break;
@@ -220,51 +156,15 @@ public class KspDirectFishingScript extends Script
 
     private KspDirectFishingState determineState()
     {
-        boolean hasSupplies = hasFishingSupplies();
-        boolean hasRawFish = hasRawFish();
-        boolean hasCookableRawFish = hasCookableRawFish();
-
-        /*
-         * A completed/partial fishing trip is processed before banking:
-         * 1. inventory full OR fishing supplies ran out
-         * 2. cook everything we are able to cook
-         * 3. bank cooked/burnt fish and any raw fish that cannot be cooked
-         * 4. restock fishing supplies
-         */
-        if ((Rs2Inventory.isFull() || !hasSupplies) && hasCookableRawFish)
+        boolean needsProcessing = Rs2Inventory.isFull() || !hasFishingSupplies();
+        if (needsProcessing && hasCookableRawFish()) return KspDirectFishingState.FINDING_FIRE;
+        if (needsProcessing)
         {
-            return KspDirectFishingState.FINDING_FIRE;
+            return Rs2Bank.isOpen() ? KspDirectFishingState.BANKING : KspDirectFishingState.WALKING_TO_BANK;
         }
-
-        if (Rs2Inventory.isFull() || !hasSupplies)
-        {
-            return Rs2Bank.isOpen()
-                    ? KspDirectFishingState.BANKING
-                    : KspDirectFishingState.WALKING_TO_BANK;
-        }
-
-        if (hasRawFish && tripShouldBeProcessed())
-        {
-            return KspDirectFishingState.FINDING_FIRE;
-        }
-
-        Rs2NpcModel spot = findNearestFishingSpot();
-        if (spot != null)
-        {
-            return KspDirectFishingState.FISHING;
-        }
-
-        if (fishingAnchor != null)
-        {
-            return KspDirectFishingState.WALKING_TO_FISH;
-        }
-
+        if (findNearestFishingSpot() != null) return KspDirectFishingState.FISHING;
+        if (fishingAnchor != null) return KspDirectFishingState.WALKING_TO_FISH;
         return KspDirectFishingState.STARTING;
-    }
-
-    private boolean tripShouldBeProcessed()
-    {
-        return Rs2Inventory.isFull() || !hasFishingSupplies();
     }
 
     private void handleStart()
@@ -277,21 +177,12 @@ public class KspDirectFishingScript extends Script
             state = KspDirectFishingState.FISHING;
             return;
         }
-
         status = "Start near a compatible fishing spot";
     }
 
     private void handleFishing()
     {
-        if (Rs2Player.isMoving())
-        {
-            return;
-        }
-
-        if (Rs2Inventory.isFull() || !hasFishingSupplies())
-        {
-            return;
-        }
+        if (Rs2Player.isMoving() || Rs2Inventory.isFull() || !hasFishingSupplies()) return;
 
         Rs2NpcModel fishingSpot = findNearestFishingSpot();
         if (fishingSpot == null)
@@ -300,12 +191,8 @@ public class KspDirectFishingScript extends Script
             return;
         }
 
-        // Rs2NpcModel performs the required client-thread dispatch internally.
         WorldPoint spotPoint = fishingSpot.getWorldLocation();
-        if (spotPoint != null)
-        {
-            fishingAnchor = spotPoint;
-        }
+        if (spotPoint != null) fishingAnchor = spotPoint;
 
         if ((Rs2Player.isAnimating() || Rs2Player.isInteracting())
                 && System.currentTimeMillis() - lastFishingClick < FISH_INTERACTION_TIMEOUT)
@@ -323,12 +210,10 @@ public class KspDirectFishingScript extends Script
 
         String action = mode.getPrimaryAction();
         status = "Direct click: " + action;
-
         if (fishingSpot.click(action))
         {
             lastFishingClick = now;
             lastFailedFishingClick = 0L;
-
             Rs2Player.waitForXpDrop(Skill.FISHING, true);
 
             while (!Thread.currentThread().isInterrupted()
@@ -363,42 +248,34 @@ public class KspDirectFishingScript extends Script
             {
                 state = KspDirectFishingState.WAITING_FOR_FIRE;
                 status = "Waiting for Fire / Forester's Campfire";
-                return;
             }
-
-            state = KspDirectFishingState.WALKING_TO_BANK;
-            status = "No fire found - banking raw fish";
+            else
+            {
+                state = KspDirectFishingState.WALKING_TO_BANK;
+                status = "No fire found - banking raw fish";
+            }
             return;
         }
 
         WorldPoint firePoint = getTileObjectWorldPoint(fire);
         if (firePoint == null)
         {
-            fireAvailable = false;
-            lastFirePoint = null;
+            updateFireStatus(null);
             status = "Fire location unavailable";
             return;
         }
 
         fireAvailable = true;
         lastFirePoint = firePoint;
-
         turnCameraTowardCampfire(firePoint);
 
-        int distance = Rs2Player.getWorldLocation().distanceTo(firePoint);
-
-        if (distance > DIRECT_FIRE_DISTANCE)
+        if (Rs2Player.getWorldLocation().distanceTo(firePoint) > DIRECT_FIRE_DISTANCE)
         {
             state = KspDirectFishingState.WALKING_TO_FIRE;
             status = "Walking to nearest fire";
-            // A fire occupies its own tile, so path to the interaction range
-            // rather than requiring the walker to reach the occupied tile.
             Rs2Walker.walkTo(firePoint, DIRECT_FIRE_DISTANCE);
-            sleepUntil(() ->
-                    !Rs2Player.isMoving()
-                            || Rs2Player.getWorldLocation().distanceTo(firePoint) <= 3,
-                    10_000
-            );
+            sleepUntil(() -> !Rs2Player.isMoving()
+                    || Rs2Player.getWorldLocation().distanceTo(firePoint) <= 3, 10_000);
             return;
         }
 
@@ -409,9 +286,7 @@ public class KspDirectFishingScript extends Script
 
     private void cookAllOn(Rs2TileObjectModel fire)
     {
-        while (!Thread.currentThread().isInterrupted()
-                && Microbot.isLoggedIn()
-                && hasCookableRawFish())
+        while (!Thread.currentThread().isInterrupted() && Microbot.isLoggedIn() && hasCookableRawFish())
         {
             if (Rs2Player.isMoving())
             {
@@ -437,8 +312,7 @@ public class KspDirectFishingScript extends Script
             Integer fireId = Microbot.getClientThread().invoke(fire::getId);
             if (fireId == null)
             {
-                fireAvailable = false;
-                lastFirePoint = null;
+                updateFireStatus(null);
                 state = KspDirectFishingState.FINDING_FIRE;
                 status = "Fire disappeared";
                 return;
@@ -446,25 +320,15 @@ public class KspDirectFishingScript extends Script
 
             state = KspDirectFishingState.USING_FIRE;
             status = "Turning camera to campfire";
-
             WorldPoint activeFirePoint = getTileObjectWorldPoint(fire);
-            if (activeFirePoint != null)
-            {
-                turnCameraTowardCampfire(activeFirePoint);
-            }
+            if (activeFirePoint != null) turnCameraTowardCampfire(activeFirePoint);
 
             status = "Using " + rawFish + " on fire";
             Rs2Inventory.useUnNotedItemOnObject(rawFish, fireId);
-
             state = KspDirectFishingState.WAITING_FOR_COOK_INTERFACE;
             status = "Waiting for cook interface";
 
-            boolean cookWidget = sleepUntil(
-                    () -> Rs2Widget.findWidget("How many would you like to cook?", null) != null,
-                    3_500
-            );
-
-            if (!cookWidget)
+            if (!sleepUntil(() -> Rs2Widget.findWidget("How many would you like to cook?", null) != null, 3_500))
             {
                 state = KspDirectFishingState.FINDING_FIRE;
                 status = "Cook interface did not open";
@@ -474,14 +338,7 @@ public class KspDirectFishingScript extends Script
 
             status = "Starting " + rawFish;
             Rs2Keyboard.keyPress(KeyEvent.VK_SPACE);
-
-            boolean cookingStarted = sleepUntil(
-                    () -> Rs2Player.isAnimating()
-                            || Rs2Player.getAnimation() != AnimationID.IDLE,
-                    5_000
-            );
-
-            if (!cookingStarted)
+            if (!sleepUntil(() -> Rs2Player.isAnimating() || Rs2Player.getAnimation() != AnimationID.IDLE, 5_000))
             {
                 state = KspDirectFishingState.WAITING_FOR_COOK_INTERFACE;
                 status = "Cooking did not start - retrying";
@@ -491,16 +348,11 @@ public class KspDirectFishingScript extends Script
 
             state = KspDirectFishingState.COOKING;
             status = "Cooking " + rawFish;
-
             Rs2Player.waitForXpDrop(Skill.COOKING, true);
 
-            final String cookingThis = rawFish;
-            sleepUntilTrue(
-                    () -> !Rs2Inventory.hasItem(cookingThis)
-                            && !Rs2Player.isAnimating(3_500),
-                    500,
-                    150_000
-            );
+            String cookingThis = rawFish;
+            sleepUntilTrue(() -> !Rs2Inventory.hasItem(cookingThis)
+                    && !Rs2Player.isAnimating(3_500), 500, 150_000);
         }
 
         state = KspDirectFishingState.WALKING_TO_BANK;
@@ -521,11 +373,9 @@ public class KspDirectFishingScript extends Script
         if (config.directBankFirst())
         {
             Rs2TileObjectModel bankBooth = null;
-
             try
             {
-                bankBooth = Microbot.getRs2TileObjectCache()
-                        .query()
+                bankBooth = Microbot.getRs2TileObjectCache().query()
                         .withNames("Bank booth", "Bank chest", "Bank")
                         .within(DIRECT_BANK_OBJECT_SEARCH_RADIUS)
                         .nearestOnClientThread();
@@ -539,39 +389,18 @@ public class KspDirectFishingScript extends Script
             {
                 state = KspDirectFishingState.BANKING;
                 long now = System.currentTimeMillis();
-
-                /*
-                 * Important: bankOpenRequested is NOT cleared merely because
-                 * the click call returned true. It is only cleared once the
-                 * actual bank interface is open. This prevents the second
-                 * click that happened on the next scheduled loop while the
-                 * bank widget was still opening.
-                 */
                 if (!bankOpenRequested)
                 {
                     bankOpenRequested = true;
                     lastBankOpenAttempt = now;
                     status = "Clicking bank booth once";
-
-                    boolean clicked = bankBooth.click("Bank");
-
-                    if (!clicked)
-                    {
-                        status = "Bank booth click failed";
-                    }
-                    else
-                    {
-                        status = "Waiting for bank to open";
-                    }
-
+                    status = bankBooth.click("Bank") ? "Waiting for bank to open" : "Bank booth click failed";
                     sleepUntil(Rs2Bank::isOpen, 5_000);
-
                     if (Rs2Bank.isOpen())
                     {
                         bankOpenRequested = false;
                         lastBankOpenAttempt = 0L;
                     }
-
                     return;
                 }
 
@@ -581,21 +410,12 @@ public class KspDirectFishingScript extends Script
                     return;
                 }
 
-                /*
-                 * A genuine timeout is the only condition that permits
-                 * another click.
-                 */
                 bankOpenRequested = false;
                 status = "Bank open timed out - retrying";
                 return;
             }
         }
 
-        /*
-         * Recovery only. No bank object is loaded, so move closer. We still
-         * do not call openBank() here; once a booth loads, the one-shot path
-         * above performs exactly one Bank interaction.
-         */
         bankOpenRequested = false;
         state = KspDirectFishingState.WALKING_TO_BANK;
         status = "Bank booth not visible - walking closer";
@@ -605,71 +425,24 @@ public class KspDirectFishingScript extends Script
     private void bankInventoryAndRestock()
     {
         status = "Banking fish";
-
         Set<Integer> keepIds = new HashSet<>();
-
         for (String item : mode.getRequiredItems())
         {
             Rs2ItemModel invItem = Rs2Inventory.get(item);
-            if (invItem != null)
-            {
-                keepIds.add(invItem.getId());
-            }
+            if (invItem != null) keepIds.add(invItem.getId());
         }
 
-        if (keepIds.isEmpty())
-        {
-            Rs2Bank.depositAll();
-        }
-        else
-        {
-            Rs2Bank.depositAllExcept(keepIds.toArray(new Integer[0]));
-        }
-
+        if (keepIds.isEmpty()) Rs2Bank.depositAll();
+        else Rs2Bank.depositAllExcept(keepIds.toArray(new Integer[0]));
         Rs2Inventory.waitForInventoryChanges(1_500);
 
         if (mode == KspDirectFishingMode.SHRIMP_ANCHOVIES)
         {
-            if (!Rs2Inventory.hasItem("Small fishing net"))
-            {
-                if (!Rs2Bank.hasItem("Small fishing net"))
-                {
-                    failAndStop("Small fishing net not found in bank");
-                    return;
-                }
-
-                status = "Withdrawing small fishing net";
-                Rs2Bank.withdrawOne("Small fishing net");
-                sleepUntil(() -> Rs2Inventory.hasItem("Small fishing net"), 3_500);
-            }
+            if (!withdrawSupply("Small fishing net", false)) return;
         }
-        else
+        else if (!withdrawSupply("Fishing rod", false) || !withdrawSupply("Fishing bait", true))
         {
-            if (!Rs2Inventory.hasItem("Fishing rod"))
-            {
-                if (!Rs2Bank.hasItem("Fishing rod"))
-                {
-                    failAndStop("Fishing rod not found in bank");
-                    return;
-                }
-
-                status = "Withdrawing fishing rod";
-                Rs2Bank.withdrawOne("Fishing rod");
-                sleepUntil(() -> Rs2Inventory.hasItem("Fishing rod"), 3_500);
-            }
-
-            if (!Rs2Inventory.hasItem("Fishing bait"))
-            {
-                if (!Rs2Bank.hasItem("Fishing bait"))
-                {
-                    failAndStop("Fishing bait not found in bank");
-                    return;
-                }
-
-                status = "Withdrawing fishing bait";
-                Rs2Bank.withdrawAll("Fishing bait");
-                sleepUntil(() -> Rs2Inventory.hasItem("Fishing bait"), 3_500);
-            }
+            return;
         }
 
         if (!hasFishingSupplies())
@@ -682,19 +455,28 @@ public class KspDirectFishingScript extends Script
         sleepUntil(() -> !Rs2Bank.isOpen(), 3_000);
         bankOpenRequested = false;
         lastBankOpenAttempt = 0L;
-
         state = KspDirectFishingState.RETURNING_TO_FISH;
         status = "Returning to fishing spot";
     }
 
+    private boolean withdrawSupply(String item, boolean all)
+    {
+        if (Rs2Inventory.hasItem(item)) return true;
+        if (!Rs2Bank.hasItem(item))
+        {
+            failAndStop(item + " not found in bank");
+            return false;
+        }
+
+        status = "Withdrawing " + item.toLowerCase(Locale.ROOT);
+        if (all) Rs2Bank.withdrawAll(item);
+        else Rs2Bank.withdrawOne(item);
+        sleepUntil(() -> Rs2Inventory.hasItem(item), 3_500);
+        return true;
+    }
+
     private void handleReturnToFishing()
     {
-        /*
-         * Do not use Rs2Walker/WebWalker to return from the bank.
-         * The fishing spot NPC is normally still loaded in the local scene
-         * around Draynor. Interact with it directly and let the game perform
-         * the short movement required to reach the spot.
-         */
         Rs2NpcModel visibleSpot = findNearestFishingSpot();
         if (visibleSpot == null)
         {
@@ -710,10 +492,7 @@ public class KspDirectFishingScript extends Script
         }
 
         WorldPoint spotPoint = visibleSpot.getWorldLocation();
-        if (spotPoint != null)
-        {
-            fishingAnchor = spotPoint;
-        }
+        if (spotPoint != null) fishingAnchor = spotPoint;
 
         long now = System.currentTimeMillis();
         if (now - lastFailedFishingClick < FAILED_CLICK_RETRY_DELAY)
@@ -725,7 +504,6 @@ public class KspDirectFishingScript extends Script
         String action = mode.getPrimaryAction();
         state = KspDirectFishingState.FISHING;
         status = "Direct return: " + action;
-
         if (visibleSpot.click(action))
         {
             lastFishingClick = now;
@@ -743,21 +521,15 @@ public class KspDirectFishingScript extends Script
     private Rs2NpcModel findNearestFishingSpot()
     {
         int[] ids = mode.getFishingSpotIds();
-
         try
         {
-            return Microbot.getRs2NpcCache()
-                    .query()
+            return Microbot.getRs2NpcCache().query()
                     .where(npc -> Arrays.stream(ids).anyMatch(id -> npc.getId() == id))
                     .nearestOnClientThread();
         }
         catch (RuntimeException ex)
         {
-            if (Thread.currentThread().isInterrupted())
-            {
-                return null;
-            }
-
+            if (Thread.currentThread().isInterrupted()) return null;
             log.debug("Fishing spot query failed: {}", ex.getMessage());
             return null;
         }
@@ -765,29 +537,11 @@ public class KspDirectFishingScript extends Script
 
     private void turnCameraTowardCampfire(WorldPoint firePoint)
     {
-        if (firePoint == null)
-        {
-            return;
-        }
-
-        /*
-         * The known Forester's campfire / Fire is at 3096,3237,0.
-         * Prefer that exact point when it is the active fire, otherwise
-         * face whichever supported fire the script selected.
-         */
-        WorldPoint target = firePoint.equals(FORESTERS_CAMPFIRE_POINT)
-                ? FORESTERS_CAMPFIRE_POINT
-                : firePoint;
-
+        if (firePoint == null) return;
         try
         {
-            int angle = (Rs2Camera.angleToTile(target) - 90) % 360;
-            if (angle < 0)
-            {
-                angle += 360;
-            }
-
-            // 25 degrees keeps the campfire clearly inside the viewport.
+            int angle = (Rs2Camera.angleToTile(firePoint) - 90) % 360;
+            if (angle < 0) angle += 360;
             Rs2Camera.setAngle(angle, 25);
         }
         catch (RuntimeException ex)
@@ -796,42 +550,19 @@ public class KspDirectFishingScript extends Script
         }
     }
 
-    private int[] supportedFireIds()
-    {
-        return new int[] {
-                ObjectID.FIRE,
-                ObjectID.FORESTRY_FIRE,
-                ObjectID.EAGLEPEAK_CAMPFIRE_TIDY,
-                ObjectID.FIRE_COOK,
-                FIRE_OBJECT_43475
-        };
-    }
-
     private void refreshFireStatusIfDue()
     {
         long now = System.currentTimeMillis();
-        if (now - lastFireStatusCheck < FIRE_STATUS_REFRESH_DELAY)
-        {
-            return;
-        }
-
+        if (now - lastFireStatusCheck < FIRE_STATUS_REFRESH_DELAY) return;
         lastFireStatusCheck = now;
 
         try
         {
-            Rs2TileObjectModel fire = Microbot.getRs2TileObjectCache()
-                    .query()
-                    .withIds(supportedFireIds())
-                    .within(config.fireSearchRadius())
-                    .nearestOnClientThread();
-
-            fireAvailable = fire != null;
-            lastFirePoint = fire == null ? null : getTileObjectWorldPoint(fire);
+            updateFireStatus(queryNearestFire());
         }
         catch (RuntimeException ex)
         {
-            fireAvailable = false;
-            lastFirePoint = null;
+            updateFireStatus(null);
             log.debug("Fire status refresh failed: {}", ex.getMessage());
         }
     }
@@ -840,38 +571,35 @@ public class KspDirectFishingScript extends Script
     {
         try
         {
-            Rs2TileObjectModel fire = Microbot.getRs2TileObjectCache()
-                    .query()
-                    .withIds(supportedFireIds())
-                    .within(config.fireSearchRadius())
-                    .nearestOnClientThread();
-
-            fireAvailable = fire != null;
-            lastFirePoint = fire == null ? null : getTileObjectWorldPoint(fire);
+            Rs2TileObjectModel fire = queryNearestFire();
+            updateFireStatus(fire);
             return fire;
         }
         catch (RuntimeException ex)
         {
-            fireAvailable = false;
-            lastFirePoint = null;
-
-            if (Thread.currentThread().isInterrupted())
-            {
-                return null;
-            }
-
-            log.debug("Fire query failed: {}", ex.getMessage());
+            updateFireStatus(null);
+            if (!Thread.currentThread().isInterrupted()) log.debug("Fire query failed: {}", ex.getMessage());
             return null;
         }
     }
 
+    private Rs2TileObjectModel queryNearestFire()
+    {
+        return Microbot.getRs2TileObjectCache().query()
+                .withIds(SUPPORTED_FIRE_IDS)
+                .within(config.fireSearchRadius())
+                .nearestOnClientThread();
+    }
+
+    private void updateFireStatus(Rs2TileObjectModel fire)
+    {
+        fireAvailable = fire != null;
+        lastFirePoint = fire == null ? null : getTileObjectWorldPoint(fire);
+    }
+
     private WorldPoint getTileObjectWorldPoint(Rs2TileObjectModel object)
     {
-        if (object == null)
-        {
-            return null;
-        }
-
+        if (object == null) return null;
         try
         {
             return Microbot.getClientThread().invoke(object::getWorldLocation);
@@ -885,60 +613,29 @@ public class KspDirectFishingScript extends Script
 
     private boolean hasFishingSupplies()
     {
-        if (mode == KspDirectFishingMode.SHRIMP_ANCHOVIES)
-        {
-            return Rs2Inventory.hasItem("Small fishing net");
-        }
-
-        return Rs2Inventory.hasItem("Fishing rod")
-                && Rs2Inventory.hasItem("Fishing bait");
+        return mode == KspDirectFishingMode.SHRIMP_ANCHOVIES
+                ? Rs2Inventory.hasItem("Small fishing net")
+                : Rs2Inventory.hasItem("Fishing rod") && Rs2Inventory.hasItem("Fishing bait");
     }
 
-    private boolean hasRawFish()
-    {
-        for (String raw : mode.getRawFish())
-        {
-            if (Rs2Inventory.hasItem(raw))
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    private boolean hasCookableRawFish()
-    {
-        return firstCookableRawFish() != null;
-    }
+    private boolean hasCookableRawFish() { return firstCookableRawFish() != null; }
 
     private String firstCookableRawFish()
     {
         for (String raw : mode.getRawFish())
         {
-            if (!Rs2Inventory.hasItem(raw))
-            {
-                continue;
-            }
-
-            if (Rs2Player.getSkillRequirement(Skill.COOKING, requiredCookingLevel(raw)))
+            if (Rs2Inventory.hasItem(raw)
+                    && Rs2Player.getSkillRequirement(Skill.COOKING, requiredCookingLevel(raw)))
             {
                 return raw;
             }
         }
-
         return null;
     }
 
     private int requiredCookingLevel(String rawFish)
     {
-        if ("Raw herring".equalsIgnoreCase(rawFish))
-        {
-            return 5;
-        }
-
-        // Shrimps, anchovies and sardines are cookable from level 1.
-        return 1;
+        return "Raw herring".equalsIgnoreCase(rawFish) ? 5 : 1;
     }
 
     private void failAndStop(String message)

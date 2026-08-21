@@ -43,45 +43,14 @@ public final class FactoryStats
         estimatedTax.addAndGet((long) Math.floor(revenue * (Math.max(0, taxPercent) / 100.0)));
     }
 
-    public long getUnitsProcessed()
-    {
-        return unitsProcessed.get();
-    }
-
-    public long getItemsBought()
-    {
-        return itemsBought.get();
-    }
-
-    public long getItemsSold()
-    {
-        return itemsSold.get();
-    }
-
-    public long getCoinsSpent()
-    {
-        return coinsSpent.get();
-    }
-
-    public long getGrossRevenue()
-    {
-        return grossRevenue.get();
-    }
-
-    public long getEstimatedTax()
-    {
-        return estimatedTax.get();
-    }
-
-    public long getSessionCashFlow()
-    {
-        return grossRevenue.get() - estimatedTax.get() - coinsSpent.get();
-    }
-
-    public Duration getRuntime()
-    {
-        return Duration.ofMillis(Math.max(0L, System.currentTimeMillis() - startedAt));
-    }
+    public long getUnitsProcessed() { return unitsProcessed.get(); }
+    public long getItemsBought() { return itemsBought.get(); }
+    public long getItemsSold() { return itemsSold.get(); }
+    public long getCoinsSpent() { return coinsSpent.get(); }
+    public long getGrossRevenue() { return grossRevenue.get(); }
+    public long getEstimatedTax() { return estimatedTax.get(); }
+    public long getSessionCashFlow() { return grossRevenue.get() - estimatedTax.get() - coinsSpent.get(); }
+    public Duration getRuntime() { return Duration.ofMillis(Math.max(0L, System.currentTimeMillis() - startedAt)); }
 
     private static long safeMultiply(long left, long right)
     {

@@ -1,5 +1,9 @@
 package net.runelite.client.plugins.microbot.kspbankorganizer;
 
+import lombok.Getter;
+import lombok.RequiredArgsConstructor;
+
+@RequiredArgsConstructor
 public enum BankTarget
 {
     IGNORE("Ignore", -1),
@@ -15,18 +19,7 @@ public enum BankTarget
     TAB_9("Tab 9", 9);
 
     private final String displayName;
-    private final int tabIndex;
-
-    BankTarget(String displayName, int tabIndex)
-    {
-        this.displayName = displayName;
-        this.tabIndex = tabIndex;
-    }
-
-    public int getTabIndex()
-    {
-        return tabIndex;
-    }
+    @Getter private final int tabIndex;
 
     @Override
     public String toString()

@@ -1,6 +1,6 @@
 package net.runelite.client.plugins.microbot.kspwillowchopper.forestry;
 
-import lombok.extern.slf4j.Slf4j;
+import lombok.RequiredArgsConstructor;
 import net.runelite.api.gameval.NpcID;
 import net.runelite.client.plugins.microbot.BlockingEvent;
 import net.runelite.client.plugins.microbot.BlockingEventPriority;
@@ -18,14 +18,10 @@ import java.util.Set;
 
 import static net.runelite.client.plugins.microbot.util.Global.sleepUntil;
 
-@Slf4j
+@RequiredArgsConstructor
 public class KspHivesEvent implements BlockingEvent {
     private final KspWillowChopperPlugin plugin;
     private final Set<Integer> completed = new HashSet<>();
-
-    public KspHivesEvent(KspWillowChopperPlugin plugin) {
-        this.plugin = plugin;
-    }
 
     @Override
     public boolean validate() {

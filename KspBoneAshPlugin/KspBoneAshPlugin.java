@@ -1,10 +1,7 @@
 package net.runelite.client.plugins.microbot.KspBoneAshPlugin;
 
 import com.google.inject.Provides;
-import net.runelite.api.events.ItemContainerChanged;
-import net.runelite.api.gameval.InventoryID;
 import net.runelite.client.config.ConfigManager;
-import net.runelite.client.eventbus.Subscribe;
 import net.runelite.client.plugins.Plugin;
 import net.runelite.client.plugins.PluginDescriptor;
 import net.runelite.client.plugins.microbot.PluginConstants;
@@ -48,14 +45,5 @@ public class KspBoneAshPlugin extends Plugin
     protected void shutDown()
     {
         script.shutdown();
-    }
-
-    @Subscribe
-    public void onItemContainerChanged(ItemContainerChanged event)
-    {
-        if (event.getContainerId() == InventoryID.INV)
-        {
-            script.onInventoryChanged();
-        }
     }
 }

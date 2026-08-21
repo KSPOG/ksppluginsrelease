@@ -1,5 +1,6 @@
 package net.runelite.client.plugins.microbot.kspwillowchopper.forestry;
 
+import lombok.RequiredArgsConstructor;
 import net.runelite.api.gameval.NpcID;
 import net.runelite.client.plugins.microbot.BlockingEvent;
 import net.runelite.client.plugins.microbot.BlockingEventPriority;
@@ -10,12 +11,9 @@ import net.runelite.client.plugins.microbot.util.player.Rs2Player;
 
 import static net.runelite.client.plugins.microbot.util.Global.sleepUntil;
 
+@RequiredArgsConstructor
 public class KspFlowersEvent implements BlockingEvent {
     private final KspWillowChopperPlugin plugin;
-
-    public KspFlowersEvent(KspWillowChopperPlugin plugin) {
-        this.plugin = plugin;
-    }
 
     @Override
     public boolean validate() {
@@ -33,12 +31,11 @@ public class KspFlowersEvent implements BlockingEvent {
         plugin.ensureInventorySpace(3);
 
         while (validate()) {
-            var flowers = Microbot.getRs2NpcCache().query()
-                    .where(npc -> npc.getName() != null && isFloweringBush(npc.getId()))
-                    .toList();
-
-            var target = flowers.stream()
-                    .filter(flower -> flower.getAnimation() == -1)
+            var target = Microbot.getRs2NpcCache().query()
+                    .where(npc -> npc.getName() != null
+                            && isFloweringBush(npc.getId())
+                            && npc.getAnimation() == -1)
+                    .toList().stream()
                     .findFirst()
                     .orElse(null);
 

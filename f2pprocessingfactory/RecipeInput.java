@@ -1,7 +1,9 @@
 package net.runelite.client.plugins.microbot.f2pprocessingfactory;
 
 import java.util.Objects;
+import lombok.Getter;
 
+@Getter
 public final class RecipeInput
 {
     private final String itemName;
@@ -57,11 +59,6 @@ public final class RecipeInput
         return new RecipeInput(itemName, 0, 1, false, false, false);
     }
 
-    public String getItemName()
-    {
-        return itemName;
-    }
-
     /**
      * Retained for compatibility with older recipe code. For ordinary consumed
      * inputs this is the exact units-per-output quantity. Fractional support
@@ -70,31 +67,6 @@ public final class RecipeInput
     public int getUnitsPerOutput()
     {
         return requiredNumerator;
-    }
-
-    public int getRequiredNumerator()
-    {
-        return requiredNumerator;
-    }
-
-    public int getRequiredDenominator()
-    {
-        return requiredDenominator;
-    }
-
-    public boolean isConsumed()
-    {
-        return consumed;
-    }
-
-    public boolean isStackable()
-    {
-        return stackable;
-    }
-
-    public boolean isProgressTracked()
-    {
-        return progressTracked;
     }
 
     public int requiredForUnits(int outputUnits)

@@ -1,5 +1,6 @@
 package net.runelite.client.plugins.microbot.kspfleshcrawlers;
 
+import lombok.Getter;
 import net.runelite.api.EnumID;
 import net.runelite.api.ParamID;
 import net.runelite.api.Skill;
@@ -16,12 +17,8 @@ import java.util.Comparator;
 import java.util.List;
 
 final class CombatTrainingController {
-    private Skill currentTrainingSkill;
+    @Getter private Skill currentTrainingSkill;
     private long lastStyleCheck;
-
-    Skill getCurrentTrainingSkill() {
-        return currentTrainingSkill;
-    }
 
     boolean allEnabledGoalsReached(KspFleshCrawlerConfig config) {
         boolean anyEnabled = false;
@@ -76,28 +73,26 @@ final class CombatTrainingController {
     }
 
     private Skill chooseSkill(KspFleshCrawlerConfig config) {
-        List<SkillGoal> pending = new ArrayList<>();
+        List<Skill> pending = new ArrayList<>();
         if (config.trainAttack() && level(Skill.ATTACK) < config.attackTarget()) {
-            pending.add(new SkillGoal(Skill.ATTACK, config.attackTarget()));
+            pending.add(Skill.ATTACK);
         }
         if (config.trainStrength() && level(Skill.STRENGTH) < config.strengthTarget()) {
-            pending.add(new SkillGoal(Skill.STRENGTH, config.strengthTarget()));
+            pending.add(Skill.STRENGTH);
         }
         if (config.trainDefence() && level(Skill.DEFENCE) < config.defenceTarget()) {
-            pending.add(new SkillGoal(Skill.DEFENCE, config.defenceTarget()));
+            pending.add(Skill.DEFENCE);
         }
 
         if (pending.isEmpty()) {
             return null;
         }
-
         if (!config.balanceCombatLevels()) {
-            return pending.get(0).skill;
+            return pending.get(0);
         }
 
         return pending.stream()
-                .min(Comparator.comparingInt(goal -> level(goal.skill)))
-                .map(goal -> goal.skill)
+                .min(Comparator.comparingInt(this::level))
                 .orElse(null);
     }
 
@@ -128,16 +123,9 @@ final class CombatTrainingController {
     }
 
     private boolean matchesDedicatedStyle(String styleName, Skill desired) {
-        if (desired == Skill.ATTACK) {
-            return "Accurate".equalsIgnoreCase(styleName);
-        }
-        if (desired == Skill.STRENGTH) {
-            return "Aggressive".equalsIgnoreCase(styleName);
-        }
-        if (desired == Skill.DEFENCE) {
-            return "Defensive".equalsIgnoreCase(styleName);
-        }
-        return false;
+        if (desired == Skill.ATTACK) return "Accurate".equalsIgnoreCase(styleName);
+        if (desired == Skill.STRENGTH) return "Aggressive".equalsIgnoreCase(styleName);
+        return desired == Skill.DEFENCE && "Defensive".equalsIgnoreCase(styleName);
     }
 
     private WidgetInfo widgetForIndex(int index) {
@@ -165,16 +153,5 @@ final class CombatTrainingController {
 
     private int level(Skill skill) {
         return Microbot.getClient().getRealSkillLevel(skill);
-    }
-
-    private static final class SkillGoal {
-        private final Skill skill;
-        @SuppressWarnings("unused")
-        private final int target;
-
-        private SkillGoal(Skill skill, int target) {
-            this.skill = skill;
-            this.target = target;
-        }
     }
 }
