@@ -24,7 +24,6 @@ public class KspBoneAshScript extends Script
     private static final long BANK_RETRY_DELAY_MS = 650L;
 
     private final Random random = new Random();
-    private final AtomicBoolean inventoryChanged = new AtomicBoolean(false);
     private final AtomicBoolean stopRequested = new AtomicBoolean(false);
 
     private KspBoneAshConfig config;
@@ -74,11 +73,6 @@ public class KspBoneAshScript extends Script
         return true;
     }
 
-    public void onInventoryChanged()
-    {
-        inventoryChanged.set(true);
-    }
-
     private void process()
     {
         final String itemName = configuredItemName();
@@ -89,7 +83,6 @@ public class KspBoneAshScript extends Script
         }
 
         final int inventoryCount = trackedInventoryCount(itemName);
-
         if (inventoryCount > 0)
         {
             handleInventory(itemName, inventoryCount);
@@ -97,7 +90,6 @@ public class KspBoneAshScript extends Script
         }
 
         awaitingConsumption = false;
-        inventoryChanged.set(false);
         handleBank(itemName);
     }
 
@@ -116,22 +108,13 @@ public class KspBoneAshScript extends Script
 
         if (awaitingConsumption)
         {
-            final boolean changed = inventoryChanged.getAndSet(false);
-
-            if (changed && inventoryCount < countBeforeConsumption)
+            if (inventoryCount < countBeforeConsumption)
             {
-                awaitingConsumption = false;
-                nextInventoryInteractionAt = now + randomInteractionDelay();
-            }
-            else if (inventoryCount < countBeforeConsumption)
-            {
-                // Safety fallback: the cached count changed even if the event flag was consumed elsewhere.
                 awaitingConsumption = false;
                 nextInventoryInteractionAt = now + randomInteractionDelay();
             }
             else if (now - consumptionIssuedAt >= CONSUME_CONFIRM_TIMEOUT_MS)
             {
-                // No inventory change was observed. Retry rather than becoming permanently idle.
                 awaitingConsumption = false;
                 nextInventoryInteractionAt = now + randomBetween(40, 110);
             }
@@ -163,15 +146,12 @@ public class KspBoneAshScript extends Script
 
         Microbot.status = action + " " + itemName;
 
-        final int before = inventoryCount;
-        inventoryChanged.set(false);
         if (Rs2Inventory.interact(target, action))
         {
             lastSlot = target.getSlot();
             maybeFlipTraversalDirection();
-
             awaitingConsumption = true;
-            countBeforeConsumption = before;
+            countBeforeConsumption = inventoryCount;
             consumptionIssuedAt = now;
         }
         else
@@ -218,16 +198,9 @@ public class KspBoneAshScript extends Script
             {
                 return;
             }
-
-            // The withdraw action did not produce an inventory change in time; allow one clean retry.
             withdrawalPending = false;
         }
 
-        /*
-         * The bank is open here, so the Microbot bank mirror has had an opportunity to sync.
-         * This is the authoritative exhaustion check: no configured item in inventory AND no
-         * configured item in the open bank means there is nothing left to process.
-         */
         if (!Rs2Bank.hasBankItem(itemName, true))
         {
             requestStop("Bone & Ash complete: no '" + itemName + "' remains in inventory or bank.");
@@ -236,7 +209,6 @@ public class KspBoneAshScript extends Script
 
         Microbot.status = "Withdraw-all " + itemName;
 
-        inventoryChanged.set(false);
         if (Rs2Bank.withdrawAll(itemName, true))
         {
             withdrawalPending = true;
@@ -311,7 +283,6 @@ public class KspBoneAshScript extends Script
             return null;
         }
 
-        // Prefer the actual action exposed by the configured item instead of guessing by item name.
         for (String action : actions)
         {
             if (action != null && action.equalsIgnoreCase("Bury"))
@@ -335,7 +306,6 @@ public class KspBoneAshScript extends Script
     {
         final int min = Math.max(0, Math.min(config.minInteractionDelay(), config.maxInteractionDelay()));
         final int max = Math.max(min, Math.max(config.minInteractionDelay(), config.maxInteractionDelay()));
-
         long delay = randomBetween(min, max);
 
         if (random.nextInt(100) < clampPercent(config.hesitationChance()))
@@ -398,17 +368,13 @@ public class KspBoneAshScript extends Script
 
     private void resetState()
     {
-        inventoryChanged.set(false);
         stopRequested.set(false);
-
         awaitingConsumption = false;
         countBeforeConsumption = 0;
         consumptionIssuedAt = 0L;
-
         withdrawalPending = false;
         withdrawalIssuedAt = 0L;
         nextBankAttemptAt = 0L;
-
         nextInventoryInteractionAt = 0L;
         lastSlot = -1;
         traversalDirection = random.nextBoolean() ? 1 : -1;
