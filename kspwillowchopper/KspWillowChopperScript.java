@@ -819,6 +819,20 @@ public class KspWillowChopperScript extends Script {
     }
 
     /**
+     * Records a confirmed resource gain as soon as the game reports it. Scene object
+     * despawn notifications can arrive before the scheduled inventory poll observes
+     * the new log, so this keeps a normal tree depletion from being treated as an
+     * unexpected target loss.
+     */
+    public void notifyResourceChopped() {
+        if (!sessionStarted || !treeInteractionIssued) {
+            return;
+        }
+
+        lastTreeProgressMillis = System.currentTimeMillis();
+    }
+
+    /**
      * Rs2TileObjectModel normalizes multi-tile GameObjects to their scene-min tile.
      * The clicked target is stored using that model location, so event locations
      * must use the same normalization or large trees will never compare equal.
