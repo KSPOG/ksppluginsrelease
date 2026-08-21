@@ -300,8 +300,12 @@ public class KspAutoRunScript extends Script
 
     private String enabledState(int runEnergy, int threshold)
     {
-        return "run enabled (cycle " + confirmedRunEnableCycles
-                + ", energy " + runEnergy + "/" + threshold + ")";
+        // Keep the confirmed cycle in the stable part of the state text. Runtime
+        // state collection intentionally discards parenthesized detail, which
+        // otherwise makes distinct, successfully completed energy cycles appear
+        // as the same repeating state.
+        return "run enabled for energy cycle " + confirmedRunEnableCycles
+                + " at " + runEnergy + "/" + threshold;
     }
 
     private void setMicrobotAutoRun(boolean enabled)
