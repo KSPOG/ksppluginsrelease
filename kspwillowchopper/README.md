@@ -155,3 +155,15 @@ The optimal stage 1 / 2 / 3 ingredient combination is learned from the game's me
 - Microbot 2.1+ compatibility: migrated legacy `Rs2GameObject` calls to `Rs2TileObjectQueryable` / `Rs2TileObjectModel`.
 
 - Friendly Ent fix: repeatedly performs valid prune actions until the Entling actually morphs to the pruned state; the Entling loop no longer treats the player's stale NPC interaction pointer as an active prune, and uses the exact current `Short back and sides!` wording.
+
+## v0.1.0 Entling hard target lock
+- Once a Friendly Entling is selected, the handler locks to that exact NPC index.
+- Other Entlings are ignored until the locked Entling morphs/despawns out of the regular Entling state.
+- Temporary missing/changed overhead text does not release the target lock.
+- Repeated prune actions continue only on the locked Entling, with the existing movement/animation/click anti-spam timing.
+
+### Friendly Ent request mapping correction (v0.1.0)
+- The locked Entling's overhead request is re-read immediately before every prune.
+- Removed alternating prune sequences for combined requests; one valid action is repeated until that Entling morphs/despawns.
+- Canonical mapping: Breezy at the back -> Prune-back; Short on top -> Prune-top; A leafy mullet -> Prune-top; Short back and sides -> Prune-back.
+- Request text is tag-stripped and current/historical wording aliases are normalized before mapping.
