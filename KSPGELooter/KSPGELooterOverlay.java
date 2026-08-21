@@ -33,7 +33,7 @@ public class KSPGELooterOverlay extends OverlayPanel
         long alchMarginPerHour = perHour(KSPGELooterScript.totalAlchMargin, runtime);
 
         panelComponent.getChildren().add(TitleComponent.builder()
-                .text("KSP GE Looter v" + KSPGELooterPlugin.version)
+                .text("KSP GE Looter v" + KSPGELooterPlugin.VERSION)
                 .color(Color.ORANGE)
                 .build());
 
