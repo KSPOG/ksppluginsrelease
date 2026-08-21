@@ -105,7 +105,10 @@ public class KspAutoRunScript extends Script
             runEnabledObserved = true;
             runToggleRequestedAt = 0L;
             runDisabledObservedAt = 0L;
-            state = enabledState(runEnergy, threshold);
+            // Enabling Run is the postcondition of this cycle, not a terminal
+            // state. The next valid action cannot occur until Run is disabled
+            // below the threshold, so report that intentional wait explicitly.
+            state = energyState("waiting for energy reset", runEnergy, threshold);
             return;
         }
 
@@ -309,15 +312,6 @@ public class KspAutoRunScript extends Script
         // the complete wait -> invoke -> confirmation lifecycle remains
         // distinguishable from an actual stalled repetition.
         return "energy cycle " + energyCycle + ": " + phase
-                + " (energy " + runEnergy + "/" + threshold + ")";
-    }
-
-    private String enabledState(int runEnergy, int threshold)
-    {
-        // Keep the completed cycle as the leading state value so state monitoring
-        // can distinguish successive postcondition-confirmed cycles from a
-        // stalled toggle.
-        return "energy cycle " + energyCycle + " complete: run enabled"
                 + " (energy " + runEnergy + "/" + threshold + ")";
     }
 

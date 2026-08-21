@@ -383,11 +383,12 @@ public class KspDirectFishingScript extends Script
             state = KspDirectFishingState.WALKING_TO_FIRE;
             status = "Walking to nearest fire";
             Rs2Walker.walkTo(firePoint);
-            sleepUntil(() ->
-                    !Rs2Player.isMoving()
-                            || Rs2Player.getWorldLocation().distanceTo(firePoint) <= 3,
-                    10_000
-            );
+            /*
+             * A walk request is asynchronous. Checking for "not moving" here
+             * can succeed before the client has started moving, which causes
+             * the next loop to rediscover the fire and issue another walk.
+             */
+            Rs2Player.waitForWalking();
             return;
         }
 
