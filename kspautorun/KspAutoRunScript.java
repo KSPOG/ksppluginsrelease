@@ -20,7 +20,10 @@ public class KspAutoRunScript extends Script
 
     private long runToggleRequestedAt = 0L;
     private long runDisabledObservedAt = 0L;
-    private long confirmedRunEnableCycles = 0L;
+    // Identifies the complete threshold lifecycle, including a submitted toggle
+    // whose confirmation is missed or times out. This keeps state reporting tied
+    // to the action lifecycle rather than only to a later client observation.
+    private long energyCycle = 1L;
     private boolean awaitingEnergyReset = false;
     private boolean runEnabledObserved = false;
     private Boolean previousMicrobotAutoRun;
@@ -97,7 +100,6 @@ public class KspAutoRunScript extends Script
             if (!runEnabledObserved)
             {
                 awaitingEnergyReset = true;
-                confirmedRunEnableCycles++;
             }
 
             runEnabledObserved = true;
@@ -162,7 +164,14 @@ public class KspAutoRunScript extends Script
             // Run back off.
             runToggleRequestedAt = 0L;
             runDisabledObservedAt = 0L;
-            awaitingEnergyReset = false;
+            if (awaitingEnergyReset)
+            {
+                // A disabled, below-threshold observation completes the previous
+                // lifecycle (whether its toggle was confirmed or timed out). The
+                // next wait/enable sequence is therefore a distinct energy cycle.
+                energyCycle++;
+                awaitingEnergyReset = false;
+            }
             state = energyState("waiting for energy", runEnergy, threshold);
             return;
         }
@@ -296,25 +305,20 @@ public class KspAutoRunScript extends Script
     private String energyState(String phase, int runEnergy, int threshold)
     {
         // The monitor retains the stable part of this state and omits detail in
-        // parentheses. Include the pending threshold-cycle number in that stable
-        // part so the complete wait -> invoke -> confirmation lifecycle remains
+        // parentheses. Include the threshold-cycle number in that stable part so
+        // the complete wait -> invoke -> confirmation lifecycle remains
         // distinguishable from an actual stalled repetition.
-        return "energy cycle " + nextEnergyCycle() + ": " + phase
+        return "energy cycle " + energyCycle + ": " + phase
                 + " (energy " + runEnergy + "/" + threshold + ")";
     }
 
     private String enabledState(int runEnergy, int threshold)
     {
-        // A confirmed toggle completes one threshold cycle. Keep that completed
-        // cycle as the leading state value so state monitoring can distinguish
-        // successive postcondition-confirmed cycles from a stalled toggle.
-        return "energy cycle " + confirmedRunEnableCycles + " complete: run enabled"
+        // Keep the completed cycle as the leading state value so state monitoring
+        // can distinguish successive postcondition-confirmed cycles from a
+        // stalled toggle.
+        return "energy cycle " + energyCycle + " complete: run enabled"
                 + " (energy " + runEnergy + "/" + threshold + ")";
-    }
-
-    private long nextEnergyCycle()
-    {
-        return confirmedRunEnableCycles + 1L;
     }
 
     private void setMicrobotAutoRun(boolean enabled)
@@ -340,7 +344,7 @@ public class KspAutoRunScript extends Script
 
         runToggleRequestedAt = 0L;
         runDisabledObservedAt = 0L;
-        confirmedRunEnableCycles = 0L;
+        energyCycle = 1L;
         awaitingEnergyReset = false;
         runEnabledObserved = false;
         state = "stopped";
