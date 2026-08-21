@@ -23,7 +23,7 @@ import net.runelite.client.ui.overlay.OverlayManager;
     description = "Automatically categorizes, moves and smart-sorts real OSRS bank tabs.",
     tags = {"bank", "organizer", "sort", "tabs", "ksp"},
     authors = {"KSP"},
-    version = KspBankOrganizerPlugin.version,
+    version = KspBankOrganizerPlugin.VERSION,
     minClientVersion = "2.0.61",
     iconUrl = "",
     cardUrl = "",
@@ -33,7 +33,7 @@ import net.runelite.client.ui.overlay.OverlayManager;
 @Slf4j
 public class KspBankOrganizerPlugin extends Plugin
 {
-    public static final String version = "1.1.32";
+    public static final String VERSION = "1.1.32";
 
     @Inject
     private KspBankOrganizerConfig config;
