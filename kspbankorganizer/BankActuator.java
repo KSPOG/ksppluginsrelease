@@ -150,7 +150,7 @@ final class BankActuator
         if (!Rs2Bank.walkToBank()
             || !Global.sleepUntil(
                 () -> isBankUiOpenOnClient()
-                    || openNearbyBanker()
+                    || hasNearbyBanker()
                     || isLocalBankBoothAvailable(),
                 WALK_TO_LOCAL_BANK_TIMEOUT_MS))
         {
@@ -227,13 +227,21 @@ final class BankActuator
 
     private boolean openNearbyBanker()
     {
-        Rs2NpcModel banker = Rs2Npc.getBankerNPC();
-        if (banker == null || !isNearPlayerOnClient(banker, 4))
-        {
-            return false;
-        }
+        Rs2NpcModel banker = nearbyBanker();
+        return banker != null && invokeNpcBankAction(banker);
+    }
 
-        return invokeNpcBankAction(banker);
+    private boolean hasNearbyBanker()
+    {
+        return nearbyBanker() != null;
+    }
+
+    private Rs2NpcModel nearbyBanker()
+    {
+        Rs2NpcModel banker = Rs2Npc.getBankerNPC();
+        return banker != null && isNearPlayerOnClient(banker, BANK_INTERACTION_DISTANCE)
+            ? banker
+            : null;
     }
 
     private boolean isNearPlayerOnClient(Rs2NpcModel npc, int maxDistance)
