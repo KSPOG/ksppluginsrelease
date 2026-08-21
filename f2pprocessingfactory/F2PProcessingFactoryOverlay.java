@@ -28,10 +28,7 @@ public class F2PProcessingFactoryOverlay extends OverlayPanel
     public Dimension render(Graphics2D graphics)
     {
         F2PProcessingFactoryScript script = plugin.getScript();
-        if (script == null)
-        {
-            return null;
-        }
+        if (script == null) return null;
 
         panelComponent.setPreferredSize(new Dimension(285, 0));
         panelComponent.getChildren().add(TitleComponent.builder()
@@ -47,13 +44,8 @@ public class F2PProcessingFactoryOverlay extends OverlayPanel
                 : "Free-to-play");
         addLine("Anti-ban", script.getAntibanStatus());
         String watchdogStatus = script.getProgressWatchdogStatus();
-        addLine("Retry guard", watchdogStatus == null || watchdogStatus.equals("Idle")
-            ? "Monitoring"
-            : watchdogStatus);
-        if (script.getAntibanPauseSeconds() > 0)
-        {
-            addLine("Anti-ban pause", script.getAntibanPauseSeconds() + "s");
-        }
+        addLine("Retry guard", watchdogStatus == null || watchdogStatus.equals("Idle") ? "Monitoring" : watchdogStatus);
+        if (script.getAntibanPauseSeconds() > 0) addLine("Anti-ban pause", script.getAntibanPauseSeconds() + "s");
         addLine("Coins detected", formatCoins(script.getObservedCoinTotal()));
         addLine("Spendable", formatCoins(script.getObservedSpendableCoins()));
 
@@ -72,11 +64,8 @@ public class F2PProcessingFactoryOverlay extends OverlayPanel
             addLine("Est. GP / hour", formatCoins(quote.getEstimatedProfitPerHour()));
         }
 
-        if (script.getState() == FactoryState.WAITING_FOR_LIMIT
-            || script.getState() == FactoryState.WAITING_FOR_MARKET)
-        {
+        if (script.getState() == FactoryState.WAITING_FOR_LIMIT || script.getState() == FactoryState.WAITING_FOR_MARKET)
             addLine("Recheck in", script.getWaitSeconds() + "s");
-        }
 
         FactoryStats stats = script.getStats();
         addLine("Processed", formatNumber(stats.getUnitsProcessed()));
@@ -85,7 +74,6 @@ public class F2PProcessingFactoryOverlay extends OverlayPanel
         addLine("Spent", formatCoins(stats.getCoinsSpent()));
         addLine("Gross sales", formatCoins(stats.getGrossRevenue()));
         addLine("Session cash flow", formatCoins(stats.getSessionCashFlow()));
-
         return super.render(graphics);
     }
 
@@ -99,10 +87,7 @@ public class F2PProcessingFactoryOverlay extends OverlayPanel
 
     private static String prettify(String value)
     {
-        if (value == null)
-        {
-            return "";
-        }
+        if (value == null) return "";
         String lower = value.toLowerCase(Locale.ROOT).replace('_', ' ');
         return Character.toUpperCase(lower.charAt(0)) + lower.substring(1);
     }
@@ -111,23 +96,11 @@ public class F2PProcessingFactoryOverlay extends OverlayPanel
     {
         String sign = value < 0 ? "-" : "";
         double absolute = Math.abs((double) value);
-        if (absolute >= 1_000_000_000)
-        {
-            return sign + String.format(Locale.ROOT, "%.2fB", absolute / 1_000_000_000.0);
-        }
-        if (absolute >= 1_000_000)
-        {
-            return sign + String.format(Locale.ROOT, "%.2fM", absolute / 1_000_000.0);
-        }
-        if (absolute >= 1_000)
-        {
-            return sign + String.format(Locale.ROOT, "%.1fK", absolute / 1_000.0);
-        }
+        if (absolute >= 1_000_000_000) return sign + String.format(Locale.ROOT, "%.2fB", absolute / 1_000_000_000.0);
+        if (absolute >= 1_000_000) return sign + String.format(Locale.ROOT, "%.2fM", absolute / 1_000_000.0);
+        if (absolute >= 1_000) return sign + String.format(Locale.ROOT, "%.1fK", absolute / 1_000.0);
         return sign + String.format(Locale.ROOT, "%.0f", absolute);
     }
 
-    private static String formatNumber(long value)
-    {
-        return String.format(Locale.ROOT, "%,d", value);
-    }
+    private static String formatNumber(long value) { return String.format(Locale.ROOT, "%,d", value); }
 }
