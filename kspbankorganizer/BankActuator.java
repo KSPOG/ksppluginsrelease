@@ -110,27 +110,8 @@ final class BankActuator
                 return Global.sleepUntil(this::isBankReadyForSnapshotOnClient, INITIAL_OPEN_VERIFY_MS);
             }
 
-            if (Rs2Bank.openBank(localBankBooth)
-                && Global.sleepUntil(this::isBankReadyForSnapshotOnClient, 5000))
-            {
-                return true;
-            }
-
-            /*
-             * A loaded booth can be replaced while the client processes the
-             * first click. Re-resolve it instead of reusing the stale scene
-             * object, and only retry if the replacement is still close enough
-             * to satisfy the Bank action's widget postcondition.
-             */
-            GameObject retryBankBooth = Rs2GameObject.findBank(LOCAL_BANK_SEARCH_RADIUS);
-            if (retryBankBooth == null
-                || !isNearPlayerOnClient(retryBankBooth, BANK_INTERACTION_DISTANCE))
-            {
-                return false;
-            }
-
-            return Rs2Bank.openBank(retryBankBooth)
-                && Global.sleepUntil(this::isBankReadyForSnapshotOnClient, INITIAL_OPEN_VERIFY_MS);
+            return Rs2Bank.openBank(localBankBooth)
+                && Global.sleepUntil(this::isBankReadyForSnapshotOnClient, 5000);
         }
 
         // When a banker is already beside the player, invoke its Bank option
