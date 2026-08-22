@@ -17,135 +17,64 @@ import java.util.concurrent.ConcurrentHashMap;
 @Slf4j
 public final class FactoryPriceService
 {
+    private static final double RETRY_STEP_PERCENT = 2.0;
     private final Map<String, Integer> itemIdCache = new ConcurrentHashMap<>();
 
     public int getItemId(String itemName)
     {
-        if (itemName == null || itemName.trim().isEmpty())
-        {
-            return -1;
-        }
-
-        String trimmed = itemName.trim();
-        String normalizedName = trimmed.toLowerCase(Locale.ROOT);
-        if ("coins".equals(normalizedName) || "coin".equals(normalizedName))
-        {
-            return ItemID.COINS;
-        }
-
-        Integer cached = itemIdCache.get(normalizedName);
-        if (cached != null && cached > 0)
-        {
-            return cached;
-        }
-
-        int itemId = Rs2ItemManager.getItemIdByName(trimmed, false);
-        if (itemId <= 0)
-        {
-            try
-            {
-                itemId = Microbot.getRs2ItemManager().getItemId(trimmed);
-            }
-            catch (Exception ignored)
-            {
-                itemId = -1;
-            }
-        }
-
-        if (itemId > 0)
-        {
-            itemIdCache.put(normalizedName, itemId);
-        }
-        return itemId;
+        if (itemName == null || itemName.trim().isEmpty()) return -1;
+        String trimmed = itemName.trim(), normalized = trimmed.toLowerCase(Locale.ROOT);
+        if ("coins".equals(normalized) || "coin".equals(normalized)) return ItemID.COINS;
+        Integer cached = itemIdCache.get(normalized);
+        if (cached != null && cached > 0) return cached;
+        int id = Rs2ItemManager.getItemIdByName(trimmed, false);
+        if (id <= 0) try { id = Microbot.getRs2ItemManager().getItemId(trimmed); } catch (Exception ignored) { id = -1; }
+        if (id > 0) itemIdCache.put(normalized, id);
+        return id;
     }
 
     public ProfitQuote quote(FactoryRecipe recipe, F2PProcessingFactoryConfig config)
     {
         try
         {
-            boolean membersAccount = isMembersAccount();
-            if (recipe.isMembersOnly() && !membersAccount)
-            {
-                return ProfitQuote.invalid(recipe, "Requires a members account");
-            }
-
-            Map<String, Integer> inputPrices = new LinkedHashMap<>();
-            long totalInputCost = 0;
-
+            boolean member = isMembersAccount();
+            if (recipe.isMembersOnly() && !member) return ProfitQuote.invalid(recipe, "Requires a members account");
+            Map<String,Integer> inputPrices = new LinkedHashMap<>();
+            long inputCost = 0;
             for (RecipeInput input : recipe.getInputs())
             {
-                int itemId = getItemId(input.getItemName());
-                if (itemId <= 0)
-                {
-                    return ProfitQuote.invalid(recipe, "Could not resolve " + input.getItemName());
-                }
-                if (!membersAccount && isMembersOnly(itemId))
-                {
-                    return ProfitQuote.invalid(recipe, input.getItemName() + " is members-only");
-                }
-                if (!input.isConsumed())
-                {
-                    continue;
-                }
-
-                int buyPrice = getBuyOfferPrice(itemId, config.buyMarkupPercent(), 0);
-                if (buyPrice <= 0)
-                {
-                    return ProfitQuote.invalid(recipe, "No buy price for " + input.getItemName());
-                }
-                inputPrices.put(input.getItemName(), buyPrice);
-                totalInputCost += input.getEstimatedCostPerOutput(buyPrice);
+                int id = getItemId(input.getItemName());
+                if (id <= 0) return ProfitQuote.invalid(recipe, "Could not resolve " + input.getItemName());
+                if (!member && isMembersOnly(id)) return ProfitQuote.invalid(recipe, input.getItemName() + " is members-only");
+                if (!input.isConsumed()) continue;
+                int price = getBuyOfferPrice(id, config.buyMarkupPercent(), 0);
+                if (price <= 0) return ProfitQuote.invalid(recipe, "No current instant-buy price for " + input.getItemName());
+                inputPrices.put(input.getItemName(), price);
+                inputCost += input.getEstimatedCostPerOutput(price);
             }
 
             int outputId = getItemId(recipe.getOutputItemName());
-            if (outputId <= 0)
-            {
-                return ProfitQuote.invalid(recipe, "Could not resolve " + recipe.getOutputItemName());
-            }
-            if (!membersAccount && isMembersOnly(outputId))
-            {
-                return ProfitQuote.invalid(recipe, recipe.getOutputItemName() + " is members-only");
-            }
-
+            if (outputId <= 0) return ProfitQuote.invalid(recipe, "Could not resolve " + recipe.getOutputItemName());
+            if (!member && isMembersOnly(outputId)) return ProfitQuote.invalid(recipe, recipe.getOutputItemName() + " is members-only");
             int outputPrice = getSellOfferPrice(outputId, config.sellDiscountPercent(), 0);
-            if (outputPrice <= 0)
+            if (outputPrice <= 0) return ProfitQuote.invalid(recipe, "No current instant-sell price for " + recipe.getOutputItemName());
+            long revenue = outputPrice, tax = calculateEstimatedTax(outputPrice, config.geTaxPercent());
+
+            for (String name : recipe.getSecondaryOutputItemNames())
             {
-                return ProfitQuote.invalid(recipe, "No sell price for " + recipe.getOutputItemName());
+                int id = getItemId(name);
+                if (id <= 0) return ProfitQuote.invalid(recipe, "Could not resolve " + name);
+                if (!member && isMembersOnly(id)) return ProfitQuote.invalid(recipe, name + " is members-only");
+                int price = getSellOfferPrice(id, config.sellDiscountPercent(), 0);
+                if (price <= 0) return ProfitQuote.invalid(recipe, "No current instant-sell price for " + name);
+                revenue += price;
+                tax += calculateEstimatedTax(price, config.geTaxPercent());
             }
 
-            long totalOutputRevenue = outputPrice;
-            long totalTax = calculateEstimatedTax(outputPrice, config.geTaxPercent());
-
-            for (String secondaryOutputName : recipe.getSecondaryOutputItemNames())
-            {
-                int secondaryOutputId = getItemId(secondaryOutputName);
-                if (secondaryOutputId <= 0)
-                {
-                    return ProfitQuote.invalid(recipe, "Could not resolve " + secondaryOutputName);
-                }
-                if (!membersAccount && isMembersOnly(secondaryOutputId))
-                {
-                    return ProfitQuote.invalid(recipe, secondaryOutputName + " is members-only");
-                }
-
-                int secondaryPrice = getSellOfferPrice(secondaryOutputId, config.sellDiscountPercent(), 0);
-                if (secondaryPrice <= 0)
-                {
-                    return ProfitQuote.invalid(recipe, "No sell price for " + secondaryOutputName);
-                }
-                totalOutputRevenue += secondaryPrice;
-                totalTax += calculateEstimatedTax(secondaryPrice, config.geTaxPercent());
-            }
-
-            int inputCost = totalInputCost > Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) totalInputCost;
-            int tax = totalTax > Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) totalTax;
-            long profitLong = totalOutputRevenue - totalTax - inputCost;
-            int profit = profitLong > Integer.MAX_VALUE
-                ? Integer.MAX_VALUE
-                : profitLong < Integer.MIN_VALUE ? Integer.MIN_VALUE : (int) profitLong;
-            double roi = inputCost <= 0 ? 0.0 : (profit * 100.0) / inputCost;
-
-            return ProfitQuote.valid(recipe, inputPrices, outputPrice, inputCost, tax, profit, roi);
+            int cost = clampInt(inputCost), estimatedTax = clampInt(tax);
+            int profit = clampInt(revenue - tax - cost);
+            double roi = cost <= 0 ? 0.0 : profit * 100.0 / cost;
+            return ProfitQuote.valid(recipe, inputPrices, outputPrice, cost, estimatedTax, profit, roi);
         }
         catch (Exception ex)
         {
@@ -156,15 +85,8 @@ public final class FactoryPriceService
 
     private boolean isMembersAccount()
     {
-        try
-        {
-            return Rs2Player.isMember();
-        }
-        catch (Exception ex)
-        {
-            log.debug("Unable to resolve account membership: {}", ex.getMessage());
-            return false;
-        }
+        try { return Rs2Player.isMember(); }
+        catch (Exception ex) { log.debug("Unable to resolve account membership: {}", ex.getMessage()); return false; }
     }
 
     private boolean isMembersOnly(int itemId)
@@ -175,53 +97,18 @@ public final class FactoryPriceService
 
     public int getBuyOfferPrice(int itemId, int markupPercent, int retryAttempt)
     {
-        double basePercentage = 1.0 + (Math.max(0, markupPercent) / 100.0);
-        try
-        {
-            int adaptivePrice = Rs2GrandExchange.getAdaptiveBuyPrice(itemId, basePercentage, retryAttempt);
-            if (adaptivePrice > 0)
-            {
-                return adaptivePrice;
-            }
-        }
-        catch (Exception ignored)
-        {
-        }
-
-        int marketPrice = getInstantPrice(itemId, true);
-        if (marketPrice <= 0)
-        {
-            return marketPrice;
-        }
-        double retryMultiplier = 1.0 + ((Math.max(0, markupPercent) + (retryAttempt * 2.0)) / 100.0);
-        return Math.max(1, (int) Math.ceil(marketPrice * retryMultiplier));
+        int market = getInstantPrice(itemId, true);
+        if (market <= 0) return -1;
+        double adjustment = Math.max(0, markupPercent) + Math.max(0, retryAttempt) * RETRY_STEP_PERCENT;
+        return Math.max(1, (int)Math.ceil(market * (1.0 + adjustment / 100.0)));
     }
 
     public int getSellOfferPrice(int itemId, int discountPercent, int retryAttempt)
     {
-        double basePercentage = Math.max(0.01, 1.0 - (Math.max(0, discountPercent) / 100.0));
-        try
-        {
-            int adaptivePrice = Rs2GrandExchange.getAdaptiveSellPrice(itemId, basePercentage, retryAttempt);
-            if (adaptivePrice > 0)
-            {
-                return adaptivePrice;
-            }
-        }
-        catch (Exception ignored)
-        {
-        }
-
-        int marketPrice = getInstantPrice(itemId, false);
-        if (marketPrice <= 0)
-        {
-            return marketPrice;
-        }
-        double retryMultiplier = Math.max(
-            0.01,
-            1.0 - ((Math.max(0, discountPercent) + (retryAttempt * 2.0)) / 100.0)
-        );
-        return Math.max(1, (int) Math.floor(marketPrice * retryMultiplier));
+        int market = getInstantPrice(itemId, false);
+        if (market <= 0) return -1;
+        double adjustment = Math.max(0, discountPercent) + Math.max(0, retryAttempt) * RETRY_STEP_PERCENT;
+        return Math.max(1, (int)Math.floor(market * Math.max(0.01, 1.0 - adjustment / 100.0)));
     }
 
     public int getTradeLimit(int itemId, int unknownLimitFallback)
@@ -229,15 +116,9 @@ public final class FactoryPriceService
         try
         {
             ItemMappingData mapping = Rs2GrandExchange.getItemMappingData(itemId);
-            if (mapping != null && mapping.tradeLimitPer4Hours > 0)
-            {
-                return mapping.tradeLimitPer4Hours;
-            }
+            if (mapping != null && mapping.tradeLimitPer4Hours > 0) return mapping.tradeLimitPer4Hours;
         }
-        catch (Exception ex)
-        {
-            log.debug("Unable to load trade limit for item {}: {}", itemId, ex.getMessage());
-        }
+        catch (Exception ex) { log.debug("Unable to load trade limit for item {}: {}", itemId, ex.getMessage()); }
         return Math.max(1, unknownLimitFallback);
     }
 
@@ -246,24 +127,20 @@ public final class FactoryPriceService
         try
         {
             WikiPrice price = Rs2GrandExchange.getRealTimePrices(itemId);
-            int livePrice = price == null ? 0 : buy ? price.buyPrice : price.sellPrice;
-            if (livePrice > 0)
-            {
-                return livePrice;
-            }
+            int value = price == null ? -1 : buy ? price.buyPrice : price.sellPrice;
+            if (value > 0) return value;
         }
-        catch (Exception ignored)
-        {
-        }
-        return Microbot.getRs2ItemManager().getGEPrice(itemId);
+        catch (Exception ex) { log.debug("Current GE price unavailable for item {}: {}", itemId, ex.getMessage()); }
+        return -1;
+    }
+
+    private static int clampInt(long value)
+    {
+        return value > Integer.MAX_VALUE ? Integer.MAX_VALUE : value < Integer.MIN_VALUE ? Integer.MIN_VALUE : (int)value;
     }
 
     static int calculateEstimatedTax(int salePrice, int taxPercent)
     {
-        if (salePrice <= 0 || taxPercent <= 0)
-        {
-            return 0;
-        }
-        return (int) Math.floor(salePrice * (taxPercent / 100.0));
+        return salePrice <= 0 || taxPercent <= 0 ? 0 : (int)Math.floor(salePrice * (taxPercent / 100.0));
     }
 }
