@@ -1,13 +1,12 @@
 package net.runelite.client.plugins.microbot.f2pprocessingfactory;
 
+import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.gameval.ItemID;
 import net.runelite.client.plugins.microbot.Microbot;
-import net.runelite.client.plugins.microbot.util.grandexchange.Rs2GrandExchange;
-import net.runelite.client.plugins.microbot.util.grandexchange.models.ItemMappingData;
 import net.runelite.client.plugins.microbot.util.item.Rs2ItemManager;
 import net.runelite.client.plugins.microbot.util.player.Rs2Player;
 
@@ -28,13 +27,13 @@ public final class FactoryPriceService
 {
     private static final double RETRY_STEP_PERCENT = 2.0;
     private static final String WIKI_LATEST_URL = "https://prices.runescape.wiki/api/v1/osrs/latest";
-    private static final long PRICE_REFRESH_MS = 60_000L;
-    private static final long PRICE_FAILURE_RETRY_MS = 10_000L;
-    private static final long PRICE_MAX_STALE_MS = 120_000L;
+    private static final String WIKI_MAPPING_URL = "https://prices.runescape.wiki/api/v1/osrs/mapping";
+    private static final long PRICE_REFRESH_MS = 60_000L, PRICE_FAILURE_RETRY_MS = 10_000L, PRICE_MAX_STALE_MS = 120_000L;
+    private static final long MAPPING_REFRESH_MS = 21_600_000L, MAPPING_FAILURE_RETRY_MS = 60_000L;
     private static final HttpClient HTTP = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(3)).build();
     private static volatile Map<Integer, MarketPrice> marketSnapshot = Collections.emptyMap();
-    private static volatile long nextMarketRefreshAt;
-    private static volatile long lastMarketSuccessAt;
+    private static volatile Map<Integer, Integer> tradeLimitSnapshot = Collections.emptyMap();
+    private static volatile long nextMarketRefreshAt, lastMarketSuccessAt, nextMappingRefreshAt;
 
     private final Map<String, Integer> itemIdCache = new ConcurrentHashMap<>();
 
@@ -55,15 +54,13 @@ public final class FactoryPriceService
     {
         try
         {
-            boolean member = isMembersAccount();
-            if (recipe.isMembersOnly() && !member) return ProfitQuote.invalid(recipe, "Requires a members account");
+            if (recipe.isMembersOnly() && !isMembersAccount()) return ProfitQuote.invalid(recipe, "Requires a members account");
             Map<String,Integer> inputPrices = new LinkedHashMap<>();
             long inputCost = 0;
             for (RecipeInput input : recipe.getInputs())
             {
                 int id = getItemId(input.getItemName());
                 if (id <= 0) return ProfitQuote.invalid(recipe, "Could not resolve " + input.getItemName());
-                if (!member && isMembersOnly(id)) return ProfitQuote.invalid(recipe, input.getItemName() + " is members-only");
                 if (!input.isConsumed()) continue;
                 int price = getBuyOfferPrice(id, config.buyMarkupPercent(), 0);
                 if (price <= 0) return ProfitQuote.invalid(recipe, "No current instant-buy price for " + input.getItemName());
@@ -73,7 +70,6 @@ public final class FactoryPriceService
 
             int outputId = getItemId(recipe.getOutputItemName());
             if (outputId <= 0) return ProfitQuote.invalid(recipe, "Could not resolve " + recipe.getOutputItemName());
-            if (!member && isMembersOnly(outputId)) return ProfitQuote.invalid(recipe, recipe.getOutputItemName() + " is members-only");
             int outputPrice = getSellOfferPrice(outputId, config.sellDiscountPercent(), 0);
             if (outputPrice <= 0) return ProfitQuote.invalid(recipe, "No current instant-sell price for " + recipe.getOutputItemName());
             long revenue = outputPrice, tax = calculateEstimatedTax(outputPrice, config.geTaxPercent());
@@ -82,7 +78,6 @@ public final class FactoryPriceService
             {
                 int id = getItemId(name);
                 if (id <= 0) return ProfitQuote.invalid(recipe, "Could not resolve " + name);
-                if (!member && isMembersOnly(id)) return ProfitQuote.invalid(recipe, name + " is members-only");
                 int price = getSellOfferPrice(id, config.sellDiscountPercent(), 0);
                 if (price <= 0) return ProfitQuote.invalid(recipe, "No current instant-sell price for " + name);
                 revenue += price;
@@ -107,12 +102,6 @@ public final class FactoryPriceService
         catch (Exception ex) { log.debug("Unable to resolve account membership: {}", ex.getMessage()); return false; }
     }
 
-    private boolean isMembersOnly(int itemId)
-    {
-        ItemMappingData mapping = Rs2GrandExchange.getItemMappingData(itemId);
-        return mapping != null && mapping.members;
-    }
-
     public int getBuyOfferPrice(int itemId, int markupPercent, int retryAttempt)
     {
         int market = getInstantPrice(itemId, true);
@@ -131,13 +120,9 @@ public final class FactoryPriceService
 
     public int getTradeLimit(int itemId, int unknownLimitFallback)
     {
-        try
-        {
-            ItemMappingData mapping = Rs2GrandExchange.getItemMappingData(itemId);
-            if (mapping != null && mapping.tradeLimitPer4Hours > 0) return mapping.tradeLimitPer4Hours;
-        }
-        catch (Exception ex) { log.debug("Unable to load trade limit for item {}: {}", itemId, ex.getMessage()); }
-        return Math.max(1, unknownLimitFallback);
+        long now = System.currentTimeMillis();
+        if (now >= nextMappingRefreshAt) refreshTradeLimits(now);
+        return Math.max(1, tradeLimitSnapshot.getOrDefault(itemId, unknownLimitFallback));
     }
 
     private int getInstantPrice(int itemId, boolean buy)
@@ -160,17 +145,8 @@ public final class FactoryPriceService
         nextMarketRefreshAt = now + PRICE_FAILURE_RETRY_MS;
         try
         {
-            HttpRequest request = HttpRequest.newBuilder(URI.create(WIKI_LATEST_URL))
-                .timeout(Duration.ofSeconds(4))
-                .header("User-Agent", "KSP-AIO-Factory/1.0.47")
-                .GET()
-                .build();
-            HttpResponse<String> response = HTTP.send(request, HttpResponse.BodyHandlers.ofString());
-            if (response.statusCode() != 200) throw new IllegalStateException("HTTP " + response.statusCode());
-            JsonObject root = new JsonParser().parse(response.body()).getAsJsonObject();
-            JsonObject data = root.getAsJsonObject("data");
+            JsonObject data = requestJson(WIKI_LATEST_URL, 4).getAsJsonObject().getAsJsonObject("data");
             if (data == null || data.entrySet().isEmpty()) throw new IllegalStateException("empty Wiki price response");
-
             Map<Integer,MarketPrice> fresh = new HashMap<>();
             for (Map.Entry<String,JsonElement> entry : data.entrySet())
             {
@@ -183,7 +159,6 @@ public final class FactoryPriceService
                 catch (Exception ignored) { }
             }
             if (fresh.isEmpty()) throw new IllegalStateException("no two-sided Wiki prices");
-
             marketSnapshot = Collections.unmodifiableMap(fresh);
             lastMarketSuccessAt = System.currentTimeMillis();
             nextMarketRefreshAt = lastMarketSuccessAt + PRICE_REFRESH_MS;
@@ -193,6 +168,46 @@ public final class FactoryPriceService
         {
             log.warn("Factory live-price refresh failed: {}; retrying in {}s", ex.getMessage(), PRICE_FAILURE_RETRY_MS / 1000L);
         }
+    }
+
+    private static synchronized void refreshTradeLimits(long now)
+    {
+        if (now < nextMappingRefreshAt) return;
+        nextMappingRefreshAt = now + MAPPING_FAILURE_RETRY_MS;
+        try
+        {
+            JsonArray mapping = requestJson(WIKI_MAPPING_URL, 5).getAsJsonArray();
+            Map<Integer,Integer> fresh = new HashMap<>();
+            for (JsonElement element : mapping)
+            {
+                try
+                {
+                    JsonObject item = element.getAsJsonObject();
+                    int id = positive(item, "id"), limit = positive(item, "limit");
+                    if (id > 0 && limit > 0) fresh.put(id, limit);
+                }
+                catch (Exception ignored) { }
+            }
+            if (fresh.isEmpty()) throw new IllegalStateException("empty Wiki mapping response");
+            tradeLimitSnapshot = Collections.unmodifiableMap(fresh);
+            nextMappingRefreshAt = System.currentTimeMillis() + MAPPING_REFRESH_MS;
+            log.debug("Factory trade-limit snapshot refreshed: {} item(s)", fresh.size());
+        }
+        catch (Exception ex)
+        {
+            log.warn("Factory trade-limit refresh failed: {}; using configured unknown-limit fallback", ex.getMessage());
+        }
+    }
+
+    private static JsonElement requestJson(String url, int timeoutSeconds) throws Exception
+    {
+        HttpRequest request = HttpRequest.newBuilder(URI.create(url))
+            .timeout(Duration.ofSeconds(timeoutSeconds))
+            .header("User-Agent", "KSP-AIO-Factory/1.0.47 (KSPOG/ksppluginsrelease)")
+            .GET().build();
+        HttpResponse<String> response = HTTP.send(request, HttpResponse.BodyHandlers.ofString());
+        if (response.statusCode() != 200) throw new IllegalStateException("HTTP " + response.statusCode());
+        return new JsonParser().parse(response.body());
     }
 
     private static int positive(JsonObject object, String key)
