@@ -149,7 +149,7 @@ final class KspBankOrganizerItemOverlay extends WidgetItemOverlay
             if (definition == null) return null;
 
             BankSnapshot.BankStack stack = new BankSnapshot.BankStack(
-                itemId, definition.getName(), quantity, 0, 0, 0,
+                itemId, definition.getName(), quantity, 0, 0, 0, 0,
                 definition.isStackable(), definition.isTradeable(), definition.isTradeable(),
                 definition.getInventoryActions() != null);
             return categorizer.categorize(stack);
