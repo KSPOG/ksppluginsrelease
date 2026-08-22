@@ -1,4 +1,4 @@
-KSP Karamja Fishing v0.1.0
+KSP Karamja Fishing v0.1.1
 
 Modes:
 - Tuna & Swordfish (Harpoon)
@@ -20,3 +20,5 @@ without enough fare for the 30-coin return journey.
 
 The destination-name options are included because Microbot's RuneLite shortest-path ship data currently identifies
 Captain Tobias with "Musa Point" and Customs officer with "Port Sarim".
+
+0.1.1: Removed unsupported Lombok @Getter/@RequiredArgsConstructor for KSP runtime source-loader compatibility.

@@ -1,7 +1,5 @@
 package net.runelite.client.plugins.microbot.kspkaramjafishing;
 
-import lombok.Getter;
-import lombok.RequiredArgsConstructor;
 import net.runelite.client.config.Config;
 import net.runelite.client.config.ConfigGroup;
 import net.runelite.client.config.ConfigItem;
@@ -9,8 +7,6 @@ import net.runelite.client.config.ConfigItem;
 @ConfigGroup("kspKaramjaFishing")
 public interface KspKaramjaFishingConfig extends Config
 {
-    @Getter
-    @RequiredArgsConstructor
     enum Mode
     {
         TUNA_SWORDFISH("Tuna & Swordfish", "Harpoon"),
@@ -18,6 +14,22 @@ public interface KspKaramjaFishingConfig extends Config
 
         private final String name;
         private final String action;
+
+        Mode(String name, String action)
+        {
+            this.name = name;
+            this.action = action;
+        }
+
+        public String getName()
+        {
+            return name;
+        }
+
+        public String getAction()
+        {
+            return action;
+        }
 
         @Override
         public String toString()
