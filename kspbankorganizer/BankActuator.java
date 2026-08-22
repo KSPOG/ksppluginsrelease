@@ -31,18 +31,18 @@ final class BankActuator {
     boolean ensureBankOpen(){
         if(bankUiOpen())return Global.sleepUntil(this::bankReady,4000);
         if(openNearbyBanker())return Global.sleepUntil(this::bankReady,5000);
-        GameObject booth=Rs2GameObject.findBank(SEARCH_RADIUS);
-        if(booth!=null){
-            if(!near(booth,INTERACT_DISTANCE)&&(!Rs2Bank.walkToBank()||!Global.sleepUntil(()->bankUiOpen()||near(booth,INTERACT_DISTANCE),WALK_TIMEOUT_MS)))return false;
+        GameObject localBooth=Rs2GameObject.findBank(SEARCH_RADIUS);
+        if(localBooth!=null){
+            if(!near(localBooth,INTERACT_DISTANCE)&&(!Rs2Bank.walkToBank()||!Global.sleepUntil(()->bankUiOpen()||near(localBooth,INTERACT_DISTANCE),WALK_TIMEOUT_MS)))return false;
             if(bankUiOpen())return Global.sleepUntil(this::bankReady,OPEN_VERIFY_MS);
-            if(Rs2Bank.openBank(booth)&&Global.sleepUntil(this::bankReady,OPEN_VERIFY_MS))return true;
-            if(bankReady()||!near(booth,INTERACT_DISTANCE))return bankReady();
-            return (openNearbyBanker()||Rs2Bank.openBank(booth))&&Global.sleepUntil(this::bankReady,5000);
+            if(Rs2Bank.openBank(localBooth)&&Global.sleepUntil(this::bankReady,OPEN_VERIFY_MS))return true;
+            if(bankReady()||!near(localBooth,INTERACT_DISTANCE))return bankReady();
+            return (openNearbyBanker()||Rs2Bank.openBank(localBooth))&&Global.sleepUntil(this::bankReady,5000);
         }
         if(!Rs2Bank.walkToBank()||!Global.sleepUntil(()->bankUiOpen()||hasNearbyBanker()||localBoothAvailable(),WALK_TIMEOUT_MS))return false;
         if(bankUiOpen())return Global.sleepUntil(this::bankReady,OPEN_VERIFY_MS);
-        booth=Rs2GameObject.findBank(SEARCH_RADIUS);
-        boolean started=openNearbyBanker()||(booth!=null&&near(booth,INTERACT_DISTANCE)&&Rs2Bank.openBank(booth));
+        GameObject reachableBooth=Rs2GameObject.findBank(SEARCH_RADIUS);
+        boolean started=openNearbyBanker()||(reachableBooth!=null&&near(reachableBooth,INTERACT_DISTANCE)&&Rs2Bank.openBank(reachableBooth));
         if(!started&&!bankUiOpen())return false;
         if(Global.sleepUntil(this::bankReady,OPEN_VERIFY_MS))return true;
         if(waitForBankOrApproach())return true;
