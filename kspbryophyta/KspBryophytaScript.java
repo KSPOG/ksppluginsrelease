@@ -985,6 +985,9 @@ public class KspBryophytaScript extends Script {
         clearLairEntryPending();
         entryFailures = 0;
         lastWalkIssuedAt = 0L;
+        // Sewer navigation must never survive the instance transition. Range movement inside
+        // the lair uses direct canvas walking and should not compete with the old webwalker.
+        Rs2Walker.clearWalkingRoute("KSP Bryophyta: entered lair");
         setState(BryophytaState.WAITING_FOR_RESPAWN, "Bryophyta lair entered - locating boss...");
     }
 
@@ -1212,17 +1215,42 @@ public class KspBryophytaScript extends Script {
     }
 
     private boolean maintainRange(Rs2NpcModel bryophyta) {
-        WorldPoint player = Rs2Player.getWorldLocation();
-        WorldArea bossArea = bryophyta == null ? null
-                : Microbot.getClientThread().runOnClientThreadOptional(bryophyta::getWorldArea).orElse(null);
-        if (player == null || bossArea == null) {
+        if (bryophyta == null || bryophyta.getNpc() == null) {
             return false;
         }
 
+        // Both areas must come from the same active WorldView. Rs2Player#getWorldLocation()
+        // translates instance coordinates, while Actor#getWorldArea() remains in scene space;
+        // mixing them produced bogus ~998-tile distances inside Bryophyta's lair.
+        WorldArea[] areas = Microbot.getClientThread().runOnClientThreadOptional(() -> {
+            if (Microbot.getClient() == null || Microbot.getClient().getLocalPlayer() == null) {
+                return null;
+            }
+            net.runelite.api.Player player = Microbot.getClient().getLocalPlayer();
+            WorldView playerView = player.getWorldView();
+            WorldView bossView = bryophyta.getNpc().getWorldView();
+            if (playerView == null || bossView == null || playerView.getId() != bossView.getId()) {
+                return null;
+            }
+            return new WorldArea[] { player.getWorldArea(), bryophyta.getNpc().getWorldArea() };
+        }).orElse(null);
+        if (areas == null || areas[0] == null || areas[1] == null) {
+            return false;
+        }
+
+        WorldArea playerArea = areas[0];
+        WorldArea bossArea = areas[1];
+        WorldPoint player = new WorldPoint(playerArea.getX(), playerArea.getY(), playerArea.getPlane());
+        WorldView worldView = bryophyta.getWorldView();
         int targetDistance = config.minimumRangeDistance();
-        int currentDistance = bossArea.distanceTo(player);
+        int currentDistance = bossArea.distanceTo(playerArea);
+
         if (currentDistance == targetDistance) {
             return false;
+        }
+        if (currentDistance == Integer.MAX_VALUE || currentDistance > 30) {
+            setStatus("Waiting for Bryophyta combat position...");
+            return true;
         }
         if (Rs2Player.isMoving()) {
             setStatus("Adjusting distance to Bryophyta: " + currentDistance + " -> " + targetDistance + " tiles...");
@@ -1234,21 +1262,19 @@ public class KspBryophytaScript extends Script {
             return true;
         }
 
-        WorldPoint target = findBestRangeTile(player, bossArea, targetDistance);
+        WorldPoint target = findBestRangeTile(player, bossArea, worldView, targetDistance);
         if (target == null) {
             setStatus("Could not find a walkable " + targetDistance + "-tile position around Bryophyta.");
             return true;
         }
 
         lastRangeMoveAt = now;
-        Rs2Walker.clearWalkingRoute("KSP Bryophyta: enforcing combat distance");
         setStatus("Moving from " + currentDistance + " to " + targetDistance + " tiles from Bryophyta...");
         Rs2Walker.walkFastCanvas(target);
         return true;
     }
-    private WorldPoint findBestRangeTile(WorldPoint player, WorldArea bossArea, int distance) {
-        WorldView worldView = Microbot.getClientThread().runOnClientThreadOptional(() ->
-                Microbot.getClient() == null ? null : Microbot.getClient().getTopLevelWorldView()).orElse(null);
+
+    private WorldPoint findBestRangeTile(WorldPoint player, WorldArea bossArea, WorldView worldView, int distance) {
         int minX = bossArea.getX() - distance;
         int maxX = bossArea.getX() + bossArea.getWidth() - 1 + distance;
         int minY = bossArea.getY() - distance;
