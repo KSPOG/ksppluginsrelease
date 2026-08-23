@@ -30,7 +30,7 @@ import java.awt.image.BufferedImage;
 )
 public class KspBryophytaPlugin extends Plugin
 {
-    public static final String VERSION = "0.0.8";
+    public static final String VERSION = "0.0.9";
 
     @Inject
     private KspBryophytaConfig config;

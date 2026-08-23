@@ -39,6 +39,8 @@ public class KspBryophytaScript extends Script
     private static final int BRYOPHYTA_ROCK_PILE_OBJECT_ID = 32535;
     private static final int VARROCK_MANHOLE_CLOSED_OBJECT_ID = 881;
     private static final int VARROCK_MANHOLE_OPEN_OBJECT_ID = 882;
+    // Confirmed in-client with Object Examiner: Altar @ 3253,3486,0.
+    private static final int VARROCK_ALTAR_OBJECT_ID = 14860;
 
     private static final int LOOP_DELAY_MS = 400;
     private static final long BOSS_MISSING_CONFIRM_MS = 1200L;
@@ -47,7 +49,8 @@ public class KspBryophytaScript extends Script
     private static final long BOSS_ATTACK_RETRY_MS = 2200L;
     private static final long ENTRY_RETRY_MS = 1800L;
     private static final long CHEST_RETRY_MS = 1800L;
-    private static final long ALTAR_RETRY_MS = 650L;
+    private static final long ALTAR_RETRY_MS = 850L;
+    private static final long ALTAR_INTERACTION_TIMEOUT_MS = 6_000L;
     private static final long MANHOLE_RETRY_MS = 900L;
     private static final long MANHOLE_TRANSITION_TIMEOUT_MS = 8_000L;
     private static final long WALK_REISSUE_MS = 2800L;
@@ -68,7 +71,9 @@ public class KspBryophytaScript extends Script
     // WorldArea takes south-west + width/height, so the inclusive bounds are x=3252..3259, y=3471..3488.
     private static final WorldArea VARROCK_ALTAR_AREA =
             new WorldArea(new WorldPoint(3252, 3471, 0), 8, 18);
-    private static final WorldPoint VARROCK_ALTAR_TARGET = new WorldPoint(3255, 3480, 0);
+    private static final WorldPoint VARROCK_ALTAR = new WorldPoint(3253, 3486, 0);
+    // Walk to a tile beside the altar; never target the scenery tile itself.
+    private static final WorldPoint VARROCK_ALTAR_APPROACH = new WorldPoint(3254, 3486, 0);
 
     private KspBryophytaConfig config;
     private final BryophytaEquipmentSettings equipmentSettings;
@@ -99,6 +104,8 @@ public class KspBryophytaScript extends Script
     private long lastEntryAttemptAt;
     private long lastChestAttemptAt;
     private long lastAltarAttemptAt;
+    private boolean altarInteractionPending;
+    private long altarInteractionStartedAt;
     private long lastManholeAttemptAt;
     private boolean manholeDescentPending;
     private long manholeDescentStartedAt;
@@ -189,6 +196,8 @@ public class KspBryophytaScript extends Script
         lastEntryAttemptAt = 0L;
         lastChestAttemptAt = 0L;
         lastAltarAttemptAt = 0L;
+        altarInteractionPending = false;
+        altarInteractionStartedAt = 0L;
         lastManholeAttemptAt = 0L;
         manholeDescentPending = false;
         manholeDescentStartedAt = 0L;
@@ -475,6 +484,8 @@ public class KspBryophytaScript extends Script
         killRegisteredForCycle = false;
         restockRequired = true;
         prayerRestoredAfterBank = false;
+        altarInteractionPending = false;
+        altarInteractionStartedAt = 0L;
         loadoutVerified = false;
         setState(BryophytaState.BANKING, "Varrock reached - heading to East bank.");
     }
@@ -551,6 +562,8 @@ public class KspBryophytaScript extends Script
 
         restockRequired = false;
         prayerRestoredAfterBank = false;
+        altarInteractionPending = false;
+        altarInteractionStartedAt = 0L;
         loadoutVerified = true;
         altarFailures = 0;
         setState(BryophytaState.RESTORING_PRAYER, "Restocked - restoring Prayer at Varrock altar.");
@@ -791,7 +804,10 @@ public class KspBryophytaScript extends Script
         if (currentPrayer >= realPrayer)
         {
             prayerRestoredAfterBank = true;
+            altarInteractionPending = false;
+            altarInteractionStartedAt = 0L;
             altarFailures = 0;
+            lastWalkIssuedAt = 0L;
             setState(BryophytaState.WALKING_TO_SEWERS, "Prayer full - heading to Varrock Sewers.");
             return;
         }
@@ -804,58 +820,91 @@ public class KspBryophytaScript extends Script
 
         setState(BryophytaState.RESTORING_PRAYER, "Restoring Prayer at Varrock altar...");
 
+        // Use the exact altar observed in-client instead of relying on a generic name search.
+        // This avoids selecting another altar object/transform and gives us a deterministic target.
         boolean altarVisible = Microbot.getRs2TileObjectCache()
                 .query()
-                .withName("Altar")
-                .where(object -> object.getWorldLocation() != null
-                        && VARROCK_ALTAR_AREA.contains(object.getWorldLocation()))
+                .withId(VARROCK_ALTAR_OBJECT_ID)
+                .within(VARROCK_ALTAR, 1)
                 .nearestOnClientThread() != null;
 
-        // As soon as the altar is loaded in the scene, interact with it directly instead
-        // of waiting to reach an arbitrary point inside the church first.
         if (!altarVisible)
         {
-            walkToControlled(VARROCK_ALTAR_TARGET, 3, "Walking to Varrock altar...");
+            altarInteractionPending = false;
+            altarInteractionStartedAt = 0L;
+            walkToControlled(VARROCK_ALTAR_APPROACH, 2, "Walking to Varrock altar...");
             return;
         }
 
         long now = System.currentTimeMillis();
-        if (now - lastAltarAttemptAt < ALTAR_RETRY_MS || Rs2Player.isMoving() || Rs2Player.isAnimating())
+
+        // Once Pray-at has been accepted, do not click the altar again while the player is
+        // walking to it / performing the interaction. The normal loop watches Prayer points.
+        if (altarInteractionPending)
+        {
+            if (now - altarInteractionStartedAt < ALTAR_INTERACTION_TIMEOUT_MS)
+            {
+                status = player.distanceTo(VARROCK_ALTAR) > 2
+                        ? "Altar clicked - walking to Pray-at..."
+                        : "Altar clicked - waiting for Prayer restore...";
+                return;
+            }
+
+            // No Prayer change within the timeout: permit one controlled retry.
+            altarInteractionPending = false;
+            altarInteractionStartedAt = 0L;
+        }
+
+        if (now - lastAltarAttemptAt < ALTAR_RETRY_MS || Rs2Player.isAnimating())
         {
             return;
         }
         lastAltarAttemptAt = now;
 
+        // Do NOT block this interaction merely because the walker is moving. Clicking Pray-at
+        // while the altar is visible intentionally replaces the generic walking destination
+        // with the exact scenery interaction.
         boolean prayed = Microbot.getRs2TileObjectCache()
                 .query()
-                .withName("Altar")
-                .where(object -> object.getWorldLocation() != null
-                        && VARROCK_ALTAR_AREA.contains(object.getWorldLocation()))
+                .withId(VARROCK_ALTAR_OBJECT_ID)
+                .within(VARROCK_ALTAR, 1)
                 .interact("Pray-at");
 
         if (!prayed)
         {
             prayed = Microbot.getRs2TileObjectCache()
                     .query()
+                    .withId(VARROCK_ALTAR_OBJECT_ID)
+                    .within(VARROCK_ALTAR, 1)
+                    .interact("Pray");
+        }
+
+        // Compatibility fallback: exact location + name, but only after the confirmed id fails.
+        if (!prayed)
+        {
+            prayed = Microbot.getRs2TileObjectCache()
+                    .query()
                     .withName("Altar")
                     .where(object -> object.getWorldLocation() != null
-                            && VARROCK_ALTAR_AREA.contains(object.getWorldLocation()))
-                    .interact("Pray");
+                            && object.getWorldLocation().equals(VARROCK_ALTAR))
+                    .interact("Pray-at");
         }
 
         if (!prayed)
         {
             altarFailures++;
+            status = "Altar 14860 found but Pray-at was not accepted; retrying...";
             if (altarFailures >= 5)
             {
-                failAndStop("Could not use an altar inside the configured Varrock altar area.");
+                failAndStop("Could not Pray-at altar 14860 at 3253,3486,0 after five attempts.");
             }
             return;
         }
 
-        // Do not block the script for several seconds. The normal 400 ms loop observes
-        // the Prayer level increase and immediately advances to the sewer state.
-        status = "Praying at Varrock altar...";
+        altarInteractionPending = true;
+        altarInteractionStartedAt = now;
+        altarFailures = 0;
+        status = "Clicked altar 14860 - waiting for Prayer restore...";
     }
 
     private void navigateToBryophyta()
