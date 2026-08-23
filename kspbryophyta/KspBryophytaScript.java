@@ -561,7 +561,38 @@ public class KspBryophytaScript extends Script
             return;
         }
 
-        Rs2Bank.closeBank();
+        if (!Rs2Bank.closeBank())
+        {
+            status = "Closing bank before final setup...";
+            return;
+        }
+
+        // Autocast must be configured after the final bank close, when the selected Magic
+        // weapon is equipped and the complete rune stacks are already in the inventory.
+        // Rs2Combat.setAutoCastSpell() is idempotent: it immediately returns true when the
+        // requested spell is already selected, so this only opens the spell selector when needed.
+        if (config.strategy() == BryophytaStrategy.MAGIC_FIRE)
+        {
+            if (!sleepUntil(() -> !Rs2Bank.isOpen(), 2500))
+            {
+                status = "Waiting for bank to close before setting autocast...";
+                return;
+            }
+
+            BryophytaFireSpell spell = config.fireSpell();
+            setState(BryophytaState.EQUIPPING, "Checking " + spell + " autocast after banking...");
+            if (!Rs2Combat.setAutoCastSpell(spell.getCombatSpell(), false))
+            {
+                failAndStop("Could not set " + spell
+                        + " to autocast after banking. Check the selected Magic weapon, standard spellbook, "
+                        + "Magic level and rune supply.");
+                return;
+            }
+
+            autocastFailures = 0;
+            lastAutocastAttemptAt = System.currentTimeMillis();
+            status = spell + " autocast ready after banking.";
+        }
 
         if (!verifyEquipmentLoadout())
         {
