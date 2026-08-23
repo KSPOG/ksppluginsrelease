@@ -265,12 +265,12 @@ public class KspBryophytaScript extends Script {
     }
 
     private void handleOutsideLair() {
-        Rs2Prayer.disableAllPrayers();
-
         WorldPoint player = Rs2Player.getWorldLocation();
         if (player == null) {
             return;
         }
+
+        maintainTravelPrayer();
 
         if (restockRequired) {
             if (isUnderground(player)) {
@@ -310,6 +310,21 @@ public class KspBryophytaScript extends Script {
         }
 
         navigateToBryophyta();
+    }
+
+    /**
+     * Keeps Protect from Magic active once the Bryophyta gate is reached and throughout
+     * its dialogue/instance transition. During ordinary surface/sewer travel prayers stay off.
+     */
+    private void maintainTravelPrayer() {
+        boolean atGate = objectVisible(BRYOPHYTA_GATE_OBJECT_ID, BRYOPHYTA_SEWER_ENTRANCE, 8);
+        boolean entering = lairEntryPending || state == BryophytaState.ENTERING_LAIR;
+
+        if (config.protectFromMagic() && !Rs2Prayer.isOutOfPrayer() && (atGate || entering)) {
+            Rs2Prayer.toggle(Rs2PrayerEnum.PROTECT_MAGIC, true);
+        } else if (!entering && !atGate) {
+            Rs2Prayer.disableAllPrayers();
+        }
     }
 
     private boolean shouldEmergencyRestock() {
@@ -902,9 +917,6 @@ public class KspBryophytaScript extends Script {
         }
         lastEntryAttemptAt = now;
 
-        if (config.protectFromMagic() && !Rs2Prayer.isOutOfPrayer()) {
-            Rs2Prayer.toggle(Rs2PrayerEnum.PROTECT_MAGIC, true);
-        }
         setState(BryophytaState.ENTERING_LAIR, "Opening Bryophyta gate...");
 
         boolean entered = false;
