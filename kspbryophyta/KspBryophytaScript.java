@@ -11,6 +11,7 @@ import net.runelite.client.plugins.microbot.api.tileitem.models.Rs2TileItemModel
 import net.runelite.client.plugins.microbot.util.bank.Rs2Bank;
 import net.runelite.client.plugins.microbot.util.bank.enums.BankLocation;
 import net.runelite.client.plugins.microbot.util.equipment.Rs2Equipment;
+import net.runelite.client.plugins.microbot.util.dialogues.Rs2Dialogue;
 import net.runelite.client.plugins.microbot.util.inventory.Rs2Inventory;
 import net.runelite.client.plugins.microbot.util.inventory.Rs2ItemModel;
 import net.runelite.client.plugins.microbot.util.magic.Rs2Magic;
@@ -22,16 +23,20 @@ import net.runelite.client.plugins.microbot.util.walker.Rs2Walker;
 import net.runelite.client.plugins.skillcalculator.skills.MagicAction;
 
 import javax.inject.Inject;
+import javax.inject.Singleton;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
+@Singleton
 public class KspBryophytaScript extends Script
 {
     private static final int BRYOPHYTA_NPC_ID = 8195;
     private static final int GROWTHLING_NPC_ID = 8194;
     private static final int BRYOPHYTA_CHEST_OBJECT_ID = 56378;
+    private static final int BRYOPHYTA_GATE_OBJECT_ID = 32534;
+    private static final int BRYOPHYTA_ROCK_PILE_OBJECT_ID = 32535;
 
     private static final int LOOP_DELAY_MS = 400;
     private static final long BOSS_MISSING_CONFIRM_MS = 1200L;
@@ -39,8 +44,10 @@ public class KspBryophytaScript extends Script
     private static final long GROWTHLING_CLICK_COOLDOWN_MS = 350L;
     private static final long ENTRY_RETRY_MS = 1800L;
     private static final long CHEST_RETRY_MS = 1800L;
-    private static final long ALTAR_RETRY_MS = 1400L;
+    private static final long ALTAR_RETRY_MS = 650L;
     private static final long MANHOLE_RETRY_MS = 1400L;
+    private static final long WALK_REISSUE_MS = 2800L;
+    private static final long WEB_RETRY_MS = 1800L;
 
     private static final String AIR_RUNE = "Air rune";
     private static final String FIRE_RUNE = "Fire rune";
@@ -85,6 +92,8 @@ public class KspBryophytaScript extends Script
     private long lastChestAttemptAt;
     private long lastAltarAttemptAt;
     private long lastManholeAttemptAt;
+    private long lastWalkIssuedAt;
+    private long lastWebAttemptAt;
 
     @Inject
     public KspBryophytaScript(BryophytaEquipmentSettings equipmentSettings)
@@ -168,6 +177,8 @@ public class KspBryophytaScript extends Script
         lastChestAttemptAt = 0L;
         lastAltarAttemptAt = 0L;
         lastManholeAttemptAt = 0L;
+        lastWalkIssuedAt = 0L;
+        lastWebAttemptAt = 0L;
     }
 
     private void updateCounters()
@@ -707,6 +718,8 @@ public class KspBryophytaScript extends Script
         {
             prayerRestoredAfterBank = true;
             altarFailures = 0;
+            lastAltarAttemptAt = 0L;
+            lastWalkIssuedAt = 0L;
             setState(BryophytaState.WALKING_TO_SEWERS, "Prayer full - heading to Varrock Sewers.");
             return;
         }
@@ -719,34 +732,50 @@ public class KspBryophytaScript extends Script
 
         setState(BryophytaState.RESTORING_PRAYER, "Restoring Prayer at Varrock altar...");
 
-        if (!VARROCK_ALTAR_AREA.contains(player))
-        {
-            Rs2Walker.walkTo(VARROCK_ALTAR_TARGET, 3);
-            return;
-        }
-
-        long now = System.currentTimeMillis();
-        if (now - lastAltarAttemptAt < ALTAR_RETRY_MS)
-        {
-            return;
-        }
-        lastAltarAttemptAt = now;
-
-        boolean prayed = Microbot.getRs2TileObjectCache()
+        // As soon as the actual altar enters the scene cache, click the altar itself.
+        // This replaces the old two-stage flow that first waited until the player was
+        // inside the broad altar area and then could block for up to four seconds after
+        // an interaction click while the character was still walking to the altar.
+        var altar = Microbot.getRs2TileObjectCache()
                 .query()
                 .withName("Altar")
                 .where(object -> object.getWorldLocation() != null
                         && VARROCK_ALTAR_AREA.contains(object.getWorldLocation()))
-                .interact("Pray-at");
+                .nearestOnClientThread();
 
+        if (altar == null)
+        {
+            // Only use the coordinate as an approach point until the altar is loaded.
+            // A looser distance is enough to bring the church/altar into the scene.
+            walkToControlled(VARROCK_ALTAR_TARGET, 8, "Approaching Varrock altar...");
+            return;
+        }
+
+        long now = System.currentTimeMillis();
+
+        // The first altar click is allowed immediately, even if the generic walker is
+        // currently moving. That retargets the client directly onto the altar instead
+        // of making it finish an unnecessary intermediate walking destination.
+        // While that altar click is moving/animating the player, do not spam it.
+        boolean firstAttempt = lastAltarAttemptAt == 0L;
+        if (!firstAttempt && (Rs2Player.isMoving() || Rs2Player.isAnimating()))
+        {
+            status = "Approaching Varrock altar...";
+            return;
+        }
+
+        if (!firstAttempt && now - lastAltarAttemptAt < ALTAR_RETRY_MS)
+        {
+            return;
+        }
+
+        lastAltarAttemptAt = now;
+        status = "Praying at Varrock altar...";
+
+        boolean prayed = altar.click("Pray-at");
         if (!prayed)
         {
-            prayed = Microbot.getRs2TileObjectCache()
-                    .query()
-                    .withName("Altar")
-                    .where(object -> object.getWorldLocation() != null
-                            && VARROCK_ALTAR_AREA.contains(object.getWorldLocation()))
-                    .interact("Pray");
+            prayed = altar.click("Pray");
         }
 
         if (!prayed)
@@ -754,23 +783,15 @@ public class KspBryophytaScript extends Script
             altarFailures++;
             if (altarFailures >= 5)
             {
-                failAndStop("Could not use an altar inside the configured Varrock altar area.");
+                failAndStop("Could not use the Varrock altar after five direct interaction attempts.");
             }
             return;
         }
 
-        boolean restored = sleepUntil(
-                () -> Microbot.getClient().getBoostedSkillLevel(Skill.PRAYER)
-                        >= Microbot.getClient().getRealSkillLevel(Skill.PRAYER),
-                4000
-        );
-
-        if (restored)
-        {
-            prayerRestoredAfterBank = true;
-            altarFailures = 0;
-            setState(BryophytaState.WALKING_TO_SEWERS, "Prayer restored - heading to Varrock Sewers.");
-        }
+        // Do not block the main script loop waiting several seconds here. Prayer restore
+        // is observed by updateCounters()/the next loop iteration. If the click somehow
+        // fails to complete, the short retry timer handles it after movement stops.
+        altarFailures = 0;
     }
 
     private void navigateToBryophyta()
@@ -789,6 +810,13 @@ public class KspBryophytaScript extends Script
 
         setState(BryophytaState.WALKING_TO_LAIR, "Walking through Varrock Sewers to Bryophyta...");
 
+        // Gate confirmation can remain open after the previous interaction. Handle it before
+        // issuing another path request or gate click.
+        if (handleLairEntryDialogue())
+        {
+            return;
+        }
+
         if (handleNearbyWeb())
         {
             return;
@@ -799,7 +827,8 @@ public class KspBryophytaScript extends Script
             return;
         }
 
-        Rs2Walker.walkTo(BRYOPHYTA_SEWER_ENTRANCE, 5);
+        walkToControlled(BRYOPHYTA_SEWER_ENTRANCE, 4,
+                "Walking through Varrock Sewers to Bryophyta...");
     }
 
     private void navigateToSewerManhole(WorldPoint player)
@@ -808,7 +837,7 @@ public class KspBryophytaScript extends Script
 
         if (player.distanceTo(VARROCK_MANHOLE) > 6)
         {
-            Rs2Walker.walkTo(VARROCK_MANHOLE, 4);
+            walkToControlled(VARROCK_MANHOLE, 4, "Walking to Varrock sewer manhole...");
             return;
         }
 
@@ -878,6 +907,14 @@ public class KspBryophytaScript extends Script
             switchedToAxe = true;
         }
 
+        long now = System.currentTimeMillis();
+        if (now - lastWebAttemptAt < WEB_RETRY_MS)
+        {
+            status = "Waiting for sewer web to clear...";
+            return true;
+        }
+        lastWebAttemptAt = now;
+
         status = "Slashing sewer web...";
         Microbot.getRs2TileObjectCache()
                 .query()
@@ -899,13 +936,25 @@ public class KspBryophytaScript extends Script
     {
         boolean gateNearby = Microbot.getRs2TileObjectCache()
                 .query()
-                .withName("Gate")
-                .within(BRYOPHYTA_SEWER_ENTRANCE, 20)
+                .withId(BRYOPHYTA_GATE_OBJECT_ID)
+                .within(BRYOPHYTA_SEWER_ENTRANCE, 8)
                 .nearestOnClientThread() != null;
 
         if (!gateNearby)
         {
             return false;
+        }
+
+        WorldPoint player = Rs2Player.getWorldLocation();
+        if (player != null && player.distanceTo(BRYOPHYTA_SEWER_ENTRANCE) > 5)
+        {
+            walkToControlled(BRYOPHYTA_SEWER_ENTRANCE, 4, "Approaching Bryophyta gate...");
+            return true;
+        }
+
+        if (handleLairEntryDialogue())
+        {
+            return true;
         }
 
         long now = System.currentTimeMillis();
@@ -924,16 +973,16 @@ public class KspBryophytaScript extends Script
 
         boolean entered = Microbot.getRs2TileObjectCache()
                 .query()
-                .withName("Gate")
-                .within(BRYOPHYTA_SEWER_ENTRANCE, 20)
+                .withId(BRYOPHYTA_GATE_OBJECT_ID)
+                .within(BRYOPHYTA_SEWER_ENTRANCE, 8)
                 .interact("Open");
 
         if (!entered)
         {
             entered = Microbot.getRs2TileObjectCache()
                     .query()
-                    .withName("Gate")
-                    .within(BRYOPHYTA_SEWER_ENTRANCE, 20)
+                    .withId(BRYOPHYTA_GATE_OBJECT_ID)
+                    .within(BRYOPHYTA_SEWER_ENTRANCE, 8)
                     .interact("Enter");
         }
 
@@ -950,9 +999,83 @@ public class KspBryophytaScript extends Script
             return true;
         }
 
-        entryFailures = 0;
-        sleepUntil(this::isInsideLair, 6000);
+        // Some accounts receive a confirmation dialogue after opening the gate. Give the
+        // client a moment to display it, accept it, then verify that the instance actually loaded.
+        sleepUntil(() -> isInsideLair() || Rs2Dialogue.isInDialogue(), 2500);
+        if (Rs2Dialogue.isInDialogue())
+        {
+            handleLairEntryDialogue();
+        }
+
+        boolean transitioned = sleepUntil(this::isInsideLair, 6000);
+        if (transitioned)
+        {
+            entryFailures = 0;
+            lastWalkIssuedAt = 0L;
+            setState(BryophytaState.WAITING_FOR_RESPAWN, "Bryophyta lair entered - locating boss...");
+            return true;
+        }
+
+        entryFailures++;
+        status = "Gate clicked but the lair did not load; retrying...";
+        if (entryFailures >= 4)
+        {
+            String suffix = Rs2Inventory.contains(MOSSY_KEY, true)
+                    ? " A Mossy key is present, so check the gate interaction/path."
+                    : " If this account has never permanently unlocked Bryophyta, bring a Mossy key once.";
+            failAndStop("Bryophyta gate was clicked but the lair never loaded after four attempts." + suffix);
+        }
         return true;
+    }
+
+    private boolean handleLairEntryDialogue()
+    {
+        WorldPoint player = Rs2Player.getWorldLocation();
+        if (player == null || player.distanceTo(BRYOPHYTA_SEWER_ENTRANCE) > 10)
+        {
+            return false;
+        }
+
+        if (Rs2Dialogue.hasSelectAnOption())
+        {
+            if (Rs2Dialogue.clickOption("Yes", "Enter", "Go"))
+            {
+                setState(BryophytaState.ENTERING_LAIR, "Confirming Bryophyta lair entry...");
+                return true;
+            }
+            return true;
+        }
+
+        if (Rs2Dialogue.hasContinue())
+        {
+            Rs2Dialogue.clickContinue();
+            setState(BryophytaState.ENTERING_LAIR, "Continuing Bryophyta gate dialogue...");
+            return true;
+        }
+
+        return false;
+    }
+
+    private void walkToControlled(WorldPoint target, int distance, String walkingStatus)
+    {
+        WorldPoint player = Rs2Player.getWorldLocation();
+        if (player == null || player.distanceTo(target) <= distance)
+        {
+            return;
+        }
+
+        status = walkingStatus;
+        long now = System.currentTimeMillis();
+
+        // Rs2Walker maintains its own path session. Re-submitting the same long route every
+        // 400 ms can reset/retarget that session around sewer bends and obstacles.
+        if (Rs2Player.isMoving() || now - lastWalkIssuedAt < WALK_REISSUE_MS)
+        {
+            return;
+        }
+
+        lastWalkIssuedAt = now;
+        Rs2Walker.walkTo(target, distance);
     }
 
     private void handleGrowthlings(Rs2NpcModel growthling)
@@ -1419,11 +1542,23 @@ public class KspBryophytaScript extends Script
             return true;
         }
 
-        return Microbot.getRs2TileObjectCache()
+        if (Microbot.getRs2TileObjectCache()
                 .query()
                 .withId(BRYOPHYTA_CHEST_OBJECT_ID)
                 .fromWorldView()
                 .within(30)
+                .nearestOnClientThread() != null)
+        {
+            return true;
+        }
+
+        // Object 32535 is the Rock Pile/Quick-exit inside Bryophyta's lair. It remains
+        // available even during boss respawn/loading windows, making it a stable instance marker.
+        return Microbot.getRs2TileObjectCache()
+                .query()
+                .withId(BRYOPHYTA_ROCK_PILE_OBJECT_ID)
+                .fromWorldView()
+                .within(40)
                 .nearestOnClientThread() != null;
     }
 

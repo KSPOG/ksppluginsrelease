@@ -34,7 +34,7 @@ public class KspBryophytaOverlay extends OverlayPanel
     {
         try
         {
-            panelComponent.setPreferredSize(new Dimension(235, 220));
+            panelComponent.setPreferredSize(new Dimension(235, 238));
 
             panelComponent.getChildren().add(
                     TitleComponent.builder()
@@ -45,6 +45,7 @@ public class KspBryophytaOverlay extends OverlayPanel
 
             panelComponent.getChildren().add(line("Strategy", config.strategy().toString()));
             panelComponent.getChildren().add(line("State", script.getState().toString()));
+            panelComponent.getChildren().add(line("Loop", script.isRunning() ? "Running" : "Stopped"));
             panelComponent.getChildren().add(line("Food", Integer.toString(script.getFoodRemaining())));
             panelComponent.getChildren().add(line("Prayer", Integer.toString(script.getPrayerPoints())));
             panelComponent.getChildren().add(line("Kills", Integer.toString(script.getKills())));

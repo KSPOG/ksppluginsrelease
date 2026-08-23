@@ -30,7 +30,7 @@ import java.awt.image.BufferedImage;
 )
 public class KspBryophytaPlugin extends Plugin
 {
-    public static final String VERSION = "0.0.1";
+    public static final String VERSION = "0.0.3";
 
     @Inject
     private KspBryophytaConfig config;
@@ -59,6 +59,7 @@ public class KspBryophytaPlugin extends Plugin
     @Inject
     private ItemManager itemManager;
 
+    private KspBryophytaEquipmentPanel equipmentPanel;
     private NavigationButton navigationButton;
 
     @Provides
@@ -93,8 +94,12 @@ public class KspBryophytaPlugin extends Plugin
         }
 
         String message = event.getMessage();
-        if (message != null
-                && config.shutdownAfterDeath()
+        if (message == null)
+        {
+            return;
+        }
+
+        if (config.shutdownAfterDeath()
                 && message.toLowerCase().contains("oh dear, you are dead"))
         {
             script.setStopped("Stopped after death.");
@@ -109,19 +114,21 @@ public class KspBryophytaPlugin extends Plugin
             return;
         }
 
-        KspBryophytaEquipmentPanel equipmentPanel = new KspBryophytaEquipmentPanel(
-                equipmentSettings, equipmentIndex, itemManager, config.strategy());
+        equipmentPanel = new KspBryophytaEquipmentPanel(equipmentSettings, equipmentIndex, itemManager, config.strategy());
+
         BufferedImage source = BryophytaEquipmentAssets.loadEquipmentSlots();
         BufferedImage iconSource = source != null && source.getWidth() >= 170 && source.getHeight() >= 61
                 ? source.getSubimage(117, 8, 53, 53)
                 : source;
+        BufferedImage icon = resize(iconSource, 16, 16);
 
         navigationButton = NavigationButton.builder()
                 .tooltip("KSP Bryophyta Equipment")
                 .priority(8)
-                .icon(resize(iconSource, 16, 16))
+                .icon(icon)
                 .panel(equipmentPanel)
                 .build();
+
         clientToolbar.addNavigation(navigationButton);
     }
 
@@ -132,6 +139,7 @@ public class KspBryophytaPlugin extends Plugin
             clientToolbar.removeNavigation(navigationButton);
             navigationButton = null;
         }
+        equipmentPanel = null;
     }
 
     private static BufferedImage resize(BufferedImage source, int width, int height)
