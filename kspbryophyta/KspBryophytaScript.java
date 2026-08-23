@@ -43,11 +43,13 @@ public class KspBryophytaScript extends Script
     private static final int LOOP_DELAY_MS = 400;
     private static final long BOSS_MISSING_CONFIRM_MS = 1200L;
     private static final long POST_KILL_LOOT_WINDOW_MS = 2400L;
-    private static final long GROWTHLING_CLICK_COOLDOWN_MS = 350L;
+    private static final long GROWTHLING_CLICK_COOLDOWN_MS = 700L;
+    private static final long BOSS_ATTACK_RETRY_MS = 2200L;
     private static final long ENTRY_RETRY_MS = 1800L;
     private static final long CHEST_RETRY_MS = 1800L;
     private static final long ALTAR_RETRY_MS = 650L;
-    private static final long MANHOLE_RETRY_MS = 650L;
+    private static final long MANHOLE_RETRY_MS = 900L;
+    private static final long MANHOLE_TRANSITION_TIMEOUT_MS = 8_000L;
     private static final long WALK_REISSUE_MS = 2800L;
     private static final long WEB_RETRY_MS = 1800L;
 
@@ -92,11 +94,14 @@ public class KspBryophytaScript extends Script
     private long lastBossSeenAt;
     private long killRegisteredAt;
     private long lastGrowthlingClickAt;
+    private long lastBossAttackClickAt;
     private long lastMagicCastAt;
     private long lastEntryAttemptAt;
     private long lastChestAttemptAt;
     private long lastAltarAttemptAt;
     private long lastManholeAttemptAt;
+    private boolean manholeDescentPending;
+    private long manholeDescentStartedAt;
     private long lastWalkIssuedAt;
     private long lastWebAttemptAt;
 
@@ -166,6 +171,8 @@ public class KspBryophytaScript extends Script
 
         bossWasPresent = false;
         killRegisteredForCycle = false;
+        manholeDescentPending = false;
+        manholeDescentStartedAt = 0L;
         restockRequired = true;
         prayerRestoredAfterBank = false;
         loadoutVerified = false;
@@ -177,11 +184,14 @@ public class KspBryophytaScript extends Script
         lastBossSeenAt = 0L;
         killRegisteredAt = 0L;
         lastGrowthlingClickAt = 0L;
+        lastBossAttackClickAt = 0L;
         lastMagicCastAt = 0L;
         lastEntryAttemptAt = 0L;
         lastChestAttemptAt = 0L;
         lastAltarAttemptAt = 0L;
         lastManholeAttemptAt = 0L;
+        manholeDescentPending = false;
+        manholeDescentStartedAt = 0L;
         lastWalkIssuedAt = 0L;
         lastWebAttemptAt = 0L;
     }
@@ -862,6 +872,10 @@ public class KspBryophytaScript extends Script
             return;
         }
 
+        // The region transition completed. Clear the descent lock immediately so it cannot
+        // leak into a later Varrock restock cycle.
+        manholeDescentPending = false;
+        manholeDescentStartedAt = 0L;
         setState(BryophytaState.WALKING_TO_LAIR, "Walking through Varrock Sewers to Bryophyta...");
 
         // Gate confirmation can remain open after the previous interaction. Handle it before
@@ -888,6 +902,45 @@ public class KspBryophytaScript extends Script
     private void navigateToSewerManhole(WorldPoint player)
     {
         setState(BryophytaState.WALKING_TO_SEWERS, "Heading to Varrock sewer manhole...");
+
+        // Once a Climb-down action has been accepted, never click the manhole again while the
+        // region/position transition is in flight. Repeated interaction calls here can queue
+        // multiple clicks before the client's world point changes to the sewer coordinates.
+        if (manholeDescentPending)
+        {
+            long elapsed = System.currentTimeMillis() - manholeDescentStartedAt;
+            if (isUnderground(player))
+            {
+                manholeDescentPending = false;
+                manholeDescentStartedAt = 0L;
+                setState(BryophytaState.WALKING_TO_LAIR, "Varrock Sewers loaded - heading to Bryophyta.");
+                return;
+            }
+
+            if (elapsed < MANHOLE_TRANSITION_TIMEOUT_MS)
+            {
+                status = "Descending through manhole - waiting for sewer load...";
+                Microbot.status = status;
+                return;
+            }
+
+            // The click was accepted but no region transition was observed. Clear the lock and
+            // allow one controlled retry instead of remaining stuck forever.
+            manholeDescentPending = false;
+            manholeDescentStartedAt = 0L;
+            lastManholeAttemptAt = 0L;
+            status = "Sewer transition timed out - retrying once...";
+            Microbot.status = status;
+            return;
+        }
+
+        // Do not interact with scenery while the player is still completing the approach click.
+        if (Rs2Player.isMoving() || Rs2Player.isAnimating())
+        {
+            status = "Approaching Varrock sewer manhole...";
+            Microbot.status = status;
+            return;
+        }
 
         // The Varrock sewer entrance has two object states: closed (881) and open (882).
         // Resolve the exact object at the exact entrance first. Name/radius-only queries could
@@ -946,12 +999,20 @@ public class KspBryophytaScript extends Script
                         .interact("Climb-down");
             }
 
-            if (!climbed)
+            if (climbed)
+            {
+                manholeDescentPending = true;
+                manholeDescentStartedAt = now;
+                status = "Climb-down accepted - waiting for Varrock Sewers to load...";
+                Microbot.status = status;
+            }
+            else
             {
                 status = "Open manhole found - retrying Climb-down...";
+                Microbot.status = status;
             }
-            // Do not block for five seconds here. The next 400 ms loop observes y > 9000
-            // and immediately switches to WALKING_TO_LAIR once the descent completes.
+            // Do not block here. The pending-transition lock prevents any further manhole clicks
+            // until the player's world point changes to the sewer region or the timeout expires.
             return;
         }
 
@@ -1070,39 +1131,50 @@ public class KspBryophytaScript extends Script
             Rs2Prayer.toggle(Rs2PrayerEnum.PROTECT_MAGIC, true);
         }
 
-        setState(BryophytaState.ENTERING_LAIR, "Entering Bryophyta's lair...");
+        setState(BryophytaState.ENTERING_LAIR, "Opening Bryophyta gate...");
 
-        boolean entered = Microbot.getRs2TileObjectCache()
-                .query()
-                .withId(BRYOPHYTA_GATE_OBJECT_ID)
-                .within(BRYOPHYTA_SEWER_ENTRANCE, 8)
-                .interact("Open");
-
+        // The gate's primary action differs depending on whether this account has permanently
+        // unlocked the lair. Try the known actions, including Unlock for the first encounter,
+        // then fall back to the object's default action instead of assuming Open is always valid.
+        boolean entered = interactBryophytaGate("Open");
+        if (!entered)
+        {
+            entered = interactBryophytaGate("Unlock");
+        }
+        if (!entered)
+        {
+            entered = interactBryophytaGate("Enter");
+        }
         if (!entered)
         {
             entered = Microbot.getRs2TileObjectCache()
                     .query()
                     .withId(BRYOPHYTA_GATE_OBJECT_ID)
                     .within(BRYOPHYTA_SEWER_ENTRANCE, 8)
-                    .interact("Enter");
+                    .interact();
         }
 
-        if (!entered)
+        // Interaction helpers can occasionally return false even though the server accepted
+        // the click. Give the client a short chance to show the unlock/entry dialogue or load
+        // the instance before treating the attempt as a failure.
+        boolean response = sleepUntil(() -> isInsideLair() || Rs2Dialogue.isInDialogue(), 1800);
+        if (!entered && !response)
         {
             entryFailures++;
+            status = Rs2Inventory.contains(MOSSY_KEY, true)
+                    ? "Gate interaction not accepted yet - Mossy key available; retrying..."
+                    : "Gate interaction not accepted yet; retrying...";
             if (entryFailures >= 4)
             {
                 String suffix = Rs2Inventory.contains(MOSSY_KEY, true)
-                        ? " A Mossy key is present, so check the gate interaction/path."
+                        ? " A Mossy key is present; the plugin tried Open, Unlock, Enter and the default gate action."
                         : " If this account has never permanently unlocked Bryophyta, bring a Mossy key once.";
                 failAndStop("Could not enter Bryophyta after four attempts." + suffix);
             }
             return true;
         }
 
-        // Some accounts receive a confirmation dialogue after opening the gate. Give the
-        // client a moment to display it, accept it, then verify that the instance actually loaded.
-        sleepUntil(() -> isInsideLair() || Rs2Dialogue.isInDialogue(), 2500);
+        // Some accounts receive a confirmation dialogue after opening/unlocking the gate.
         if (Rs2Dialogue.isInDialogue())
         {
             handleLairEntryDialogue();
@@ -1127,6 +1199,15 @@ public class KspBryophytaScript extends Script
             failAndStop("Bryophyta gate was clicked but the lair never loaded after four attempts." + suffix);
         }
         return true;
+    }
+
+    private boolean interactBryophytaGate(String action)
+    {
+        return Microbot.getRs2TileObjectCache()
+                .query()
+                .withId(BRYOPHYTA_GATE_OBJECT_ID)
+                .within(BRYOPHYTA_SEWER_ENTRANCE, 8)
+                .interact(action);
     }
 
     private boolean handleLairEntryDialogue()
@@ -1189,8 +1270,18 @@ public class KspBryophytaScript extends Script
             return;
         }
 
+        // Do not repeatedly click the same Growthling while the client already has it as
+        // the active interaction target. This also prevents unnecessary clicks during axe swings.
+        if (isPlayerInteractingWith(growthling))
+        {
+            status = "Finishing Growthling...";
+            return;
+        }
+
         long now = System.currentTimeMillis();
-        if (now - lastGrowthlingClickAt < GROWTHLING_CLICK_COOLDOWN_MS)
+        if (now - lastGrowthlingClickAt < GROWTHLING_CLICK_COOLDOWN_MS
+                || Rs2Player.isMoving()
+                || Rs2Player.isAnimating())
         {
             return;
         }
@@ -1279,13 +1370,51 @@ public class KspBryophytaScript extends Script
 
     private void attackWithCurrentWeapon(Rs2NpcModel bryophyta)
     {
-        // Compatibility: the Microbot client used by KSP Source Loader does not expose
-        // Rs2Player.isIdle(). isMoving() and isAnimating() are available on the older
-        // runtime API and provide the action-readiness guard needed here.
-        if (!Rs2Player.isMoving() && !Rs2Player.isAnimating())
+        if (bryophyta == null || bryophyta.isDead())
         {
-            bryophyta.click("Attack");
+            return;
         }
+
+        // The local player's interaction target remains Bryophyta between weapon animations.
+        // Checking only isMoving()/isAnimating() caused the old 400 ms loop to click Attack
+        // repeatedly every time the swing animation returned to idle.
+        if (isPlayerInteractingWith(bryophyta))
+        {
+            status = "Engaged with Bryophyta...";
+            return;
+        }
+
+        long now = System.currentTimeMillis();
+        if (now - lastBossAttackClickAt < BOSS_ATTACK_RETRY_MS
+                || Rs2Player.isMoving()
+                || Rs2Player.isAnimating())
+        {
+            return;
+        }
+
+        lastBossAttackClickAt = now;
+        status = "Attacking Bryophyta...";
+        if (!bryophyta.click("Attack"))
+        {
+            status = "Bryophyta attack click not accepted - waiting to retry...";
+        }
+    }
+
+    private boolean isPlayerInteractingWith(Rs2NpcModel npc)
+    {
+        if (npc == null || npc.getNpc() == null)
+        {
+            return false;
+        }
+
+        return Microbot.getClientThread().runOnClientThreadOptional(() ->
+        {
+            if (Microbot.getClient() == null || Microbot.getClient().getLocalPlayer() == null)
+            {
+                return false;
+            }
+            return Microbot.getClient().getLocalPlayer().getInteracting() == npc.getNpc();
+        }).orElse(false);
     }
 
     private void castFireSpell(Rs2NpcModel bryophyta)
@@ -1653,28 +1782,32 @@ public class KspBryophytaScript extends Script
 
     private boolean isInsideLair()
     {
+        // Bryophyta's fight takes place in an instanced region. This is the authoritative
+        // discriminator between the ordinary Varrock Sewers and the boss room. The old
+        // Rock Pile-only check could see object 32535 from outside the gate and falsely put
+        // the script into WAITING_FOR_RESPAWN before the gate had ever been opened.
+        boolean instanced = Microbot.getClientThread().runOnClientThreadOptional(() ->
+                Microbot.getClient() != null && Microbot.getClient().isInInstancedRegion()
+        ).orElse(false);
+
+        if (instanced)
+        {
+            return true;
+        }
+
+        // Short transition fallback: if the instance flag has not updated yet but the boss,
+        // a Growthling, or the reward chest is already visible in the current WorldView, we
+        // are clearly inside. Do not use the Rock Pile by itself because it caused false positives.
         if (getBryophyta() != null || getNearestGrowthling() != null)
         {
             return true;
         }
 
-        if (Microbot.getRs2TileObjectCache()
+        return Microbot.getRs2TileObjectCache()
                 .query()
                 .withId(BRYOPHYTA_CHEST_OBJECT_ID)
                 .fromWorldView()
                 .within(30)
-                .nearestOnClientThread() != null)
-        {
-            return true;
-        }
-
-        // Object 32535 is the Rock Pile/Quick-exit inside Bryophyta's lair. It remains
-        // available even during boss respawn/loading windows, making it a stable instance marker.
-        return Microbot.getRs2TileObjectCache()
-                .query()
-                .withId(BRYOPHYTA_ROCK_PILE_OBJECT_ID)
-                .fromWorldView()
-                .within(40)
                 .nearestOnClientThread() != null;
     }
 
@@ -1687,6 +1820,20 @@ public class KspBryophytaScript extends Script
     private static boolean isUnderground(WorldPoint point)
     {
         return point != null && point.getY() > 9000;
+    }
+
+    /**
+     * Server-confirmed manhole descent. The game message arrives when OSRS has accepted the
+     * Climb-down action, so use it as a second lock source in case the interaction helper
+     * returned false/late while the click still succeeded.
+     */
+    public void confirmManholeDescent()
+    {
+        manholeDescentPending = true;
+        manholeDescentStartedAt = System.currentTimeMillis();
+        lastManholeAttemptAt = manholeDescentStartedAt;
+        setState(BryophytaState.WALKING_TO_SEWERS,
+                "Manhole descent confirmed - loading Varrock Sewers...");
     }
 
     private static String normalize(String value)

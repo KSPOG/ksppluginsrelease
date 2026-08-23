@@ -30,7 +30,7 @@ import java.awt.image.BufferedImage;
 )
 public class KspBryophytaPlugin extends Plugin
 {
-    public static final String VERSION = "0.0.5";
+    public static final String VERSION = "0.0.7";
 
     @Inject
     private KspBryophytaConfig config;
@@ -99,8 +99,14 @@ public class KspBryophytaPlugin extends Plugin
             return;
         }
 
+        String lower = message.toLowerCase();
+        if (lower.contains("you climb down through the manhole"))
+        {
+            script.confirmManholeDescent();
+        }
+
         if (config.shutdownAfterDeath()
-                && message.toLowerCase().contains("oh dear, you are dead"))
+                && lower.contains("oh dear, you are dead"))
         {
             script.setStopped("Stopped after death.");
             script.shutdown();
