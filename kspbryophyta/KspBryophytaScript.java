@@ -37,6 +37,8 @@ public class KspBryophytaScript extends Script
     private static final int BRYOPHYTA_CHEST_OBJECT_ID = 56378;
     private static final int BRYOPHYTA_GATE_OBJECT_ID = 32534;
     private static final int BRYOPHYTA_ROCK_PILE_OBJECT_ID = 32535;
+    private static final int VARROCK_MANHOLE_CLOSED_OBJECT_ID = 881;
+    private static final int VARROCK_MANHOLE_OPEN_OBJECT_ID = 882;
 
     private static final int LOOP_DELAY_MS = 400;
     private static final long BOSS_MISSING_CONFIRM_MS = 1200L;
@@ -45,7 +47,7 @@ public class KspBryophytaScript extends Script
     private static final long ENTRY_RETRY_MS = 1800L;
     private static final long CHEST_RETRY_MS = 1800L;
     private static final long ALTAR_RETRY_MS = 650L;
-    private static final long MANHOLE_RETRY_MS = 1400L;
+    private static final long MANHOLE_RETRY_MS = 650L;
     private static final long WALK_REISSUE_MS = 2800L;
     private static final long WEB_RETRY_MS = 1800L;
 
@@ -56,6 +58,8 @@ public class KspBryophytaScript extends Script
     private static final String STRENGTH_POTION_4 = "Strength potion(4)";
 
     private static final WorldPoint VARROCK_MANHOLE = new WorldPoint(3237, 3458, 0);
+    // Walk beside the object rather than targeting the occupied manhole tile itself.
+    private static final WorldPoint VARROCK_MANHOLE_APPROACH = new WorldPoint(3237, 3459, 0);
     private static final WorldPoint BRYOPHYTA_SEWER_ENTRANCE = new WorldPoint(3174, 9901, 0);
 
     // User supplied: new Area(3252, 3488, 3259, 3471)
@@ -883,11 +887,35 @@ public class KspBryophytaScript extends Script
 
     private void navigateToSewerManhole(WorldPoint player)
     {
-        setState(BryophytaState.WALKING_TO_SEWERS, "Walking to Varrock sewer manhole...");
+        setState(BryophytaState.WALKING_TO_SEWERS, "Heading to Varrock sewer manhole...");
 
-        if (player.distanceTo(VARROCK_MANHOLE) > 6)
+        // The Varrock sewer entrance has two object states: closed (881) and open (882).
+        // Resolve the exact object at the exact entrance first. Name/radius-only queries could
+        // leave the script standing beside the manhole while repeatedly reporting WALKING_TO_SEWERS.
+        boolean openVisible = Microbot.getRs2TileObjectCache()
+                .query()
+                .withId(VARROCK_MANHOLE_OPEN_OBJECT_ID)
+                .within(VARROCK_MANHOLE, 2)
+                .nearestOnClientThread() != null;
+
+        boolean closedVisible = !openVisible && Microbot.getRs2TileObjectCache()
+                .query()
+                .withId(VARROCK_MANHOLE_CLOSED_OBJECT_ID)
+                .within(VARROCK_MANHOLE, 2)
+                .nearestOnClientThread() != null;
+
+        // If the entrance is not loaded yet, approach a known walkable tile next to it.
+        // Do not ask the walker to stand on the scenery object's occupied tile.
+        if (!openVisible && !closedVisible)
         {
-            walkToControlled(VARROCK_MANHOLE, 4, "Walking to Varrock sewer manhole...");
+            if (player.distanceTo(VARROCK_MANHOLE_APPROACH) > 3)
+            {
+                walkToControlled(VARROCK_MANHOLE_APPROACH, 2, "Walking to Varrock sewer entrance...");
+            }
+            else
+            {
+                status = "At sewer entrance - waiting for manhole object...";
+            }
             return;
         }
 
@@ -898,37 +926,60 @@ public class KspBryophytaScript extends Script
         }
         lastManholeAttemptAt = now;
 
-        boolean climbed = Microbot.getRs2TileObjectCache()
-                .query()
-                .withName("Manhole")
-                .within(8)
-                .interact("Climb-down");
-
-        if (!climbed)
+        if (openVisible)
         {
-            boolean opened = Microbot.getRs2TileObjectCache()
+            setState(BryophytaState.WALKING_TO_SEWERS, "Climbing down into Varrock Sewers...");
+            boolean climbed = Microbot.getRs2TileObjectCache()
                     .query()
-                    .withName("Manhole")
-                    .within(8)
-                    .interact("Open");
+                    .withId(VARROCK_MANHOLE_OPEN_OBJECT_ID)
+                    .within(VARROCK_MANHOLE, 2)
+                    .interact("Climb-down");
 
-            if (opened)
+            if (!climbed)
             {
-                sleep(600, 900);
+                // Compatibility fallback in case the cache exposes the same object by name/action
+                // while its transformed id has not updated on this tick.
                 climbed = Microbot.getRs2TileObjectCache()
                         .query()
                         .withName("Manhole")
-                        .within(8)
+                        .within(VARROCK_MANHOLE, 2)
                         .interact("Climb-down");
             }
+
+            if (!climbed)
+            {
+                status = "Open manhole found - retrying Climb-down...";
+            }
+            // Do not block for five seconds here. The next 400 ms loop observes y > 9000
+            // and immediately switches to WALKING_TO_LAIR once the descent completes.
+            return;
         }
 
-        if (climbed)
+        setState(BryophytaState.WALKING_TO_SEWERS, "Opening Varrock sewer manhole...");
+        boolean opened = Microbot.getRs2TileObjectCache()
+                .query()
+                .withId(VARROCK_MANHOLE_CLOSED_OBJECT_ID)
+                .within(VARROCK_MANHOLE, 2)
+                .interact("Open");
+
+        if (!opened)
         {
-            sleepUntil(() -> {
-                WorldPoint nowPoint = Rs2Player.getWorldLocation();
-                return nowPoint != null && isUnderground(nowPoint);
-            }, 5000);
+            opened = Microbot.getRs2TileObjectCache()
+                    .query()
+                    .withName("Manhole")
+                    .within(VARROCK_MANHOLE, 2)
+                    .interact("Open");
+        }
+
+        if (opened)
+        {
+            // Let the very next loop see object 882 and climb immediately instead of sleeping.
+            lastManholeAttemptAt = 0L;
+            status = "Manhole opened - climbing down...";
+        }
+        else
+        {
+            status = "Closed manhole found - retrying Open...";
         }
     }
 
