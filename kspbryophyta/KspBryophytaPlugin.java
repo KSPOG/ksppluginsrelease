@@ -30,7 +30,7 @@ import java.awt.image.BufferedImage;
 )
 public class KspBryophytaPlugin extends Plugin
 {
-    public static final String VERSION = "0.0.10";
+    public static final String VERSION = "0.0.13";
 
     @Inject
     private KspBryophytaConfig config;
@@ -120,7 +120,13 @@ public class KspBryophytaPlugin extends Plugin
             return;
         }
 
-        equipmentPanel = new KspBryophytaEquipmentPanel(equipmentSettings, equipmentIndex, itemManager, config.strategy());
+        equipmentPanel = new KspBryophytaEquipmentPanel(
+                equipmentSettings,
+                equipmentIndex,
+                itemManager,
+                config.strategy(),
+                script,
+                config);
 
         BufferedImage source = BryophytaEquipmentAssets.loadEquipmentSlots();
         BufferedImage iconSource = source != null && source.getWidth() >= 170 && source.getHeight() >= 61
@@ -144,6 +150,10 @@ public class KspBryophytaPlugin extends Plugin
         {
             clientToolbar.removeNavigation(navigationButton);
             navigationButton = null;
+        }
+        if (equipmentPanel != null)
+        {
+            equipmentPanel.shutdownPanel();
         }
         equipmentPanel = null;
     }

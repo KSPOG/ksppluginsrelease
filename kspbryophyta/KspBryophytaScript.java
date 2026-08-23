@@ -10,6 +10,7 @@ import net.runelite.client.plugins.microbot.api.npc.models.Rs2NpcModel;
 import net.runelite.client.plugins.microbot.api.tileitem.models.Rs2TileItemModel;
 import net.runelite.client.plugins.microbot.util.bank.Rs2Bank;
 import net.runelite.client.plugins.microbot.util.bank.enums.BankLocation;
+import net.runelite.client.plugins.microbot.util.combat.Rs2Combat;
 import net.runelite.client.plugins.microbot.util.equipment.Rs2Equipment;
 import net.runelite.client.plugins.microbot.util.dialogues.Rs2Dialogue;
 import net.runelite.client.plugins.microbot.util.inventory.Rs2Inventory;
@@ -47,6 +48,7 @@ public class KspBryophytaScript extends Script
     private static final long POST_KILL_LOOT_WINDOW_MS = 2400L;
     private static final long GROWTHLING_ATTACK_RETRY_MS = 2200L;
     private static final long BOSS_ATTACK_RETRY_MS = 2200L;
+    private static final long AUTOCAST_RETRY_MS = 1500L;
     private static final long ENTRY_RETRY_MS = 1800L;
     private static final long LAIR_ENTRY_TRANSITION_TIMEOUT_MS = 10_000L;
     private static final long LAIR_DIALOGUE_RETRY_MS = 350L;
@@ -97,12 +99,13 @@ public class KspBryophytaScript extends Script
 
     private int entryFailures;
     private int altarFailures;
+    private int autocastFailures;
 
     private long lastBossSeenAt;
     private long killRegisteredAt;
     private long lastGrowthlingClickAt;
     private long lastBossAttackClickAt;
-    private long lastMagicCastAt;
+    private long lastAutocastAttemptAt;
     private long lastEntryAttemptAt;
     private boolean lairEntryPending;
     private long lairEntryStartedAt;
@@ -192,12 +195,13 @@ public class KspBryophytaScript extends Script
 
         entryFailures = 0;
         altarFailures = 0;
+        autocastFailures = 0;
 
         lastBossSeenAt = 0L;
         killRegisteredAt = 0L;
         lastGrowthlingClickAt = 0L;
         lastBossAttackClickAt = 0L;
-        lastMagicCastAt = 0L;
+        lastAutocastAttemptAt = 0L;
         lastEntryAttemptAt = 0L;
         lairEntryPending = false;
         lairEntryStartedAt = 0L;
@@ -590,9 +594,19 @@ public class KspBryophytaScript extends Script
             if (slot == EquipmentInventorySlot.AMMO)
             {
                 int equipped = getEquippedQuantity(slot, itemName);
-                int needed = Math.max(0, config.rangedArrowAmount() - equipped);
-                if (needed > 0 && !withdrawExact(itemName, needed, "Ranged ammunition"))
+
+                // Ammo amount is no longer configurable. Carry every banked stack of the
+                // selected ammunition, then merge it into the equipped ammo slot.
+                if (Rs2Bank.hasBankItem(itemName, 1, true))
                 {
+                    if (!withdrawAllAvailableStack(itemName, 1, "Ranged ammunition"))
+                    {
+                        return false;
+                    }
+                }
+                else if (equipped <= 0)
+                {
+                    failAndStop("Missing required Ranged ammunition in bank/equipment: " + itemName);
                     return false;
                 }
                 continue;
@@ -750,21 +764,30 @@ public class KspBryophytaScript extends Script
         if (config.strategy() == BryophytaStrategy.MAGIC_FIRE)
         {
             BryophytaFireSpell spell = config.fireSpell();
-            requiredAir += spell.getAirRunesPerCast() * config.magicCastSupply();
-            requiredFire += spell.getFireRunesPerCast() * config.magicCastSupply();
 
-            if (!withdrawExact(
-                    spell.getCatalystRuneName(),
-                    config.magicCastSupply(),
-                    spell + " catalyst runes"))
+            // Magic casts are no longer capped by a config value. Withdraw every available
+            // stack required by the selected fire spell. Keep the Varrock teleport minimum
+            // as a hard requirement, plus enough elemental/catalyst runes for at least one cast.
+            int minimumAir = requiredAir + spell.getAirRunesPerCast();
+            int minimumFire = requiredFire + spell.getFireRunesPerCast();
+
+            if (!withdrawAllAvailableStack(AIR_RUNE, minimumAir, spell + " / Varrock Air runes")
+                    || !withdrawAllAvailableStack(FIRE_RUNE, minimumFire, spell + " / Varrock Fire runes")
+                    || !withdrawAllAvailableStack(spell.getCatalystRuneName(), 1, spell + " catalyst runes"))
+            {
+                return false;
+            }
+        }
+        else
+        {
+            if (!withdrawExact(AIR_RUNE, requiredAir, "Varrock Air runes")
+                    || !withdrawExact(FIRE_RUNE, requiredFire, "Varrock Fire runes"))
             {
                 return false;
             }
         }
 
-        if (!withdrawExact(AIR_RUNE, requiredAir, "Varrock/combat Air runes")
-                || !withdrawExact(FIRE_RUNE, requiredFire, "Varrock/combat Fire runes")
-                || !withdrawExact(LAW_RUNE, requiredLaw, "Varrock Law runes"))
+        if (!withdrawExact(LAW_RUNE, requiredLaw, "Varrock Law runes"))
         {
             return false;
         }
@@ -805,6 +828,55 @@ public class KspBryophytaScript extends Script
 
         failAndStop("Missing required " + purpose + " in bank: " + itemName + " x" + amount);
         return false;
+    }
+
+    /**
+     * Withdraw every banked item in a stack while enforcing a minimum trip quantity.
+     * Intended for stackable runes/ammunition, so taking the entire bank stack consumes
+     * only one inventory slot for each item type.
+     */
+    private boolean withdrawAllAvailableStack(String itemName, int minimumRequired, String purpose)
+    {
+        int inventoryBefore = Rs2Inventory.itemQuantity(itemName);
+        int bankAvailable = Rs2Bank.bankItems().stream()
+                .filter(item -> item != null
+                        && item.getName() != null
+                        && item.getName().equalsIgnoreCase(itemName))
+                .mapToInt(Rs2ItemModel::getQuantity)
+                .sum();
+
+        long totalAvailable = (long) inventoryBefore + bankAvailable;
+        if (totalAvailable < minimumRequired)
+        {
+            failAndStop("Missing required " + purpose + ": " + itemName
+                    + " (need at least " + minimumRequired + ", available " + totalAvailable + ")");
+            return false;
+        }
+
+        if (bankAvailable <= 0)
+        {
+            return inventoryBefore >= minimumRequired;
+        }
+
+        if (!Rs2Bank.withdrawAll(itemName, true))
+        {
+            failAndStop("Could not withdraw all available " + purpose + ": " + itemName);
+            return false;
+        }
+
+        int expected = (int) Math.min(Integer.MAX_VALUE, totalAvailable);
+        if (!sleepUntil(() -> Rs2Inventory.itemQuantity(itemName) >= expected, 3000))
+        {
+            // Bank/inventory caches can update one tick apart. Only continue when the minimum
+            // requirement is definitely present; otherwise stop rather than entering under-supplied.
+            if (Rs2Inventory.itemQuantity(itemName) < minimumRequired)
+            {
+                failAndStop("Withdrawal did not supply enough " + purpose + ": " + itemName);
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private void restorePrayerAtVarrockAltar()
@@ -1505,16 +1577,24 @@ public class KspBryophytaScript extends Script
                 break;
 
             case MAGIC_FIRE:
-                if (!Rs2Equipment.isWearing("Staff of fire", true))
+                if (mainWeapon == null || mainWeapon.isBlank() || !Rs2Equipment.isWearing(mainWeapon, true))
                 {
                     restockRequired = true;
+                    loadoutVerified = false;
+                    return;
+                }
+                if (!ensureSelectedSpellAutocast())
+                {
                     return;
                 }
                 if (maintainRange(bryophyta))
                 {
                     return;
                 }
-                castFireSpell(bryophyta);
+                // Once the selected spell is configured as autocast, a normal Attack
+                // interaction lets the combat system cast it automatically. This avoids
+                // manual spell clicks and arbitrary cast-interval timing entirely.
+                attackWithCurrentWeapon(bryophyta);
                 break;
 
             default:
@@ -1586,29 +1666,46 @@ public class KspBryophytaScript extends Script
         }).orElse(false);
     }
 
-    private void castFireSpell(Rs2NpcModel bryophyta)
+    private boolean ensureSelectedSpellAutocast()
     {
+        if (config.strategy() != BryophytaStrategy.MAGIC_FIRE)
+        {
+            return true;
+        }
+
         long now = System.currentTimeMillis();
-        if (now - lastMagicCastAt < config.magicCastIntervalMs() || Rs2Player.isMoving())
+        if (autocastFailures > 0 && now - lastAutocastAttemptAt < AUTOCAST_RETRY_MS)
         {
-            return;
+            return false;
         }
 
-        lastMagicCastAt = now;
-        status = "Casting " + config.fireSpell() + "...";
+        lastAutocastAttemptAt = now;
+        BryophytaFireSpell spell = config.fireSpell();
+        status = "Setting " + spell + " to autocast...";
 
-        boolean cast = Rs2Magic.castOn(config.fireSpell().getMagicAction(), bryophyta);
-        if (!cast)
+        boolean configured = Rs2Combat.setAutoCastSpell(spell.getCombatSpell(), false);
+        if (configured)
         {
-            if (shouldEmergencyRestock())
-            {
-                restockRequired = true;
-            }
-            else
-            {
-                status = "Could not cast " + config.fireSpell() + ".";
-            }
+            autocastFailures = 0;
+            status = spell + " autocast ready.";
+            return true;
         }
+
+        if (shouldEmergencyRestock())
+        {
+            restockRequired = true;
+            return false;
+        }
+
+        autocastFailures++;
+        status = "Could not set " + spell + " to autocast (" + autocastFailures + "/4).";
+        if (autocastFailures >= 4)
+        {
+            failAndStop("Could not set " + spell
+                    + " to autocast. Check that the selected Magic weapon supports standard spell autocasting, "
+                    + "the account has the required Magic level, and the standard spellbook is active.");
+        }
+        return false;
     }
 
     /**
@@ -1846,7 +1943,7 @@ public class KspBryophytaScript extends Script
 
         if (config.strategy() == BryophytaStrategy.RANGED
                 && selectedAmmoName() != null
-                && getEquippedQuantity(EquipmentInventorySlot.AMMO, selectedAmmoName()) < config.rangedArrowAmount())
+                && getEquippedQuantity(EquipmentInventorySlot.AMMO, selectedAmmoName()) <= 0)
         {
             return false;
         }
@@ -1854,18 +1951,17 @@ public class KspBryophytaScript extends Script
         if (config.strategy() == BryophytaStrategy.MAGIC_FIRE)
         {
             BryophytaFireSpell spell = config.fireSpell();
-            int casts = config.magicCastSupply();
             if (Rs2Inventory.itemQuantity(AIR_RUNE)
-                    < config.varrockTeleportCount() * 3 + spell.getAirRunesPerCast() * casts)
+                    < config.varrockTeleportCount() * 3 + spell.getAirRunesPerCast())
             {
                 return false;
             }
             if (Rs2Inventory.itemQuantity(FIRE_RUNE)
-                    < config.varrockTeleportCount() + spell.getFireRunesPerCast() * casts)
+                    < config.varrockTeleportCount() + spell.getFireRunesPerCast())
             {
                 return false;
             }
-            if (Rs2Inventory.itemQuantity(spell.getCatalystRuneName()) < casts)
+            if (Rs2Inventory.itemQuantity(spell.getCatalystRuneName()) < 1)
             {
                 return false;
             }

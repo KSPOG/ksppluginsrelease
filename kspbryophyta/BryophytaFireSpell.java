@@ -1,39 +1,40 @@
 package net.runelite.client.plugins.microbot.kspbryophyta;
 
-import net.runelite.client.plugins.skillcalculator.skills.MagicAction;
+import net.runelite.client.plugins.microbot.util.magic.Rs2CombatSpells;
 
 public enum BryophytaFireSpell
 {
-    FIRE_STRIKE("Fire Strike", MagicAction.FIRE_STRIKE, 3, 2, "Mind rune"),
-    FIRE_BOLT("Fire Bolt", MagicAction.FIRE_BOLT, 3, 4, "Chaos rune"),
-    FIRE_BLAST("Fire Blast", MagicAction.FIRE_BLAST, 4, 5, "Death rune"),
-    FIRE_WAVE("Fire Wave", MagicAction.FIRE_WAVE, 5, 7, "Blood rune"),
-    FIRE_SURGE("Fire Surge", MagicAction.FIRE_SURGE, 7, 10, "Wrath rune");
+    FIRE_STRIKE("Fire Strike", Rs2CombatSpells.FIRE_STRIKE, 3, 2, "Mind rune"),
+    FIRE_BOLT("Fire Bolt", Rs2CombatSpells.FIRE_BOLT, 3, 4, "Chaos rune"),
+    FIRE_BLAST("Fire Blast", Rs2CombatSpells.FIRE_BLAST, 4, 5, "Death rune"),
+    FIRE_WAVE("Fire Wave", Rs2CombatSpells.FIRE_WAVE, 5, 7, "Blood rune"),
+    FIRE_SURGE("Fire Surge", Rs2CombatSpells.FIRE_SURGE, 7, 10, "Wrath rune");
 
     private final String displayName;
-    private final MagicAction magicAction;
+    private final Rs2CombatSpells combatSpell;
     private final int airRunesPerCast;
     private final int fireRunesPerCast;
     private final String catalystRuneName;
 
     BryophytaFireSpell(
             String displayName,
-            MagicAction magicAction,
+            Rs2CombatSpells combatSpell,
             int airRunesPerCast,
             int fireRunesPerCast,
             String catalystRuneName)
     {
         this.displayName = displayName;
-        this.magicAction = magicAction;
+        this.combatSpell = combatSpell;
         this.airRunesPerCast = airRunesPerCast;
         this.fireRunesPerCast = fireRunesPerCast;
         this.catalystRuneName = catalystRuneName;
     }
 
-    public MagicAction getMagicAction()
+    public Rs2CombatSpells getCombatSpell()
     {
-        return magicAction;
+        return combatSpell;
     }
+
 
     public int getAirRunesPerCast()
     {

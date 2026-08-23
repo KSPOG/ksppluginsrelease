@@ -74,24 +74,11 @@ public interface KspBryophytaConfig extends Config
         return 5;
     }
 
-    @Range(min = 1800, max = 4200)
-    @ConfigItem(
-            keyName = "magicCastIntervalMs",
-            name = "Magic cast interval",
-            description = "Minimum milliseconds between manual fire-spell casts",
-            position = 3,
-            section = strategySection
-    )
-    default int magicCastIntervalMs()
-    {
-        return 3000;
-    }
-
     @ConfigItem(
             keyName = "growthlingToolName",
             name = "Growthling axe",
             description = "Exact woodcutting axe to bank and carry. Rune axe matches the supplied Melee setup",
-            position = 4,
+            position = 3,
             section = strategySection
     )
     default String growthlingToolName()
@@ -137,37 +124,11 @@ public interface KspBryophytaConfig extends Config
         return 40;
     }
 
-    @Range(min = 50, max = 5000)
-    @ConfigItem(
-            keyName = "rangedArrowAmount",
-            name = "Ammo amount",
-            description = "Target equipped quantity for the ammunition selected in the equipment side panel",
-            position = 3,
-            section = bankingSection
-    )
-    default int rangedArrowAmount()
-    {
-        return 500;
-    }
-
-    @Range(min = 25, max = 1000)
-    @ConfigItem(
-            keyName = "magicCastSupply",
-            name = "Magic casts",
-            description = "Bank enough combat runes for approximately this many selected fire-spell casts",
-            position = 4,
-            section = bankingSection
-    )
-    default int magicCastSupply()
-    {
-        return 250;
-    }
-
     @ConfigItem(
             keyName = "useStrengthPotion",
             name = "Use Strength potion",
             description = "For Melee, withdraw Strength potion(4) and drink when the Strength boost has fully expired",
-            position = 5,
+            position = 3,
             section = bankingSection
     )
     default boolean useStrengthPotion()
@@ -180,7 +141,7 @@ public interface KspBryophytaConfig extends Config
             keyName = "strengthPotionAmount",
             name = "Strength potions",
             description = "Number of Strength potion(4) to withdraw per Melee trip",
-            position = 6,
+            position = 4,
             section = bankingSection
     )
     default int strengthPotionAmount()
@@ -192,7 +153,7 @@ public interface KspBryophytaConfig extends Config
             keyName = "withdrawMossyKey",
             name = "Bring Mossy key if banked",
             description = "Withdraw one Mossy key when available. It is optional and will not be treated as a missing required item",
-            position = 7,
+            position = 5,
             section = bankingSection
     )
     default boolean withdrawMossyKey()

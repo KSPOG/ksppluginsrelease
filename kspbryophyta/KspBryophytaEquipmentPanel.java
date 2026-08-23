@@ -73,21 +73,31 @@ final class KspBryophytaEquipmentPanel extends PluginPanel
     private final BryophytaEquipmentSettings equipmentSettings;
     private final BryophytaEquipmentIndex equipmentIndex;
     private final ItemManager itemManager;
+    private final KspBryophytaScript script;
+    private final KspBryophytaConfig config;
 
     private final JComboBox<BryophytaStrategy> strategySelector = new JComboBox<>(BryophytaStrategy.values());
     private final EquipmentCanvas equipmentCanvas;
     private final JLabel infoLabel = new JLabel(" ");
+    private final JLabel runStateLabel = new JLabel(" ");
+    private final JButton startStopButton = new JButton();
+    private final javax.swing.Timer runStateTimer;
+    private volatile boolean controlBusy;
 
     KspBryophytaEquipmentPanel(
             BryophytaEquipmentSettings equipmentSettings,
             BryophytaEquipmentIndex equipmentIndex,
             ItemManager itemManager,
-            BryophytaStrategy initialStrategy)
+            BryophytaStrategy initialStrategy,
+            KspBryophytaScript script,
+            KspBryophytaConfig config)
     {
         super();
         this.equipmentSettings = equipmentSettings;
         this.equipmentIndex = equipmentIndex;
         this.itemManager = itemManager;
+        this.script = script;
+        this.config = config;
 
         BufferedImage background = BryophytaEquipmentAssets.loadEquipmentSlots();
 
@@ -96,6 +106,11 @@ final class KspBryophytaEquipmentPanel extends PluginPanel
         buildUi();
         strategySelector.setSelectedItem(initialStrategy == null ? BryophytaStrategy.MELEE : initialStrategy);
         refreshCanvas();
+        refreshRunControls();
+
+        runStateTimer = new javax.swing.Timer(500, e -> refreshRunControls());
+        runStateTimer.setRepeats(true);
+        runStateTimer.start();
     }
 
     private void buildUi()
@@ -110,6 +125,21 @@ final class KspBryophytaEquipmentPanel extends PluginPanel
         hint.setHorizontalAlignment(SwingConstants.CENTER);
         hint.setForeground(Color.LIGHT_GRAY);
         add(hint);
+
+        JPanel runControls = new JPanel(new BorderLayout(0, 4));
+        runControls.setBackground(ColorScheme.DARK_GRAY_COLOR);
+        runControls.setBorder(new EmptyBorder(6, 0, 8, 0));
+
+        startStopButton.setFocusPainted(false);
+        startStopButton.setPreferredSize(new Dimension(CANVAS_WIDTH, 34));
+        startStopButton.setMaximumSize(new Dimension(CANVAS_WIDTH, 34));
+        startStopButton.addActionListener(e -> toggleScript());
+        runControls.add(startStopButton, BorderLayout.CENTER);
+
+        runStateLabel.setHorizontalAlignment(SwingConstants.CENTER);
+        runStateLabel.setForeground(Color.LIGHT_GRAY);
+        runControls.add(runStateLabel, BorderLayout.SOUTH);
+        add(runControls);
 
         JPanel strategyRow = new JPanel(new BorderLayout(6, 0));
         strategyRow.setBackground(ColorScheme.DARK_GRAY_COLOR);
@@ -141,6 +171,68 @@ final class KspBryophytaEquipmentPanel extends PluginPanel
         buttonRow.add(preloadButton);
 
         add(buttonRow);
+    }
+
+    private void toggleScript()
+    {
+        if (controlBusy)
+        {
+            return;
+        }
+
+        controlBusy = true;
+        refreshRunControls();
+
+        Thread controlThread = new Thread(() ->
+        {
+            try
+            {
+                if (script.isRunning())
+                {
+                    script.shutdown();
+                }
+                else
+                {
+                    script.run(config);
+                }
+            }
+            finally
+            {
+                controlBusy = false;
+                SwingUtilities.invokeLater(this::refreshRunControls);
+            }
+        }, "KspBryophyta-Control");
+        controlThread.setDaemon(true);
+        controlThread.start();
+    }
+
+    private void refreshRunControls()
+    {
+        boolean running = script.isRunning();
+
+        startStopButton.setText(controlBusy ? "Please wait..." : (running ? "Stop" : "Start"));
+        startStopButton.setEnabled(!controlBusy);
+        startStopButton.setToolTipText(running
+                ? "Stop the Bryophyta automation without disabling the plugin"
+                : "Start the Bryophyta automation using the current configuration");
+
+        if (controlBusy)
+        {
+            runStateLabel.setText("Changing script state...");
+        }
+        else if (running)
+        {
+            runStateLabel.setText("Automation: Running");
+        }
+        else
+        {
+            runStateLabel.setText("Automation: Stopped");
+        }
+    }
+
+    void shutdownPanel()
+    {
+        runStateTimer.stop();
     }
 
     private BryophytaStrategy selectedStrategy()
