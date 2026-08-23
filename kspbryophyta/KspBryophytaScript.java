@@ -61,6 +61,10 @@ public class KspBryophytaScript extends Script {
     private static final long LAIR_ENTRY_TRANSITION_TIMEOUT_MS = 10_000L;
     private static final long LAIR_DIALOGUE_RETRY_MS = 350L;
     private static final long CHEST_RETRY_MS = 1800L;
+    private static final long CHEST_OPEN_TIMEOUT_MS = 6_000L;
+    private static final long CHEST_LOOT_SETTLE_MS = 1_200L;
+    private static final long CHEST_LOOT_TIMEOUT_MS = 8_000L;
+    private static final long CHEST_LOOT_CLICK_RETRY_MS = 650L;
     private static final long ALTAR_RETRY_MS = 850L;
     private static final long ALTAR_INTERACTION_TIMEOUT_MS = 6_000L;
     private static final long MANHOLE_RETRY_MS = 900L;
@@ -118,6 +122,12 @@ public class KspBryophytaScript extends Script {
     private long lairEntryStartedAt;
     private long lastLairDialogueActionAt;
     private long lastChestAttemptAt;
+    private boolean chestLootPending;
+    private int chestKeysBeforeOpen;
+    private long chestOpenRequestedAt;
+    private long chestOpenConfirmedAt;
+    private long lastChestLootSeenAt;
+    private long lastChestLootClickAt;
     private long lastAltarAttemptAt;
     private boolean altarInteractionPending;
     private long altarInteractionStartedAt;
@@ -129,6 +139,7 @@ public class KspBryophytaScript extends Script {
     private long lastRangeMoveAt;
     private long lastAutoRetaliateAttemptAt;
     private final Set<Integer> handledGrowthlings = new HashSet<>();
+    private final Set<String> ignoredChestGroundDrops = new HashSet<>();
 
     @Inject
     public KspBryophytaScript(BryophytaEquipmentSettings equipmentSettings) {
@@ -173,14 +184,18 @@ public class KspBryophytaScript extends Script {
         entryFailures = altarFailures = autocastFailures = 0;
         lastBossSeenAt = killRegisteredAt = lastGrowthlingClickAt = lastBossAttackClickAt = 0L;
         lastAutocastAttemptAt = lastEntryAttemptAt = lastLairDialogueActionAt = lastChestAttemptAt = 0L;
+        chestOpenRequestedAt = chestOpenConfirmedAt = lastChestLootSeenAt = lastChestLootClickAt = 0L;
+        chestKeysBeforeOpen = 0;
         lastAltarAttemptAt = lastManholeAttemptAt = lastWalkIssuedAt = lastWebAttemptAt = 0L;
         lastRangeMoveAt = lastAutoRetaliateAttemptAt = 0L;
 
         bossWasPresent = killRegisteredForCycle = prayerRestoredAfterBank = loadoutVerified = false;
+        chestLootPending = false;
         restockRequired = true;
         mainWeapon = equipmentSettings.mainWeaponFor(config.strategy());
         resetTransitions();
         handledGrowthlings.clear();
+        ignoredChestGroundDrops.clear();
     }
 
     private void updateCounters() {
@@ -215,6 +230,21 @@ public class KspBryophytaScript extends Script {
     }
 
     private void handleInsideLair() {
+        long now = System.currentTimeMillis();
+
+        // Once the reward chest has been opened, its ground rewards have priority over
+        // restocking. This prevents a food/prayer threshold from teleporting away while
+        // chest loot is still on the floor.
+        if (chestLootPending) {
+            handleChestLoot(now);
+            return;
+        }
+
+        if (killRegisteredForCycle) {
+            handlePostKill(now);
+            return;
+        }
+
         if (restockRequired || shouldEmergencyRestock()) {
             restockRequired = true;
             handleVarrockTeleport("Restocking from Bryophyta...");
@@ -240,7 +270,6 @@ public class KspBryophytaScript extends Script {
         }
 
         Rs2NpcModel bryophyta = getBryophyta();
-        long now = System.currentTimeMillis();
 
         if (bryophyta != null && !bryophyta.isDead()) {
             bossWasPresent = true;
@@ -825,19 +854,23 @@ public class KspBryophytaScript extends Script {
             return;
         }
 
+        // The tile-object cache can already contain the manhole while it is still too far away
+        // to use. Never invoke Open/Climb-down from range: first reach the adjacent approach tile,
+        // then inspect and interact with the manhole locally.
+        if (player.distanceTo(VARROCK_MANHOLE_APPROACH) > 1) {
+            walkToControlled(VARROCK_MANHOLE_APPROACH, 1, "Walking to Varrock sewer entrance...");
+            return;
+        }
+
         if (Rs2Player.isMoving() || Rs2Player.isAnimating()) {
-            setStatus("Approaching Varrock sewer manhole...");
+            setStatus("At sewer entrance - waiting to stop before using manhole...");
             return;
         }
 
         boolean open = objectVisible(VARROCK_MANHOLE_OPEN_OBJECT_ID, VARROCK_MANHOLE, 2);
         boolean closed = !open && objectVisible(VARROCK_MANHOLE_CLOSED_OBJECT_ID, VARROCK_MANHOLE, 2);
         if (!open && !closed) {
-            if (player.distanceTo(VARROCK_MANHOLE_APPROACH) > 3) {
-                walkToControlled(VARROCK_MANHOLE_APPROACH, 2, "Walking to Varrock sewer entrance...");
-            } else {
-                setStatus("At sewer entrance - waiting for manhole object...");
-            }
+            setStatus("At sewer entrance - waiting for manhole object...");
             return;
         }
         if (now - lastManholeAttemptAt < MANHOLE_RETRY_MS) {
@@ -1406,12 +1439,18 @@ public class KspBryophytaScript extends Script {
 
     private void handleChest(long now) {
         if (now - lastChestAttemptAt < CHEST_RETRY_MS) {
-            setState(BryophytaState.WAITING_FOR_RESPAWN, "Waiting for Bryophyta respawn...");
+            setState(BryophytaState.WAITING_FOR_RESPAWN, "Waiting to retry Bryophyta chest...");
+            return;
+        }
+
+        chestKeysBeforeOpen = Rs2Inventory.itemQuantity(MOSSY_KEY);
+        if (chestKeysBeforeOpen <= 0) {
+            finishChestCycle("No Mossy key available - waiting for Bryophyta respawn.");
             return;
         }
 
         lastChestAttemptAt = now;
-        setState(BryophytaState.OPENING_CHEST, "Attempting Bryophyta chest...");
+        setState(BryophytaState.OPENING_CHEST, "Opening Bryophyta reward chest...");
 
         boolean interacted = Microbot.getRs2TileObjectCache()
                 .query()
@@ -1419,14 +1458,169 @@ public class KspBryophytaScript extends Script {
                 .within(20)
                 .interact("Open");
 
-        if (interacted) {
-            chestAttempts++;
-            bossWasPresent = false;
-            killRegisteredForCycle = false;
-            setState(BryophytaState.WAITING_FOR_RESPAWN, "Chest attempted - waiting for respawn.");
-        } else {
+        if (!interacted) {
             status = "Could not interact with Bryophyta chest.";
+            return;
         }
+
+        chestAttempts++;
+        ignoredChestGroundDrops.clear();
+        chestLootPending = true;
+        chestOpenRequestedAt = now;
+        chestOpenConfirmedAt = 0L;
+        lastChestLootSeenAt = 0L;
+        lastChestLootClickAt = 0L;
+        setState(BryophytaState.LOOTING, "Chest opened - waiting for reward drops...");
+    }
+
+    /**
+     * The post-2025 reward chest can place rewards on the ground when inventory space is
+     * unavailable. Treat the chest as incomplete until those rewards have been collected.
+     */
+    private void handleChestLoot(long now) {
+        int currentKeys = Rs2Inventory.itemQuantity(MOSSY_KEY);
+        Rs2TileItemModel loot = getNearestChestGroundLoot();
+
+        // Key consumption confirms that this specific chest interaction completed. Do not
+        // use a pre-existing boss drop as confirmation, otherwise a distant Open click could
+        // be mistaken for a completed chest opening.
+        if (chestOpenConfirmedAt == 0L && currentKeys < chestKeysBeforeOpen) {
+            chestOpenConfirmedAt = now;
+        }
+
+        if (chestOpenConfirmedAt == 0L) {
+            if (now - chestOpenRequestedAt >= CHEST_OPEN_TIMEOUT_MS) {
+                chestLootPending = false;
+                status = "Chest interaction did not complete - retrying.";
+                return;
+            }
+            setState(BryophytaState.LOOTING, "Waiting for reward chest to open...");
+            return;
+        }
+
+        if (loot != null) {
+            lastChestLootSeenAt = now;
+            setState(BryophytaState.LOOTING, "Collecting chest reward: " + loot.getName() + "...");
+
+            if (now - lastChestLootClickAt < CHEST_LOOT_CLICK_RETRY_MS) {
+                return;
+            }
+
+            int neededSlots = inventorySlotsNeededFor(loot);
+            if (!ensureLootSpace(neededSlots)) {
+                status = "Chest reward waiting - could not free " + neededSlots + " inventory slot(s).";
+                return;
+            }
+
+            lastChestLootClickAt = now;
+            if (!loot.pickup()) {
+                status = "Could not pick up chest reward: " + loot.getName();
+            }
+            return;
+        }
+
+        long sinceConfirmed = now - chestOpenConfirmedAt;
+        long sinceLastLoot = lastChestLootSeenAt == 0L ? sinceConfirmed : now - lastChestLootSeenAt;
+        if (sinceConfirmed < CHEST_LOOT_SETTLE_MS || sinceLastLoot < CHEST_LOOT_SETTLE_MS) {
+            setState(BryophytaState.LOOTING, "Waiting for remaining chest rewards...");
+            return;
+        }
+
+        if (sinceConfirmed >= CHEST_LOOT_TIMEOUT_MS || sinceLastLoot >= CHEST_LOOT_SETTLE_MS) {
+            finishChestCycle("Chest rewards collected - waiting for Bryophyta respawn.");
+        }
+    }
+
+    private Rs2TileItemModel getNearestChestGroundLoot() {
+        return Microbot.getRs2TileItemCache()
+                .query()
+                .fromWorldView()
+                .within(10)
+                .where(item -> item != null && item.isLootAble() && isChestLootCandidate(item))
+                .nearestOnClientThread();
+    }
+
+    private boolean isChestLootCandidate(Rs2TileItemModel item) {
+        String name = item.getName();
+        return name != null
+                && !name.equalsIgnoreCase("Giant bones")
+                && !name.equalsIgnoreCase("Big bones")
+                && !ignoredChestGroundDrops.contains(groundLootKey(item.getId(), item.getWorldLocation()));
+    }
+
+    private static String groundLootKey(int itemId, WorldPoint point) {
+        return point == null ? String.valueOf(itemId)
+                : itemId + "@" + point.getX() + "," + point.getY() + "," + point.getPlane();
+    }
+
+    private int inventorySlotsNeededFor(Rs2TileItemModel item) {
+        if (item == null) {
+            return 0;
+        }
+        if (item.isStackable()) {
+            return Rs2Inventory.hasItem(item.getId()) ? 0 : 1;
+        }
+        return Math.max(1, Math.min(item.getQuantity(), Rs2Inventory.capacity()));
+    }
+
+    private boolean ensureLootSpace(int requiredSlots) {
+        if (requiredSlots <= 0) {
+            return true;
+        }
+
+        int attempts = 0;
+        while (freeInventorySlots() < requiredSlots && attempts++ < requiredSlots + 2) {
+            int beforeSlots = freeInventorySlots();
+            if (!freeOneLootSlot()) {
+                return false;
+            }
+            if (!sleepUntil(() -> freeInventorySlots() > beforeSlots, 1_200)) {
+                return false;
+            }
+        }
+        return freeInventorySlots() >= requiredSlots;
+    }
+
+    private int freeInventorySlots() {
+        return Math.max(0, Rs2Inventory.capacity() - Rs2Inventory.all().size());
+    }
+
+    /**
+     * Food is deliberately the disposable trip supply. If HP is missing, consume one;
+     * otherwise drop one so a chest reward is never abandoned simply because HP is full.
+     */
+    private boolean freeOneLootSlot() {
+        String foodName = normalize(config.foodName());
+        if (foodName.isEmpty() || Rs2Inventory.get(foodName, true) == null) {
+            return false;
+        }
+
+        int currentHp = Microbot.getClient().getBoostedSkillLevel(Skill.HITPOINTS);
+        int realHp = Microbot.getClient().getRealSkillLevel(Skill.HITPOINTS);
+        if (currentHp < realHp && interactInventory(foodName, "Eat")) {
+            setStatus("Eating " + foodName + " to make room for chest loot...");
+            return true;
+        }
+
+        Rs2ItemModel food = Rs2Inventory.get(foodName, true);
+        WorldPoint dropTile = Rs2Player.getWorldLocation();
+        if (food != null && interactInventory(foodName, "Drop")) {
+            // Never re-loot the food we deliberately discarded to create the slot.
+            ignoredChestGroundDrops.add(groundLootKey(food.getId(), dropTile));
+            setStatus("Dropping " + foodName + " to make room for chest loot...");
+            return true;
+        }
+        return false;
+    }
+
+    private void finishChestCycle(String message) {
+        chestLootPending = false;
+        ignoredChestGroundDrops.clear();
+        chestKeysBeforeOpen = 0;
+        chestOpenRequestedAt = chestOpenConfirmedAt = lastChestLootSeenAt = lastChestLootClickAt = 0L;
+        bossWasPresent = false;
+        killRegisteredForCycle = false;
+        setState(BryophytaState.WAITING_FOR_RESPAWN, message);
     }
 
     private boolean verifyEquipmentLoadout() {
