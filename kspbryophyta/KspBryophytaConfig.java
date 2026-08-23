@@ -164,10 +164,35 @@ public interface KspBryophytaConfig extends Config
     }
 
     @ConfigItem(
+            keyName = "useStrengthPotion",
+            name = "Use Strength potion",
+            description = "For Melee, withdraw Strength potion(4) and drink when the Strength boost has fully expired",
+            position = 5,
+            section = bankingSection
+    )
+    default boolean useStrengthPotion()
+    {
+        return true;
+    }
+
+    @Range(min = 1, max = 4)
+    @ConfigItem(
+            keyName = "strengthPotionAmount",
+            name = "Strength potions",
+            description = "Number of Strength potion(4) to withdraw per Melee trip",
+            position = 6,
+            section = bankingSection
+    )
+    default int strengthPotionAmount()
+    {
+        return 1;
+    }
+
+    @ConfigItem(
             keyName = "withdrawMossyKey",
             name = "Bring Mossy key if banked",
             description = "Withdraw one Mossy key when available. It is optional and will not be treated as a missing required item",
-            position = 5,
+            position = 7,
             section = bankingSection
     )
     default boolean withdrawMossyKey()

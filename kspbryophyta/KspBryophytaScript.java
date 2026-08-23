@@ -53,6 +53,7 @@ public class KspBryophytaScript extends Script
     private static final String FIRE_RUNE = "Fire rune";
     private static final String LAW_RUNE = "Law rune";
     private static final String MOSSY_KEY = "Mossy key";
+    private static final String STRENGTH_POTION_4 = "Strength potion(4)";
 
     private static final WorldPoint VARROCK_MANHOLE = new WorldPoint(3237, 3458, 0);
     private static final WorldPoint BRYOPHYTA_SEWER_ENTRANCE = new WorldPoint(3174, 9901, 0);
@@ -358,6 +359,16 @@ public class KspBryophytaScript extends Script
                         || Rs2Inventory.itemQuantity(spell.getCatalystRuneName()) < 1;
 
             case MELEE:
+                if (config.useStrengthPotion()
+                        && Microbot.getClient().getBoostedSkillLevel(Skill.STRENGTH)
+                        <= Microbot.getClient().getRealSkillLevel(Skill.STRENGTH)
+                        && !hasAnyStrengthPotionDose())
+                {
+                    status = "Strength potion depleted.";
+                    return true;
+                }
+                return false;
+
             default:
                 return false;
         }
@@ -370,12 +381,53 @@ public class KspBryophytaScript extends Script
             Rs2Prayer.toggle(Rs2PrayerEnum.PROTECT_MAGIC, true);
         }
 
+        maintainStrengthBoost();
         Rs2Player.eatAt(config.eatAtPercent());
 
         if (config.maintainPoisonProtection())
         {
             Rs2Player.drinkAntiPoisonPotion();
         }
+    }
+
+    private void maintainStrengthBoost()
+    {
+        if (config.strategy() != BryophytaStrategy.MELEE || !config.useStrengthPotion())
+        {
+            return;
+        }
+
+        int realStrength = Microbot.getClient().getRealSkillLevel(Skill.STRENGTH);
+        int boostedStrength = Microbot.getClient().getBoostedSkillLevel(Skill.STRENGTH);
+        if (boostedStrength > realStrength)
+        {
+            return;
+        }
+
+        for (int dose = 4; dose >= 1; dose--)
+        {
+            String potion = "Strength potion(" + dose + ")";
+            if (!Rs2Inventory.contains(potion, true))
+            {
+                continue;
+            }
+
+            status = "Drinking Strength potion...";
+            Rs2Inventory.interact(potion, "Drink", true);
+            return;
+        }
+    }
+
+    private boolean hasAnyStrengthPotionDose()
+    {
+        for (int dose = 4; dose >= 1; dose--)
+        {
+            if (Rs2Inventory.contains("Strength potion(" + dose + ")", true))
+            {
+                return true;
+            }
+        }
+        return false;
     }
 
     private void handleVarrockTeleport(String reason)
@@ -679,6 +731,14 @@ public class KspBryophytaScript extends Script
             return false;
         }
 
+        if (config.strategy() == BryophytaStrategy.MELEE && config.useStrengthPotion())
+        {
+            if (!withdrawExact(STRENGTH_POTION_4, config.strengthPotionAmount(), "Strength potion"))
+            {
+                return false;
+            }
+        }
+
         if (!withdrawExact(normalize(config.foodName()), config.foodAmount(), "Food"))
         {
             return false;
@@ -718,8 +778,6 @@ public class KspBryophytaScript extends Script
         {
             prayerRestoredAfterBank = true;
             altarFailures = 0;
-            lastAltarAttemptAt = 0L;
-            lastWalkIssuedAt = 0L;
             setState(BryophytaState.WALKING_TO_SEWERS, "Prayer full - heading to Varrock Sewers.");
             return;
         }
@@ -732,50 +790,43 @@ public class KspBryophytaScript extends Script
 
         setState(BryophytaState.RESTORING_PRAYER, "Restoring Prayer at Varrock altar...");
 
-        // As soon as the actual altar enters the scene cache, click the altar itself.
-        // This replaces the old two-stage flow that first waited until the player was
-        // inside the broad altar area and then could block for up to four seconds after
-        // an interaction click while the character was still walking to the altar.
-        var altar = Microbot.getRs2TileObjectCache()
+        boolean altarVisible = Microbot.getRs2TileObjectCache()
                 .query()
                 .withName("Altar")
                 .where(object -> object.getWorldLocation() != null
                         && VARROCK_ALTAR_AREA.contains(object.getWorldLocation()))
-                .nearestOnClientThread();
+                .nearestOnClientThread() != null;
 
-        if (altar == null)
+        // As soon as the altar is loaded in the scene, interact with it directly instead
+        // of waiting to reach an arbitrary point inside the church first.
+        if (!altarVisible)
         {
-            // Only use the coordinate as an approach point until the altar is loaded.
-            // A looser distance is enough to bring the church/altar into the scene.
-            walkToControlled(VARROCK_ALTAR_TARGET, 8, "Approaching Varrock altar...");
+            walkToControlled(VARROCK_ALTAR_TARGET, 3, "Walking to Varrock altar...");
             return;
         }
 
         long now = System.currentTimeMillis();
-
-        // The first altar click is allowed immediately, even if the generic walker is
-        // currently moving. That retargets the client directly onto the altar instead
-        // of making it finish an unnecessary intermediate walking destination.
-        // While that altar click is moving/animating the player, do not spam it.
-        boolean firstAttempt = lastAltarAttemptAt == 0L;
-        if (!firstAttempt && (Rs2Player.isMoving() || Rs2Player.isAnimating()))
-        {
-            status = "Approaching Varrock altar...";
-            return;
-        }
-
-        if (!firstAttempt && now - lastAltarAttemptAt < ALTAR_RETRY_MS)
+        if (now - lastAltarAttemptAt < ALTAR_RETRY_MS || Rs2Player.isMoving() || Rs2Player.isAnimating())
         {
             return;
         }
-
         lastAltarAttemptAt = now;
-        status = "Praying at Varrock altar...";
 
-        boolean prayed = altar.click("Pray-at");
+        boolean prayed = Microbot.getRs2TileObjectCache()
+                .query()
+                .withName("Altar")
+                .where(object -> object.getWorldLocation() != null
+                        && VARROCK_ALTAR_AREA.contains(object.getWorldLocation()))
+                .interact("Pray-at");
+
         if (!prayed)
         {
-            prayed = altar.click("Pray");
+            prayed = Microbot.getRs2TileObjectCache()
+                    .query()
+                    .withName("Altar")
+                    .where(object -> object.getWorldLocation() != null
+                            && VARROCK_ALTAR_AREA.contains(object.getWorldLocation()))
+                    .interact("Pray");
         }
 
         if (!prayed)
@@ -783,15 +834,14 @@ public class KspBryophytaScript extends Script
             altarFailures++;
             if (altarFailures >= 5)
             {
-                failAndStop("Could not use the Varrock altar after five direct interaction attempts.");
+                failAndStop("Could not use an altar inside the configured Varrock altar area.");
             }
             return;
         }
 
-        // Do not block the main script loop waiting several seconds here. Prayer restore
-        // is observed by updateCounters()/the next loop iteration. If the click somehow
-        // fails to complete, the short retry timer handles it after movement stops.
-        altarFailures = 0;
+        // Do not block the script for several seconds. The normal 400 ms loop observes
+        // the Prayer level increase and immediately advances to the sewer state.
+        status = "Praying at Varrock altar...";
     }
 
     private void navigateToBryophyta()
@@ -1438,6 +1488,13 @@ public class KspBryophytaScript extends Script
             return false;
         }
 
+        if (config.strategy() == BryophytaStrategy.MELEE
+                && config.useStrengthPotion()
+                && Rs2Inventory.itemQuantity(STRENGTH_POTION_4) < config.strengthPotionAmount())
+        {
+            return false;
+        }
+
         if (config.strategy() == BryophytaStrategy.RANGED
                 && selectedAmmoName() != null
                 && getEquippedQuantity(EquipmentInventorySlot.AMMO, selectedAmmoName()) < config.rangedArrowAmount())
@@ -1485,6 +1542,14 @@ public class KspBryophytaScript extends Script
 
         if (Rs2Inventory.itemQuantity(normalize(config.foodName())) <= config.teleportAtFoodCount())
         {
+            return false;
+        }
+
+        if (config.strategy() == BryophytaStrategy.MELEE
+                && config.useStrengthPotion()
+                && !hasAnyStrengthPotionDose())
+        {
+            failAndStop("Strength potion is missing before entering the sewers.");
             return false;
         }
 
