@@ -48,6 +48,8 @@ public class KspBryophytaScript extends Script
     private static final long GROWTHLING_ATTACK_RETRY_MS = 2200L;
     private static final long BOSS_ATTACK_RETRY_MS = 2200L;
     private static final long ENTRY_RETRY_MS = 1800L;
+    private static final long LAIR_ENTRY_TRANSITION_TIMEOUT_MS = 10_000L;
+    private static final long LAIR_DIALOGUE_RETRY_MS = 350L;
     private static final long CHEST_RETRY_MS = 1800L;
     private static final long ALTAR_RETRY_MS = 850L;
     private static final long ALTAR_INTERACTION_TIMEOUT_MS = 6_000L;
@@ -102,6 +104,9 @@ public class KspBryophytaScript extends Script
     private long lastBossAttackClickAt;
     private long lastMagicCastAt;
     private long lastEntryAttemptAt;
+    private boolean lairEntryPending;
+    private long lairEntryStartedAt;
+    private long lastLairDialogueActionAt;
     private long lastChestAttemptAt;
     private long lastAltarAttemptAt;
     private boolean altarInteractionPending;
@@ -194,6 +199,9 @@ public class KspBryophytaScript extends Script
         lastBossAttackClickAt = 0L;
         lastMagicCastAt = 0L;
         lastEntryAttemptAt = 0L;
+        lairEntryPending = false;
+        lairEntryStartedAt = 0L;
+        lastLairDialogueActionAt = 0L;
         lastChestAttemptAt = 0L;
         lastAltarAttemptAt = 0L;
         altarInteractionPending = false;
@@ -486,6 +494,9 @@ public class KspBryophytaScript extends Script
         prayerRestoredAfterBank = false;
         altarInteractionPending = false;
         altarInteractionStartedAt = 0L;
+        lairEntryPending = false;
+        lairEntryStartedAt = 0L;
+        lastLairDialogueActionAt = 0L;
         loadoutVerified = false;
         setState(BryophytaState.BANKING, "Varrock reached - heading to East bank.");
     }
@@ -1145,6 +1156,46 @@ public class KspBryophytaScript extends Script
 
     private boolean tryEnterNearbyLairGate()
     {
+        long now = System.currentTimeMillis();
+
+        // Once the gate has been accepted, drive the entire dialogue/instance transition as
+        // a non-blocking state machine. The old implementation clicked one dialogue step and
+        // then blocked for up to six seconds waiting for the instance, which prevented the
+        // next required dialogue step from ever being processed during that wait.
+        if (lairEntryPending)
+        {
+            if (isInsideLair())
+            {
+                completeLairEntry();
+                return true;
+            }
+
+            if (handleLairEntryDialogue())
+            {
+                return true;
+            }
+
+            if (now - lairEntryStartedAt < LAIR_ENTRY_TRANSITION_TIMEOUT_MS)
+            {
+                setState(BryophytaState.ENTERING_LAIR,
+                        "Gate accepted - waiting for Bryophyta lair/dialogue...");
+                return true;
+            }
+
+            lairEntryPending = false;
+            lairEntryStartedAt = 0L;
+            lastLairDialogueActionAt = 0L;
+            entryFailures++;
+            status = "Bryophyta entry timed out - retrying gate...";
+            Microbot.status = status;
+
+            if (entryFailures >= 4)
+            {
+                failBryophytaEntry("Bryophyta entry dialogue/instance transition timed out after four attempts.");
+            }
+            return true;
+        }
+
         boolean gateNearby = Microbot.getRs2TileObjectCache()
                 .query()
                 .withId(BRYOPHYTA_GATE_OBJECT_ID)
@@ -1163,12 +1214,18 @@ public class KspBryophytaScript extends Script
             return true;
         }
 
+        // A confirmation dialogue can remain open from the preceding gate click. Never click
+        // the scenery again while a dialogue is awaiting input.
         if (handleLairEntryDialogue())
         {
+            lairEntryPending = true;
+            if (lairEntryStartedAt == 0L)
+            {
+                lairEntryStartedAt = now;
+            }
             return true;
         }
 
-        long now = System.currentTimeMillis();
         if (now - lastEntryAttemptAt < ENTRY_RETRY_MS)
         {
             return true;
@@ -1182,9 +1239,6 @@ public class KspBryophytaScript extends Script
 
         setState(BryophytaState.ENTERING_LAIR, "Opening Bryophyta gate...");
 
-        // The gate's primary action differs depending on whether this account has permanently
-        // unlocked the lair. Try the known actions, including Unlock for the first encounter,
-        // then fall back to the object's default action instead of assuming Open is always valid.
         boolean entered = interactBryophytaGate("Open");
         if (!entered)
         {
@@ -1203,49 +1257,27 @@ public class KspBryophytaScript extends Script
                     .interact();
         }
 
-        // Interaction helpers can occasionally return false even though the server accepted
-        // the click. Give the client a short chance to show the unlock/entry dialogue or load
-        // the instance before treating the attempt as a failure.
-        boolean response = sleepUntil(() -> isInsideLair() || Rs2Dialogue.isInDialogue(), 1800);
-        if (!entered && !response)
+        // Treat either a successful interaction call or a visible dialogue as acceptance. Do
+        // not sleep here: the 400 ms scheduler must remain free to advance every dialogue page.
+        if (entered || Rs2Dialogue.isInDialogue())
         {
-            entryFailures++;
-            status = Rs2Inventory.contains(MOSSY_KEY, true)
-                    ? "Gate interaction not accepted yet - Mossy key available; retrying..."
-                    : "Gate interaction not accepted yet; retrying...";
-            if (entryFailures >= 4)
-            {
-                String suffix = Rs2Inventory.contains(MOSSY_KEY, true)
-                        ? " A Mossy key is present; the plugin tried Open, Unlock, Enter and the default gate action."
-                        : " If this account has never permanently unlocked Bryophyta, bring a Mossy key once.";
-                failAndStop("Could not enter Bryophyta after four attempts." + suffix);
-            }
-            return true;
-        }
-
-        // Some accounts receive a confirmation dialogue after opening/unlocking the gate.
-        if (Rs2Dialogue.isInDialogue())
-        {
-            handleLairEntryDialogue();
-        }
-
-        boolean transitioned = sleepUntil(this::isInsideLair, 6000);
-        if (transitioned)
-        {
+            lairEntryPending = true;
+            lairEntryStartedAt = now;
             entryFailures = 0;
-            lastWalkIssuedAt = 0L;
-            setState(BryophytaState.WAITING_FOR_RESPAWN, "Bryophyta lair entered - locating boss...");
+            setState(BryophytaState.ENTERING_LAIR,
+                    "Bryophyta gate accepted - completing entry dialogue...");
             return true;
         }
 
         entryFailures++;
-        status = "Gate clicked but the lair did not load; retrying...";
+        status = Rs2Inventory.contains(MOSSY_KEY, true)
+                ? "Gate interaction not accepted yet - Mossy key available; retrying..."
+                : "Gate interaction not accepted yet; retrying...";
+        Microbot.status = status;
+
         if (entryFailures >= 4)
         {
-            String suffix = Rs2Inventory.contains(MOSSY_KEY, true)
-                    ? " A Mossy key is present, so check the gate interaction/path."
-                    : " If this account has never permanently unlocked Bryophyta, bring a Mossy key once.";
-            failAndStop("Bryophyta gate was clicked but the lair never loaded after four attempts." + suffix);
+            failBryophytaEntry("Could not enter Bryophyta after four gate attempts.");
         }
         return true;
     }
@@ -1262,29 +1294,87 @@ public class KspBryophytaScript extends Script
     private boolean handleLairEntryDialogue()
     {
         WorldPoint player = Rs2Player.getWorldLocation();
-        if (player == null || player.distanceTo(BRYOPHYTA_SEWER_ENTRANCE) > 10)
+        if (player == null || player.distanceTo(BRYOPHYTA_SEWER_ENTRANCE) > 12)
         {
             return false;
         }
 
-        if (Rs2Dialogue.hasSelectAnOption())
+        boolean optionVisible = Rs2Dialogue.hasSelectAnOption();
+        boolean continueVisible = Rs2Dialogue.hasContinue();
+        if (!optionVisible && !continueVisible)
         {
-            if (Rs2Dialogue.clickOption("Yes", "Enter", "Go"))
+            return false;
+        }
+
+        long now = System.currentTimeMillis();
+        if (now - lastLairDialogueActionAt < LAIR_DIALOGUE_RETRY_MS)
+        {
+            // Dialogue is still active; consume the loop without re-clicking the gate.
+            return true;
+        }
+
+        if (optionVisible)
+        {
+            // Confirmed in-client prompt:
+            //   Are you sure you wish to open it?
+            //   1. Yes, let's go!
+            //   2. I don't think I'm quite ready yet.
+            // Prefer the exact affirmative text so a broad substring can never select the
+            // negative option. Fall back to compatible affirmative wording for later visits.
+            boolean selected = Rs2Dialogue.clickOption(true, "Yes, let's go!");
+            if (!selected)
             {
-                setState(BryophytaState.ENTERING_LAIR, "Confirming Bryophyta lair entry...");
-                return true;
+                selected = Rs2Dialogue.clickOption(false,
+                        "Yes, let's go", "Yes", "Enter", "Go in", "Continue");
+            }
+
+            if (selected)
+            {
+                lastLairDialogueActionAt = now;
+                lairEntryPending = true;
+                if (lairEntryStartedAt == 0L)
+                {
+                    lairEntryStartedAt = now;
+                }
+                setState(BryophytaState.ENTERING_LAIR,
+                        "Selected 'Yes, let's go!' - completing Bryophyta entry...");
+            }
+            else
+            {
+                status = "Bryophyta entry options visible - waiting for affirmative option...";
+                Microbot.status = status;
             }
             return true;
         }
 
-        if (Rs2Dialogue.hasContinue())
+        Rs2Dialogue.clickContinue();
+        lastLairDialogueActionAt = now;
+        lairEntryPending = true;
+        if (lairEntryStartedAt == 0L)
         {
-            Rs2Dialogue.clickContinue();
-            setState(BryophytaState.ENTERING_LAIR, "Continuing Bryophyta gate dialogue...");
-            return true;
+            lairEntryStartedAt = now;
         }
+        setState(BryophytaState.ENTERING_LAIR, "Continuing Bryophyta gate dialogue...");
+        return true;
+    }
 
-        return false;
+    private void completeLairEntry()
+    {
+        lairEntryPending = false;
+        lairEntryStartedAt = 0L;
+        lastLairDialogueActionAt = 0L;
+        entryFailures = 0;
+        lastWalkIssuedAt = 0L;
+        setState(BryophytaState.WAITING_FOR_RESPAWN,
+                "Bryophyta lair entered - locating boss...");
+    }
+
+    private void failBryophytaEntry(String prefix)
+    {
+        String suffix = Rs2Inventory.contains(MOSSY_KEY, true)
+                ? " A Mossy key is present; gate actions and the full confirmation dialogue were attempted."
+                : " If this account has never permanently unlocked Bryophyta, bring a Mossy key once.";
+        failAndStop(prefix + suffix);
     }
 
     private void walkToControlled(WorldPoint target, int distance, String walkingStatus)
