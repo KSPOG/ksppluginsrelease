@@ -617,15 +617,17 @@ public class KspBryophytaScript extends Script {
     }
 
     private boolean withdrawExact(String itemName, int amount, String purpose) {
-        if (amount <= 0) {
+        if (amount <= 0 || Rs2Inventory.itemQuantity(itemName) >= amount) {
             return true;
         }
-
-        if (Rs2Bank.withdrawDeficit(itemName, amount, true)) {
+        if (!Rs2Bank.withdrawDeficit(itemName, amount, true)) {
+            failAndStop("Missing required " + purpose + " in bank: " + itemName + " x" + amount);
+            return false;
+        }
+        if (sleepUntil(() -> Rs2Inventory.itemQuantity(itemName) >= amount, 2500)) {
             return true;
         }
-
-        failAndStop("Missing required " + purpose + " in bank: " + itemName + " x" + amount);
+        failAndStop("Could not withdraw required " + purpose + ": " + itemName + " x" + amount);
         return false;
     }
 
@@ -1575,9 +1577,15 @@ public class KspBryophytaScript extends Script {
     }
 
     private boolean interactInventory(String itemName, String... actions) {
-        for (String action : actions) {
-            if (Rs2Inventory.interact(itemName, action, true)) {
-                return true;
+        Rs2ItemModel item = Rs2Inventory.get(itemName, true);
+        if (item == null || item.getInventoryActions() == null) {
+            return false;
+        }
+        for (String wanted : actions) {
+            for (String available : item.getInventoryActions()) {
+                if (available != null && available.equalsIgnoreCase(wanted)) {
+                    return Rs2Inventory.interact(item, available);
+                }
             }
         }
         return false;
