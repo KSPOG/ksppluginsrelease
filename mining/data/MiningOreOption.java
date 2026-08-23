@@ -1,10 +1,6 @@
 package net.runelite.client.plugins.microbot.mining.data;
 
-import lombok.Getter;
-import lombok.RequiredArgsConstructor;
 
-@Getter
-@RequiredArgsConstructor
 public enum MiningOreOption {
     COPPER_AND_TIN("Copper & Tin", Rocks.COPPER),
     CLAY("Clay", Rocks.CLAY),
@@ -24,6 +20,19 @@ public enum MiningOreOption {
 
     private final String displayName;
     private final Rocks rock;
+
+    MiningOreOption(String displayName, Rocks rock) {
+        this.displayName = displayName;
+        this.rock = rock;
+    }
+
+    public String getDisplayName() {
+        return displayName;
+    }
+
+    public Rocks getRock() {
+        return rock;
+    }
 
     public boolean isCopperAndTin() {
         return this == COPPER_AND_TIN;

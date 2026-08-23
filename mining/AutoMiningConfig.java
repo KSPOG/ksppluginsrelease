@@ -1,26 +1,30 @@
 package net.runelite.client.plugins.microbot.mining;
 
-import net.runelite.client.config.*;
-import net.runelite.client.plugins.microbot.mining.data.Rocks;
+import net.runelite.client.config.Config;
+import net.runelite.client.config.ConfigGroup;
+import net.runelite.client.config.ConfigInformation;
+import net.runelite.client.config.ConfigItem;
+import net.runelite.client.config.ConfigSection;
+import net.runelite.client.plugins.microbot.mining.data.MiningOreOption;
 import net.runelite.client.plugins.microbot.util.inventory.InteractOrder;
 
 @ConfigGroup("Mining")
 @ConfigInformation("<h2>Auto Mining</h2>" +
-        "<h3>Version: "+ AutoMiningPlugin.version + "</h3>" +
-        "<p>1. <strong>Ore Selection:</strong> Choose the type of ore you wish to mine. The default ore is <em>TIN</em>.</p>" +
-        "<p></p>"+
-        "<p>2. <strong>Distance to Stray:</strong> Set the maximum distance in tiles that the bot can travel from its initial position. The default distance is <em>20 tiles</em>.</p>" +
-        "<p></p>"+
-        "<p>3. <strong>Banking Option:</strong> Enable or disable the use of a bank. If enabled, the bot will walk back to the original location after banking. The default setting is <em>disabled</em>.</p>" +
-        "<p></p>"+
-        "<p>4. <strong>Items to Bank:</strong> Specify the items to be banked, separated by commas. The default value is <em>'ore'</em>.</p>"+
-        "<p></p>"+
-        "<p>5. <strong>Basalt:</strong> If mining basalt, ensure UseBank is checked and it will automatically note at Snowflake</em>.</p>")
-
-public interface AutoMiningConfig extends Config {
+        "<h3>Version: " + AutoMiningPlugin.version + "</h3>" +
+        "<p>1. <strong>Ore Selection:</strong> Copper &amp; Tin mode keeps both ore amounts balanced automatically.</p>" +
+        "<p></p>" +
+        "<p>2. <strong>Distance to Stray:</strong> Set the maximum distance in tiles that the bot can travel from its initial position.</p>" +
+        "<p></p>" +
+        "<p>3. <strong>Banking:</strong> Deposit inventory is used automatically. The best usable pickaxe is restored or upgraded before leaving the bank.</p>" +
+        "<p></p>" +
+        "<p>4. <strong>Dropping:</strong> Inventory pickaxes are retained automatically; all other inventory items are dropped.</p>" +
+        "<p></p>" +
+        "<p>5. <strong>Basalt:</strong> Enable UseBank to note basalt at Snowflake.</p>")
+public interface AutoMiningConfig extends Config
+{
     @ConfigSection(
             name = "General",
-            description = "General",
+            description = "General settings",
             position = 0
     )
     String generalSection = "general";
@@ -42,19 +46,19 @@ public interface AutoMiningConfig extends Config {
     @ConfigItem(
             keyName = "Ore",
             name = "Ore",
-            description = "Choose the ore",
+            description = "Choose the ore to mine",
             position = 0,
             section = generalSection
     )
-    default Rocks ORE()
+    default MiningOreOption ORE()
     {
-        return Rocks.TIN;
+        return MiningOreOption.COPPER_AND_TIN;
     }
 
     @ConfigItem(
             keyName = "progressiveMode",
             name = "Progressive mode",
-            description = "Automatically select the best ore for our level",
+            description = "Mine balanced Copper & Tin at levels 1-14, then automatically select the highest unlocked ore",
             position = 1,
             section = generalSection
     )
@@ -66,7 +70,7 @@ public interface AutoMiningConfig extends Config {
     @ConfigItem(
             keyName = "DistanceToStray",
             name = "Distance to Stray",
-            description = "Set how far you can travel from your initial position in tiles",
+            description = "Maximum distance from the initial mining position",
             position = 2,
             section = generalSection
     )
@@ -78,29 +82,31 @@ public interface AutoMiningConfig extends Config {
     @ConfigItem(
             keyName = "maxPlayersInArea",
             name = "Max players in area",
-            description = "If more players than this are nearby, hop worlds. 0 = disable",
+            description = "Hop when at least this many mining players are nearby. 0 disables hopping",
             position = 3,
             section = generalSection
     )
-    default int maxPlayersInArea() {
+    default int maxPlayersInArea()
+    {
         return 0;
     }
 
     @ConfigItem(
             keyName = "leagueMode",
             name = "League mode (anti-AFK)",
-            description = "Periodically presses a key to reset the idle timer so you never get logged out",
+            description = "Periodically press a key to reset the idle timer",
             position = 4,
             section = generalSection
     )
-    default boolean leagueMode() {
+    default boolean leagueMode()
+    {
         return false;
     }
 
     @ConfigItem(
             keyName = "UseBank",
             name = "UseBank",
-            description = "Use bank and walk back to original location",
+            description = "Bank the inventory and return to the mining location",
             position = 0,
             section = bankingSection
     )
@@ -110,46 +116,26 @@ public interface AutoMiningConfig extends Config {
     }
 
     @ConfigItem(
-            keyName = "ItemsToBank",
-            name = "Items to bank (Comma seperated)",
-            description = "Items to bank",
+            keyName = "clayBracelet",
+            name = "Use Clay Bracelet",
+            description = "Withdraw and equip a bracelet of clay. Start with one equipped",
             position = 1,
             section = bankingSection
     )
-    default String itemsToBank() {
-        return "ore";
-    }
-
-    @ConfigItem(
-            keyName = "clayBracelet",
-            name = "Use Clay Bracelet",
-            description = "Withdraw and equip bracelet of clay. Start script with bracelet on.",
-            position = 2,
-            section = bankingSection
-    )
-    default boolean clayBracelet() {
+    default boolean clayBracelet()
+    {
         return false;
     }
 
     @ConfigItem(
             keyName = "dropOrder",
             name = "Drop Order",
-            description = "Order for dropping items",
+            description = "Order used when dropping inventory items",
             position = 0,
             section = droppingSection
     )
-    default InteractOrder interactOrder() {
+    default InteractOrder interactOrder()
+    {
         return InteractOrder.STANDARD;
-    }
-
-    @ConfigItem(
-            keyName = "itemsToKeep",
-            name = "Items to keep (Comma seperated)",
-            description = "Items to keep when dropping ore",
-            position = 1,
-            section = droppingSection
-    )
-    default String itemsToKeep() {
-        return "pickaxe";
     }
 }

@@ -1,7 +1,5 @@
 package net.runelite.client.plugins.microbot.mining.data;
 
-import lombok.Getter;
-import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.Quest;
 import net.runelite.api.QuestState;
 import net.runelite.api.Skill;
@@ -18,8 +16,6 @@ import java.util.Map;
  * resource availability, helping to choose locations with sufficient resources
  * for efficient skilling activities.
  */
-@Getter
-@Slf4j
 public class ResourceLocationOption extends LocationOption {
 
     /**
@@ -42,6 +38,10 @@ public class ResourceLocationOption extends LocationOption {
     public ResourceLocationOption(WorldPoint worldPoint, String name, boolean membersOnly, int numberOfResources) {
         super(worldPoint, name, membersOnly);
         this.numberOfResources = numberOfResources;
+    }
+
+    public int getNumberOfResources() {
+        return numberOfResources;
     }
 
     /**

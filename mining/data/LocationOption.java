@@ -1,7 +1,7 @@
 package net.runelite.client.plugins.microbot.mining.data;
 
-import lombok.Getter;
-import lombok.extern.slf4j.Slf4j;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import net.runelite.api.Quest;
 import net.runelite.api.QuestState;
 import net.runelite.api.Skill;
@@ -20,9 +20,8 @@ import java.util.Map;
 /**
  * Container class for location data with requirements.
  */
-@Getter
-@Slf4j
 public class LocationOption {
+    private static final Logger log = LoggerFactory.getLogger(LocationOption.class);
     private final WorldPoint worldPoint;
     private final String name;
     private final boolean membersOnly; // Indicates if this location is members-only
@@ -55,6 +54,38 @@ public class LocationOption {
         this.requiredVarplayer = requiredVarplayer != null ? new HashMap<>(requiredVarplayer) : new HashMap<>();
         this.requiredItems = requiredItems != null ? new HashMap<>(requiredItems) : new HashMap<>();
 
+    }
+
+    public WorldPoint getWorldPoint() {
+        return worldPoint;
+    }
+
+    public String getName() {
+        return name;
+    }
+
+    public boolean isMembersOnly() {
+        return membersOnly;
+    }
+
+    public Map<Quest, QuestState> getRequiredQuests() {
+        return requiredQuests;
+    }
+
+    public Map<Skill, Integer> getRequiredSkills() {
+        return requiredSkills;
+    }
+
+    public Map<Integer, Integer> getRequiredVarbits() {
+        return requiredVarbits;
+    }
+
+    public Map<Integer, Integer> getRequiredVarplayer() {
+        return requiredVarplayer;
+    }
+
+    public Map<Integer, Integer> getRequiredItems() {
+        return requiredItems;
     }
     public boolean canReach() {
         return Rs2Walker.canReach(worldPoint);

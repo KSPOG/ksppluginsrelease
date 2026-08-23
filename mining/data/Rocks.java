@@ -1,12 +1,8 @@
 package net.runelite.client.plugins.microbot.mining.data;
 
-import lombok.Getter;
-import lombok.RequiredArgsConstructor;
 import net.runelite.api.Skill;
 import net.runelite.client.plugins.microbot.util.player.Rs2Player;
 
-@Getter
-@RequiredArgsConstructor
 public enum Rocks {
     TIN("tin rocks", 1),
     COPPER("copper rocks", 1),
@@ -27,6 +23,19 @@ public enum Rocks {
 
     private final String name;
     private final int miningLevel;
+
+    Rocks(String name, int miningLevel) {
+        this.name = name;
+        this.miningLevel = miningLevel;
+    }
+
+    public String getName() {
+        return name;
+    }
+
+    public int getMiningLevel() {
+        return miningLevel;
+    }
 
     @Override
     public String toString() {

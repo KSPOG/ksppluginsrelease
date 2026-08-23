@@ -1,7 +1,5 @@
 package net.runelite.client.plugins.microbot.mining.data;
 
-import lombok.Getter;
-import lombok.RequiredArgsConstructor;
 import net.runelite.api.Quest;
 import net.runelite.api.QuestState;
 import net.runelite.api.Skill;
@@ -20,9 +18,17 @@ import java.util.stream.Collectors;
  * This class provides optimized mining locations for each ore type with their requirements.
  * Data sourced from OSRS Wiki: https://oldschool.runescape.wiki/w/Mines
  */
-@Getter
-@RequiredArgsConstructor
 public class MiningRockLocations {
+    private static final WorldPoint VARROCK_SOUTH_EAST_MINE_POSITION =
+            new WorldPoint(3284, 3363, 0);
+
+    private static LocationOption getVarrockSouthEastMine() {
+        return new LocationOption(
+                VARROCK_SOUTH_EAST_MINE_POSITION,
+                "Varrock South East Mine",
+                false
+        );
+    }
 
     /**
      * Gets the best locations for a specific rock/ore type.
@@ -75,6 +81,13 @@ public class MiningRockLocations {
      * Returns null if no accessible locations are found.
      */
     public static LocationOption getBestAccessibleLocation(Rocks rock) {
+        // Copper, Tin and Iron are explicitly pinned to the requested mine.
+        // This prevents nearest-location selection from redirecting the script
+        // to Varrock South West around 3181/3182, 3377.
+        if (rock == Rocks.COPPER || rock == Rocks.TIN || rock == Rocks.IRON) {
+            return getVarrockSouthEastMine();
+        }
+
         List<LocationOption> accessibleLocations = getAccessibleLocationsForRock(rock);
 
         if (accessibleLocations.isEmpty()) {
@@ -231,6 +244,11 @@ public class MiningRockLocations {
     private static List<LocationOption> getTinRockLocations() {
         List<LocationOption> locations = new ArrayList<>();
 
+        locations.add(new LocationOption(
+                new WorldPoint(3284, 3363, 0),
+                "Varrock South East Mine", false
+        ));
+
         // Lumbridge Swamp West Mine - great for beginners, close to bank
         locations.add(new LocationOption(
                 new WorldPoint(3149, 3148, 0),
@@ -260,6 +278,11 @@ public class MiningRockLocations {
 
     private static List<LocationOption> getCopperRockLocations() {
         List<LocationOption> locations = new ArrayList<>();
+
+        locations.add(new LocationOption(
+                new WorldPoint(3284, 3363, 0),
+                "Varrock South East Mine", false
+        ));
 
         // Al Kharid Mine - excellent for beginners, close to bank
         locations.add(new LocationOption(
@@ -331,7 +354,7 @@ public class MiningRockLocations {
 
         // Varrock South East Mine - close to Varrock east bank
         locations.add(new LocationOption(
-                new WorldPoint(3285, 3363, 0),
+                new WorldPoint(3284, 3363, 0),
                 "Varrock South East Mine", false
         ));
 
