@@ -33,30 +33,24 @@ import java.awt.Dimension;
 import java.awt.FlowLayout;
 import java.awt.Font;
 import java.awt.Graphics;
-import java.awt.Image;
 import java.awt.Rectangle;
 import java.awt.Window;
+import java.awt.event.ActionListener;
 import java.awt.image.BufferedImage;
-import java.util.ArrayList;
 import java.util.EnumMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
-/**
- * RuneLite side panel for configuring per-strategy Bryophyta equipment presets.
- */
-final class KspBryophytaEquipmentPanel extends PluginPanel
-{
+final class KspBryophytaEquipmentPanel extends PluginPanel {
     private static final int CANVAS_WIDTH = 213;
     private static final int SOURCE_WIDTH = 288;
-    private static final int SOURCE_HEIGHT = 317;
+    private static final int SOURCE_HEIGHT = 309;
     private static final int CANVAS_HEIGHT = Math.round((float) SOURCE_HEIGHT * CANVAS_WIDTH / SOURCE_WIDTH);
 
     private static final Map<EquipmentInventorySlot, Rectangle> SOURCE_SLOT_BOUNDS = new EnumMap<>(EquipmentInventorySlot.class);
 
-    static
-    {
+    static {
         SOURCE_SLOT_BOUNDS.put(EquipmentInventorySlot.HEAD, new Rectangle(117, 8, 53, 53));
         SOURCE_SLOT_BOUNDS.put(EquipmentInventorySlot.CAPE, new Rectangle(54, 66, 54, 55));
         SOURCE_SLOT_BOUNDS.put(EquipmentInventorySlot.AMULET, new Rectangle(116, 66, 55, 55));
@@ -90,8 +84,7 @@ final class KspBryophytaEquipmentPanel extends PluginPanel
             ItemManager itemManager,
             BryophytaStrategy initialStrategy,
             KspBryophytaScript script,
-            KspBryophytaConfig config)
-    {
+            KspBryophytaConfig config) {
         super();
         this.equipmentSettings = equipmentSettings;
         this.equipmentIndex = equipmentIndex;
@@ -112,37 +105,25 @@ final class KspBryophytaEquipmentPanel extends PluginPanel
         runStateTimer.setRepeats(true);
         runStateTimer.start();
     }
-
-    private void buildUi()
-    {
-        JLabel title = new JLabel("Bryophyta Equipment");
-        title.setHorizontalAlignment(SwingConstants.CENTER);
-        title.setForeground(Color.WHITE);
+    private void buildUi() {
+        JLabel title = centeredLabel("Bryophyta Equipment", Color.WHITE);
         title.setFont(title.getFont().deriveFont(Font.BOLD, 15f));
         add(title);
+        add(centeredLabel("<html><center>Click an equipment slot to choose an item.<br>Each strategy stores its own setup.</center></html>", Color.LIGHT_GRAY));
 
-        JLabel hint = new JLabel("<html><center>Click an equipment slot to choose an item.<br>Each strategy stores its own setup.</center></html>");
-        hint.setHorizontalAlignment(SwingConstants.CENTER);
-        hint.setForeground(Color.LIGHT_GRAY);
-        add(hint);
-
-        JPanel runControls = new JPanel(new BorderLayout(0, 4));
-        runControls.setBackground(ColorScheme.DARK_GRAY_COLOR);
+        JPanel runControls = darkPanel(new BorderLayout(0, 4));
         runControls.setBorder(new EmptyBorder(6, 0, 8, 0));
-
         startStopButton.setFocusPainted(false);
         startStopButton.setPreferredSize(new Dimension(CANVAS_WIDTH, 34));
         startStopButton.setMaximumSize(new Dimension(CANVAS_WIDTH, 34));
         startStopButton.addActionListener(e -> toggleScript());
         runControls.add(startStopButton, BorderLayout.CENTER);
-
         runStateLabel.setHorizontalAlignment(SwingConstants.CENTER);
         runStateLabel.setForeground(Color.LIGHT_GRAY);
         runControls.add(runStateLabel, BorderLayout.SOUTH);
         add(runControls);
 
-        JPanel strategyRow = new JPanel(new BorderLayout(6, 0));
-        strategyRow.setBackground(ColorScheme.DARK_GRAY_COLOR);
+        JPanel strategyRow = darkPanel(new BorderLayout(6, 0));
         JLabel strategyLabel = new JLabel("Edit setup:");
         strategyLabel.setForeground(Color.WHITE);
         strategyRow.add(strategyLabel, BorderLayout.WEST);
@@ -152,52 +133,32 @@ final class KspBryophytaEquipmentPanel extends PluginPanel
 
         equipmentCanvas.setAlignmentX(CENTER_ALIGNMENT);
         add(equipmentCanvas);
-
         infoLabel.setForeground(Color.LIGHT_GRAY);
         infoLabel.setHorizontalAlignment(SwingConstants.CENTER);
         add(infoLabel);
 
-        JPanel buttonRow = new JPanel(new FlowLayout(FlowLayout.CENTER, 4, 0));
-        buttonRow.setBackground(ColorScheme.DARK_GRAY_COLOR);
-
-        JButton resetButton = new JButton("Reset defaults");
-        resetButton.setToolTipText("Remove all custom overrides for the selected strategy");
-        resetButton.addActionListener(e -> resetCurrentStrategy());
-        buttonRow.add(resetButton);
-
-        JButton preloadButton = new JButton("Load items");
-        preloadButton.setToolTipText("Build the local equipment database used by the item picker");
-        preloadButton.addActionListener(e -> ensureIndexLoaded(null));
-        buttonRow.add(preloadButton);
-
-        add(buttonRow);
+        JPanel buttons = darkPanel(new FlowLayout(FlowLayout.CENTER, 4, 0));
+        buttons.add(button("Reset defaults", "Remove all custom overrides for the selected strategy", e -> resetCurrentStrategy()));
+        buttons.add(button("Load items", "Build the local equipment database used by the item picker", e -> ensureIndexLoaded(null)));
+        add(buttons);
     }
 
-    private void toggleScript()
-    {
-        if (controlBusy)
-        {
+    private void toggleScript() {
+        if (controlBusy) {
             return;
         }
 
         controlBusy = true;
         refreshRunControls();
 
-        Thread controlThread = new Thread(() ->
-        {
-            try
-            {
-                if (script.isRunning())
-                {
+        Thread controlThread = new Thread(() -> {
+            try {
+                if (script.isRunning()) {
                     script.shutdown();
-                }
-                else
-                {
+                } else {
                     script.run(config);
                 }
-            }
-            finally
-            {
+            } finally {
                 controlBusy = false;
                 SwingUtilities.invokeLater(this::refreshRunControls);
             }
@@ -206,8 +167,7 @@ final class KspBryophytaEquipmentPanel extends PluginPanel
         controlThread.start();
     }
 
-    private void refreshRunControls()
-    {
+    private void refreshRunControls() {
         boolean running = script.isRunning();
 
         startStopButton.setText(controlBusy ? "Please wait..." : (running ? "Stop" : "Start"));
@@ -216,101 +176,100 @@ final class KspBryophytaEquipmentPanel extends PluginPanel
                 ? "Stop the Bryophyta automation without disabling the plugin"
                 : "Start the Bryophyta automation using the current configuration");
 
-        if (controlBusy)
-        {
+        if (controlBusy) {
             runStateLabel.setText("Changing script state...");
         }
-        else if (running)
-        {
+        else if (running) {
             runStateLabel.setText("Automation: Running");
-        }
-        else
-        {
+        } else {
             runStateLabel.setText("Automation: Stopped");
         }
     }
-
-    void shutdownPanel()
-    {
+    void shutdownPanel() {
         runStateTimer.stop();
     }
+    private static JLabel centeredLabel(String text, Color color) {
+        JLabel label = new JLabel(text, SwingConstants.CENTER);
+        label.setForeground(color);
+        return label;
+    }
 
-    private BryophytaStrategy selectedStrategy()
-    {
+    private static JPanel darkPanel(java.awt.LayoutManager layout) {
+        JPanel panel = new JPanel(layout);
+        panel.setBackground(ColorScheme.DARK_GRAY_COLOR);
+        return panel;
+    }
+
+    private static JButton button(String text, String tooltip, ActionListener listener) {
+        JButton button = new JButton(text);
+        if (tooltip != null) {
+            button.setToolTipText(tooltip);
+        }
+        button.addActionListener(listener);
+        return button;
+    }
+
+    private void indexReady(Runnable onSuccess) {
+        infoLabel.setText("Equipment database ready.");
+        if (onSuccess != null) {
+            onSuccess.run();
+        }
+    }
+
+    private static DocumentListener onDocumentChange(Runnable action) {
+        return new DocumentListener() {
+            @Override public void insertUpdate(DocumentEvent e) { action.run(); }
+            @Override public void removeUpdate(DocumentEvent e) { action.run(); }
+            @Override public void changedUpdate(DocumentEvent e) { action.run(); }
+        };
+    }
+
+    private BryophytaStrategy selectedStrategy() {
         Object selected = strategySelector.getSelectedItem();
         return selected instanceof BryophytaStrategy ? (BryophytaStrategy) selected : BryophytaStrategy.MELEE;
     }
 
-    private void refreshCanvas()
-    {
+    private void refreshCanvas() {
         equipmentCanvas.refresh(selectedStrategy());
         infoLabel.setText("Editing: " + selectedStrategy());
     }
-
-    private void resetCurrentStrategy()
-    {
+    private void resetCurrentStrategy() {
         BryophytaStrategy strategy = selectedStrategy();
-        int option = JOptionPane.showConfirmDialog(
-                this,
+        int option = JOptionPane.showConfirmDialog(this,
                 "Reset every equipment slot for " + strategy + " to the built-in defaults?",
-                "Reset equipment",
-                JOptionPane.YES_NO_OPTION,
-                JOptionPane.QUESTION_MESSAGE
-        );
-
-        if (option == JOptionPane.YES_OPTION)
-        {
-            equipmentSettings.resetStrategy(strategy);
-            refreshCanvas();
+                "Reset equipment", JOptionPane.YES_NO_OPTION, JOptionPane.QUESTION_MESSAGE);
+        if (option != JOptionPane.YES_OPTION) {
+            return;
         }
+        equipmentSettings.resetStrategy(strategy);
+        refreshCanvas();
     }
 
-    private void openPicker(EquipmentInventorySlot slot)
-    {
+    private void openPicker(EquipmentInventorySlot slot) {
         ensureIndexLoaded(() -> showPicker(slot));
     }
-
-    private void ensureIndexLoaded(Runnable onSuccess)
-    {
-        if (equipmentIndex.isLoaded())
-        {
-            infoLabel.setText("Equipment database ready.");
-            if (onSuccess != null)
-            {
-                onSuccess.run();
-            }
+    private void ensureIndexLoaded(Runnable onSuccess) {
+        if (equipmentIndex.isLoaded()) {
+            indexReady(onSuccess);
             return;
         }
 
         infoLabel.setText("Loading equipment database...");
-        equipmentIndex.ensureLoaded(success ->
-        {
-            if (!success)
-            {
-                infoLabel.setText("Could not load item database.");
-                JOptionPane.showMessageDialog(
-                        this,
-                        "The RuneScape item cache was not ready. Log in and try again.",
-                        "Equipment database",
-                        JOptionPane.ERROR_MESSAGE
-                );
+        equipmentIndex.ensureLoaded(success -> {
+            if (success) {
+                refreshCanvas();
+                indexReady(onSuccess);
                 return;
             }
-
-            infoLabel.setText("Equipment database ready.");
-            refreshCanvas();
-            if (onSuccess != null)
-            {
-                onSuccess.run();
-            }
+            infoLabel.setText("Could not load item database.");
+            JOptionPane.showMessageDialog(this, "The RuneScape item cache was not ready. Log in and try again.",
+                    "Equipment database", JOptionPane.ERROR_MESSAGE);
         });
     }
 
-    private void showPicker(EquipmentInventorySlot slot)
-    {
+    private void showPicker(EquipmentInventorySlot slot) {
         List<BryophytaEquipmentItem> allItems = equipmentIndex.itemsFor(slot);
-        if (allItems.isEmpty())
-        {
+        if (allItems.isEmpty()) {
             JOptionPane.showMessageDialog(
                     this,
                     "No equipable items were found for " + prettySlot(slot) + ".",
@@ -351,34 +310,27 @@ final class KspBryophytaEquipmentPanel extends PluginPanel
         scrollPane.setBorder(BorderFactory.createEmptyBorder(0, 8, 0, 8));
         dialog.add(scrollPane, BorderLayout.CENTER);
 
-        Runnable rebuild = () ->
-        {
+        Runnable rebuild = () -> {
             String query = searchField.getText() == null
                     ? ""
                     : searchField.getText().trim().toLowerCase(Locale.ROOT);
             boolean onlyF2p = f2pOnly.isSelected();
 
             model.clear();
-            for (BryophytaEquipmentItem item : allItems)
-            {
-                if (onlyF2p && item.isMembers())
-                {
+            for (BryophytaEquipmentItem item : allItems) {
+                if (onlyF2p && item.isMembers()) {
                     continue;
                 }
-                if (!query.isEmpty() && !item.getName().toLowerCase(Locale.ROOT).contains(query))
-                {
+                if (!query.isEmpty() && !item.getName().toLowerCase(Locale.ROOT).contains(query)) {
                     continue;
                 }
                 model.addElement(item);
             }
 
             Integer effectiveId = effectiveItemId(selectedStrategy(), slot);
-            if (effectiveId != null)
-            {
-                for (int i = 0; i < model.size(); i++)
-                {
-                    if (model.get(i).getId() == effectiveId)
-                    {
+            if (effectiveId != null) {
+                for (int i = 0; i < model.size(); i++) {
+                    if (model.get(i).getId() == effectiveId) {
                         itemList.setSelectedIndex(i);
                         itemList.ensureIndexIsVisible(i);
                         break;
@@ -387,70 +339,36 @@ final class KspBryophytaEquipmentPanel extends PluginPanel
             }
         };
 
-        searchField.getDocument().addDocumentListener(new DocumentListener()
-        {
-            @Override
-            public void insertUpdate(DocumentEvent e)
-            {
-                rebuild.run();
-            }
-
-            @Override
-            public void removeUpdate(DocumentEvent e)
-            {
-                rebuild.run();
-            }
-
-            @Override
-            public void changedUpdate(DocumentEvent e)
-            {
-                rebuild.run();
-            }
-        });
+        searchField.getDocument().addDocumentListener(onDocumentChange(rebuild));
         f2pOnly.addActionListener(e -> rebuild.run());
 
         JPanel south = new JPanel(new BorderLayout(8, 8));
         south.setBorder(new EmptyBorder(0, 8, 8, 8));
 
         JPanel leftButtons = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 0));
-        JButton emptyButton = new JButton("Leave empty");
-        emptyButton.addActionListener(e ->
-        {
+        leftButtons.add(button("Leave empty", null, e -> {
             equipmentSettings.setEmpty(selectedStrategy(), slot);
             dialog.dispose();
             refreshCanvas();
-        });
-        leftButtons.add(emptyButton);
-
-        JButton defaultButton = new JButton("Use default");
-        defaultButton.addActionListener(e ->
-        {
+        }));
+        leftButtons.add(button("Use default", null, e -> {
             equipmentSettings.resetSlot(selectedStrategy(), slot);
             dialog.dispose();
             refreshCanvas();
-        });
-        leftButtons.add(defaultButton);
+        }));
         south.add(leftButtons, BorderLayout.WEST);
 
         JPanel rightButtons = new JPanel(new FlowLayout(FlowLayout.RIGHT, 4, 0));
-        JButton cancelButton = new JButton("Cancel");
-        cancelButton.addActionListener(e -> dialog.dispose());
-        rightButtons.add(cancelButton);
-
-        JButton selectButton = new JButton("Select");
-        selectButton.addActionListener(e -> selectFromPicker(slot, itemList.getSelectedValue(), dialog));
-        rightButtons.add(selectButton);
+        rightButtons.add(button("Cancel", null, e -> dialog.dispose()));
+        rightButtons.add(button("Select", null, e -> selectFromPicker(slot, itemList.getSelectedValue(), dialog)));
         south.add(rightButtons, BorderLayout.EAST);
 
         dialog.add(south, BorderLayout.SOUTH);
 
-        itemList.addMouseListener(new java.awt.event.MouseAdapter()
-        {
+        itemList.addMouseListener(new java.awt.event.MouseAdapter() {
             @Override
-            public void mouseClicked(java.awt.event.MouseEvent e)
-            {
-                if (e.getClickCount() == 2 && SwingUtilities.isLeftMouseButton(e))
-                {
+            public void mouseClicked(java.awt.event.MouseEvent e) {
+                if (e.getClickCount() == 2 && SwingUtilities.isLeftMouseButton(e)) {
                     selectFromPicker(slot, itemList.getSelectedValue(), dialog);
                 }
             }
@@ -465,21 +383,17 @@ final class KspBryophytaEquipmentPanel extends PluginPanel
     private void selectFromPicker(
             EquipmentInventorySlot slot,
             BryophytaEquipmentItem selected,
-            JDialog dialog)
-    {
-        if (selected == null)
-        {
+            JDialog dialog) {
+        if (selected == null) {
             return;
         }
 
         BryophytaStrategy strategy = selectedStrategy();
 
-        if (slot == EquipmentInventorySlot.SHIELD)
-        {
+        if (slot == EquipmentInventorySlot.SHIELD) {
             Integer weaponId = effectiveItemId(strategy, EquipmentInventorySlot.WEAPON);
             BryophytaEquipmentItem weapon = findById(EquipmentInventorySlot.WEAPON, weaponId);
-            if (weapon != null && weapon.isTwoHanded())
-            {
+            if (weapon != null && weapon.isTwoHanded()) {
                 JOptionPane.showMessageDialog(
                         dialog,
                         weapon.getName() + " is two-handed. Choose a one-handed weapon before selecting a shield.",
@@ -492,8 +406,7 @@ final class KspBryophytaEquipmentPanel extends PluginPanel
 
         equipmentSettings.setItem(strategy, slot, selected.getId());
 
-        if (slot == EquipmentInventorySlot.WEAPON && selected.isTwoHanded())
-        {
+        if (slot == EquipmentInventorySlot.WEAPON && selected.isTwoHanded()) {
             equipmentSettings.setEmpty(strategy, EquipmentInventorySlot.SHIELD);
         }
 
@@ -501,48 +414,31 @@ final class KspBryophytaEquipmentPanel extends PluginPanel
         refreshCanvas();
     }
 
-    private Integer effectiveItemId(BryophytaStrategy strategy, EquipmentInventorySlot slot)
-    {
+    private Integer effectiveItemId(BryophytaStrategy strategy, EquipmentInventorySlot slot) {
         Integer override = equipmentSettings.getOverrideItemId(strategy, slot);
-        if (override != null)
-        {
+        if (override != null) {
             return override > 0 ? override : null;
         }
 
         String defaultName = BryophytaLoadout.defaultEquipmentFor(strategy).get(slot);
         return equipmentIndex.findItemIdByName(slot, defaultName);
     }
-
-    private BryophytaEquipmentItem findById(EquipmentInventorySlot slot, Integer id)
-    {
-        if (id == null)
-        {
+    private BryophytaEquipmentItem findById(EquipmentInventorySlot slot, Integer id) {
+        if (id == null) {
             return null;
         }
-
-        for (BryophytaEquipmentItem item : equipmentIndex.itemsFor(slot))
-        {
-            if (item.getId() == id)
-            {
-                return item;
-            }
-        }
-        return null;
+        return equipmentIndex.itemsFor(slot).stream().filter(item -> item.getId() == id).findFirst().orElse(null);
     }
-
-    private static String prettySlot(EquipmentInventorySlot slot)
-    {
+    private static String prettySlot(EquipmentInventorySlot slot) {
         String lower = slot.name().toLowerCase(Locale.ROOT);
         return Character.toUpperCase(lower.charAt(0)) + lower.substring(1);
     }
 
-    private final class EquipmentCanvas extends JPanel
-    {
+    private final class EquipmentCanvas extends JPanel {
         private final BufferedImage background;
         private final Map<EquipmentInventorySlot, JButton> buttons = new EnumMap<>(EquipmentInventorySlot.class);
 
-        private EquipmentCanvas(BufferedImage background)
-        {
+        private EquipmentCanvas(BufferedImage background) {
             this.background = background;
             setLayout(null);
             setOpaque(false);
@@ -550,8 +446,7 @@ final class KspBryophytaEquipmentPanel extends PluginPanel
             setMinimumSize(new Dimension(CANVAS_WIDTH, CANVAS_HEIGHT));
             setMaximumSize(new Dimension(CANVAS_WIDTH, CANVAS_HEIGHT));
 
-            for (EquipmentInventorySlot slot : BryophytaLoadout.CONFIGURABLE_SLOTS)
-            {
+            for (EquipmentInventorySlot slot : BryophytaLoadout.CONFIGURABLE_SLOTS) {
                 JButton button = new JButton();
                 button.setOpaque(false);
                 button.setContentAreaFilled(false);
@@ -569,13 +464,10 @@ final class KspBryophytaEquipmentPanel extends PluginPanel
             }
         }
 
-        private void refresh(BryophytaStrategy strategy)
-        {
-            for (EquipmentInventorySlot slot : BryophytaLoadout.CONFIGURABLE_SLOTS)
-            {
+        private void refresh(BryophytaStrategy strategy) {
+            for (EquipmentInventorySlot slot : BryophytaLoadout.CONFIGURABLE_SLOTS) {
                 JButton button = buttons.get(slot);
-                if (button == null)
-                {
+                if (button == null) {
                     continue;
                 }
 
@@ -589,8 +481,7 @@ final class KspBryophytaEquipmentPanel extends PluginPanel
 
                 button.setToolTipText(prettySlot(slot) + ": " + name + (custom ? " (custom)" : " (default)"));
 
-                if (empty)
-                {
+                if (empty) {
                     button.setText("×");
                     button.setForeground(new Color(220, 90, 90));
                     button.setFont(button.getFont().deriveFont(Font.BOLD, 24f));
@@ -598,11 +489,9 @@ final class KspBryophytaEquipmentPanel extends PluginPanel
                 }
 
                 Integer itemId = effectiveItemId(strategy, slot);
-                if (itemId != null && itemId > 0)
-                {
+                if (itemId != null && itemId > 0) {
                     AsyncBufferedImage image = itemManager.getImage(itemId);
-                    if (image != null)
-                    {
+                    if (image != null) {
                         image.addTo(button);
                     }
                 }
@@ -612,17 +501,14 @@ final class KspBryophytaEquipmentPanel extends PluginPanel
         }
 
         @Override
-        protected void paintComponent(Graphics graphics)
-        {
+        protected void paintComponent(Graphics graphics) {
             super.paintComponent(graphics);
-            if (background != null)
-            {
+            if (background != null) {
                 graphics.drawImage(background, 0, 0, CANVAS_WIDTH, CANVAS_HEIGHT, null);
             }
         }
 
-        private Rectangle scale(Rectangle source)
-        {
+        private Rectangle scale(Rectangle source) {
             float scale = (float) CANVAS_WIDTH / SOURCE_WIDTH;
             return new Rectangle(
                     Math.round(source.x * scale),
@@ -633,14 +519,12 @@ final class KspBryophytaEquipmentPanel extends PluginPanel
         }
     }
 
-    private static final class EquipmentItemRenderer extends JPanel implements ListCellRenderer<BryophytaEquipmentItem>
-    {
+    private static final class EquipmentItemRenderer extends JPanel implements ListCellRenderer<BryophytaEquipmentItem> {
         private final ItemManager itemManager;
         private final JLabel iconLabel = new JLabel();
         private final JLabel textLabel = new JLabel();
 
-        private EquipmentItemRenderer(ItemManager itemManager)
-        {
+        private EquipmentItemRenderer(ItemManager itemManager) {
             super(new BorderLayout(8, 0));
             this.itemManager = itemManager;
             setBorder(new EmptyBorder(5, 7, 5, 7));
@@ -660,10 +544,8 @@ final class KspBryophytaEquipmentPanel extends PluginPanel
                 BryophytaEquipmentItem value,
                 int index,
                 boolean isSelected,
-                boolean cellHasFocus)
-        {
-            if (value == null)
-            {
+                boolean cellHasFocus) {
+            if (value == null) {
                 iconLabel.setIcon(null);
                 textLabel.setText("");
                 return this;
@@ -677,16 +559,14 @@ final class KspBryophytaEquipmentPanel extends PluginPanel
 
             iconLabel.setIcon(null);
             AsyncBufferedImage image = itemManager.getImage(value.getId());
-            if (image != null)
-            {
+            if (image != null) {
                 image.addTo(iconLabel);
             }
 
             return this;
         }
 
-        private static String escape(String value)
-        {
+        private static String escape(String value) {
             return value
                     .replace("&", "&amp;")
                     .replace("<", "&lt;")

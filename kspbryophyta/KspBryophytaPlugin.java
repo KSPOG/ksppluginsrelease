@@ -28,9 +28,8 @@ import java.awt.image.BufferedImage;
         enabledByDefault = PluginConstants.DEFAULT_ENABLED,
         isExternal = PluginConstants.IS_EXTERNAL
 )
-public class KspBryophytaPlugin extends Plugin
-{
-    public static final String VERSION = "0.0.15";
+public class KspBryophytaPlugin extends Plugin {
+    public static final String VERSION = "0.1.8";
 
     @Inject
     private KspBryophytaConfig config;
@@ -63,62 +62,50 @@ public class KspBryophytaPlugin extends Plugin
     private NavigationButton navigationButton;
 
     @Provides
-    KspBryophytaConfig provideConfig(ConfigManager manager)
-    {
+    KspBryophytaConfig provideConfig(ConfigManager manager) {
         return manager.getConfig(KspBryophytaConfig.class);
     }
 
     @Override
-    protected void startUp()
-    {
+    protected void startUp() {
         configManager.setDefaultConfiguration(config, false);
         overlayManager.add(overlay);
         addEquipmentPanel();
-        // Do not start automation when the plugin is enabled.
-        // The side-panel Start button is the sole explicit start action.
         script.setStopped("Ready - press Start in the Bryophyta side panel.");
     }
 
     @Override
-    protected void shutDown()
-    {
+    protected void shutDown() {
         script.shutdown();
         overlayManager.remove(overlay);
         removeEquipmentPanel();
     }
 
     @Subscribe
-    public void onChatMessage(ChatMessage event)
-    {
-        if (event.getType() != ChatMessageType.GAMEMESSAGE)
-        {
+    public void onChatMessage(ChatMessage event) {
+        if (!script.isRunning() || event.getType() != ChatMessageType.GAMEMESSAGE) {
             return;
         }
 
         String message = event.getMessage();
-        if (message == null)
-        {
+        if (message == null) {
             return;
         }
 
         String lower = message.toLowerCase();
-        if (lower.contains("you climb down through the manhole"))
-        {
+        if (lower.contains("you climb down through the manhole")) {
             script.confirmManholeDescent();
         }
 
         if (config.shutdownAfterDeath()
-                && lower.contains("oh dear, you are dead"))
-        {
+                && lower.contains("oh dear, you are dead")) {
             script.setStopped("Stopped after death.");
             script.shutdown();
         }
     }
 
-    private void addEquipmentPanel()
-    {
-        if (navigationButton != null)
-        {
+    private void addEquipmentPanel() {
+        if (navigationButton != null) {
             return;
         }
 
@@ -146,36 +133,28 @@ public class KspBryophytaPlugin extends Plugin
         clientToolbar.addNavigation(navigationButton);
     }
 
-    private void removeEquipmentPanel()
-    {
-        if (navigationButton != null)
-        {
+    private void removeEquipmentPanel() {
+        if (navigationButton != null) {
             clientToolbar.removeNavigation(navigationButton);
             navigationButton = null;
         }
-        if (equipmentPanel != null)
-        {
+        if (equipmentPanel != null) {
             equipmentPanel.shutdownPanel();
         }
         equipmentPanel = null;
     }
 
-    private static BufferedImage resize(BufferedImage source, int width, int height)
-    {
-        if (source == null)
-        {
+    private static BufferedImage resize(BufferedImage source, int width, int height) {
+        if (source == null) {
             return new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB);
         }
 
         BufferedImage scaled = new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB);
         Graphics2D graphics = scaled.createGraphics();
-        try
-        {
+        try {
             graphics.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
             graphics.drawImage(source, 0, 0, width, height, null);
-        }
-        finally
-        {
+        } finally {
             graphics.dispose();
         }
         return scaled;

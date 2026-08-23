@@ -7,8 +7,7 @@ import net.runelite.client.config.ConfigSection;
 import net.runelite.client.config.Range;
 
 @ConfigGroup("kspbryophyta")
-public interface KspBryophytaConfig extends Config
-{
+public interface KspBryophytaConfig extends Config {
     @ConfigSection(
             name = "Strategy",
             description = "Combat strategy and automatic strategy loadout",
@@ -44,10 +43,7 @@ public interface KspBryophytaConfig extends Config
             position = 0,
             section = strategySection
     )
-    default BryophytaStrategy strategy()
-    {
-        return BryophytaStrategy.MELEE;
-    }
+    default BryophytaStrategy strategy() { return BryophytaStrategy.MELEE; }
 
     @ConfigItem(
             keyName = "fireSpell",
@@ -56,23 +52,17 @@ public interface KspBryophytaConfig extends Config
             position = 1,
             section = strategySection
     )
-    default BryophytaFireSpell fireSpell()
-    {
-        return BryophytaFireSpell.FIRE_BLAST;
-    }
+    default BryophytaFireSpell fireSpell() { return BryophytaFireSpell.FIRE_BLAST; }
 
     @Range(min = 3, max = 10)
     @ConfigItem(
             keyName = "minimumRangeDistance",
-            name = "Minimum range",
-            description = "For Ranged/Magic, step away when Bryophyta is closer than this many tiles",
+            name = "Distance from Bryophyta",
+            description = "For Ranged/Magic, actively maintain exactly this many tiles between the player and Bryophyta",
             position = 2,
             section = strategySection
     )
-    default int minimumRangeDistance()
-    {
-        return 5;
-    }
+    default int minimumRangeDistance() { return 5; }
 
     @ConfigItem(
             keyName = "growthlingToolName",
@@ -81,10 +71,7 @@ public interface KspBryophytaConfig extends Config
             position = 3,
             section = strategySection
     )
-    default String growthlingToolName()
-    {
-        return "Rune axe";
-    }
+    default String growthlingToolName() { return "Rune axe"; }
 
     @ConfigItem(
             keyName = "foodName",
@@ -93,10 +80,7 @@ public interface KspBryophytaConfig extends Config
             position = 0,
             section = bankingSection
     )
-    default String foodName()
-    {
-        return "Swordfish";
-    }
+    default String foodName() { return "Swordfish"; }
 
     @Range(min = 1, max = 24)
     @ConfigItem(
@@ -106,10 +90,7 @@ public interface KspBryophytaConfig extends Config
             position = 1,
             section = bankingSection
     )
-    default int foodAmount()
-    {
-        return 21;
-    }
+    default int foodAmount() { return 21; }
 
     @Range(min = 1, max = 100)
     @ConfigItem(
@@ -119,10 +100,7 @@ public interface KspBryophytaConfig extends Config
             position = 2,
             section = bankingSection
     )
-    default int varrockTeleportCount()
-    {
-        return 40;
-    }
+    default int varrockTeleportCount() { return 40; }
 
     @ConfigItem(
             keyName = "useStrengthPotion",
@@ -131,10 +109,7 @@ public interface KspBryophytaConfig extends Config
             position = 3,
             section = bankingSection
     )
-    default boolean useStrengthPotion()
-    {
-        return true;
-    }
+    default boolean useStrengthPotion() { return true; }
 
     @Range(min = 1, max = 4)
     @ConfigItem(
@@ -144,10 +119,7 @@ public interface KspBryophytaConfig extends Config
             position = 4,
             section = bankingSection
     )
-    default int strengthPotionAmount()
-    {
-        return 1;
-    }
+    default int strengthPotionAmount() { return 1; }
 
     @ConfigItem(
             keyName = "withdrawMossyKey",
@@ -156,10 +128,7 @@ public interface KspBryophytaConfig extends Config
             position = 5,
             section = bankingSection
     )
-    default boolean withdrawMossyKey()
-    {
-        return true;
-    }
+    default boolean withdrawMossyKey() { return true; }
 
     @ConfigItem(
             keyName = "protectFromMagic",
@@ -168,10 +137,7 @@ public interface KspBryophytaConfig extends Config
             position = 0,
             section = survivalSection
     )
-    default boolean protectFromMagic()
-    {
-        return true;
-    }
+    default boolean protectFromMagic() { return true; }
 
     @Range(min = 1, max = 99)
     @ConfigItem(
@@ -181,10 +147,7 @@ public interface KspBryophytaConfig extends Config
             position = 1,
             section = survivalSection
     )
-    default int eatAtPercent()
-    {
-        return 45;
-    }
+    default int eatAtPercent() { return 45; }
 
     @Range(min = 0, max = 20)
     @ConfigItem(
@@ -194,10 +157,7 @@ public interface KspBryophytaConfig extends Config
             position = 2,
             section = survivalSection
     )
-    default int teleportAtPrayerPoints()
-    {
-        return 0;
-    }
+    default int teleportAtPrayerPoints() { return 0; }
 
     @Range(min = 0, max = 10)
     @ConfigItem(
@@ -207,10 +167,7 @@ public interface KspBryophytaConfig extends Config
             position = 3,
             section = survivalSection
     )
-    default int teleportAtFoodCount()
-    {
-        return 0;
-    }
+    default int teleportAtFoodCount() { return 0; }
 
     @ConfigItem(
             keyName = "maintainPoisonProtection",
@@ -219,10 +176,7 @@ public interface KspBryophytaConfig extends Config
             position = 4,
             section = survivalSection
     )
-    default boolean maintainPoisonProtection()
-    {
-        return true;
-    }
+    default boolean maintainPoisonProtection() { return true; }
 
     @ConfigItem(
             keyName = "autoEnterLair",
@@ -231,10 +185,7 @@ public interface KspBryophytaConfig extends Config
             position = 0,
             section = lootSection
     )
-    default boolean autoEnterLair()
-    {
-        return true;
-    }
+    default boolean autoEnterLair() { return true; }
 
     @ConfigItem(
             keyName = "lootBossDrops",
@@ -243,10 +194,7 @@ public interface KspBryophytaConfig extends Config
             position = 1,
             section = lootSection
     )
-    default boolean lootBossDrops()
-    {
-        return true;
-    }
+    default boolean lootBossDrops() { return true; }
 
     @Range(min = 0, max = 10000000)
     @ConfigItem(
@@ -256,10 +204,7 @@ public interface KspBryophytaConfig extends Config
             position = 2,
             section = lootSection
     )
-    default int lootValueThreshold()
-    {
-        return 5000;
-    }
+    default int lootValueThreshold() { return 5000; }
 
     @ConfigItem(
             keyName = "openRewardChest",
@@ -268,10 +213,7 @@ public interface KspBryophytaConfig extends Config
             position = 3,
             section = lootSection
     )
-    default boolean openRewardChest()
-    {
-        return true;
-    }
+    default boolean openRewardChest() { return true; }
 
     @ConfigItem(
             keyName = "shutdownAfterDeath",
@@ -280,8 +222,5 @@ public interface KspBryophytaConfig extends Config
             position = 4,
             section = lootSection
     )
-    default boolean shutdownAfterDeath()
-    {
-        return true;
-    }
+    default boolean shutdownAfterDeath() { return true; }
 }

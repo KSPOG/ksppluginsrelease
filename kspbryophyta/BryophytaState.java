@@ -1,7 +1,6 @@
 package net.runelite.client.plugins.microbot.kspbryophyta;
 
-public enum BryophytaState
-{
+public enum BryophytaState {
     STARTING,
     TELEPORTING_VARROCK,
     BANKING,
