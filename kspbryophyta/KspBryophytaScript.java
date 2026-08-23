@@ -527,14 +527,17 @@ public class KspBryophytaScript extends Script {
             return false;
         }
 
-        Widget depositEquipment = Rs2Widget.getWidget(WidgetInfo.BANK_DEPOSIT_EQUIPMENT.getId());
-        if (depositEquipment == null || depositEquipment.isHidden()) {
+        int depositEquipmentId = WidgetInfo.BANK_DEPOSIT_EQUIPMENT.getId();
+        if (!Rs2Widget.isWidgetVisible(depositEquipmentId)) {
             status = "Waiting for bank Deposit worn items button...";
             return false;
         }
 
         status = "Depositing worn equipment without closing bank...";
-        Rs2Widget.clickWidget(depositEquipment);
+        if (!Rs2Widget.clickWidget(depositEquipmentId)) {
+            status = "Could not click bank Deposit worn items button.";
+            return false;
+        }
         if (!sleepUntil(() -> Rs2Equipment.items().isEmpty(), 2500)) {
             status = "Waiting for worn equipment to deposit...";
             return false;
