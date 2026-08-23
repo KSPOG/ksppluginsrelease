@@ -43,7 +43,7 @@ public class KspBryophytaScript extends Script
     private static final int LOOP_DELAY_MS = 400;
     private static final long BOSS_MISSING_CONFIRM_MS = 1200L;
     private static final long POST_KILL_LOOT_WINDOW_MS = 2400L;
-    private static final long GROWTHLING_CLICK_COOLDOWN_MS = 700L;
+    private static final long GROWTHLING_ATTACK_RETRY_MS = 2200L;
     private static final long BOSS_ATTACK_RETRY_MS = 2200L;
     private static final long ENTRY_RETRY_MS = 1800L;
     private static final long CHEST_RETRY_MS = 1800L;
@@ -1270,25 +1270,40 @@ public class KspBryophytaScript extends Script
             return;
         }
 
-        // Do not repeatedly click the same Growthling while the client already has it as
-        // the active interaction target. This also prevents unnecessary clicks during axe swings.
-        if (isPlayerInteractingWith(growthling))
+        // IMPORTANT: getNearestGrowthling() can return a different Growthling on consecutive
+        // 400 ms loops. Checking only whether the player is interacting with *this* model let
+        // the script click another Growthling while the first one was already being attacked.
+        // Treat interaction with ANY Growthling as an in-flight attack and wait for it to finish.
+        if (isPlayerInteractingWithGrowthling())
         {
-            status = "Finishing Growthling...";
+            status = "Engaged with Growthling - waiting for hit...";
             return;
         }
 
         long now = System.currentTimeMillis();
-        if (now - lastGrowthlingClickAt < GROWTHLING_CLICK_COOLDOWN_MS
+        if (now - lastGrowthlingClickAt < GROWTHLING_ATTACK_RETRY_MS
                 || Rs2Player.isMoving()
                 || Rs2Player.isAnimating())
         {
             return;
         }
 
-        lastGrowthlingClickAt = now;
         status = "Attacking Growthling...";
-        growthling.click("Attack");
+        boolean clicked = growthling.click("Attack");
+
+        // Lock immediately after a successful click so the short client delay before
+        // Player#getInteracting() updates cannot cause another Growthling to be clicked.
+        if (clicked)
+        {
+            lastGrowthlingClickAt = now;
+            status = "Growthling attack sent - waiting for hit...";
+        }
+        else
+        {
+            // A rejected click may be retried quickly, but still avoid 400 ms spam.
+            lastGrowthlingClickAt = now - (GROWTHLING_ATTACK_RETRY_MS - 700L);
+            status = "Growthling attack not accepted - waiting to retry...";
+        }
     }
 
     private boolean equipGrowthlingTool()
@@ -1398,6 +1413,21 @@ public class KspBryophytaScript extends Script
         {
             status = "Bryophyta attack click not accepted - waiting to retry...";
         }
+    }
+
+    private boolean isPlayerInteractingWithGrowthling()
+    {
+        return Microbot.getClientThread().runOnClientThreadOptional(() ->
+        {
+            if (Microbot.getClient() == null || Microbot.getClient().getLocalPlayer() == null)
+            {
+                return false;
+            }
+
+            net.runelite.api.Actor target = Microbot.getClient().getLocalPlayer().getInteracting();
+            return target instanceof net.runelite.api.NPC
+                    && ((net.runelite.api.NPC) target).getId() == GROWTHLING_NPC_ID;
+        }).orElse(false);
     }
 
     private boolean isPlayerInteractingWith(Rs2NpcModel npc)
