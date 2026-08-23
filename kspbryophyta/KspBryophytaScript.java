@@ -270,8 +270,6 @@ public class KspBryophytaScript extends Script {
             return;
         }
 
-        maintainTravelPrayer();
-
         if (restockRequired) {
             if (isUnderground(player)) {
                 handleVarrockTeleport("Returning to Varrock for restock...");
@@ -280,6 +278,13 @@ public class KspBryophytaScript extends Script {
 
             performBankRestock();
             return;
+        }
+
+        // Never touch prayers while the bank interface is active. Prayer handling is
+        // travel/combat state, not banking state, and UI actions during banking can
+        // interfere with the single-session restock workflow.
+        if (!Rs2Bank.isOpen()) {
+            maintainTravelPrayer();
         }
 
         if (!prayerRestoredAfterBank) {
@@ -449,7 +454,13 @@ public class KspBryophytaScript extends Script {
     }
     private void performBankRestock() {
         setState(BryophytaState.BANKING, "Banking at Varrock East...");
-        if (!Rs2Bank.walkToBankAndUseBank(BankLocation.VARROCK_EAST)) {
+        if (!Rs2Bank.isOpen()) {
+            if (!Rs2Bank.walkToBankAndUseBank(BankLocation.VARROCK_EAST)) {
+                return;
+            }
+            // Let the bank inventory/equipment containers settle before mutating them.
+            // This also guarantees subsequent ticks do not re-enter the walker/open path.
+            setStatus("Bank opened - preparing restock...");
             return;
         }
         if (!Rs2Inventory.isEmpty() && !Rs2Bank.depositAll()) {
@@ -476,9 +487,15 @@ public class KspBryophytaScript extends Script {
             return;
         }
 
-        if (!Rs2Bank.closeBank() || !sleepUntil(() -> !Rs2Bank.isOpen(), 2500)) {
-            setStatus("Restock complete - waiting for bank to close...");
-            return;
+        if (Rs2Bank.isOpen()) {
+            // closeBank() is an interaction request; the authoritative result is the
+            // bank widget actually disappearing. Do not keep restockRequired=true just
+            // because the helper's immediate return value is false.
+            Rs2Bank.closeBank();
+            if (!sleepUntil(() -> !Rs2Bank.isOpen(), 2500)) {
+                setStatus("Restock complete - waiting for bank to close...");
+                return;
+            }
         }
 
         markRestockComplete();
@@ -561,7 +578,18 @@ public class KspBryophytaScript extends Script {
         return true;
     }
     private boolean interactEquip(String itemName) {
-        if (!interactInventory(itemName, EQUIP_ACTIONS)) {
+        Rs2ItemModel item = Rs2Inventory.get(itemName, true);
+        if (item == null) {
+            return false;
+        }
+
+        // While banking, use the bank-side inventory equipment action directly.
+        // Rs2Inventory.interact() switches to the normal Inventory tab before invoking
+        // an item action, which can collapse/close modal bank interfaces on some layouts.
+        boolean interacted = Rs2Bank.isOpen()
+                ? Rs2Bank.wearItem(item.getId())
+                : interactInventory(itemName, EQUIP_ACTIONS);
+        if (!interacted) {
             return false;
         }
         return sleepUntil(() -> Rs2Equipment.isWearing(itemName, true)
@@ -574,7 +602,11 @@ public class KspBryophytaScript extends Script {
         }
 
         int expected = getEquippedQuantity(EquipmentInventorySlot.AMMO, itemName) + inventoryAmount;
-        if (!interactInventory(itemName, "Wield", "Wear")) {
+        Rs2ItemModel ammo = Rs2Inventory.get(itemName, true);
+        boolean interacted = ammo != null && (Rs2Bank.isOpen()
+                ? Rs2Bank.wearItem(ammo.getId())
+                : interactInventory(itemName, "Wield", "Wear"));
+        if (!interacted) {
             return false;
         }
         return sleepUntil(() -> getEquippedQuantity(EquipmentInventorySlot.AMMO, itemName) >= expected
