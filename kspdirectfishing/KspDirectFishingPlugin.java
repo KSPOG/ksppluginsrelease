@@ -23,7 +23,7 @@ import javax.inject.Inject;
 )
 public class KspDirectFishingPlugin extends Plugin
 {
-    public static final String VERSION = "0.1.1";
+    public static final String VERSION = "0.1.2";
 
     @Inject
     private KspDirectFishingConfig config;
