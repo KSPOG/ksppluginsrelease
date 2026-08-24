@@ -59,7 +59,9 @@ public class KspBryophytaScript extends Script {
     private static final long AUTOCAST_RETRY_MS = 1500L;
     private static final long ENTRY_RETRY_MS = 1800L;
     private static final long LAIR_ENTRY_TRANSITION_TIMEOUT_MS = 10_000L;
-    private static final long LAIR_DIALOGUE_RETRY_MS = 350L;
+    private static final long LAIR_DIALOGUE_RETRY_MS = 90L;
+    private static final long LAIR_DIALOGUE_FAST_WINDOW_MS = 1_800L;
+    private static final long LAIR_DIALOGUE_FAST_POLL_MS = 45L;
     private static final long CHEST_RETRY_MS = 1800L;
     private static final long CHEST_OPEN_TIMEOUT_MS = 6_000L;
     private static final long CHEST_LOOT_SETTLE_MS = 1_200L;
@@ -949,6 +951,9 @@ public class KspBryophytaScript extends Script {
                 completeLairEntry();
                 return true;
             }
+            if (fastTrackLairEntryDialogue()) {
+                return true;
+            }
             if (handleLairEntryDialogue()) {
                 return true;
             }
@@ -1001,6 +1006,7 @@ public class KspBryophytaScript extends Script {
             startLairEntry(now);
             entryFailures = 0;
             setState(BryophytaState.ENTERING_LAIR, "Bryophyta gate accepted - completing entry dialogue...");
+            fastTrackLairEntryDialogue();
             return true;
         }
 
@@ -1027,6 +1033,50 @@ public class KspBryophytaScript extends Script {
                 .within(BRYOPHYTA_SEWER_ENTRANCE, 8)
                 .interact(action);
     }
+    /**
+     * Immediately services the Bryophyta gate dialogue after a successful gate interaction.
+     * The main script loop runs every few hundred milliseconds, which made the confirmation
+     * feel sluggish. This short bounded burst polls only while a lair entry is pending and
+     * advances option/continue widgets as soon as they appear.
+     */
+    private boolean fastTrackLairEntryDialogue() {
+        if (!lairEntryPending) {
+            return false;
+        }
+
+        long deadline = System.currentTimeMillis() + LAIR_DIALOGUE_FAST_WINDOW_MS;
+        boolean acted = false;
+        while (System.currentTimeMillis() < deadline && lairEntryPending) {
+            if (isInsideLair()) {
+                completeLairEntry();
+                return true;
+            }
+
+            if (Rs2Dialogue.hasSelectAnOption()) {
+                boolean selected = Rs2Dialogue.clickOption(true, "Yes, let's go!")
+                        || Rs2Dialogue.clickOption(false, "Yes, let's go", "Yes", "Enter", "Go in", "Continue");
+                if (selected) {
+                    acted = true;
+                    lastLairDialogueActionAt = System.currentTimeMillis();
+                    setState(BryophytaState.ENTERING_LAIR,
+                            "Selected 'Yes, let's go!' - entering Bryophyta immediately...");
+                    sleep(70, 110);
+                    continue;
+                }
+            } else if (Rs2Dialogue.hasContinue()) {
+                Rs2Dialogue.clickContinue();
+                acted = true;
+                lastLairDialogueActionAt = System.currentTimeMillis();
+                setState(BryophytaState.ENTERING_LAIR, "Continuing Bryophyta gate dialogue...");
+                sleep(70, 110);
+                continue;
+            }
+
+            sleep((int) LAIR_DIALOGUE_FAST_POLL_MS, (int) LAIR_DIALOGUE_FAST_POLL_MS + 15);
+        }
+        return acted;
+    }
+
     private boolean handleLairEntryDialogue() {
         WorldPoint player = Rs2Player.getWorldLocation();
         if (player == null || player.distanceTo(BRYOPHYTA_SEWER_ENTRANCE) > 12) {
