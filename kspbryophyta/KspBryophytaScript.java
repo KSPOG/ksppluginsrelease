@@ -4,6 +4,7 @@ import net.runelite.api.EquipmentInventorySlot;
 import net.runelite.api.Skill;
 import net.runelite.api.WorldView;
 import net.runelite.api.gameval.VarPlayerID;
+import net.runelite.api.widgets.InterfaceID;
 import net.runelite.api.widgets.Widget;
 import net.runelite.api.widgets.WidgetInfo;
 import net.runelite.api.coords.WorldArea;
@@ -15,7 +16,6 @@ import net.runelite.client.plugins.microbot.api.npc.models.Rs2NpcModel;
 import net.runelite.client.plugins.microbot.api.tileitem.models.Rs2TileItemModel;
 import net.runelite.client.plugins.microbot.util.bank.Rs2Bank;
 import net.runelite.client.plugins.microbot.util.bank.enums.BankLocation;
-import net.runelite.client.plugins.microbot.util.combat.Rs2Combat;
 import net.runelite.client.plugins.microbot.util.equipment.Rs2Equipment;
 import net.runelite.client.plugins.microbot.util.dialogues.Rs2Dialogue;
 import net.runelite.client.plugins.microbot.util.inventory.Rs2Inventory;
@@ -43,38 +43,19 @@ import java.util.concurrent.TimeUnit;
 
 @Singleton
 public class KspBryophytaScript extends Script {
-    private static final int BRYOPHYTA_NPC_ID = 8195;
-    private static final int GROWTHLING_NPC_ID = 8194;
+    static final int BRYOPHYTA_NPC_ID = 8195;
+    static final int GROWTHLING_NPC_ID = 8194;
     private static final int BRYOPHYTA_CHEST_OBJECT_ID = 56378;
     private static final int BRYOPHYTA_GATE_OBJECT_ID = 32534;
     private static final int VARROCK_MANHOLE_CLOSED_OBJECT_ID = 881;
     private static final int VARROCK_MANHOLE_OPEN_OBJECT_ID = 882;
     private static final int VARROCK_ALTAR_OBJECT_ID = 14860;
 
-    private static final int LOOP_DELAY_MS = 400;
-    private static final long BOSS_MISSING_CONFIRM_MS = 1200L;
-    private static final long POST_KILL_LOOT_WINDOW_MS = 2400L;
-    private static final long GROWTHLING_ATTACK_RETRY_MS = 2200L;
-    private static final long BOSS_ATTACK_RETRY_MS = 2200L;
-    private static final long AUTOCAST_RETRY_MS = 1500L;
-    private static final long ENTRY_RETRY_MS = 1800L;
+    private static final int LOOP_DELAY_MS = 100;
     private static final long LAIR_ENTRY_TRANSITION_TIMEOUT_MS = 10_000L;
-    private static final long LAIR_DIALOGUE_RETRY_MS = 90L;
-    private static final long LAIR_DIALOGUE_FAST_WINDOW_MS = 1_800L;
-    private static final long LAIR_DIALOGUE_FAST_POLL_MS = 45L;
-    private static final long CHEST_RETRY_MS = 1800L;
     private static final long CHEST_OPEN_TIMEOUT_MS = 6_000L;
-    private static final long CHEST_LOOT_SETTLE_MS = 1_200L;
-    private static final long CHEST_LOOT_TIMEOUT_MS = 8_000L;
-    private static final long CHEST_LOOT_CLICK_RETRY_MS = 650L;
-    private static final long ALTAR_RETRY_MS = 850L;
     private static final long ALTAR_INTERACTION_TIMEOUT_MS = 6_000L;
-    private static final long MANHOLE_RETRY_MS = 900L;
     private static final long MANHOLE_TRANSITION_TIMEOUT_MS = 8_000L;
-    private static final long WALK_REISSUE_MS = 2800L;
-    private static final long WEB_RETRY_MS = 1800L;
-    private static final long RANGE_MOVE_RETRY_MS = 650L;
-    private static final long AUTO_RETALIATE_RETRY_MS = 1500L;
 
     private static final String AIR_RUNE = "Air rune";
     private static final String FIRE_RUNE = "Fire rune";
@@ -112,36 +93,35 @@ public class KspBryophytaScript extends Script {
 
     private int entryFailures;
     private int altarFailures;
-    private int autocastFailures;
+    private int bossMissingScans;
+    private int postKillEmptyScans;
 
-    private long lastBossSeenAt;
-    private long killRegisteredAt;
-    private long lastGrowthlingClickAt;
-    private long lastBossAttackClickAt;
-    private long lastAutocastAttemptAt;
-    private long lastEntryAttemptAt;
-    private boolean lairEntryPending;
+    private volatile boolean growthlingWaveActive;
+    private volatile int growthlingEmptyScans;
+    private volatile int activeGrowthlingIndex = -1;
+    private volatile int spawnedGrowthlingIndex = -1;
+    private volatile int pendingGrowthlingAttackIndex = -1;
+    private volatile boolean bossAttackPending;
+    private volatile boolean lairEntryPending;
+    private volatile String lastGateDialogueFingerprint = "";
+    private volatile boolean gateContinueHandled;
     private long lairEntryStartedAt;
-    private long lastLairDialogueActionAt;
-    private long lastChestAttemptAt;
     private boolean chestLootPending;
     private int chestKeysBeforeOpen;
     private long chestOpenRequestedAt;
     private long chestOpenConfirmedAt;
-    private long lastChestLootSeenAt;
-    private long lastChestLootClickAt;
-    private long lastAltarAttemptAt;
+    private String pendingChestLootKey = "";
     private boolean altarInteractionPending;
     private long altarInteractionStartedAt;
-    private long lastManholeAttemptAt;
     private boolean manholeDescentPending;
+    private boolean manholeOpenPending;
     private long manholeDescentStartedAt;
-    private long lastWalkIssuedAt;
-    private long lastWebAttemptAt;
-    private long lastRangeMoveAt;
-    private long lastAutoRetaliateAttemptAt;
-    private final Set<Integer> handledGrowthlings = new HashSet<>();
+    private boolean webSlashPending;
     private final Set<String> ignoredChestGroundDrops = new HashSet<>();
+    private boolean teleportPending;
+    private boolean bankClosePending;
+    private int bankEpochBeforeOpen = -1;
+    private long teleportStartedAt;
 
     @Inject
     public KspBryophytaScript(BryophytaEquipmentSettings equipmentSettings) {
@@ -151,27 +131,14 @@ public class KspBryophytaScript extends Script {
         this.config = config;
         resetRuntimeState();
         Microbot.enableAutoRunOn = true;
+        if (!validateStaticRequirements()) return false;
 
         mainScheduledFuture = scheduledExecutorService.scheduleWithFixedDelay(() -> {
             try {
-                if (!Microbot.isLoggedIn() || state == BryophytaState.STOPPED || !super.run()) {
-                    return;
-                }
-
+                if (!Microbot.isLoggedIn() || state == BryophytaState.STOPPED || !super.run()) return;
                 updateCounters();
-                if (!validateStaticRequirements()) {
-                    return;
-                }
-
-                if (!Rs2Bank.isOpen() && !ensureAutoRetaliateDisabled()) {
-                    return;
-                }
-
-                if (isInsideLair()) {
-                    handleInsideLair();
-                } else {
-                    handleOutsideLair();
-                }
+                if (!Rs2Bank.isOpen() && !ensureAutoRetaliateDisabled()) return;
+                if (isInsideLair()) handleInsideLair(); else handleOutsideLair();
             } catch (Exception ex) {
                 Microbot.logStackTrace(getClass().getSimpleName(), ex);
                 failAndStop("Unexpected error: " + ex.getClass().getSimpleName());
@@ -183,20 +150,23 @@ public class KspBryophytaScript extends Script {
         state = BryophytaState.STARTING;
         status = "Starting - first action is a full Varrock restock.";
         kills = chestAttempts = mossyKeys = foodRemaining = prayerPoints = 0;
-        entryFailures = altarFailures = autocastFailures = 0;
-        lastBossSeenAt = killRegisteredAt = lastGrowthlingClickAt = lastBossAttackClickAt = 0L;
-        lastAutocastAttemptAt = lastEntryAttemptAt = lastLairDialogueActionAt = lastChestAttemptAt = 0L;
-        chestOpenRequestedAt = chestOpenConfirmedAt = lastChestLootSeenAt = lastChestLootClickAt = 0L;
+        entryFailures = altarFailures = bossMissingScans = postKillEmptyScans = 0;
+        growthlingWaveActive = false;
+        growthlingEmptyScans = 0;
+        activeGrowthlingIndex = spawnedGrowthlingIndex = pendingGrowthlingAttackIndex = -1;
+        bossAttackPending = false;
+        chestOpenRequestedAt = chestOpenConfirmedAt = 0L;
         chestKeysBeforeOpen = 0;
-        lastAltarAttemptAt = lastManholeAttemptAt = lastWalkIssuedAt = lastWebAttemptAt = 0L;
-        lastRangeMoveAt = lastAutoRetaliateAttemptAt = 0L;
-
         bossWasPresent = killRegisteredForCycle = prayerRestoredAfterBank = loadoutVerified = false;
-        chestLootPending = false;
+        chestLootPending = altarInteractionPending = manholeDescentPending = manholeOpenPending = false;
+        webSlashPending = teleportPending = bankClosePending = false;
+        bankEpochBeforeOpen = -1;
+        teleportStartedAt = 0L;
+        pendingChestLootKey = lastGateDialogueFingerprint = "";
+        gateContinueHandled = false;
         restockRequired = true;
         mainWeapon = equipmentSettings.mainWeaponFor(config.strategy());
         resetTransitions();
-        handledGrowthlings.clear();
         ignoredChestGroundDrops.clear();
     }
 
@@ -233,66 +203,39 @@ public class KspBryophytaScript extends Script {
 
     private void handleInsideLair() {
         long now = System.currentTimeMillis();
-
-        // Once the reward chest has been opened, its ground rewards have priority over
-        // restocking. This prevents a food/prayer threshold from teleporting away while
-        // chest loot is still on the floor.
-        if (chestLootPending) {
-            handleChestLoot(now);
-            return;
-        }
-
-        if (killRegisteredForCycle) {
-            handlePostKill(now);
-            return;
-        }
-
+        if (chestLootPending) { handleChestLoot(now); return; }
+        if (killRegisteredForCycle) { handlePostKill(now); return; }
         if (restockRequired || shouldEmergencyRestock()) {
             restockRequired = true;
             handleVarrockTeleport("Restocking from Bryophyta...");
             return;
         }
-
         if (!loadoutVerified && !verifyEquipmentLoadout()) {
             restockRequired = true;
             handleVarrockTeleport("Loadout changed - returning to Varrock...");
             return;
         }
 
-        handleSurvival();
-
-        Rs2NpcModel growthling = getNearestGrowthling();
-        if (growthling != null) {
-            handleGrowthlings(growthling);
-            return;
-        }
-
-        if (!restoreMainWeaponIfNeeded()) {
-            return;
-        }
-
         Rs2NpcModel bryophyta = getBryophyta();
+        boolean liveBoss = bryophyta != null && !bryophyta.isDead();
+        maintainCombatPrayer(liveBoss);
+        handleSurvival();
+        Rs2NpcModel growthling = getNearestGrowthling();
+        if (growthling != null) { handleGrowthlings(growthling); return; }
+        if (awaitGrowthlingWaveClear()) return;
+        if (!restoreMainWeaponIfNeeded()) return;
 
-        if (bryophyta != null && !bryophyta.isDead()) {
+        if (liveBoss) {
             bossWasPresent = true;
-            lastBossSeenAt = now;
+            bossMissingScans = 0;
             killRegisteredForCycle = false;
             handleBryophyta(bryophyta);
             return;
         }
-
-        if (bossWasPresent
-                && !killRegisteredForCycle
-                && now - lastBossSeenAt >= BOSS_MISSING_CONFIRM_MS) {
-            registerKill();
-        }
-
-        if (killRegisteredForCycle) {
-            handlePostKill(now);
-            return;
-        }
-
-        setState(BryophytaState.WAITING_FOR_RESPAWN, "Waiting for Bryophyta...");
+        if (bossWasPresent && !killRegisteredForCycle) {
+            if (++bossMissingScans >= 2) registerKill();
+            else setState(BryophytaState.WAITING_FOR_RESPAWN, "Bryophyta missing - confirming NPC cache...");
+        } else setState(BryophytaState.WAITING_FOR_RESPAWN, "Waiting for Bryophyta...");
     }
 
     private void handleOutsideLair() {
@@ -353,13 +296,14 @@ public class KspBryophytaScript extends Script {
      * its dialogue/instance transition. During ordinary surface/sewer travel prayers stay off.
      */
     private void maintainTravelPrayer() {
-        boolean atGate = objectVisible(BRYOPHYTA_GATE_OBJECT_ID, BRYOPHYTA_SEWER_ENTRANCE, 8);
+        WorldPoint player = Rs2Player.getWorldLocation();
+        boolean underground = isUnderground(player);
         boolean entering = lairEntryPending || state == BryophytaState.ENTERING_LAIR;
-
+        boolean atGate = underground && objectVisible(BRYOPHYTA_GATE_OBJECT_ID, BRYOPHYTA_SEWER_ENTRANCE, 8);
         if (config.protectFromMagic() && !Rs2Prayer.isOutOfPrayer() && (atGate || entering)) {
             Rs2Prayer.toggle(Rs2PrayerEnum.PROTECT_MAGIC, true);
-        } else if (!entering && !atGate) {
-            Rs2Prayer.disableAllPrayers();
+        } else if (!entering && !atGate && Rs2Prayer.isPrayerActive(Rs2PrayerEnum.PROTECT_MAGIC)) {
+            Rs2Prayer.toggle(Rs2PrayerEnum.PROTECT_MAGIC, false);
         }
     }
 
@@ -401,36 +345,33 @@ public class KspBryophytaScript extends Script {
     }
 
     private boolean ensureAutoRetaliateDisabled() {
-        if (Microbot.getVarbitPlayerValue(VarPlayerID.OPTION_NODEF) == 1) {
-            return true;
-        }
-
-        long now = System.currentTimeMillis();
-        if (now - lastAutoRetaliateAttemptAt < AUTO_RETALIATE_RETRY_MS) {
+        if (Microbot.getVarbitPlayerValue(VarPlayerID.OPTION_NODEF) == 1) return true;
+        if (Rs2Tab.getCurrentTab() != InterfaceTab.COMBAT) {
+            setStatus("Opening Combat tab to disable Auto Retaliate...");
+            Rs2Tab.switchTo(InterfaceTab.COMBAT);
             return false;
         }
-        lastAutoRetaliateAttemptAt = now;
-
-        status = "Disabling Auto Retaliate...";
-        boolean disabled = Rs2Combat.setAutoRetaliate(false);
-        if (disabled) {
-            status = "Auto Retaliate disabled.";
-        } else {
-            status = "Could not disable Auto Retaliate yet - retrying...";
+        Widget retaliate = Rs2Widget.getWidget(WidgetInfo.COMBAT_AUTO_RETALIATE.getId());
+        if (retaliate == null) {
+            setStatus("Waiting for Auto Retaliate widget...");
+            return false;
         }
-        return disabled;
+        setStatus("Disabling visible Auto Retaliate widget...");
+        Rs2Widget.clickWidget(retaliate);
+        return false; // varplayer confirms on next pass
     }
 
     private void handleSurvival() {
-        if (config.protectFromMagic() && !Rs2Prayer.isOutOfPrayer()) {
-            Rs2Prayer.toggle(Rs2PrayerEnum.PROTECT_MAGIC, true);
-        }
-
         maintainStrengthBoost();
         Rs2Player.eatAt(config.eatAtPercent());
+        if (config.maintainPoisonProtection()) Rs2Player.drinkAntiPoisonPotion();
+    }
 
-        if (config.maintainPoisonProtection()) {
-            Rs2Player.drinkAntiPoisonPotion();
+    private void maintainCombatPrayer(boolean liveBoss) {
+        if (config.protectFromMagic() && liveBoss && !Rs2Prayer.isOutOfPrayer()) {
+            Rs2Prayer.toggle(Rs2PrayerEnum.PROTECT_MAGIC, true);
+        } else if (!liveBoss && Rs2Prayer.isPrayerActive(Rs2PrayerEnum.PROTECT_MAGIC)) {
+            Rs2Prayer.toggle(Rs2PrayerEnum.PROTECT_MAGIC, false);
         }
     }
     private void maintainStrengthBoost() {
@@ -462,116 +403,151 @@ public class KspBryophytaScript extends Script {
     }
 
     private void handleVarrockTeleport(String reason) {
+        if (isOnSurface()) {
+            teleportPending = false;
+            teleportStartedAt = 0L;
+            bossWasPresent = killRegisteredForCycle = prayerRestoredAfterBank = loadoutVerified = false;
+            restockRequired = true;
+            resetTransitions();
+            setState(BryophytaState.BANKING, "Varrock reached - heading to East bank.");
+            return;
+        }
+        if (teleportPending) {
+            if (System.currentTimeMillis() - teleportStartedAt > 10_000L) {
+                teleportPending = false;
+                failAndStop("Varrock Teleport did not complete within 10 seconds.");
+            } else setState(BryophytaState.TELEPORTING_VARROCK, "Teleport sent - waiting for surface region...");
+            return;
+        }
         if (!hasVarrockTeleportRunesForOne()) {
             failAndStop("Missing Varrock teleport runes. Required: 3 Air rune, 1 Fire rune, 1 Law rune.");
             return;
         }
-
         setState(BryophytaState.TELEPORTING_VARROCK, reason);
         Rs2Prayer.disableAllPrayers();
         if (!Rs2Magic.cast(MagicAction.VARROCK_TELEPORT)) {
             failAndStop("Could not cast Varrock Teleport. Check the standard spellbook and rune supply.");
             return;
         }
-        if (!sleepUntil(this::isOnSurface, 10_000)) {
-            failAndStop("Varrock Teleport did not complete within 10 seconds.");
-            return;
-        }
-
-        bossWasPresent = killRegisteredForCycle = prayerRestoredAfterBank = loadoutVerified = false;
-        restockRequired = true;
-        resetTransitions();
-        setState(BryophytaState.BANKING, "Varrock reached - heading to East bank.");
+        teleportPending = true;
+        teleportStartedAt = System.currentTimeMillis();
     }
     private void performBankRestock() {
         setState(BryophytaState.BANKING, "Banking at Varrock East...");
         if (!Rs2Bank.isOpen()) {
-            if (!Rs2Bank.walkToBankAndUseBank(BankLocation.VARROCK_EAST)) {
+            if (bankClosePending) {
+                if (!ensureAutoRetaliateDisabled()) return;
+                if (config.strategy() == BryophytaStrategy.MAGIC_FIRE && !ensureSelectedSpellAutocast()) return;
+                bankClosePending = false;
+                markRestockComplete();
+                setState(BryophytaState.RESTORING_PRAYER, "Restocked - restoring Prayer at Varrock altar.");
                 return;
             }
-            // Let the bank inventory/equipment containers settle before mutating them.
-            // This also guarantees subsequent ticks do not re-enter the walker/open path.
-            setStatus("Bank opened - preparing restock...");
-            return;
-        }
-        if (!Rs2Inventory.isEmpty() && !Rs2Bank.depositAll()) {
-            setStatus("Waiting for inventory deposit...");
-            return;
-        }
-        if (!depositWornEquipmentAtBank()) {
+            WorldPoint player = Rs2Player.getWorldLocation();
+            WorldPoint bank = BankLocation.VARROCK_EAST.getWorldPoint();
+            if (player == null) return;
+            if (player.distanceTo(bank) > 8) {
+                walkToControlled(bank, 4, "Walking to Varrock East bank...");
+                return;
+            }
+            int epoch = Rs2Bank.getBankLiveEpoch();
+            boolean opened = Microbot.getRs2TileObjectCache().query().withName("Bank booth").within(10).interact("Bank");
+            if (!opened) {
+                Rs2NpcModel banker = Microbot.getRs2NpcCache().query().withName("Banker").fromWorldView().nearestOnClientThread();
+                opened = banker != null && banker.click("Bank");
+            }
+            if (opened) bankEpochBeforeOpen = epoch;
+            setStatus(opened ? "Bank interaction sent - checking bank widget/container..." : "Waiting for visible Varrock East bank target...");
             return;
         }
 
-        Map<EquipmentInventorySlot, String> desired = equipmentSettings.equipmentFor(config.strategy());
-        setState(BryophytaState.EQUIPPING, "Equipping " + config.strategy() + " loadout while bank stays open...");
-        if (!prepareEquipmentLoadout(desired) || !withdrawTripSupplies()) {
+        if (bankEpochBeforeOpen >= 0 && Rs2Bank.getBankLiveEpoch() <= bankEpochBeforeOpen) {
+            setStatus("Bank widget open - checking live bank container snapshot...");
             return;
         }
+        bankEpochBeforeOpen = -1;
+        Map<EquipmentInventorySlot, String> desired = equipmentSettings.equipmentFor(config.strategy());
+        if (!depositUnneededInventory(desired) || !depositIncorrectWornEquipmentAtBank(desired)) return;
+        setState(BryophytaState.EQUIPPING, "Completing " + config.strategy() + " loadout...");
+        if (!prepareEquipmentLoadout(desired) || !withdrawTripSupplies()) return;
         mainWeapon = equipmentSettings.mainWeaponFor(config.strategy());
         if (mainWeapon == null || mainWeapon.isBlank()) {
             failAndStop("The selected " + config.strategy() + " setup requires a weapon.");
             return;
         }
-
         if (!verifyEquipmentLoadout() || !verifyFullTripSupplies()) {
-            failAndStop("Bank restock verification failed for equipment or trip supplies.");
+            setStatus("Checking bank/inventory/equipment container updates...");
             return;
         }
 
-        if (Rs2Bank.isOpen()) {
-            // closeBank() is an interaction request; the authoritative result is the
-            // bank widget actually disappearing. Do not keep restockRequired=true just
-            // because the helper's immediate return value is false.
-            Rs2Bank.closeBank();
-            if (!sleepUntil(() -> !Rs2Bank.isOpen(), 2500)) {
-                setStatus("Restock complete - waiting for bank to close...");
-                return;
-            }
-        }
-
-        markRestockComplete();
-        if (!ensureAutoRetaliateDisabled()) {
-            setStatus("Restock complete - waiting to disable Auto Retaliate...");
-            return;
-        }
-
-        if (config.strategy() == BryophytaStrategy.MAGIC_FIRE && !setSelectedAutocastWithoutMagicTab(config.fireSpell())) {
-            failAndStop("Could not set " + config.fireSpell()
-                    + " to autocast after banking. Check the selected Magic weapon and Combat spell selector.");
-            return;
-        }
-        if (config.strategy() == BryophytaStrategy.MAGIC_FIRE) {
-            autocastFailures = 0;
-            lastAutocastAttemptAt = System.currentTimeMillis();
-        }
-
-        setState(BryophytaState.RESTORING_PRAYER, "Restocked - restoring Prayer at Varrock altar.");
+        bankClosePending = true;
+        setStatus("Restock verified - closing bank widget...");
+        Rs2Widget.clickChildWidget(786434, 11);
     }
 
-    private boolean depositWornEquipmentAtBank() {
-        if (Rs2Equipment.items().isEmpty()) {
-            return true;
+    private boolean depositUnneededInventory(Map<EquipmentInventorySlot, String> desired) {
+        Set<String> keep = desiredInventoryNames(desired);
+        Rs2ItemModel unwanted = Rs2Inventory.all().stream()
+                .filter(item -> item != null && item.getName() != null)
+                .filter(item -> !keep.contains(item.getName().toLowerCase()))
+                .findFirst().orElse(null);
+        if (unwanted == null) return true;
+        setStatus("Banking " + unwanted.getName() + "...");
+        Rs2Bank.depositAll(unwanted.getId());
+        return false; // next pass confirms from the inventory cache
+    }
+
+    private Set<String> desiredInventoryNames(Map<EquipmentInventorySlot, String> desired) {
+        Set<String> keep = new HashSet<>();
+        for (String name : desired.values()) {
+            addKeepName(keep, name);
         }
 
-        if (!Rs2Bank.isOpen()) {
-            status = "Bank closed before worn equipment could be deposited.";
-            return false;
-        }
+        addKeepName(keep, config.growthlingToolName());
+        addKeepName(keep, AIR_RUNE);
+        addKeepName(keep, FIRE_RUNE);
+        addKeepName(keep, LAW_RUNE);
+        addKeepName(keep, config.foodName());
 
-        int depositEquipmentId = WidgetInfo.BANK_DEPOSIT_EQUIPMENT.getId();
-        if (!Rs2Widget.isWidgetVisible(depositEquipmentId)) {
-            status = "Waiting for bank Deposit worn items button...";
-            return false;
+        if (config.strategy() == BryophytaStrategy.MAGIC_FIRE) {
+            addKeepName(keep, config.fireSpell().getCatalystRuneName());
         }
+        if (config.strategy() == BryophytaStrategy.MELEE && config.useStrengthPotion()) {
+            addKeepName(keep, STRENGTH_POTION_4);
+        }
+        if (config.withdrawMossyKey()) {
+            addKeepName(keep, MOSSY_KEY);
+        }
+        return keep;
+    }
 
-        status = "Depositing worn equipment without closing bank...";
-        if (!Rs2Widget.clickWidget(depositEquipmentId)) {
-            status = "Could not click bank Deposit worn items button.";
-            return false;
+    private void addKeepName(Set<String> keep, String name) {
+        String normalized = normalize(name);
+        if (!normalized.isEmpty()) {
+            keep.add(normalized.toLowerCase());
         }
-        if (!sleepUntil(() -> Rs2Equipment.items().isEmpty(), 2500)) {
-            status = "Waiting for worn equipment to deposit...";
-            return false;
+    }
+
+    private boolean depositIncorrectWornEquipmentAtBank(Map<EquipmentInventorySlot, String> desired) {
+        if (!Rs2Bank.isOpen()) return false;
+        for (EquipmentInventorySlot slot : BryophytaLoadout.CONFIGURABLE_SLOTS) {
+            Rs2ItemModel worn = Rs2Equipment.get(slot);
+            if (worn == null) continue;
+            String wanted = desired.get(slot);
+            boolean explicitEmpty = equipmentSettings.isExplicitEmpty(config.strategy(), slot);
+            if ((wanted != null && worn.getName() != null && worn.getName().equalsIgnoreCase(wanted))
+                    || (wanted == null && !explicitEmpty)) continue;
+            if (Rs2Inventory.isFull()) {
+                Rs2ItemModel food = Rs2Inventory.get(normalize(config.foodName()), true);
+                if (food == null || !Rs2Bank.depositOne(food.getId())) {
+                    setStatus("Need one inventory slot to swap incorrect worn equipment...");
+                    return false;
+                }
+                return false;
+            }
+            setStatus("Removing incorrect " + slot.name().toLowerCase() + ": " + worn.getName());
+            Rs2Equipment.unEquip(slot);
+            return false; // equipment/inventory cache confirms next pass; unwanted item is then banked normally
         }
         return true;
     }
@@ -580,71 +556,43 @@ public class KspBryophytaScript extends Script {
         for (Map.Entry<EquipmentInventorySlot, String> entry : desired.entrySet()) {
             EquipmentInventorySlot slot = entry.getKey();
             String itemName = entry.getValue();
-
             if (slot == EquipmentInventorySlot.AMMO) {
-                if (Rs2Bank.hasBankItem(itemName, 1, true)
-                        && !withdrawAllAvailableStack(itemName, 1, "Ranged ammunition")) {
+                if (getEquippedQuantity(slot, itemName) > 0) continue;
+                if (Rs2Inventory.itemQuantity(itemName) > 0) {
+                    if (!equipAmmoStack(itemName)) failAndStop("Could not equip required ammunition: " + itemName);
                     return false;
                 }
-                if (getEquippedQuantity(slot, itemName) <= 0 && Rs2Inventory.itemQuantity(itemName) <= 0) {
+                if (!bankQuantityExact(itemName) >= 1) {
                     failAndStop("Missing required Ranged ammunition in bank/equipment: " + itemName);
                     return false;
                 }
-                if (Rs2Inventory.itemQuantity(itemName) > 0 && !equipAmmoStack(itemName)) {
-                    failAndStop("Could not equip required ammunition: " + itemName);
+                withdrawAllAvailableStack(itemName, 1, "Ranged ammunition");
+                return false;
+            }
+            if (Rs2Equipment.isWearing(itemName, true)) continue;
+            if (!Rs2Inventory.contains(itemName, true)) {
+                if (!bankQuantityExact(itemName) >= 1) {
+                    failAndStop("Missing required " + slot.name().toLowerCase() + " equipment in bank: " + itemName);
                     return false;
                 }
-                continue;
-            }
-
-            if (Rs2Equipment.isWearing(itemName, true)) {
-                continue;
-            }
-            if (!Rs2Inventory.contains(itemName, true)
-                    && !withdrawExact(itemName, 1, slot.name() + " equipment")) {
+                withdrawExact(itemName, 1, slot.name() + " equipment");
                 return false;
             }
-            if (!interactEquip(itemName)) {
-                failAndStop("Could not equip required item: " + itemName + ". Check skill/quest requirements.");
-                return false;
-            }
+            if (!interactEquip(itemName)) failAndStop("Could not equip required item: " + itemName + ". Check skill/quest requirements.");
+            return false; // next pass checks worn slot
         }
         return true;
     }
     private boolean interactEquip(String itemName) {
+        if (Rs2Equipment.isWearing(itemName, true)) return true;
         Rs2ItemModel item = Rs2Inventory.get(itemName, true);
-        if (item == null) {
-            return false;
-        }
-
-        // While banking, use the bank-side inventory equipment action directly.
-        // Rs2Inventory.interact() switches to the normal Inventory tab before invoking
-        // an item action, which can collapse/close modal bank interfaces on some layouts.
-        boolean interacted = Rs2Bank.isOpen()
-                ? Rs2Bank.wearItem(item.getId())
-                : interactInventory(itemName, EQUIP_ACTIONS);
-        if (!interacted) {
-            return false;
-        }
-        return sleepUntil(() -> Rs2Equipment.isWearing(itemName, true)
-                || !Rs2Inventory.contains(itemName, true), 2500);
+        if (item == null) return false;
+        return Rs2Bank.isOpen() ? Rs2Bank.wearItem(item.getId()) : interactInventory(itemName, EQUIP_ACTIONS);
     }
     private boolean equipAmmoStack(String itemName) {
-        int inventoryAmount = Rs2Inventory.itemQuantity(itemName);
-        if (inventoryAmount <= 0) {
-            return getEquippedQuantity(EquipmentInventorySlot.AMMO, itemName) > 0;
-        }
-
-        int expected = getEquippedQuantity(EquipmentInventorySlot.AMMO, itemName) + inventoryAmount;
+        if (getEquippedQuantity(EquipmentInventorySlot.AMMO, itemName) > 0 && Rs2Inventory.itemQuantity(itemName) <= 0) return true;
         Rs2ItemModel ammo = Rs2Inventory.get(itemName, true);
-        boolean interacted = ammo != null && (Rs2Bank.isOpen()
-                ? Rs2Bank.wearItem(ammo.getId())
-                : interactInventory(itemName, "Wield", "Wear"));
-        if (!interacted) {
-            return false;
-        }
-        return sleepUntil(() -> getEquippedQuantity(EquipmentInventorySlot.AMMO, itemName) >= expected
-                || Rs2Inventory.itemQuantity(itemName) == 0, 3000);
+        return ammo != null && (Rs2Bank.isOpen() ? Rs2Bank.wearItem(ammo.getId()) : interactInventory(itemName, "Wield", "Wear"));
     }
 
     private boolean withdrawTripSupplies() {
@@ -690,62 +638,39 @@ public class KspBryophytaScript extends Script {
             return false;
         }
 
-        if (config.withdrawMossyKey() && Rs2Bank.hasBankItem(MOSSY_KEY, 1, true)) {
+        if (config.withdrawMossyKey() && Rs2Inventory.itemQuantity(MOSSY_KEY) < 1 && bankQuantityExact(MOSSY_KEY) >= 1) {
+            setStatus("Withdrawing Mossy key...");
             Rs2Bank.withdrawDeficit(MOSSY_KEY, 1, true);
+            return false;
         }
-
         return true;
     }
 
     private boolean withdrawExact(String itemName, int amount, String purpose) {
-        if (amount <= 0 || Rs2Inventory.itemQuantity(itemName) >= amount) {
-            return true;
-        }
-        if (!Rs2Bank.withdrawDeficit(itemName, amount, true)) {
+        if (amount <= 0 || Rs2Inventory.itemQuantity(itemName) >= amount) return true;
+        int need = amount - Rs2Inventory.itemQuantity(itemName);
+        if (!bankQuantityExact(itemName) >= need) {
             failAndStop("Missing required " + purpose + " in bank: " + itemName + " x" + amount);
             return false;
         }
-        if (sleepUntil(() -> Rs2Inventory.itemQuantity(itemName) >= amount, 2500)) {
-            return true;
-        }
-        failAndStop("Could not withdraw required " + purpose + ": " + itemName + " x" + amount);
-        return false;
+        setStatus("Withdrawing " + purpose + ": " + itemName + "...");
+        Rs2Bank.withdrawDeficit(itemName, amount, true);
+        return false; // inventory count confirms completion next pass
     }
 
     private boolean withdrawAllAvailableStack(String itemName, int minimumRequired, String purpose) {
-        int inventoryBefore = Rs2Inventory.itemQuantity(itemName);
-        int bankAvailable = Rs2Bank.bankItems().stream()
-                .filter(item -> item != null
-                        && item.getName() != null
-                        && item.getName().equalsIgnoreCase(itemName))
-                .mapToInt(Rs2ItemModel::getQuantity)
-                .sum();
-
-        long totalAvailable = (long) inventoryBefore + bankAvailable;
-        if (totalAvailable < minimumRequired) {
-            failAndStop("Missing required " + purpose + ": " + itemName
-                    + " (need at least " + minimumRequired + ", available " + totalAvailable + ")");
+        int inventory = Rs2Inventory.itemQuantity(itemName);
+        int bank = Rs2Bank.bankItems().stream()
+                .filter(item -> item != null && item.getName() != null && item.getName().equalsIgnoreCase(itemName))
+                .mapToInt(Rs2ItemModel::getQuantity).sum();
+        if ((long) inventory + bank < minimumRequired) {
+            failAndStop("Missing required " + purpose + ": " + itemName + " (need at least " + minimumRequired + ")");
             return false;
         }
-
-        if (bankAvailable <= 0) {
-            return inventoryBefore >= minimumRequired;
-        }
-
-        if (!Rs2Bank.withdrawAll(itemName, true)) {
-            failAndStop("Could not withdraw all available " + purpose + ": " + itemName);
-            return false;
-        }
-
-        int expected = (int) Math.min(Integer.MAX_VALUE, totalAvailable);
-        if (!sleepUntil(() -> Rs2Inventory.itemQuantity(itemName) >= expected, 3000)) {
-            if (Rs2Inventory.itemQuantity(itemName) < minimumRequired) {
-                failAndStop("Withdrawal did not supply enough " + purpose + ": " + itemName);
-                return false;
-            }
-        }
-
-        return true;
+        if (bank <= 0) return inventory >= minimumRequired;
+        setStatus("Withdrawing all " + itemName + "...");
+        Rs2Bank.withdrawAll(itemName, true);
+        return false; // bank/inventory caches are the confirmation
     }
     private void restorePrayerAtVarrockAltar() {
         int realPrayer = Microbot.getClient().getRealSkillLevel(Skill.PRAYER);
@@ -753,56 +678,34 @@ public class KspBryophytaScript extends Script {
             prayerRestoredAfterBank = true;
             altarFailures = 0;
             altarInteractionPending = false;
-            altarInteractionStartedAt = lastWalkIssuedAt = 0L;
+            altarInteractionStartedAt = 0L;
             setState(BryophytaState.WALKING_TO_SEWERS, "Prayer full - heading to Varrock Sewers.");
             return;
         }
-
         WorldPoint player = Rs2Player.getWorldLocation();
-        if (player == null) {
-            return;
-        }
+        if (player == null) return;
         setState(BryophytaState.RESTORING_PRAYER, "Restoring Prayer at Varrock altar...");
-
         if (!objectVisible(VARROCK_ALTAR_OBJECT_ID, VARROCK_ALTAR, 1)) {
             altarInteractionPending = false;
-            altarInteractionStartedAt = 0L;
             walkToControlled(VARROCK_ALTAR_APPROACH, 2, "Walking to Varrock altar...");
             return;
         }
-
-        long now = System.currentTimeMillis();
         if (altarInteractionPending) {
-            if (now - altarInteractionStartedAt < ALTAR_INTERACTION_TIMEOUT_MS) {
-                setStatus(player.distanceTo(VARROCK_ALTAR) > 2
-                        ? "Altar clicked - walking to Pray-at..."
-                        : "Altar clicked - waiting for Prayer restore...");
-                return;
-            }
-            altarInteractionPending = false;
-            altarInteractionStartedAt = 0L;
-        }
-        if (now - lastAltarAttemptAt < ALTAR_RETRY_MS || Rs2Player.isAnimating()) {
+            if (System.currentTimeMillis() - altarInteractionStartedAt > ALTAR_INTERACTION_TIMEOUT_MS) {
+                altarInteractionPending = false;
+                if (++altarFailures >= 5) failAndStop("Could not Pray-at altar 14860 at 3253,3486,0 after five attempts.");
+            } else setStatus("Altar interaction sent - checking Prayer level...");
             return;
         }
-        lastAltarAttemptAt = now;
-
+        if (Rs2Player.isAnimating()) return;
         boolean prayed = interactObject(VARROCK_ALTAR_OBJECT_ID, VARROCK_ALTAR, 1, "Pray-at")
                 || interactObject(VARROCK_ALTAR_OBJECT_ID, VARROCK_ALTAR, 1, "Pray")
                 || Microbot.getRs2TileObjectCache().query().withName("Altar")
                     .where(object -> VARROCK_ALTAR.equals(object.getWorldLocation())).interact("Pray-at");
-        if (!prayed) {
-            setStatus("Altar 14860 found but Pray-at was not accepted; retrying...");
-            if (++altarFailures >= 5) {
-                failAndStop("Could not Pray-at altar 14860 at 3253,3486,0 after five attempts.");
-            }
-            return;
-        }
-
+        if (!prayed) { setStatus("Altar 14860 visible - waiting for an actionable Pray-at entry..."); return; }
         altarInteractionPending = true;
-        altarInteractionStartedAt = now;
-        altarFailures = 0;
-        setStatus("Clicked altar 14860 - waiting for Prayer restore...");
+        altarInteractionStartedAt = System.currentTimeMillis();
+        setStatus("Altar interaction sent - checking Prayer level...");
     }
 
     private void navigateToBryophyta() {
@@ -837,185 +740,103 @@ public class KspBryophytaScript extends Script {
     }
     private void navigateToSewerManhole(WorldPoint player) {
         setState(BryophytaState.WALKING_TO_SEWERS, "Heading to Varrock sewer manhole...");
-        long now = System.currentTimeMillis();
-
         if (manholeDescentPending) {
             if (isUnderground(player)) {
                 manholeDescentPending = false;
                 manholeDescentStartedAt = 0L;
                 setState(BryophytaState.WALKING_TO_LAIR, "Varrock Sewers loaded - heading to Bryophyta.");
-                return;
-            }
-            if (now - manholeDescentStartedAt < MANHOLE_TRANSITION_TIMEOUT_MS) {
-                setStatus("Descending through manhole - waiting for sewer load...");
-                return;
-            }
-            manholeDescentPending = false;
-            manholeDescentStartedAt = lastManholeAttemptAt = 0L;
-            setStatus("Sewer transition timed out - retrying once...");
+            } else if (System.currentTimeMillis() - manholeDescentStartedAt > MANHOLE_TRANSITION_TIMEOUT_MS) {
+                manholeDescentPending = false;
+                setStatus("Sewer transition did not occur - rechecking manhole state...");
+            } else setStatus("Climb-down sent - checking for underground region...");
             return;
         }
-
-        // The tile-object cache can already contain the manhole while it is still too far away
-        // to use. Never invoke Open/Climb-down from range: first reach the adjacent approach tile,
-        // then inspect and interact with the manhole locally.
         if (player.distanceTo(VARROCK_MANHOLE_APPROACH) > 1) {
             walkToControlled(VARROCK_MANHOLE_APPROACH, 1, "Walking to Varrock sewer entrance...");
             return;
         }
-
-        if (Rs2Player.isMoving() || Rs2Player.isAnimating()) {
-            setStatus("At sewer entrance - waiting to stop before using manhole...");
-            return;
-        }
-
         boolean open = objectVisible(VARROCK_MANHOLE_OPEN_OBJECT_ID, VARROCK_MANHOLE, 2);
         boolean closed = !open && objectVisible(VARROCK_MANHOLE_CLOSED_OBJECT_ID, VARROCK_MANHOLE, 2);
-        if (!open && !closed) {
-            setStatus("At sewer entrance - waiting for manhole object...");
-            return;
-        }
-        if (now - lastManholeAttemptAt < MANHOLE_RETRY_MS) {
-            return;
-        }
-        lastManholeAttemptAt = now;
-
+        if (!open && !closed) { setStatus("At sewer entrance - waiting for manhole 881/882..."); return; }
         if (open) {
-            setState(BryophytaState.WALKING_TO_SEWERS, "Climbing down into Varrock Sewers...");
+            manholeOpenPending = false;
+            if (Rs2Player.isMoving() || Rs2Player.isAnimating()) return;
             boolean climbed = interactObject(VARROCK_MANHOLE_OPEN_OBJECT_ID, VARROCK_MANHOLE, 2, "Climb-down")
                     || interactNamedObject("Manhole", VARROCK_MANHOLE, 2, "Climb-down");
             if (climbed) {
                 manholeDescentPending = true;
-                manholeDescentStartedAt = now;
-                setStatus("Climb-down accepted - waiting for Varrock Sewers to load...");
-            } else {
-                setStatus("Open manhole found - retrying Climb-down...");
+                manholeDescentStartedAt = System.currentTimeMillis();
+                setStatus("Climb-down sent - checking for sewer region...");
             }
             return;
         }
-
-        setState(BryophytaState.WALKING_TO_SEWERS, "Opening Varrock sewer manhole...");
+        if (manholeOpenPending) { setStatus("Open sent - checking for manhole 882..."); return; }
         boolean opened = interactObject(VARROCK_MANHOLE_CLOSED_OBJECT_ID, VARROCK_MANHOLE, 2, "Open")
                 || interactNamedObject("Manhole", VARROCK_MANHOLE, 2, "Open");
-        lastManholeAttemptAt = opened ? 0L : lastManholeAttemptAt;
-        setStatus(opened ? "Manhole opened - climbing down..." : "Closed manhole found - retrying Open...");
+        manholeOpenPending = opened;
+        setStatus(opened ? "Open sent - checking for manhole 882..." : "Manhole 881 visible but Open is not actionable yet...");
     }
 
     private boolean handleNearbyWeb() {
-        boolean webPresent = Microbot.getRs2TileObjectCache()
-                .query()
-                .withName("Web")
-                .within(8)
-                .nearestOnClientThread() != null;
-
+        boolean webPresent = Microbot.getRs2TileObjectCache().query().withName("Web").within(8).nearestOnClientThread() != null;
         if (!webPresent) {
+            webSlashPending = false;
+            if (config.strategy() != BryophytaStrategy.MELEE
+                    && Rs2Equipment.isWearing(normalize(config.growthlingToolName()), true)) restoreMainWeaponIfNeeded();
             return false;
         }
-
-        boolean switchedToAxe = false;
         if (config.strategy() != BryophytaStrategy.MELEE
                 && !Rs2Equipment.isWearing(normalize(config.growthlingToolName()), true)) {
-            if (!equipGrowthlingTool()) {
-                failAndStop("Could not equip the Growthling axe to slash the Varrock Sewers web.");
-                return true;
-            }
-            switchedToAxe = true;
-        }
-
-        long now = System.currentTimeMillis();
-        if (now - lastWebAttemptAt < WEB_RETRY_MS) {
-            status = "Waiting for sewer web to clear...";
+            if (!equipGrowthlingTool()) failAndStop("Could not equip the Growthling axe to slash the Varrock Sewers web.");
             return true;
         }
-        lastWebAttemptAt = now;
-
-        status = "Slashing sewer web...";
-        Microbot.getRs2TileObjectCache()
-                .query()
-                .withName("Web")
-                .within(8)
-                .interact("Slash");
-
-        sleep(650, 950);
-
-        if (switchedToAxe) {
-            restoreMainWeaponIfNeeded();
+        if (webSlashPending) {
+            if (Rs2Player.isAnimating() || Rs2Player.isMoving()) {
+                setStatus("Slash sent - checking whether web still exists...");
+                return true;
+            }
+            webSlashPending = false; // idle + same web means the previous request did not clear it
         }
-
+        status = "Slashing visible sewer web...";
+        webSlashPending = Microbot.getRs2TileObjectCache().query().withName("Web").within(8).interact("Slash");
         return true;
     }
     private boolean tryEnterNearbyLairGate() {
         long now = System.currentTimeMillis();
         if (lairEntryPending) {
-            if (isInsideLair()) {
-                completeLairEntry();
-                return true;
-            }
-            if (fastTrackLairEntryDialogue()) {
-                return true;
-            }
-            if (handleLairEntryDialogue()) {
-                return true;
-            }
-            if (now - lairEntryStartedAt < LAIR_ENTRY_TRANSITION_TIMEOUT_MS) {
-                setState(BryophytaState.ENTERING_LAIR, "Gate accepted - waiting for Bryophyta lair/dialogue...");
-                return true;
-            }
-
-            clearLairEntryPending();
-            setStatus("Bryophyta entry timed out - retrying gate...");
-            if (++entryFailures >= 4) {
-                failBryophytaEntry("Bryophyta entry dialogue/instance transition timed out after four attempts.");
-            }
+            if (isInsideLair()) { completeLairEntry(); return true; }
+            if (serviceLairGateWidgetNow() || handleLairEntryDialogue()) return true;
+            if (now - lairEntryStartedAt > LAIR_ENTRY_TRANSITION_TIMEOUT_MS) {
+                clearLairEntryPending();
+                setStatus("Bryophyta entry did not transition - rechecking gate 32534...");
+                if (++entryFailures >= 4) failBryophytaEntry("Bryophyta entry dialogue/instance transition timed out after four attempts.");
+            } else setState(BryophytaState.ENTERING_LAIR, "Checking for Bryophyta gate dialogue/instance...");
             return true;
         }
-
-        if (!objectVisible(BRYOPHYTA_GATE_OBJECT_ID, BRYOPHYTA_SEWER_ENTRANCE, 8)) {
-            return false;
-        }
-
+        if (!objectVisible(BRYOPHYTA_GATE_OBJECT_ID, BRYOPHYTA_SEWER_ENTRANCE, 8)) return false;
         WorldPoint player = Rs2Player.getWorldLocation();
         if (player != null && player.distanceTo(BRYOPHYTA_SEWER_ENTRANCE) > 10) {
             walkToControlled(BRYOPHYTA_SEWER_ENTRANCE, 8, "Approaching Bryophyta gate...");
             return true;
         }
-
         cancelWalkerForBryophytaGate();
-        if (handleLairEntryDialogue()) {
-            startLairEntry(now);
-            return true;
-        }
-        if (now - lastEntryAttemptAt < ENTRY_RETRY_MS) {
-            return true;
-        }
-        lastEntryAttemptAt = now;
-
-        setState(BryophytaState.ENTERING_LAIR, "Opening Bryophyta gate...");
-
-        boolean entered = false;
+        if (handleLairEntryDialogue()) { startLairEntry(now); return true; }
+        setState(BryophytaState.ENTERING_LAIR, "Interacting with visible Bryophyta gate 32534...");
         for (String action : GATE_ACTIONS) {
             if (interactBryophytaGate(action)) {
-                entered = true;
-                break;
+                startLairEntry(now);
+                entryFailures = 0;
+                serviceLairGateWidgetNow();
+                return true;
             }
         }
-        entered = entered || Microbot.getRs2TileObjectCache().query().withId(BRYOPHYTA_GATE_OBJECT_ID)
-                .within(BRYOPHYTA_SEWER_ENTRANCE, 8).interact();
-
-        if (entered || Rs2Dialogue.isInDialogue()) {
+        if (Microbot.getRs2TileObjectCache().query().withId(BRYOPHYTA_GATE_OBJECT_ID)
+                .within(BRYOPHYTA_SEWER_ENTRANCE, 8).interact()) {
             startLairEntry(now);
             entryFailures = 0;
-            setState(BryophytaState.ENTERING_LAIR, "Bryophyta gate accepted - completing entry dialogue...");
-            fastTrackLairEntryDialogue();
             return true;
         }
-
-        setStatus(Rs2Inventory.contains(MOSSY_KEY, true)
-                ? "Gate interaction not accepted yet - Mossy key available; retrying..."
-                : "Gate interaction not accepted yet; retrying...");
-        if (++entryFailures >= 4) {
-            failBryophytaEntry("Could not enter Bryophyta after four gate attempts.");
-        }
+        setStatus("Gate 32534 visible but no gate action is currently actionable...");
         return true;
     }
 
@@ -1023,7 +844,6 @@ public class KspBryophytaScript extends Script {
         if (Rs2Walker.getCurrentTarget() != null) {
             Rs2Walker.clearWalkingRoute("KSP Bryophyta: gate 32534 reached");
         }
-        lastWalkIssuedAt = 0L;
     }
 
     private boolean interactBryophytaGate(String action) {
@@ -1034,87 +854,79 @@ public class KspBryophytaScript extends Script {
                 .interact(action);
     }
     /**
-     * Immediately services the Bryophyta gate dialogue after a successful gate interaction.
-     * The main script loop runs every few hundred milliseconds, which made the confirmation
-     * feel sluggish. This short bounded burst polls only while a lair entry is pending and
-     * advances option/continue widgets as soon as they appear.
+     * Event/poll driven gate-dialogue service. Both Bryophyta gate option pages use the
+     * dialogue-option widget, and the affirmative choice is option 1. Using the widget
+     * directly avoids waiting for generic text discovery before selecting it.
      */
-    private boolean fastTrackLairEntryDialogue() {
-        if (!lairEntryPending) {
-            return false;
+    public void onWidgetLoaded(int groupId) {
+        if (!lairEntryPending || state == BryophytaState.STOPPED) return;
+        if (groupId == InterfaceID.DIALOG_OPTION || groupId == InterfaceID.DIALOG_NPC
+                || groupId == InterfaceID.DIALOG_PLAYER || groupId == InterfaceID.DIALOG_SPRITE
+                || groupId == InterfaceID.DIALOG_DOUBLE_SPRITE || groupId == 229) {
+            lastGateDialogueFingerprint = "";
+            gateContinueHandled = false;
+            serviceLairGateWidgetNow();
         }
+    }
 
-        long deadline = System.currentTimeMillis() + LAIR_DIALOGUE_FAST_WINDOW_MS;
-        boolean acted = false;
-        while (System.currentTimeMillis() < deadline && lairEntryPending) {
-            if (isInsideLair()) {
-                completeLairEntry();
+    public void onClientTick() {
+        if (!isRunning()) return;
+        if (lairEntryPending) serviceLairGateWidgetNow();
+        if (spawnedGrowthlingIndex >= 0 && state != BryophytaState.STOPPED) {
+            Rs2NpcModel spawned = findGrowthlingByIndex(spawnedGrowthlingIndex);
+            if (spawned != null && isGrowthlingActionable(spawned)
+                    && Rs2Equipment.isWearing(normalize(config.growthlingToolName()), true)) handleGrowthlings(spawned);
+        }
+    }
+
+    private boolean serviceLairGateWidgetNow() {
+        if (!lairEntryPending) return false;
+        return Microbot.getClientThread().runOnClientThreadOptional(() -> {
+            Widget optionRoot = Microbot.getClient().getWidget(InterfaceID.DIALOG_OPTION, 1);
+            if (optionRoot != null && !optionRoot.isHidden()) {
+                Widget[] children = optionRoot.getDynamicChildren();
+                StringBuilder fingerprint = new StringBuilder("option:");
+                if (children != null) for (Widget child : children)
+                    if (child != null && !child.isHidden()) fingerprint.append(child.getText()).append('|');
+                String fp = fingerprint.toString();
+                gateContinueHandled = false;
+                if (fp.equals(lastGateDialogueFingerprint)) return true;
+                if (Rs2Dialogue.keyPressForDialogueOption(1)) {
+                    lastGateDialogueFingerprint = fp;
+                    setState(BryophytaState.ENTERING_LAIR, "Gate option widget visible - selected option 1.");
+                    return true;
+                }
+            } else lastGateDialogueFingerprint = "";
+
+            if (Rs2Dialogue.hasContinue()) {
+                if (gateContinueHandled) return true;
+                Rs2Dialogue.clickContinue();
+                gateContinueHandled = true;
+                setState(BryophytaState.ENTERING_LAIR, "Gate Continue widget visible - continued.");
                 return true;
             }
-
-            if (Rs2Dialogue.hasSelectAnOption()) {
-                boolean selected = Rs2Dialogue.clickOption(true, "Yes, let's go!")
-                        || Rs2Dialogue.clickOption(false, "Yes, let's go", "Yes", "Enter", "Go in", "Continue");
-                if (selected) {
-                    acted = true;
-                    lastLairDialogueActionAt = System.currentTimeMillis();
-                    setState(BryophytaState.ENTERING_LAIR,
-                            "Selected 'Yes, let's go!' - entering Bryophyta immediately...");
-                    sleep(70, 110);
-                    continue;
-                }
-            } else if (Rs2Dialogue.hasContinue()) {
-                Rs2Dialogue.clickContinue();
-                acted = true;
-                lastLairDialogueActionAt = System.currentTimeMillis();
-                setState(BryophytaState.ENTERING_LAIR, "Continuing Bryophyta gate dialogue...");
-                sleep(70, 110);
-                continue;
-            }
-
-            sleep((int) LAIR_DIALOGUE_FAST_POLL_MS, (int) LAIR_DIALOGUE_FAST_POLL_MS + 15);
-        }
-        return acted;
+            gateContinueHandled = false;
+            return false;
+        }).orElse(false);
     }
+
+    /**
+     * Immediately services the Bryophyta gate dialogue after a successful gate interaction.
+     * WidgetLoaded handles the normal fast path; this bounded poll remains as a fallback for
+     * same-group widget content changes that do not emit a second WidgetLoaded event.
+     */
 
     private boolean handleLairEntryDialogue() {
         WorldPoint player = Rs2Player.getWorldLocation();
-        if (player == null || player.distanceTo(BRYOPHYTA_SEWER_ENTRANCE) > 12) {
-            return false;
-        }
-
-        boolean options = Rs2Dialogue.hasSelectAnOption();
-        boolean canContinue = Rs2Dialogue.hasContinue();
-        if (!options && !canContinue) {
-            return false;
-        }
-
-        long now = System.currentTimeMillis();
-        if (now - lastLairDialogueActionAt < LAIR_DIALOGUE_RETRY_MS) {
-            return true;
-        }
-
-        if (options) {
-            boolean selected = Rs2Dialogue.clickOption(true, "Yes, let's go!")
-                    || Rs2Dialogue.clickOption(false, "Yes, let's go", "Yes", "Enter", "Go in", "Continue");
-            if (!selected) {
-                setStatus("Bryophyta entry options visible - waiting for affirmative option...");
-                return true;
-            }
-            setState(BryophytaState.ENTERING_LAIR, "Selected 'Yes, let's go!' - completing Bryophyta entry...");
-        } else {
-            Rs2Dialogue.clickContinue();
-            setState(BryophytaState.ENTERING_LAIR, "Continuing Bryophyta gate dialogue...");
-        }
-
-        lastLairDialogueActionAt = now;
-        startLairEntry(now);
-        return true;
+        if (player == null || player.distanceTo(BRYOPHYTA_SEWER_ENTRANCE) > 12) return false;
+        if (serviceLairGateWidgetNow()) return true;
+        if (!Rs2Dialogue.hasSelectAnOption() && !Rs2Dialogue.hasContinue()) return false;
+        startLairEntry(System.currentTimeMillis());
+        return serviceLairGateWidgetNow();
     }
     private void completeLairEntry() {
         clearLairEntryPending();
         entryFailures = 0;
-        lastWalkIssuedAt = 0L;
         // Sewer navigation must never survive the instance transition. Range movement inside
         // the lair uses direct canvas walking and should not compete with the old webwalker.
         Rs2Walker.clearWalkingRoute("KSP Bryophyta: entered lair");
@@ -1130,46 +942,42 @@ public class KspBryophytaScript extends Script {
 
     private void walkToControlled(WorldPoint target, int distance, String walkingStatus) {
         WorldPoint player = Rs2Player.getWorldLocation();
-        if (player == null || player.distanceTo(target) <= distance) {
-            return;
-        }
-
+        if (player == null || player.distanceTo(target) <= distance) return;
         status = walkingStatus;
-        long now = System.currentTimeMillis();
-
-        if (Rs2Player.isMoving() || now - lastWalkIssuedAt < WALK_REISSUE_MS) {
-            return;
-        }
-
-        lastWalkIssuedAt = now;
+        if (Rs2Player.isMoving()) return;
+        WorldPoint activeTarget = Rs2Walker.getCurrentTarget();
+        if (activeTarget != null && activeTarget.distanceTo(target) <= distance) return;
         Rs2Walker.walkTo(target, distance);
     }
-    private void handleGrowthlings(Rs2NpcModel growthling) {
-        setState(BryophytaState.KILLING_GROWTHLINGS,
-                "Growthling - switching to " + config.growthlingToolName() + ".");
+    private synchronized void handleGrowthlings(Rs2NpcModel growthling) {
+        if (growthling == null || isGrowthlingDeadOrDying(growthling)) return;
+        setState(BryophytaState.KILLING_GROWTHLINGS, "Growthling - using " + config.growthlingToolName() + ".");
         if (!equipGrowthlingTool()) {
             failAndStop("Required Growthling axe is missing/unusable: " + config.growthlingToolName());
             return;
         }
-        if (isPlayerInteractingWithGrowthling()) {
-            setStatus("Engaged with Growthling - waiting for hit...");
+        int index = growthling.getIndex();
+        markGrowthlingSeen();
+        int interacting = interactingGrowthlingIndex();
+        if (interacting >= 0) {
+            activeGrowthlingIndex = interacting;
+            pendingGrowthlingAttackIndex = -1;
+            if (spawnedGrowthlingIndex == interacting) spawnedGrowthlingIndex = -1;
+            setStatus("Growthling engaged - checking death/HP state...");
             return;
         }
-
-        long now = System.currentTimeMillis();
-        if (now - lastGrowthlingClickAt < GROWTHLING_ATTACK_RETRY_MS
-                || Rs2Player.isMoving() || Rs2Player.isAnimating()) {
-            return;
+        if (pendingGrowthlingAttackIndex == index) {
+            if (Rs2Player.isAnimating() || Rs2Player.isMoving()) return;
+            pendingGrowthlingAttackIndex = -1; // request produced no interaction/movement; retry from visible NPC state
         }
-
-        setStatus("Attacking Growthling...");
+        setStatus("Attacking visible Growthling " + index + "...");
         if (growthling.click("Attack")) {
-            handledGrowthlings.add(growthling.getIndex());
-            lastGrowthlingClickAt = now;
-            setStatus("Growthling attack sent - waiting for despawn...");
+            activeGrowthlingIndex = index;
+            pendingGrowthlingAttackIndex = index;
+            if (spawnedGrowthlingIndex == index) spawnedGrowthlingIndex = -1;
         } else {
-            lastGrowthlingClickAt = now - (GROWTHLING_ATTACK_RETRY_MS - 700L);
-            setStatus("Growthling attack not accepted - waiting to retry...");
+            activeGrowthlingIndex = -1;
+            pendingGrowthlingAttackIndex = -1;
         }
     }
 
@@ -1219,186 +1027,94 @@ public class KspBryophytaScript extends Script {
     }
 
     private void attackWithCurrentWeapon(Rs2NpcModel bryophyta) {
-        if (bryophyta == null || bryophyta.isDead()) {
-            return;
-        }
-
+        if (bryophyta == null || bryophyta.isDead()) { bossAttackPending = false; return; }
         if (isPlayerInteractingWith(bryophyta)) {
+            bossAttackPending = false;
             status = "Engaged with Bryophyta...";
             return;
         }
-
-        long now = System.currentTimeMillis();
-        if (now - lastBossAttackClickAt < BOSS_ATTACK_RETRY_MS
-                || Rs2Player.isMoving()
-                || Rs2Player.isAnimating()) {
-            return;
+        if (bossAttackPending) {
+            if (Rs2Player.isMoving() || Rs2Player.isAnimating()) return;
+            bossAttackPending = false;
         }
-
-        lastBossAttackClickAt = now;
-        status = "Attacking Bryophyta...";
-        if (!bryophyta.click("Attack")) {
-            status = "Bryophyta attack click not accepted - waiting to retry...";
-        }
-    }
-    private boolean isPlayerInteractingWithGrowthling() {
-        net.runelite.api.Actor target = playerInteractionTarget();
-        return target instanceof net.runelite.api.NPC
-                && ((net.runelite.api.NPC) target).getId() == GROWTHLING_NPC_ID;
+        if (Rs2Player.isMoving() || Rs2Player.isAnimating()) return;
+        status = "Attacking visible Bryophyta...";
+        bossAttackPending = bryophyta.click("Attack");
+        if (!bossAttackPending) status = "Bryophyta visible - Attack not actionable yet...";
     }
     private boolean isPlayerInteractingWith(Rs2NpcModel npc) {
         return npc != null && npc.getNpc() != null && playerInteractionTarget() == npc.getNpc();
     }
 
     private boolean setSelectedAutocastWithoutMagicTab(BryophytaFireSpell selectedSpell) {
-        if (selectedSpell == null) {
-            return false;
-        }
-
+        if (selectedSpell == null || selectedSpell.getCombatSpell() == null) return false;
         Rs2CombatSpells combatSpell = selectedSpell.getCombatSpell();
-        if (combatSpell == null) {
-            return false;
-        }
-
-        if (Rs2Magic.getCurrentAutoCastSpell() == combatSpell) {
-            return true;
-        }
-
+        if (Rs2Magic.getCurrentAutoCastSpell() == combatSpell) return true;
         if (Microbot.getClient().getRealSkillLevel(Skill.MAGIC) < combatSpell.getRequiredLevel()) {
-            status = selectedSpell + " requires Magic level " + combatSpell.getRequiredLevel() + ".";
+            failAndStop(selectedSpell + " requires Magic level " + combatSpell.getRequiredLevel() + ".");
             return false;
         }
-
-        Rs2Tab.switchTo(InterfaceTab.COMBAT);
-        if (!sleepUntil(() -> Rs2Tab.getCurrentTab() == InterfaceTab.COMBAT, 2000)) {
-            status = "Could not open Combat tab to configure autocast.";
+        if (Rs2Tab.getCurrentTab() != InterfaceTab.COMBAT) {
+            setStatus("Opening Combat tab for autocast...");
+            Rs2Tab.switchTo(InterfaceTab.COMBAT);
             return false;
         }
-
+        if (Rs2Widget.isWidgetVisible(201, 1)) {
+            Widget options = Rs2Widget.getWidget(201, 1);
+            Widget spell = options == null ? null : Rs2Widget.findWidget(combatSpell.getMagicAction().getSprite(), List.of(options));
+            if (spell == null) {
+                failAndStop(selectedSpell + " is not available in this weapon's autocast selector.");
+                return false;
+            }
+            setStatus("Selecting visible " + selectedSpell + " autocast widget...");
+            Rs2Widget.clickWidget(spell);
+            return false;
+        }
         Widget spellButton = Rs2Widget.getWidget(WidgetInfo.COMBAT_SPELL_BOX.getId());
         if (spellButton == null) {
-            status = "Selected Magic weapon does not expose an autocast Spell button.";
+            failAndStop("Selected Magic weapon does not expose an autocast Spell button.");
             return false;
         }
-
+        setStatus("Opening visible autocast selector...");
         Rs2Widget.clickWidget(spellButton);
-        if (!sleepUntil(() -> Rs2Widget.isWidgetVisible(201, 1), 2000)) {
-            status = "Autocast spell selector did not open.";
-            return false;
-        }
-
-        Widget autoCastOptions = Rs2Widget.getWidget(201, 1);
-        if (autoCastOptions == null) {
-            return false;
-        }
-
-        Widget spellSprite = Rs2Widget.findWidget(
-                combatSpell.getMagicAction().getSprite(),
-                List.of(autoCastOptions));
-        if (spellSprite == null) {
-            status = selectedSpell + " is not available in this weapon's autocast selector.";
-            return false;
-        }
-
-        Rs2Widget.clickWidget(spellSprite);
-        boolean selected = sleepUntil(() -> Rs2Magic.getCurrentAutoCastSpell() == combatSpell, 2500);
-        if (!selected) {
-            status = selectedSpell + " autocast selection was not confirmed.";
-        }
-        return selected;
-    }
-
-    private boolean ensureSelectedSpellAutocast() {
-        if (config.strategy() != BryophytaStrategy.MAGIC_FIRE) {
-            return true;
-        }
-
-        long now = System.currentTimeMillis();
-        if (autocastFailures > 0 && now - lastAutocastAttemptAt < AUTOCAST_RETRY_MS) {
-            return false;
-        }
-
-        lastAutocastAttemptAt = now;
-        BryophytaFireSpell spell = config.fireSpell();
-        status = "Setting " + spell + " to autocast...";
-
-        boolean configured = setSelectedAutocastWithoutMagicTab(spell);
-        if (configured) {
-            autocastFailures = 0;
-            status = spell + " autocast ready.";
-            return true;
-        }
-
-        if (shouldEmergencyRestock()) {
-            restockRequired = true;
-            return false;
-        }
-
-        autocastFailures++;
-        status = "Could not set " + spell + " to autocast (" + autocastFailures + "/4).";
-        if (autocastFailures >= 4) {
-            failAndStop("Could not set " + spell
-                    + " to autocast. Check that the selected Magic weapon supports standard spell autocasting, "
-                    + "the account has the required Magic level, and the standard spellbook is active.");
-        }
         return false;
     }
 
+    private boolean ensureSelectedSpellAutocast() {
+        if (config.strategy() != BryophytaStrategy.MAGIC_FIRE) return true;
+        BryophytaFireSpell spell = config.fireSpell();
+        if (Rs2Magic.getCurrentAutoCastSpell() == spell.getCombatSpell()) {
+            return true;
+        }
+        return setSelectedAutocastWithoutMagicTab(spell);
+    }
+
     private boolean maintainRange(Rs2NpcModel bryophyta) {
-        if (bryophyta == null || bryophyta.getNpc() == null) {
-            return false;
-        }
-
-        // Both areas must come from the same active WorldView. Rs2Player#getWorldLocation()
-        // translates instance coordinates, while Actor#getWorldArea() remains in scene space;
-        // mixing them produced bogus ~998-tile distances inside Bryophyta's lair.
+        if (bryophyta == null || bryophyta.getNpc() == null) return false;
         WorldArea[] areas = Microbot.getClientThread().runOnClientThreadOptional(() -> {
-            if (Microbot.getClient() == null || Microbot.getClient().getLocalPlayer() == null) {
-                return null;
-            }
+            if (Microbot.getClient() == null || Microbot.getClient().getLocalPlayer() == null) return null;
             net.runelite.api.Player player = Microbot.getClient().getLocalPlayer();
-            WorldView playerView = player.getWorldView();
-            WorldView bossView = bryophyta.getNpc().getWorldView();
-            if (playerView == null || bossView == null || playerView.getId() != bossView.getId()) {
-                return null;
-            }
-            return new WorldArea[] { player.getWorldArea(), bryophyta.getNpc().getWorldArea() };
+            WorldView playerView = player.getWorldView(), bossView = bryophyta.getNpc().getWorldView();
+            if (playerView == null || bossView == null || playerView.getId() != bossView.getId()) return null;
+            return new WorldArea[]{player.getWorldArea(), bryophyta.getNpc().getWorldArea()};
         }).orElse(null);
-        if (areas == null || areas[0] == null || areas[1] == null) {
-            return false;
-        }
-
-        WorldArea playerArea = areas[0];
-        WorldArea bossArea = areas[1];
-        WorldPoint player = new WorldPoint(playerArea.getX(), playerArea.getY(), playerArea.getPlane());
-        WorldView worldView = bryophyta.getWorldView();
-        int targetDistance = config.minimumRangeDistance();
-        int currentDistance = bossArea.distanceTo(playerArea);
-
-        if (currentDistance == targetDistance) {
-            return false;
-        }
+        if (areas == null || areas[0] == null || areas[1] == null) return false;
+        WorldArea playerArea = areas[0], bossArea = areas[1];
+        int targetDistance = config.minimumRangeDistance(), currentDistance = bossArea.distanceTo(playerArea);
+        if (currentDistance == targetDistance) return false;
         if (currentDistance == Integer.MAX_VALUE || currentDistance > 30) {
             setStatus("Waiting for Bryophyta combat position...");
             return true;
         }
-        if (Rs2Player.isMoving()) {
-            setStatus("Adjusting distance to Bryophyta: " + currentDistance + " -> " + targetDistance + " tiles...");
-            return true;
-        }
-
-        long now = System.currentTimeMillis();
-        if (now - lastRangeMoveAt < RANGE_MOVE_RETRY_MS) {
-            return true;
-        }
-
-        WorldPoint target = findBestRangeTile(player, bossArea, worldView, targetDistance);
+        if (Rs2Player.isMoving()) return true;
+        WorldPoint player = new WorldPoint(playerArea.getX(), playerArea.getY(), playerArea.getPlane());
+        WorldPoint target = findBestRangeTile(player, bossArea, bryophyta.getWorldView(), targetDistance);
         if (target == null) {
             setStatus("Could not find a walkable " + targetDistance + "-tile position around Bryophyta.");
             return true;
         }
-
-        lastRangeMoveAt = now;
+        WorldPoint walkerTarget = Rs2Walker.getCurrentTarget();
+        if (target.equals(walkerTarget)) return true;
         setStatus("Moving from " + currentDistance + " to " + targetDistance + " tiles from Bryophyta...");
         Rs2Walker.walkFastCanvas(target);
         return true;
@@ -1428,47 +1144,42 @@ public class KspBryophytaScript extends Script {
                 .orElse(null);
     }
 
-    private void registerKill() {
+    private synchronized void registerKill() {
+        if (killRegisteredForCycle) return;
         kills++;
         killRegisteredForCycle = true;
-        killRegisteredAt = System.currentTimeMillis();
-        setState(BryophytaState.LOOTING, "Bryophyta defeated - looting.");
+        bossMissingScans = postKillEmptyScans = 0;
+        setState(BryophytaState.LOOTING, "Bryophyta defeated - checking ground drops.");
         Rs2Prayer.disableAllPrayers();
     }
 
-    private void handlePostKill(long now) {
-        if (config.lootBossDrops() && now - killRegisteredAt <= POST_KILL_LOOT_WINDOW_MS) {
-            setState(BryophytaState.LOOTING, "Looting Bryophyta drops...");
-            attemptBossLoot();
-            return;
-        }
-
-        if (config.openRewardChest()) {
-            handleChest(now);
-            return;
-        }
-
-        setState(BryophytaState.WAITING_FOR_RESPAWN, "Waiting for next Bryophyta cycle...");
-        bossWasPresent = false;
-        killRegisteredForCycle = false;
+    public void onBryophytaDespawned() {
+        if (!isRunning() || !bossWasPresent || killRegisteredForCycle) return;
+        if (state == BryophytaState.FIGHTING_BRYOPHYTA || state == BryophytaState.KILLING_GROWTHLINGS) registerKill();
     }
-    private void attemptBossLoot() {
-        for (String itemName : PRIORITY_LOOT) {
-            if (pickupNamedGroundItem(itemName)) {
+
+    private void handlePostKill(long now) {
+        if (config.lootBossDrops()) {
+            if (attemptBossLoot()) { postKillEmptyScans = 0; return; }
+            if (++postKillEmptyScans < 2) {
+                setState(BryophytaState.LOOTING, "No boss ground item visible - rechecking cache...");
                 return;
             }
         }
-        if (config.lootValueThreshold() <= 0) {
-            return;
-        }
-
+        if (config.openRewardChest()) { handleChest(now); return; }
+        setState(BryophytaState.WAITING_FOR_RESPAWN, "Waiting for next Bryophyta cycle...");
+        bossWasPresent = killRegisteredForCycle = false;
+    }
+    private boolean attemptBossLoot() {
+        for (String itemName : PRIORITY_LOOT) if (pickupNamedGroundItem(itemName)) return true;
+        if (config.lootValueThreshold() <= 0) return false;
         Rs2TileItemModel valuable = Microbot.getRs2TileItemCache().query().fromWorldView().within(8)
                 .where(item -> item.isLootAble() && item.getTotalValue() >= config.lootValueThreshold())
                 .nearestOnClientThread();
-        if (valuable != null) {
-            setStatus("Looting " + valuable.getName() + "...");
-            valuable.pickup();
-        }
+        if (valuable == null) return false;
+        setStatus("Looting " + valuable.getName() + "...");
+        valuable.pickup();
+        return true;
     }
 
     private boolean pickupNamedGroundItem(String itemName) {
@@ -1488,39 +1199,21 @@ public class KspBryophytaScript extends Script {
     }
 
     private void handleChest(long now) {
-        if (now - lastChestAttemptAt < CHEST_RETRY_MS) {
-            setState(BryophytaState.WAITING_FOR_RESPAWN, "Waiting to retry Bryophyta chest...");
-            return;
-        }
-
         chestKeysBeforeOpen = Rs2Inventory.itemQuantity(MOSSY_KEY);
-        if (chestKeysBeforeOpen <= 0) {
-            finishChestCycle("No Mossy key available - waiting for Bryophyta respawn.");
+        if (chestKeysBeforeOpen <= 0) { finishChestCycle("No Mossy key available - waiting for Bryophyta respawn."); return; }
+        if (!objectVisible(BRYOPHYTA_CHEST_OBJECT_ID, Rs2Player.getWorldLocation(), 20)) {
+            setState(BryophytaState.OPENING_CHEST, "Waiting for reward chest 56378...");
             return;
         }
-
-        lastChestAttemptAt = now;
-        setState(BryophytaState.OPENING_CHEST, "Opening Bryophyta reward chest...");
-
-        boolean interacted = Microbot.getRs2TileObjectCache()
-                .query()
-                .withId(BRYOPHYTA_CHEST_OBJECT_ID)
-                .within(20)
-                .interact("Open");
-
-        if (!interacted) {
-            status = "Could not interact with Bryophyta chest.";
-            return;
-        }
-
+        setState(BryophytaState.OPENING_CHEST, "Opening visible Bryophyta reward chest...");
+        if (!Microbot.getRs2TileObjectCache().query().withId(BRYOPHYTA_CHEST_OBJECT_ID).within(20).interact("Open")) return;
         chestAttempts++;
         ignoredChestGroundDrops.clear();
+        pendingChestLootKey = "";
         chestLootPending = true;
         chestOpenRequestedAt = now;
         chestOpenConfirmedAt = 0L;
-        lastChestLootSeenAt = 0L;
-        lastChestLootClickAt = 0L;
-        setState(BryophytaState.LOOTING, "Chest opened - waiting for reward drops...");
+        setState(BryophytaState.LOOTING, "Chest Open sent - checking key/reward state...");
     }
 
     /**
@@ -1529,56 +1222,37 @@ public class KspBryophytaScript extends Script {
      */
     private void handleChestLoot(long now) {
         int currentKeys = Rs2Inventory.itemQuantity(MOSSY_KEY);
-        Rs2TileItemModel loot = getNearestChestGroundLoot();
-
-        // Key consumption confirms that this specific chest interaction completed. Do not
-        // use a pre-existing boss drop as confirmation, otherwise a distant Open click could
-        // be mistaken for a completed chest opening.
-        if (chestOpenConfirmedAt == 0L && currentKeys < chestKeysBeforeOpen) {
-            chestOpenConfirmedAt = now;
-        }
-
+        if (chestOpenConfirmedAt == 0L && currentKeys < chestKeysBeforeOpen) chestOpenConfirmedAt = now;
         if (chestOpenConfirmedAt == 0L) {
-            if (now - chestOpenRequestedAt >= CHEST_OPEN_TIMEOUT_MS) {
+            if (now - chestOpenRequestedAt > CHEST_OPEN_TIMEOUT_MS) {
                 chestLootPending = false;
-                status = "Chest interaction did not complete - retrying.";
-                return;
-            }
-            setState(BryophytaState.LOOTING, "Waiting for reward chest to open...");
+                setStatus("Chest key was not consumed - rechecking chest...");
+            } else setState(BryophytaState.LOOTING, "Checking for Mossy key consumption...");
             return;
         }
 
-        if (loot != null) {
-            lastChestLootSeenAt = now;
-            setState(BryophytaState.LOOTING, "Collecting chest reward: " + loot.getName() + "...");
-
-            if (now - lastChestLootClickAt < CHEST_LOOT_CLICK_RETRY_MS) {
+        Rs2TileItemModel loot = getNearestChestGroundLoot();
+        if (!pendingChestLootKey.isEmpty()) {
+            boolean stillPresent = loot != null && pendingChestLootKey.equals(groundLootKey(loot.getId(), loot.getWorldLocation()));
+            if (stillPresent) {
+                setStatus("Take sent - checking ground item removal...");
                 return;
             }
-
-            int neededSlots = inventorySlotsNeededFor(loot);
-            if (!ensureLootSpace(neededSlots)) {
-                status = "Chest reward waiting - could not free " + neededSlots + " inventory slot(s).";
-                return;
-            }
-
-            lastChestLootClickAt = now;
-            if (!loot.pickup()) {
-                status = "Could not pick up chest reward: " + loot.getName();
-            }
+            pendingChestLootKey = "";
+            loot = getNearestChestGroundLoot();
+        }
+        if (loot == null) {
+            finishChestCycle("Chest has no remaining ground rewards - waiting for Bryophyta respawn.");
             return;
         }
-
-        long sinceConfirmed = now - chestOpenConfirmedAt;
-        long sinceLastLoot = lastChestLootSeenAt == 0L ? sinceConfirmed : now - lastChestLootSeenAt;
-        if (sinceConfirmed < CHEST_LOOT_SETTLE_MS || sinceLastLoot < CHEST_LOOT_SETTLE_MS) {
-            setState(BryophytaState.LOOTING, "Waiting for remaining chest rewards...");
+        int needed = inventorySlotsNeededFor(loot);
+        if (!ensureLootSpace(needed)) {
+            setStatus("Chest reward visible - making " + needed + " inventory slot(s)...");
             return;
         }
-
-        if (sinceConfirmed >= CHEST_LOOT_TIMEOUT_MS || sinceLastLoot >= CHEST_LOOT_SETTLE_MS) {
-            finishChestCycle("Chest rewards collected - waiting for Bryophyta respawn.");
-        }
+        String key = groundLootKey(loot.getId(), loot.getWorldLocation());
+        setState(BryophytaState.LOOTING, "Taking visible chest reward: " + loot.getName() + "...");
+        if (loot.pickup()) pendingChestLootKey = key;
     }
 
     private Rs2TileItemModel getNearestChestGroundLoot() {
@@ -1614,21 +1288,9 @@ public class KspBryophytaScript extends Script {
     }
 
     private boolean ensureLootSpace(int requiredSlots) {
-        if (requiredSlots <= 0) {
-            return true;
-        }
-
-        int attempts = 0;
-        while (freeInventorySlots() < requiredSlots && attempts++ < requiredSlots + 2) {
-            int beforeSlots = freeInventorySlots();
-            if (!freeOneLootSlot()) {
-                return false;
-            }
-            if (!sleepUntil(() -> freeInventorySlots() > beforeSlots, 1_200)) {
-                return false;
-            }
-        }
-        return freeInventorySlots() >= requiredSlots;
+        if (requiredSlots <= 0 || freeInventorySlots() >= requiredSlots) return true;
+        if (freeOneLootSlot()) setStatus("Inventory-space action sent - checking inventory container...");
+        return false;
     }
 
     private int freeInventorySlots() {
@@ -1667,7 +1329,8 @@ public class KspBryophytaScript extends Script {
         chestLootPending = false;
         ignoredChestGroundDrops.clear();
         chestKeysBeforeOpen = 0;
-        chestOpenRequestedAt = chestOpenConfirmedAt = lastChestLootSeenAt = lastChestLootClickAt = 0L;
+        chestOpenRequestedAt = chestOpenConfirmedAt = 0L;
+        pendingChestLootKey = "";
         bossWasPresent = false;
         killRegisteredForCycle = false;
         setState(BryophytaState.WAITING_FOR_RESPAWN, message);
@@ -1700,6 +1363,13 @@ public class KspBryophytaScript extends Script {
 
         loadoutVerified = true;
         return true;
+    }
+
+    private int bankQuantityExact(String name) {
+        if (name == null || name.isBlank()) return 0;
+        return Rs2Bank.bankItems().stream()
+                .filter(item -> item != null && item.getName() != null && item.getName().equalsIgnoreCase(name))
+                .mapToInt(Rs2ItemModel::getQuantity).sum();
     }
 
     private String selectedAmmoName() {
@@ -1806,21 +1476,99 @@ public class KspBryophytaScript extends Script {
                 .nearestOnClientThread();
     }
     private Rs2NpcModel getNearestGrowthling() {
-        Rs2NpcModel any = Microbot.getRs2NpcCache().query().withId(GROWTHLING_NPC_ID)
-                .fromWorldView().nearestOnClientThread();
-        if (any == null) {
-            handledGrowthlings.clear();
-            return null;
+        long now = System.currentTimeMillis();
+        int interactingIndex = interactingGrowthlingIndex();
+        if (interactingIndex >= 0) {
+            Rs2NpcModel interacting = findGrowthlingByIndex(interactingIndex);
+            if (isGrowthlingActionable(interacting)) {
+                activeGrowthlingIndex = interactingIndex;
+                pendingGrowthlingAttackIndex = -1;
+                markGrowthlingSeen();
+                return interacting;
+            }
         }
-        return Microbot.getRs2NpcCache().query().withId(GROWTHLING_NPC_ID).fromWorldView()
+        if (spawnedGrowthlingIndex >= 0) {
+            Rs2NpcModel spawned = findGrowthlingByIndex(spawnedGrowthlingIndex);
+            if (isGrowthlingActionable(spawned)) { markGrowthlingSeen(); return spawned; }
+            spawnedGrowthlingIndex = -1;
+        }
+        if (activeGrowthlingIndex >= 0) {
+            Rs2NpcModel active = findGrowthlingByIndex(activeGrowthlingIndex);
+            if (isGrowthlingActionable(active)) { markGrowthlingSeen(); return active; }
+            activeGrowthlingIndex = pendingGrowthlingAttackIndex = -1;
+        }
+        Rs2NpcModel next = Microbot.getRs2NpcCache().query().withId(GROWTHLING_NPC_ID).fromWorldView()
                 .where(this::isGrowthlingActionable).nearestOnClientThread();
+        if (next != null) markGrowthlingSeen();
+        else if (Microbot.getRs2NpcCache().query().withId(GROWTHLING_NPC_ID).fromWorldView().nearestOnClientThread() != null)
+            growthlingWaveActive = true;
+        return next;
     }
-    private boolean isGrowthlingActionable(Rs2NpcModel npc) {
-        if (npc == null || handledGrowthlings.contains(npc.getIndex()) || npc.isDead()) {
-            return false;
+
+    private Rs2NpcModel findGrowthlingByIndex(int index) {
+        return Microbot.getRs2NpcCache().query()
+                .withId(GROWTHLING_NPC_ID)
+                .fromWorldView()
+                .where(npc -> npc != null && npc.getIndex() == index)
+                .nearestOnClientThread();
+    }
+
+    private int interactingGrowthlingIndex() {
+        return Microbot.getClientThread().runOnClientThreadOptional(() -> {
+            if (Microbot.getClient() == null || Microbot.getClient().getLocalPlayer() == null) {
+                return -1;
+            }
+            net.runelite.api.Actor target = Microbot.getClient().getLocalPlayer().getInteracting();
+            if (!(target instanceof net.runelite.api.NPC)) {
+                return -1;
+            }
+            net.runelite.api.NPC npc = (net.runelite.api.NPC) target;
+            return npc.getId() == GROWTHLING_NPC_ID ? npc.getIndex() : -1;
+        }).orElse(-1);
+    }
+
+    private void markGrowthlingSeen() {
+        growthlingWaveActive = true;
+        growthlingEmptyScans = 0;
+    }
+
+    private boolean awaitGrowthlingWaveClear() {
+        if (!growthlingWaveActive) return false;
+        if (++growthlingEmptyScans < 3) {
+            setState(BryophytaState.KILLING_GROWTHLINGS, "Rechecking Growthling NPC 8194 cache (" + growthlingEmptyScans + "/3)...");
+            return true;
+        }
+        growthlingWaveActive = false;
+        growthlingEmptyScans = 0;
+        activeGrowthlingIndex = spawnedGrowthlingIndex = pendingGrowthlingAttackIndex = -1;
+        return false;
+    }
+
+    public void onGrowthlingSpawned(int index) {
+        if (!isRunning()) return;
+        spawnedGrowthlingIndex = index;
+        growthlingEmptyScans = 0;
+        markGrowthlingSeen();
+    }
+
+    public void onGrowthlingDespawned(int index) {
+        if (!isRunning()) return;
+        if (activeGrowthlingIndex == index) activeGrowthlingIndex = -1;
+        if (spawnedGrowthlingIndex == index) spawnedGrowthlingIndex = -1;
+        if (pendingGrowthlingAttackIndex == index) pendingGrowthlingAttackIndex = -1;
+        growthlingWaveActive = true;
+    }
+
+    private boolean isGrowthlingDeadOrDying(Rs2NpcModel npc) {
+        if (npc == null || npc.isDead()) {
+            return true;
         }
         int scale = npc.getHealthScale();
-        return scale <= 0 || npc.getHealthRatio() > 0;
+        return scale > 0 && npc.getHealthRatio() <= 0;
+    }
+
+    private boolean isGrowthlingActionable(Rs2NpcModel npc) {
+        return npc != null && !isGrowthlingDeadOrDying(npc);
     }
 
     private boolean isInsideLair() {
@@ -1856,7 +1604,6 @@ public class KspBryophytaScript extends Script {
     public void confirmManholeDescent() {
         manholeDescentPending = true;
         manholeDescentStartedAt = System.currentTimeMillis();
-        lastManholeAttemptAt = manholeDescentStartedAt;
         setState(BryophytaState.WALKING_TO_SEWERS,
                 "Manhole descent confirmed - loading Varrock Sewers...");
     }
@@ -1871,9 +1618,11 @@ public class KspBryophytaScript extends Script {
     }
 
     private void resetTransitions() {
-        altarInteractionPending = manholeDescentPending = lairEntryPending = false;
+        altarInteractionPending = manholeDescentPending = manholeOpenPending = lairEntryPending = false;
+        webSlashPending = bankClosePending = false;
         altarInteractionStartedAt = manholeDescentStartedAt = lairEntryStartedAt = 0L;
-        lastLairDialogueActionAt = 0L;
+        lastGateDialogueFingerprint = "";
+        gateContinueHandled = false;
     }
 
     private void startLairEntry(long now) {
@@ -1885,7 +1634,9 @@ public class KspBryophytaScript extends Script {
 
     private void clearLairEntryPending() {
         lairEntryPending = false;
-        lairEntryStartedAt = lastLairDialogueActionAt = 0L;
+        lairEntryStartedAt = 0L;
+        lastGateDialogueFingerprint = "";
+        gateContinueHandled = false;
     }
 
     private void setStatus(String newStatus) {

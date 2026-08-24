@@ -3,6 +3,10 @@ package net.runelite.client.plugins.microbot.kspbryophyta;
 import com.google.inject.Provides;
 import net.runelite.api.ChatMessageType;
 import net.runelite.api.events.ChatMessage;
+import net.runelite.api.events.ClientTick;
+import net.runelite.api.events.NpcDespawned;
+import net.runelite.api.events.NpcSpawned;
+import net.runelite.api.events.WidgetLoaded;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.eventbus.Subscribe;
 import net.runelite.client.game.ItemManager;
@@ -29,7 +33,7 @@ import java.awt.image.BufferedImage;
         isExternal = PluginConstants.IS_EXTERNAL
 )
 public class KspBryophytaPlugin extends Plugin {
-    public static final String VERSION = "0.1.16";
+    public static final String VERSION = "0.1.21";
 
     @Inject
     private KspBryophytaConfig config;
@@ -79,6 +83,35 @@ public class KspBryophytaPlugin extends Plugin {
         script.shutdown();
         overlayManager.remove(overlay);
         removeEquipmentPanel();
+    }
+
+
+
+    @Subscribe
+    public void onClientTick(ClientTick event) {
+        if (script.isRunning()) script.onClientTick();
+    }
+
+    @Subscribe
+    public void onWidgetLoaded(WidgetLoaded event) {
+        if (script.isRunning()) {
+            script.onWidgetLoaded(event.getGroupId());
+        }
+    }
+
+    @Subscribe
+    public void onNpcSpawned(NpcSpawned event) {
+        if (script.isRunning() && event.getNpc() != null && event.getNpc().getId() == KspBryophytaScript.GROWTHLING_NPC_ID) {
+            script.onGrowthlingSpawned(event.getNpc().getIndex());
+        }
+    }
+
+    @Subscribe
+    public void onNpcDespawned(NpcDespawned event) {
+        if (!script.isRunning() || event.getNpc() == null) return;
+        if (event.getNpc().getId() == KspBryophytaScript.GROWTHLING_NPC_ID)
+            script.onGrowthlingDespawned(event.getNpc().getIndex());
+        else if (event.getNpc().getId() == KspBryophytaScript.BRYOPHYTA_NPC_ID) script.onBryophytaDespawned();
     }
 
     @Subscribe
