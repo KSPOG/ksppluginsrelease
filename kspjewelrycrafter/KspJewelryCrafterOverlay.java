@@ -1,5 +1,7 @@
 package net.runelite.client.plugins.microbot.kspjewelrycrafter;
 
+import net.runelite.api.Skill;
+import net.runelite.client.plugins.microbot.Microbot;
 import net.runelite.client.ui.overlay.OverlayPanel;
 import net.runelite.client.ui.overlay.components.LineComponent;
 import net.runelite.client.ui.overlay.components.TitleComponent;
@@ -16,6 +18,13 @@ public class KspJewelryCrafterOverlay extends OverlayPanel
     private final KspJewelryCrafterScript script;
     private final KspJewelryCrafterConfig config;
 
+    private long trackedSessionStart;
+    private int startingCraftingXp;
+    private int startingCraftingLevel;
+    private int currentCraftingXp;
+    private int currentCraftingLevel;
+    private boolean craftingBaselineReady;
+
     @Inject
     public KspJewelryCrafterOverlay(KspJewelryCrafterScript script, KspJewelryCrafterConfig config)
     {
@@ -31,6 +40,7 @@ public class KspJewelryCrafterOverlay extends OverlayPanel
         if (!config.showOverlay()) return null;
         setPreferredSize(new Dimension(OVERLAY_WIDTH, 0));
         panelComponent.setPreferredSize(new Dimension(OVERLAY_WIDTH, 0));
+        updateCraftingSession();
 
         panelComponent.getChildren().add(TitleComponent.builder()
             .text("KSP Jewelry Crafter v" + KspJewelryCrafterPlugin.VERSION)
@@ -42,9 +52,9 @@ public class KspJewelryCrafterOverlay extends OverlayPanel
         line("Runtime", script.getFormattedRuntime());
 
         line("Account", script.isMemberAccount() ? "Members" : "F2P");
-        line("Crafting", "Lvl " + script.getCraftingLevel());
-        line("XP gained", format(script.getCraftingXpGained()));
-        line("XP / hr", format(script.getCraftingXpPerHour()));
+        line("Crafting Lvl", currentCraftingLevel + " / +" + getCraftingLevelsGained() + " gained");
+        line("XP gained", format(getCraftingXpGained()));
+        line("XP / hr", format(getCraftingXpPerHour()));
 
         JewelryRecipe recipe = script.getActiveRecipe();
         JewelryQuote quote = script.getActiveQuote();
@@ -92,6 +102,44 @@ public class KspJewelryCrafterOverlay extends OverlayPanel
         line("Restock", script.getRestockProgress());
 
         return super.render(graphics);
+    }
+
+    private void updateCraftingSession()
+    {
+        long sessionStart = script.getSessionStartedAt();
+        if (sessionStart <= 0L) return;
+
+        int xp = Microbot.getClientThread().runOnClientThreadOptional(
+            () -> Microbot.getClient().getSkillExperience(Skill.CRAFTING)).orElse(-1);
+        int level = Microbot.getClientThread().runOnClientThreadOptional(
+            () -> Microbot.getClient().getRealSkillLevel(Skill.CRAFTING)).orElse(-1);
+        if (xp < 0 || level <= 0) return;
+
+        if (!craftingBaselineReady || trackedSessionStart != sessionStart || xp < startingCraftingXp)
+        {
+            trackedSessionStart = sessionStart;
+            startingCraftingXp = xp;
+            startingCraftingLevel = level;
+            craftingBaselineReady = true;
+        }
+        currentCraftingXp = xp;
+        currentCraftingLevel = level;
+    }
+
+    private int getCraftingXpGained()
+    {
+        return craftingBaselineReady ? Math.max(0, currentCraftingXp - startingCraftingXp) : 0;
+    }
+
+    private int getCraftingLevelsGained()
+    {
+        return craftingBaselineReady ? Math.max(0, currentCraftingLevel - startingCraftingLevel) : 0;
+    }
+
+    private long getCraftingXpPerHour()
+    {
+        long elapsed = script.getRuntimeMillis();
+        return elapsed <= 0L ? 0L : Math.round(getCraftingXpGained() * 3_600_000.0 / elapsed);
     }
 
     private void line(String left, String right)
