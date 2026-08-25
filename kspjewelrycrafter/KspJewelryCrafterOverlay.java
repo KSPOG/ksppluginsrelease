@@ -46,7 +46,7 @@ public class KspJewelryCrafterOverlay extends OverlayPanel
         if (recipe != null)
         {
             line("Required lvl", String.valueOf(recipe.getCraftingLevel()));
-            line("Access", recipe.isMembersOnly() ? "Members only" : script.isMemberAccount() ? "F2P + Members" : "F2P");
+            line("Access", recipe.isMembersOnly() ? "Members only" : "F2P");
             line("Inputs", recipe.usesGem()
                 ? recipe.getBarName() + " + " + recipe.getGemName()
                 : recipe.getBarName());
