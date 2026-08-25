@@ -9,7 +9,7 @@ import java.awt.Graphics2D;
 
 public class KspJewelryCrafterOverlay extends OverlayPanel
 {
-    private static final int OVERLAY_WIDTH = 235;
+    private static final int OVERLAY_WIDTH = 320;
     private final KspJewelryCrafterScript script;
     private final KspJewelryCrafterConfig config;
 
@@ -18,6 +18,7 @@ public class KspJewelryCrafterOverlay extends OverlayPanel
     {
         this.script = script;
         this.config = config;
+        setResizable(false);
         setPreferredSize(new Dimension(OVERLAY_WIDTH, 0));
     }
 
@@ -25,9 +26,11 @@ public class KspJewelryCrafterOverlay extends OverlayPanel
     public Dimension render(Graphics2D graphics)
     {
         if (!config.showOverlay()) return null;
+        setPreferredSize(new Dimension(OVERLAY_WIDTH, 0));
+        panelComponent.setPreferredSize(new Dimension(OVERLAY_WIDTH, 0));
 
         line("KSP Jewelry Crafter", "v" + KspJewelryCrafterPlugin.VERSION);
-        line("Status", shorten(script.getStatus(), 32));
+        line("Status", shorten(script.getStatus(), 40));
         line("State", prettyState(script.getState()));
         line("Runtime", script.getFormattedRuntime());
 
@@ -64,7 +67,7 @@ public class KspJewelryCrafterOverlay extends OverlayPanel
             else
             {
                 line("Market", "Quote unavailable");
-                line("Reason", shorten(quote.getReason(), 32));
+                line("Reason", shorten(quote.getReason(), 40));
             }
         }
 
@@ -77,7 +80,7 @@ public class KspJewelryCrafterOverlay extends OverlayPanel
         line("Est. net profit", gp(script.getEstimatedProfit()));
         line("Est. profit / hr", gp(script.getEstimatedProfitPerHour()));
 
-        line("GE offer", shorten(script.getPendingOfferSummary(), 32));
+        line("GE offer", shorten(script.getPendingOfferSummary(), 40));
         line("GE retry", script.getGeRetry() + "/" + config.maxOfferRetries());
         line("Restock", script.getRestockProgress());
 
