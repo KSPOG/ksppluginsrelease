@@ -352,7 +352,7 @@ public class KspJewelryCrafterScript extends Script
 
         String widgetName = craftingWidgetName(activeRecipe);
         status = "Selecting " + widgetName;
-        if (!Rs2Widget.clickWidget(widgetName, true))
+        if (!Rs2Widget.clickWidget(widgetName))
         {
             status = "Unable to select " + widgetName;
             return;
