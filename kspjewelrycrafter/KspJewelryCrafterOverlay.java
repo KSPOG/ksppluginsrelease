@@ -43,8 +43,7 @@ public class KspJewelryCrafterOverlay extends OverlayPanel
 
         line("Account", script.isMemberAccount() ? "Members" : "F2P");
         line("Crafting Lvl", script.getCraftingLevel() + " / +" + script.getCraftingLevelsGained() + " gained");
-        line("XP gained", format(script.getCraftingXpGained()));
-        line("XP / hr", format(script.getCraftingXpPerHour()));
+        line("XP", format(script.getCraftingXpGained()) + " / " + format(script.getCraftingXpPerHour()) + " p/h");
 
         JewelryRecipe recipe = script.getActiveRecipe();
         JewelryQuote quote = script.getActiveQuote();
@@ -84,8 +83,7 @@ public class KspJewelryCrafterOverlay extends OverlayPanel
             line("Last batch", format(script.getLastBatchMade()));
 
         line("Crafted", format(script.getCraftedCount()));
-        line("Total Profit", gp(script.getEstimatedProfit()));
-        line("Est. profit / hr", gp(script.getEstimatedProfitPerHour()));
+        line("Profit", gp(script.getEstimatedProfit()) + " / " + gp(script.getEstimatedProfitPerHour()) + " p/h");
 
         line("GE offer", shorten(script.getPendingOfferSummary(), 40));
         line("GE retry", script.getGeRetry() + "/" + config.maxOfferRetries());
