@@ -40,8 +40,6 @@ public class KspJewelryCrafterScript extends Script
     private static final int EDGEVILLE_DIRECT_BANK_RADIUS = 20;
     private static final int BANK_WIDGET_GROUP = 12;
     private static final int BANK_WIDGET_CHILD = 1;
-    private static final int GE_FIRST_SLOT_CHILD = 7;
-    private static final int GE_OFFER_CONTAINER_CHILD = 26;
     private static final int GE_PRICE_X_CHILD = 12;
     private static final WorldPoint EDGEVILLE_BANK = new WorldPoint(3096, 3494, 0);
     private static final WorldPoint EDGEVILLE_FURNACE = new WorldPoint(3109, 3499, 0);
@@ -697,13 +695,23 @@ public class KspJewelryCrafterScript extends Script
         return false;
     }
 
+    private boolean geSetupOpen()
+    {
+        return Rs2Widget.isWidgetVisible(InterfaceID.GeOffers.SETUP);
+    }
+
+    private boolean geSubScreenOpen()
+    {
+        return Rs2GrandExchange.isOfferScreenOpen() || geSetupOpen();
+    }
+
     private boolean ensureGeOverview(String openingStatus)
     {
         if (!openVerifiedGe(openingStatus)) return false;
-        if (!Rs2GrandExchange.isOfferScreenOpen()) return true;
+        if (!geSubScreenOpen()) return true;
         status = "Returning to GE overview";
         Rs2GrandExchange.backToOverview();
-        if (sleepUntil(() -> Rs2GrandExchange.isOpen() && !Rs2GrandExchange.isOfferScreenOpen(), 4_000)) return true;
+        if (sleepUntil(() -> Rs2GrandExchange.isOpen() && !geSubScreenOpen(), 4_000)) return true;
         status = Rs2GrandExchange.isOpen() ? "Waiting for GE overview" : "GE closed - recovering";
         return false;
     }
@@ -888,7 +896,7 @@ public class KspJewelryCrafterScript extends Script
             status = "No updated buy price - keeping offer: " + order.itemName;
             return true;
         }
-        if (!modifyGeOffer(order.slot, GrandExchangeAction.BUY, price)) return false;
+        if (!modifyGeOffer(order.slot, price)) return false;
         order.retry = nextRetry;
         order.placedAt = System.currentTimeMillis();
         status = "Modified buy price: " + order.itemName + " (retry " + order.retry + ")";
@@ -1062,51 +1070,64 @@ public class KspJewelryCrafterScript extends Script
         return false;
     }
 
-    private boolean modifyGeOffer(GrandExchangeSlots slot, GrandExchangeAction action, int newPrice)
+    private boolean modifyGeOffer(GrandExchangeSlots slot, int newPrice)
     {
         if (slot == null || newPrice <= 0) return false;
+        OfferSnapshot current = getOfferSnapshot(slot);
+        if (current != null && current.price == newPrice) return true;
         if (!ensureGeOverview("Reopening Grand Exchange to modify offer")) return false;
 
-        int identifier = modifyActionIdentifier(slot, action);
-        if (identifier <= 0)
-        {
-            status = "Modify price option unavailable for GE slot " + (slot.ordinal() + 1);
-            return false;
-        }
-        Widget slotWidget = Rs2Widget.getWidget(InterfaceID.GE_OFFERS, GE_FIRST_SLOT_CHILD + slot.ordinal());
+        Widget slotWidget = Rs2Widget.getWidget(InterfaceID.GeOffers.INDEX_0 + slot.ordinal());
         if (slotWidget == null)
         {
             status = "Waiting for GE slot widget";
             return false;
         }
 
-        status = "Opening GE modify price";
-        Rs2Widget.clickWidgetFast(slotWidget, 2, identifier);
-        if (!sleepUntil(() -> gePriceInputOpen() || Rs2GrandExchange.isOfferScreenOpen() || !Rs2GrandExchange.isOpen(), 3_500))
+        status = "Opening GE Modify offer";
+        Rs2Widget.clickWidgetFast(slotWidget, 2, 3);
+        if (!sleepUntil(() -> geSetupOpen() || Rs2GrandExchange.isOfferScreenOpen() || !Rs2GrandExchange.isOpen(), 3_500))
         {
-            status = "Waiting for Modify price widget";
+            status = "Waiting for GE Modify offer";
             return false;
         }
         if (!Rs2GrandExchange.isOpen())
         {
-            status = "GE closed while opening Modify price - recovering";
+            status = "GE closed while opening Modify offer - recovering";
             return false;
         }
 
-        if (!gePriceInputOpen())
+        if (!geSetupOpen())
         {
-            Widget offerContainer = Rs2Widget.getWidget(InterfaceID.GE_OFFERS, GE_OFFER_CONTAINER_CHILD);
-            Widget priceX = offerContainer == null ? null : offerContainer.getChild(GE_PRICE_X_CHILD);
-            if (priceX == null || !Rs2Widget.clickWidget(priceX))
+            Widget modify = Rs2Widget.getWidget(InterfaceID.GeOffers.DETAILS_MODIFY);
+            if (modify == null || !Rs2Widget.clickWidget(modify))
             {
-                status = "Unable to open GE price input";
+                status = "Waiting for GE Modify button";
                 return false;
             }
-            if (!sleepUntil(() -> gePriceInputOpen() || !Rs2GrandExchange.isOpen(), 2_500))
+            if (!sleepUntil(() -> geSetupOpen() || !Rs2GrandExchange.isOpen(), 3_000))
             {
-                status = "Waiting for GE price input";
+                status = "Waiting for GE offer setup";
                 return false;
             }
+        }
+        if (!Rs2GrandExchange.isOpen())
+        {
+            status = "GE closed before price edit - recovering";
+            return false;
+        }
+
+        Widget setup = Rs2Widget.getWidget(InterfaceID.GeOffers.SETUP);
+        Widget priceX = setup == null ? null : setup.getChild(GE_PRICE_X_CHILD);
+        if (priceX == null || !Rs2Widget.clickWidget(priceX))
+        {
+            status = "Unable to open GE price input";
+            return false;
+        }
+        if (!sleepUntil(() -> gePriceInputOpen() || !Rs2GrandExchange.isOpen(), 2_500))
+        {
+            status = "Waiting for GE price input";
+            return false;
         }
         if (!Rs2GrandExchange.isOpen())
         {
@@ -1117,23 +1138,28 @@ public class KspJewelryCrafterScript extends Script
         Rs2GrandExchange.setChatboxValue(newPrice);
         sleep(120, 220);
         Rs2Keyboard.enter();
-        sleep(250, 450);
-
-        if (Rs2GrandExchange.isOfferScreenOpen())
+        if (!sleepUntil(() -> !gePriceInputOpen() || !Rs2GrandExchange.isOpen(), 2_500))
         {
-            status = "Confirming modified GE price";
-            if (!Rs2Widget.clickWidget("Confirm", true))
-            {
-                status = "Unable to confirm modified GE price";
-                return false;
-            }
-            sleepUntil(() -> !Rs2GrandExchange.isOfferScreenOpen()
-                || Rs2Widget.hasWidget("Your offer is much") || !Rs2GrandExchange.isOpen(), 3_000);
-            if (Rs2Widget.hasWidget("Your offer is much"))
-            {
-                Rs2Widget.clickWidget("Yes");
-                sleepUntil(() -> !Rs2GrandExchange.isOfferScreenOpen() || !Rs2GrandExchange.isOpen(), 3_000);
-            }
+            status = "Waiting for GE price entry";
+            return false;
+        }
+        if (!Rs2GrandExchange.isOpen())
+        {
+            status = "GE closed after price entry - recovering";
+            return false;
+        }
+
+        status = "Confirming modified GE price";
+        if (!Rs2Widget.clickWidget(InterfaceID.GeOffers.SETUP_CONFIRM))
+        {
+            status = "Unable to confirm modified GE price";
+            return false;
+        }
+        sleepUntil(() -> !geSetupOpen() || Rs2Widget.hasWidget("Your offer is much") || !Rs2GrandExchange.isOpen(), 3_000);
+        if (Rs2Widget.hasWidget("Your offer is much"))
+        {
+            Rs2Widget.clickWidget("Yes");
+            sleepUntil(() -> !geSetupOpen() || !Rs2GrandExchange.isOpen(), 3_000);
         }
 
         if (sleepUntil(() ->
@@ -1149,25 +1175,6 @@ public class KspJewelryCrafterScript extends Script
     private boolean gePriceInputOpen()
     {
         return Rs2Widget.getWidget(InterfaceID.Chatbox.MES_TEXT2) != null;
-    }
-
-    private int modifyActionIdentifier(GrandExchangeSlots slot, GrandExchangeAction action)
-    {
-        return Microbot.getClientThread().runOnClientThreadOptional(() ->
-        {
-            Widget widget = Microbot.getClient().getWidget(InterfaceID.GE_OFFERS, GE_FIRST_SLOT_CHILD + slot.ordinal());
-            if (widget == null || widget.getActions() == null) return -1;
-            String side = action == GrandExchangeAction.BUY ? "buy" : "sell";
-            String[] actions = widget.getActions();
-            for (int i = 0; i < actions.length; i++)
-            {
-                String value = actions[i];
-                if (value == null) continue;
-                String lower = value.toLowerCase();
-                if (lower.contains("modify") && lower.contains(side)) return i + 1;
-            }
-            return -1;
-        }).orElse(-1);
     }
 
     private boolean allBuyOrdersDone()
@@ -1333,7 +1340,7 @@ public class KspJewelryCrafterScript extends Script
                 status = "No updated sell price - keeping offer";
                 return true;
             }
-            if (!modifyGeOffer(slot, GrandExchangeAction.SELL, price)) return true;
+            if (!modifyGeOffer(slot, price)) return true;
             geRetry = nextRetry;
             pendingOffer.placedAt = System.currentTimeMillis();
             status = "Modified sell price: " + pendingOffer.itemName + " (retry " + geRetry + ")";
