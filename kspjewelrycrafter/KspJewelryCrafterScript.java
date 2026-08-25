@@ -6,6 +6,8 @@ import net.runelite.api.GrandExchangeOfferState;
 import net.runelite.api.Skill;
 import net.runelite.api.TileObject;
 import net.runelite.api.coords.WorldPoint;
+import net.runelite.api.gameval.InterfaceID;
+import net.runelite.api.widgets.Widget;
 import net.runelite.client.plugins.microbot.Microbot;
 import net.runelite.client.plugins.microbot.Script;
 import net.runelite.client.plugins.microbot.util.bank.Rs2Bank;
@@ -15,6 +17,7 @@ import net.runelite.client.plugins.microbot.util.grandexchange.GrandExchangeRequ
 import net.runelite.client.plugins.microbot.util.grandexchange.GrandExchangeSlots;
 import net.runelite.client.plugins.microbot.util.grandexchange.Rs2GrandExchange;
 import net.runelite.client.plugins.microbot.util.inventory.Rs2Inventory;
+import net.runelite.client.plugins.microbot.util.keyboard.Rs2Keyboard;
 import net.runelite.client.plugins.microbot.util.player.Rs2Player;
 import net.runelite.client.plugins.microbot.util.walker.Rs2Walker;
 import net.runelite.client.plugins.microbot.util.widget.Rs2Widget;
@@ -37,6 +40,9 @@ public class KspJewelryCrafterScript extends Script
     private static final int EDGEVILLE_DIRECT_BANK_RADIUS = 20;
     private static final int BANK_WIDGET_GROUP = 12;
     private static final int BANK_WIDGET_CHILD = 1;
+    private static final int GE_FIRST_SLOT_CHILD = 7;
+    private static final int GE_OFFER_CONTAINER_CHILD = 26;
+    private static final int GE_PRICE_X_CHILD = 12;
     private static final WorldPoint EDGEVILLE_BANK = new WorldPoint(3096, 3494, 0);
     private static final WorldPoint EDGEVILLE_FURNACE = new WorldPoint(3109, 3499, 0);
     private static final WorldPoint GRAND_EXCHANGE = new WorldPoint(3164, 3487, 0);
@@ -161,7 +167,6 @@ public class KspJewelryCrafterScript extends Script
     private void evaluate()
     {
         refreshAccountEligibility();
-
         if (activeRecipe != null && activeRecipe.isEligible(craftingLevel, memberAccount))
         {
             activeQuote = prices.quote(activeRecipe, config);
@@ -221,8 +226,8 @@ public class KspJewelryCrafterScript extends Script
         {
             JewelryRecipe fixed = config.fixedRecipe();
             if (!fixed.isEligible(craftingLevel, memberAccount)) return null;
-            JewelryQuote q = prices.quote(fixed, config);
-            return q.meets(config) ? fixed : null;
+            JewelryQuote quote = prices.quote(fixed, config);
+            return quote.meets(config) ? fixed : null;
         }
 
         Comparator<JewelryQuote> comparator;
@@ -248,7 +253,6 @@ public class KspJewelryCrafterScript extends Script
         }
 
         activeQuote = prices.quote(activeRecipe, config);
-
         if (!bankWidgetOpen() && hasCraftingInputsInInventory())
         {
             primeCraftingMonitor();
@@ -269,18 +273,16 @@ public class KspJewelryCrafterScript extends Script
         int available = availableInputUnits();
         boolean hasMould = Rs2Inventory.hasItem(activeRecipe.getMouldName())
             || Rs2Bank.count(activeRecipe.getMouldName(), true) > 0;
-
         if (!hasMould || available <= 0)
         {
             if (!prepareOutputForSale()) return;
-            String nextStatus = !hasMould ? "Need mould - going to GE" : "Existing inputs exhausted - going to GE";
-            leaveBank(JewelryCrafterState.TRAVEL_TO_GE, nextStatus);
+            leaveBank(JewelryCrafterState.TRAVEL_TO_GE,
+                !hasMould ? "Need mould - going to GE" : "Existing inputs exhausted - going to GE");
             return;
         }
 
         int craftUnits = Math.min(activeRecipe.usesGem() ? 13 : 27, available);
         if (!normalizeCraftingInventory(craftUnits)) return;
-
         int bars = Rs2Inventory.count(activeRecipe.getBarName(), true);
         int gems = activeRecipe.usesGem() ? Rs2Inventory.count(activeRecipe.getGemName(), true) : craftUnits;
         if (bars != craftUnits || gems != craftUnits || !Rs2Inventory.hasItem(activeRecipe.getMouldName()))
@@ -291,17 +293,14 @@ public class KspJewelryCrafterScript extends Script
 
         currentBatchTarget = craftUnits;
         primeCraftingMonitor();
-        leaveBank(JewelryCrafterState.CRAFTING,
-            "Ready: " + craftUnits + " x " + activeRecipe.getOutputName());
+        leaveBank(JewelryCrafterState.CRAFTING, "Ready: " + craftUnits + " x " + activeRecipe.getOutputName());
     }
 
     private int availableInputUnits()
     {
-        int bars = Rs2Inventory.count(activeRecipe.getBarName(), true)
-            + Rs2Bank.count(activeRecipe.getBarName(), true);
+        int bars = Rs2Inventory.count(activeRecipe.getBarName(), true) + Rs2Bank.count(activeRecipe.getBarName(), true);
         if (!activeRecipe.usesGem()) return bars;
-        int gems = Rs2Inventory.count(activeRecipe.getGemName(), true)
-            + Rs2Bank.count(activeRecipe.getGemName(), true);
+        int gems = Rs2Inventory.count(activeRecipe.getGemName(), true) + Rs2Bank.count(activeRecipe.getGemName(), true);
         return Math.min(bars, gems);
     }
 
@@ -324,7 +323,6 @@ public class KspJewelryCrafterScript extends Script
             return false;
         }
         if (!hasUnneededInventory()) return true;
-
         status = "Depositing unneeded inventory";
         boolean started = activeRecipe.usesGem()
             ? Rs2Bank.depositAllExcept(true, activeRecipe.getMouldName(), activeRecipe.getBarName(), activeRecipe.getGemName())
@@ -337,8 +335,7 @@ public class KspJewelryCrafterScript extends Script
 
     private boolean hasUnneededInventory()
     {
-        return Rs2Inventory.all().stream().anyMatch(item ->
-            item != null && !isNeededInventoryItem(item.getName()));
+        return Rs2Inventory.all().stream().anyMatch(item -> item != null && !isNeededInventoryItem(item.getName()));
     }
 
     private boolean isNeededInventoryItem(String name)
@@ -353,9 +350,8 @@ public class KspJewelryCrafterScript extends Script
     {
         int current = Rs2Inventory.count(item, true);
         if (current <= target) return true;
-        int excess = current - target;
         status = "Depositing excess " + item.toLowerCase();
-        if (!Rs2Bank.depositX(item, excess)) return false;
+        if (!Rs2Bank.depositX(item, current - target)) return false;
         if (sleepUntil(() -> Rs2Inventory.count(item, true) <= target, 4_000)) return true;
         status = "Waiting to trim " + item.toLowerCase();
         return false;
@@ -449,13 +445,11 @@ public class KspJewelryCrafterScript extends Script
             outputPendingSale = carried > 0 ? output : null;
             return true;
         }
-
         if (!Rs2Bank.setWithdrawAsNote())
         {
             status = "Setting noted output withdrawal";
             return false;
         }
-
         int target = carried + banked;
         status = "Withdrawing all output as notes";
         if (!Rs2Bank.withdrawAll(output, true)) return false;
@@ -464,7 +458,6 @@ public class KspJewelryCrafterScript extends Script
             status = "Waiting for full noted output stack";
             return false;
         }
-
         outputPendingSale = output;
         return true;
     }
@@ -535,8 +528,9 @@ public class KspJewelryCrafterScript extends Script
     private boolean craftingInventoryChanged()
     {
         if (!craftingMonitorPrimed || monitoredRecipe != activeRecipe) return false;
-        return monitoredBars != Rs2Inventory.count(activeRecipe.getBarName(), true)
-            || monitoredGems != (activeRecipe.usesGem() ? Rs2Inventory.count(activeRecipe.getGemName(), true) : Rs2Inventory.count(activeRecipe.getBarName(), true))
+        int bars = Rs2Inventory.count(activeRecipe.getBarName(), true);
+        int gems = activeRecipe.usesGem() ? Rs2Inventory.count(activeRecipe.getGemName(), true) : bars;
+        return monitoredBars != bars || monitoredGems != gems
             || monitoredOutput != Rs2Inventory.count(activeRecipe.getOutputName(), true);
     }
 
@@ -547,7 +541,6 @@ public class KspJewelryCrafterScript extends Script
             primeCraftingMonitor();
             return 0;
         }
-
         int bars = Rs2Inventory.count(activeRecipe.getBarName(), true);
         int gems = activeRecipe.usesGem() ? Rs2Inventory.count(activeRecipe.getGemName(), true) : bars;
         int output = Rs2Inventory.count(activeRecipe.getOutputName(), true);
@@ -556,7 +549,6 @@ public class KspJewelryCrafterScript extends Script
         monitoredBars = bars;
         monitoredGems = gems;
         monitoredOutput = output;
-
         if (changed) lastCraftingInventoryChangeAt = System.currentTimeMillis();
         if (made <= 0) return 0;
 
@@ -564,8 +556,7 @@ public class KspJewelryCrafterScript extends Script
         lastBatchMade = monitoredBatchMade;
         craftedCount += made;
         craftingXpGained += Math.round(made * activeRecipe.getXp());
-        if (activeQuote != null && activeQuote.isValid())
-            estimatedProfit += (long) made * activeQuote.getProfit();
+        if (activeQuote != null && activeQuote.isValid()) estimatedProfit += (long) made * activeQuote.getProfit();
         outputPendingSale = activeRecipe.getOutputName();
         return made;
     }
@@ -597,11 +588,9 @@ public class KspJewelryCrafterScript extends Script
             state = JewelryCrafterState.EVALUATING;
             return;
         }
-
         activeQuote = prices.quote(activeRecipe, config);
         if (!craftingMonitorPrimed || monitoredRecipe != activeRecipe) primeCraftingMonitor();
         if (craftingInventoryChanged()) observeCraftingProgress();
-
         if (!hasCraftingInputsInInventory())
         {
             finishCraftingBatch();
@@ -616,13 +605,11 @@ public class KspJewelryCrafterScript extends Script
             if (!hasCraftingInputsInInventory()) finishCraftingBatch();
             return;
         }
-
         if (System.currentTimeMillis() - lastCraftingInventoryChangeAt < 1_500L)
         {
             status = "Waiting for next craft";
             return;
         }
-
         if (sleepUntil(() -> Rs2Player.isAnimating() || craftingInventoryChanged(), 500))
         {
             if (craftingInventoryChanged()) observeCraftingProgress();
@@ -637,7 +624,6 @@ public class KspJewelryCrafterScript extends Script
             if (!Rs2Player.isMoving()) Rs2Walker.walkTo(EDGEVILLE_FURNACE, 3);
             return;
         }
-
         if (!isJewelryProductionOpen())
         {
             status = "Opening jewellery furnace interface";
@@ -652,7 +638,6 @@ public class KspJewelryCrafterScript extends Script
                 return;
             }
         }
-
         if (!makeAllSelected()) return;
 
         String widgetName = craftingWidgetName(activeRecipe);
@@ -662,7 +647,6 @@ public class KspJewelryCrafterScript extends Script
             status = "Unable to select " + widgetName;
             return;
         }
-
         status = "Starting " + activeRecipe.getOutputName();
         sleepUntil(() -> Rs2Player.isAnimating() || craftingInventoryChanged(), 5_000);
         if (craftingInventoryChanged()) observeCraftingProgress();
@@ -673,7 +657,6 @@ public class KspJewelryCrafterScript extends Script
     {
         boolean silver = activeRecipe.getBarName().equalsIgnoreCase("Silver bar");
         if (silver ? silverMakeAllSelected : goldMakeAllSelected) return true;
-
         status = "Selecting Make All";
         if (!Rs2Widget.clickWidget("All", true))
         {
@@ -704,16 +687,30 @@ public class KspJewelryCrafterScript extends Script
     {
         if (Rs2GrandExchange.isOpen()) return true;
         status = openingStatus;
-        if (!Rs2GrandExchange.openExchange()) return false;
+        if (!Rs2GrandExchange.openExchange())
+        {
+            status = "GE widget closed - reopening";
+            return false;
+        }
         if (sleepUntil(Rs2GrandExchange::isOpen, 5_000)) return true;
         status = "Waiting for Grand Exchange widget";
+        return false;
+    }
+
+    private boolean ensureGeOverview(String openingStatus)
+    {
+        if (!openVerifiedGe(openingStatus)) return false;
+        if (!Rs2GrandExchange.isOfferScreenOpen()) return true;
+        status = "Returning to GE overview";
+        Rs2GrandExchange.backToOverview();
+        if (sleepUntil(() -> Rs2GrandExchange.isOpen() && !Rs2GrandExchange.isOfferScreenOpen(), 4_000)) return true;
+        status = Rs2GrandExchange.isOpen() ? "Waiting for GE overview" : "GE closed - recovering";
         return false;
     }
 
     private void sellOutput()
     {
         if (handlePendingOffer()) return;
-
         String output = outputPendingSale;
         if (output == null)
         {
@@ -735,9 +732,9 @@ public class KspJewelryCrafterScript extends Script
                 return;
             }
         }
-
         if (bankWidgetOpen() && !closeBankIfDone("Closing bank before selling")) return;
-        if (!openVerifiedGe("Opening Grand Exchange")) return;
+        if (!ensureGeOverview("Opening Grand Exchange")) return;
+        if (hasCompletedGeOffers() && !collectAllCompletedOffers()) return;
 
         qty = Rs2Inventory.itemQuantity(output, true);
         int itemId = prices.getItemId(output);
@@ -758,10 +755,11 @@ public class KspJewelryCrafterScript extends Script
             .build();
         if (!Rs2GrandExchange.processOffer(request))
         {
-            status = "GE sell placement failed";
+            status = Rs2GrandExchange.isOpen() ? "GE sell placement failed" : "GE closed during sell placement - recovering";
             return;
         }
-        pendingOffer = new PendingOffer(output, itemId, GrandExchangeAction.SELL, System.currentTimeMillis());
+        GrandExchangeSlots slot = findOfferSlot(itemId, GrandExchangeAction.SELL);
+        pendingOffer = new PendingOffer(output, itemId, GrandExchangeAction.SELL, slot, System.currentTimeMillis());
         status = "Selling all " + qty + " x " + output;
     }
 
@@ -776,12 +774,9 @@ public class KspJewelryCrafterScript extends Script
                 return false;
             }
         }
-
         if (!openVerifiedBank(false, "Opening bank for output recovery")) return false;
-
         int banked = Rs2Bank.count(output, true);
         if (banked <= 0) return closeBankIfDone("Closing empty output bank");
-
         if (!Rs2Bank.setWithdrawAsNote())
         {
             status = "Setting noted output withdrawal";
@@ -805,11 +800,11 @@ public class KspJewelryCrafterScript extends Script
             state = JewelryCrafterState.EVALUATING;
             return;
         }
-
         if (buyQueue.isEmpty() && !buildBuyQueue()) return;
         if (buyQueue.isEmpty()) return;
-        if (!openVerifiedGe("Opening Grand Exchange")) return;
 
+        reconcileBuyAssignments();
+        if (!ensureGeOverview("Opening Grand Exchange")) return;
         if (!monitorBuyOffers()) return;
         if (allBuyOrdersDone())
         {
@@ -823,7 +818,6 @@ public class KspJewelryCrafterScript extends Script
             finishParallelRestock();
             return;
         }
-
         int active = activeBuyOrders();
         int queued = queuedBuyOrders();
         status = active > 0
@@ -833,14 +827,14 @@ public class KspJewelryCrafterScript extends Script
 
     private boolean monitorBuyOffers()
     {
-        long timeout = config.offerTimeoutSeconds() * 1_000L;
-        long now = System.currentTimeMillis();
-
+        reconcileBuyAssignments();
+        boolean bought = false;
         for (BuyOrder order : buyQueue)
         {
             if (order.completed || order.failed || order.slot == null) continue;
             OfferSnapshot offer = getOfferSnapshot(order.slot);
-            if (offer == null || offer.state == GrandExchangeOfferState.EMPTY)
+            if (offer == null) continue;
+            if (offer.itemId != order.itemId)
             {
                 order.slot = null;
                 order.placedAt = 0L;
@@ -848,15 +842,28 @@ public class KspJewelryCrafterScript extends Script
             }
             if (offer.state == GrandExchangeOfferState.BOUGHT)
             {
-                if (!collectBuyOrder(order)) return false;
                 order.completed = true;
                 order.remaining = 0;
+                bought = true;
+            }
+            else if (offer.state == GrandExchangeOfferState.EMPTY)
+            {
                 order.slot = null;
                 order.placedAt = 0L;
-                status = "Bought " + order.itemName;
             }
         }
 
+        if (bought || hasCompletedGeOffers())
+        {
+            if (!collectAllCompletedOffers()) return false;
+            for (BuyOrder order : buyQueue)
+                if (order.completed) { order.slot = null; order.placedAt = 0L; }
+            status = "Collected all completed GE offers";
+            return false;
+        }
+
+        long timeout = config.offerTimeoutSeconds() * 1_000L;
+        long now = System.currentTimeMillis();
         for (BuyOrder order : buyQueue)
         {
             if (order.completed || order.failed || order.slot == null || now - order.placedAt < timeout) continue;
@@ -865,52 +872,32 @@ public class KspJewelryCrafterScript extends Script
         return true;
     }
 
-    private boolean collectBuyOrder(BuyOrder order)
-    {
-        GrandExchangeRequest collect = GrandExchangeRequest.builder()
-            .action(GrandExchangeAction.COLLECT)
-            .slot(order.slot)
-            .itemName(order.itemName)
-            .exact(true)
-            .toBank(true)
-            .closeAfterCompletion(false)
-            .build();
-        if (Rs2GrandExchange.processOffer(collect)) return true;
-        status = "Collecting " + order.itemName;
-        return false;
-    }
-
     private boolean handleTimedOutBuyOrder(BuyOrder order)
     {
-        OfferSnapshot offer = getOfferSnapshot(order.slot);
-        int filled = offer == null ? 0 : Math.min(order.remaining, Math.max(0, offer.quantitySold));
-        boolean retryLimit = order.retry >= config.maxOfferRetries();
-        status = (retryLimit ? "Aborting " : "Repricing ") + order.itemName;
-        if (!Rs2GrandExchange.abortOffer(order.itemName, true)) return false;
-
-        order.remaining = Math.max(0, order.remaining - filled);
-        order.slot = null;
-        order.placedAt = 0L;
-        if (order.remaining == 0)
+        if (order.retry >= config.maxOfferRetries())
         {
-            order.completed = true;
+            order.placedAt = System.currentTimeMillis();
+            status = "Waiting at final buy price: " + order.itemName;
             return true;
         }
-        if (retryLimit)
+        int nextRetry = order.retry + 1;
+        int price = prices.buyOfferPrice(order.itemName, config.buyMarkupPercent(), nextRetry);
+        if (price <= 0)
         {
-            order.failed = true;
-            status = "GE retry limit reached: " + order.itemName;
+            order.placedAt = System.currentTimeMillis();
+            status = "No updated buy price - keeping offer: " + order.itemName;
+            return true;
         }
-        else
-        {
-            order.retry++;
-            status = "Repricing " + order.itemName + " (retry " + order.retry + ")";
-        }
+        if (!modifyGeOffer(order.slot, GrandExchangeAction.BUY, price)) return false;
+        order.retry = nextRetry;
+        order.placedAt = System.currentTimeMillis();
+        status = "Modified buy price: " + order.itemName + " (retry " + order.retry + ")";
         return true;
     }
 
     private void placeBuyOffers()
     {
+        reconcileBuyAssignments();
         List<GrandExchangeSlots> freeSlots = getAvailableGeSlots();
         if (freeSlots.isEmpty()) return;
 
@@ -919,7 +906,6 @@ public class KspJewelryCrafterScript extends Script
         {
             if (slotIndex >= freeSlots.size()) break;
             if (order.completed || order.failed || order.slot != null || order.remaining <= 0) continue;
-
             GrandExchangeSlots slot = freeSlots.get(slotIndex++);
             int itemId = prices.getItemId(order.itemName);
             int price = prices.buyOfferPrice(order.itemName, config.buyMarkupPercent(), order.retry);
@@ -930,6 +916,9 @@ public class KspJewelryCrafterScript extends Script
                 continue;
             }
 
+            order.itemId = itemId;
+            order.slot = slot;
+            order.placedAt = System.currentTimeMillis();
             GrandExchangeRequest request = GrandExchangeRequest.builder()
                 .slot(slot)
                 .action(GrandExchangeAction.BUY)
@@ -939,22 +928,26 @@ public class KspJewelryCrafterScript extends Script
                 .price(price)
                 .closeAfterCompletion(false)
                 .build();
-            status = "Buying " + order.remaining + " x " + order.itemName
-                + " in GE slot " + (slot.ordinal() + 1);
+            status = "Buying " + order.remaining + " x " + order.itemName + " in GE slot " + (slot.ordinal() + 1);
             if (!Rs2GrandExchange.processOffer(request))
             {
-                status = "GE buy placement failed: " + order.itemName;
+                if (Rs2GrandExchange.isOpen())
+                {
+                    order.slot = null;
+                    order.placedAt = 0L;
+                    status = "GE buy placement failed: " + order.itemName;
+                }
+                else status = "GE closed during buy placement - recovering " + order.itemName;
                 return;
             }
-
-            order.itemId = itemId;
-            order.slot = slot;
-            order.placedAt = System.currentTimeMillis();
-            if (!sleepUntil(() -> offerMatches(order), 3_000))
+            if (!sleepUntil(() -> offerMatches(order) || !Rs2GrandExchange.isOpen(), 3_000))
             {
                 status = "Waiting for GE slot confirmation: " + order.itemName;
-                order.slot = null;
-                order.placedAt = 0L;
+                return;
+            }
+            if (!Rs2GrandExchange.isOpen())
+            {
+                status = "GE closed after placing " + order.itemName + " - recovering";
                 return;
             }
         }
@@ -967,6 +960,29 @@ public class KspJewelryCrafterScript extends Script
             && (offer.state == GrandExchangeOfferState.BUYING || offer.state == GrandExchangeOfferState.BOUGHT);
     }
 
+    private void reconcileBuyAssignments()
+    {
+        for (BuyOrder order : buyQueue)
+        {
+            if (order.completed || order.failed || order.itemId <= 0) continue;
+            OfferSnapshot current = getOfferSnapshot(order.slot);
+            if (current != null && current.itemId == order.itemId
+                && (current.state == GrandExchangeOfferState.BUYING || current.state == GrandExchangeOfferState.BOUGHT)) continue;
+
+            GrandExchangeSlots recovered = findOfferSlot(order.itemId, GrandExchangeAction.BUY);
+            if (recovered != null)
+            {
+                order.slot = recovered;
+                if (order.placedAt <= 0L) order.placedAt = System.currentTimeMillis();
+            }
+            else if (order.slot != null)
+            {
+                order.slot = null;
+                order.placedAt = 0L;
+            }
+        }
+    }
+
     private List<GrandExchangeSlots> getAvailableGeSlots()
     {
         return Microbot.getClientThread().runOnClientThreadOptional(() ->
@@ -977,11 +993,32 @@ public class KspJewelryCrafterScript extends Script
             for (int i = 0; i < max; i++)
             {
                 GrandExchangeOffer offer = offers != null && i < offers.length ? offers[i] : null;
-                if (offer == null || offer.getState() == GrandExchangeOfferState.EMPTY)
-                    free.add(GrandExchangeSlots.values()[i]);
+                if (offer == null || offer.getState() == GrandExchangeOfferState.EMPTY) free.add(GrandExchangeSlots.values()[i]);
             }
             return free;
         }).orElse(new ArrayList<>());
+    }
+
+    private GrandExchangeSlots findOfferSlot(int itemId, GrandExchangeAction action)
+    {
+        if (itemId <= 0) return null;
+        return Microbot.getClientThread().runOnClientThreadOptional(() ->
+        {
+            GrandExchangeOffer[] offers = Microbot.getClient().getGrandExchangeOffers();
+            if (offers == null) return null;
+            int max = Math.min(offers.length, GrandExchangeSlots.values().length);
+            for (int i = 0; i < max; i++)
+            {
+                GrandExchangeOffer offer = offers[i];
+                if (offer == null || offer.getItemId() != itemId) continue;
+                GrandExchangeOfferState s = offer.getState();
+                if (action == GrandExchangeAction.BUY
+                    && (s == GrandExchangeOfferState.BUYING || s == GrandExchangeOfferState.BOUGHT)) return GrandExchangeSlots.values()[i];
+                if (action == GrandExchangeAction.SELL
+                    && (s == GrandExchangeOfferState.SELLING || s == GrandExchangeOfferState.SOLD)) return GrandExchangeSlots.values()[i];
+            }
+            return null;
+        }).orElse(null);
     }
 
     private OfferSnapshot getOfferSnapshot(GrandExchangeSlots slot)
@@ -992,10 +1029,145 @@ public class KspJewelryCrafterScript extends Script
             GrandExchangeOffer[] offers = Microbot.getClient().getGrandExchangeOffers();
             int index = slot.ordinal();
             if (offers == null || index >= offers.length || offers[index] == null)
-                return new OfferSnapshot(0, GrandExchangeOfferState.EMPTY, 0);
+                return new OfferSnapshot(0, GrandExchangeOfferState.EMPTY, 0, 0);
             GrandExchangeOffer offer = offers[index];
-            return new OfferSnapshot(offer.getItemId(), offer.getState(), offer.getQuantitySold());
+            return new OfferSnapshot(offer.getItemId(), offer.getState(), offer.getQuantitySold(), offer.getPrice());
         }).orElse(null);
+    }
+
+    private boolean hasCompletedGeOffers()
+    {
+        return Microbot.getClientThread().runOnClientThreadOptional(() ->
+        {
+            GrandExchangeOffer[] offers = Microbot.getClient().getGrandExchangeOffers();
+            if (offers == null) return false;
+            for (GrandExchangeOffer offer : offers)
+                if (offer != null && (offer.getState() == GrandExchangeOfferState.BOUGHT || offer.getState() == GrandExchangeOfferState.SOLD)) return true;
+            return false;
+        }).orElse(false);
+    }
+
+    private boolean collectAllCompletedOffers()
+    {
+        if (!hasCompletedGeOffers()) return true;
+        if (!ensureGeOverview("Reopening Grand Exchange to collect")) return false;
+        status = "Collecting all completed GE offers";
+        if (!Rs2GrandExchange.collectAllToBank())
+        {
+            status = Rs2GrandExchange.isOpen() ? "Collect all failed - retrying" : "GE closed during Collect all - recovering";
+            return false;
+        }
+        if (sleepUntil(() -> !hasCompletedGeOffers(), 5_000)) return true;
+        status = Rs2GrandExchange.isOpen() ? "Waiting for Collect all" : "GE closed after Collect all - recovering";
+        return false;
+    }
+
+    private boolean modifyGeOffer(GrandExchangeSlots slot, GrandExchangeAction action, int newPrice)
+    {
+        if (slot == null || newPrice <= 0) return false;
+        if (!ensureGeOverview("Reopening Grand Exchange to modify offer")) return false;
+
+        int identifier = modifyActionIdentifier(slot, action);
+        if (identifier <= 0)
+        {
+            status = "Modify price option unavailable for GE slot " + (slot.ordinal() + 1);
+            return false;
+        }
+        Widget slotWidget = Rs2Widget.getWidget(InterfaceID.GE_OFFERS, GE_FIRST_SLOT_CHILD + slot.ordinal());
+        if (slotWidget == null)
+        {
+            status = "Waiting for GE slot widget";
+            return false;
+        }
+
+        status = "Opening GE modify price";
+        Rs2Widget.clickWidgetFast(slotWidget, 2, identifier);
+        if (!sleepUntil(() -> gePriceInputOpen() || Rs2GrandExchange.isOfferScreenOpen() || !Rs2GrandExchange.isOpen(), 3_500))
+        {
+            status = "Waiting for Modify price widget";
+            return false;
+        }
+        if (!Rs2GrandExchange.isOpen())
+        {
+            status = "GE closed while opening Modify price - recovering";
+            return false;
+        }
+
+        if (!gePriceInputOpen())
+        {
+            Widget offerContainer = Rs2Widget.getWidget(InterfaceID.GE_OFFERS, GE_OFFER_CONTAINER_CHILD);
+            Widget priceX = offerContainer == null ? null : offerContainer.getChild(GE_PRICE_X_CHILD);
+            if (priceX == null || !Rs2Widget.clickWidget(priceX))
+            {
+                status = "Unable to open GE price input";
+                return false;
+            }
+            if (!sleepUntil(() -> gePriceInputOpen() || !Rs2GrandExchange.isOpen(), 2_500))
+            {
+                status = "Waiting for GE price input";
+                return false;
+            }
+        }
+        if (!Rs2GrandExchange.isOpen())
+        {
+            status = "GE closed during price input - recovering";
+            return false;
+        }
+
+        Rs2GrandExchange.setChatboxValue(newPrice);
+        sleep(120, 220);
+        Rs2Keyboard.enter();
+        sleep(250, 450);
+
+        if (Rs2GrandExchange.isOfferScreenOpen())
+        {
+            status = "Confirming modified GE price";
+            if (!Rs2Widget.clickWidget("Confirm", true))
+            {
+                status = "Unable to confirm modified GE price";
+                return false;
+            }
+            sleepUntil(() -> !Rs2GrandExchange.isOfferScreenOpen()
+                || Rs2Widget.hasWidget("Your offer is much") || !Rs2GrandExchange.isOpen(), 3_000);
+            if (Rs2Widget.hasWidget("Your offer is much"))
+            {
+                Rs2Widget.clickWidget("Yes");
+                sleepUntil(() -> !Rs2GrandExchange.isOfferScreenOpen() || !Rs2GrandExchange.isOpen(), 3_000);
+            }
+        }
+
+        if (sleepUntil(() ->
+        {
+            OfferSnapshot snapshot = getOfferSnapshot(slot);
+            return snapshot != null && snapshot.price == newPrice;
+        }, 3_000)) return true;
+
+        status = Rs2GrandExchange.isOpen() ? "Waiting for modified GE price" : "GE closed after price modify - recovering";
+        return false;
+    }
+
+    private boolean gePriceInputOpen()
+    {
+        return Rs2Widget.getWidget(InterfaceID.Chatbox.MES_TEXT2) != null;
+    }
+
+    private int modifyActionIdentifier(GrandExchangeSlots slot, GrandExchangeAction action)
+    {
+        return Microbot.getClientThread().runOnClientThreadOptional(() ->
+        {
+            Widget widget = Microbot.getClient().getWidget(InterfaceID.GE_OFFERS, GE_FIRST_SLOT_CHILD + slot.ordinal());
+            if (widget == null || widget.getActions() == null) return -1;
+            String side = action == GrandExchangeAction.BUY ? "buy" : "sell";
+            String[] actions = widget.getActions();
+            for (int i = 0; i < actions.length; i++)
+            {
+                String value = actions[i];
+                if (value == null) continue;
+                String lower = value.toLowerCase();
+                if (lower.contains("modify") && lower.contains(side)) return i + 1;
+            }
+            return -1;
+        }).orElse(-1);
     }
 
     private boolean allBuyOrdersDone()
@@ -1026,7 +1198,7 @@ public class KspJewelryCrafterScript extends Script
         if (Rs2GrandExchange.isOpen()) Rs2GrandExchange.closeExchange();
         if (failed)
         {
-            pause("One or more input offers reached retry limit", 15_000L);
+            pause("One or more input offers could not be placed", 15_000L);
             return;
         }
         state = JewelryCrafterState.RETURN_TO_FURNACE;
@@ -1068,14 +1240,12 @@ public class KspJewelryCrafterScript extends Script
         int affordable = (int) Math.min(Integer.MAX_VALUE, spendable / unitCost);
         int target = Math.min(config.maxRestockUnits(), affordable);
 
-        int existingBars = Rs2Bank.count(activeRecipe.getBarName(), true)
-            + Rs2Inventory.count(activeRecipe.getBarName(), true);
+        int existingBars = Rs2Bank.count(activeRecipe.getBarName(), true) + Rs2Inventory.count(activeRecipe.getBarName(), true);
         int existingGems = activeRecipe.usesGem()
             ? Rs2Bank.count(activeRecipe.getGemName(), true) + Rs2Inventory.count(activeRecipe.getGemName(), true)
             : target;
         int existingUnits = Math.min(existingBars, existingGems);
         target = Math.max(target, Math.min(config.maxRestockUnits(), existingUnits));
-
         if (target <= 0)
         {
             if (!closeBankIfDone("Closing bank - no restock possible")) return false;
@@ -1084,13 +1254,10 @@ public class KspJewelryCrafterScript extends Script
         }
 
         buyQueue.clear();
-        if (!Rs2Inventory.hasItem(activeRecipe.getMouldName())
-            && Rs2Bank.count(activeRecipe.getMouldName(), true) <= 0)
+        if (!Rs2Inventory.hasItem(activeRecipe.getMouldName()) && Rs2Bank.count(activeRecipe.getMouldName(), true) <= 0)
             buyQueue.add(new BuyOrder(activeRecipe.getMouldName(), 1));
-
         int needBars = Math.max(0, target - existingBars);
         if (needBars > 0) buyQueue.add(new BuyOrder(activeRecipe.getBarName(), needBars));
-
         if (activeRecipe.usesGem())
         {
             int needGems = Math.max(0, target - existingGems);
@@ -1110,22 +1277,26 @@ public class KspJewelryCrafterScript extends Script
     private boolean handlePendingOffer()
     {
         if (pendingOffer == null) return false;
-        if (!openVerifiedGe("Opening GE to monitor offer")) return true;
+        if (!ensureGeOverview("Opening GE to monitor offer")) return true;
 
-        GrandExchangeOfferState live = findOfferState(pendingOffer.itemId, pendingOffer.action);
-        if (live == GrandExchangeOfferState.SOLD)
+        GrandExchangeSlots slot = pendingOffer.slot;
+        OfferSnapshot offer = getOfferSnapshot(slot);
+        if (offer == null || offer.itemId != pendingOffer.itemId
+            || (offer.state != GrandExchangeOfferState.SELLING && offer.state != GrandExchangeOfferState.SOLD))
         {
-            GrandExchangeRequest collect = GrandExchangeRequest.builder()
-                .action(GrandExchangeAction.COLLECT)
-                .toBank(true)
-                .closeAfterCompletion(false)
-                .build();
-            if (!Rs2GrandExchange.processOffer(collect))
-            {
-                status = "Collecting completed GE offer";
-                return true;
-            }
+            slot = findOfferSlot(pendingOffer.itemId, pendingOffer.action);
+            pendingOffer.slot = slot;
+            offer = getOfferSnapshot(slot);
+        }
+        if (offer == null || slot == null)
+        {
+            status = "Recovering live GE sale offer";
+            return true;
+        }
 
+        if (offer.state == GrandExchangeOfferState.SOLD)
+        {
+            if (!collectAllCompletedOffers()) return true;
             String itemName = pendingOffer.itemName;
             pendingOffer = null;
             geRetry = 0;
@@ -1148,55 +1319,29 @@ public class KspJewelryCrafterScript extends Script
         long timeout = config.offerTimeoutSeconds() * 1_000L;
         if (System.currentTimeMillis() - pendingOffer.placedAt >= timeout)
         {
-            String itemName = pendingOffer.itemName;
             if (geRetry >= config.maxOfferRetries())
             {
-                Rs2GrandExchange.abortOffer(itemName, true);
-                pendingOffer = null;
-                geRetry = 0;
-                buyQueue.clear();
-                state = JewelryCrafterState.EVALUATING;
-                pause("GE retry limit reached for " + itemName, 15_000L);
+                pendingOffer.placedAt = System.currentTimeMillis();
+                status = "Waiting at final sell price: " + pendingOffer.itemName;
                 return true;
             }
-
-            if (Rs2GrandExchange.abortOffer(itemName, true))
+            int nextRetry = geRetry + 1;
+            int price = prices.sellOfferPrice(pendingOffer.itemName, config.sellDiscountPercent(), nextRetry);
+            if (price <= 0)
             {
-                pendingOffer = null;
-                geRetry++;
-                status = "Repricing " + itemName + " (retry " + geRetry + ")";
+                pendingOffer.placedAt = System.currentTimeMillis();
+                status = "No updated sell price - keeping offer";
+                return true;
             }
+            if (!modifyGeOffer(slot, GrandExchangeAction.SELL, price)) return true;
+            geRetry = nextRetry;
+            pendingOffer.placedAt = System.currentTimeMillis();
+            status = "Modified sell price: " + pendingOffer.itemName + " (retry " + geRetry + ")";
             return true;
         }
 
         status = "Waiting for GE offer: " + pendingOffer.itemName;
         return true;
-    }
-
-    private GrandExchangeOfferState findOfferState(int itemId, GrandExchangeAction action)
-    {
-        try
-        {
-            return Microbot.getClientThread().runOnClientThreadOptional(() ->
-            {
-                GrandExchangeOffer[] offers = Microbot.getClient().getGrandExchangeOffers();
-                if (offers == null) return null;
-                for (GrandExchangeOffer offer : offers)
-                {
-                    if (offer == null || offer.getItemId() != itemId) continue;
-                    GrandExchangeOfferState s = offer.getState();
-                    if (action == GrandExchangeAction.BUY
-                        && (s == GrandExchangeOfferState.BUYING || s == GrandExchangeOfferState.BOUGHT)) return s;
-                    if (action == GrandExchangeAction.SELL
-                        && (s == GrandExchangeOfferState.SELLING || s == GrandExchangeOfferState.SOLD)) return s;
-                }
-                return null;
-            }).orElse(null);
-        }
-        catch (Exception ignored)
-        {
-            return null;
-        }
     }
 
     private void returnToFurnace()
@@ -1210,7 +1355,6 @@ public class KspJewelryCrafterScript extends Script
                 return;
             }
         }
-
         if (distanceTo(EDGEVILLE_BANK) > EDGEVILLE_DIRECT_BANK_RADIUS)
         {
             status = "Returning to Edgeville";
@@ -1288,11 +1432,7 @@ public class KspJewelryCrafterScript extends Script
 
     public String getPendingOfferSummary()
     {
-        if (pendingOffer != null)
-        {
-            String side = pendingOffer.action == GrandExchangeAction.BUY ? "BUY" : "SELL";
-            return side + " " + pendingOffer.itemName;
-        }
+        if (pendingOffer != null) return "SELL " + pendingOffer.itemName;
         int active = activeBuyOrders();
         if (active > 0) return "BUY " + active + " slot" + (active == 1 ? "" : "s");
         int queued = queuedBuyOrders();
@@ -1336,13 +1476,15 @@ public class KspJewelryCrafterScript extends Script
         final String itemName;
         final int itemId;
         final GrandExchangeAction action;
-        final long placedAt;
+        GrandExchangeSlots slot;
+        long placedAt;
 
-        PendingOffer(String itemName, int itemId, GrandExchangeAction action, long placedAt)
+        PendingOffer(String itemName, int itemId, GrandExchangeAction action, GrandExchangeSlots slot, long placedAt)
         {
             this.itemName = itemName;
             this.itemId = itemId;
             this.action = action;
+            this.slot = slot;
             this.placedAt = placedAt;
         }
     }
@@ -1372,12 +1514,14 @@ public class KspJewelryCrafterScript extends Script
         final int itemId;
         final GrandExchangeOfferState state;
         final int quantitySold;
+        final int price;
 
-        OfferSnapshot(int itemId, GrandExchangeOfferState state, int quantitySold)
+        OfferSnapshot(int itemId, GrandExchangeOfferState state, int quantitySold, int price)
         {
             this.itemId = itemId;
             this.state = state;
             this.quantitySold = quantitySold;
+            this.price = price;
         }
     }
 }
