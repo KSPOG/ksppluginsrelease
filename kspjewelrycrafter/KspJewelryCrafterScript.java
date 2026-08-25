@@ -300,7 +300,7 @@ public class KspJewelryCrafterScript extends Script
     private boolean prepareOutputForSale()
     {
         String output = activeRecipe.getOutputName();
-        int carried = Rs2Inventory.count(output, true);
+        int carried = Rs2Inventory.itemQuantity(output, true);
         int banked = Rs2Bank.count(output, true);
         if (banked <= 0)
         {
@@ -317,7 +317,7 @@ public class KspJewelryCrafterScript extends Script
         int target = carried + banked;
         status = "Withdrawing all output as notes";
         if (!Rs2Bank.withdrawAll(output, true)) return false;
-        if (!sleepUntil(() -> Rs2Inventory.count(output, true) >= target, 5_000))
+        if (!sleepUntil(() -> Rs2Inventory.itemQuantity(output, true) >= target, 5_000))
         {
             status = "Waiting for full noted output stack";
             return false;
@@ -498,11 +498,11 @@ public class KspJewelryCrafterScript extends Script
             return;
         }
 
-        int qty = Rs2Inventory.count(output, true);
+        int qty = Rs2Inventory.itemQuantity(output, true);
         if (qty <= 0)
         {
             if (!recoverSaleStack(output)) return;
-            qty = Rs2Inventory.count(output, true);
+            qty = Rs2Inventory.itemQuantity(output, true);
             if (qty <= 0)
             {
                 outputPendingSale = null;
@@ -523,7 +523,7 @@ public class KspJewelryCrafterScript extends Script
             return;
         }
 
-        qty = Rs2Inventory.count(output, true);
+        qty = Rs2Inventory.itemQuantity(output, true);
         int itemId = prices.getItemId(output);
         int price = prices.sellOfferPrice(output, config.sellDiscountPercent(), geRetry);
         if (qty <= 0 || itemId <= 0 || price <= 0)
@@ -585,7 +585,7 @@ public class KspJewelryCrafterScript extends Script
         }
         status = "Recovering full output stack";
         if (!Rs2Bank.withdrawAll(output, true)) return false;
-        if (!sleepUntil(() -> Rs2Inventory.count(output, true) >= banked, 5_000))
+        if (!sleepUntil(() -> Rs2Inventory.itemQuantity(output, true) >= banked, 5_000))
         {
             status = "Waiting for recovered output stack";
             return false;
@@ -681,7 +681,7 @@ public class KspJewelryCrafterScript extends Script
             return false;
         }
 
-        long coins = Rs2Bank.count("Coins", true) + (long) Rs2Inventory.count("Coins", true);
+        long coins = Rs2Bank.count("Coins", true) + (long) Rs2Inventory.itemQuantity("Coins", true);
         long spendable = Math.max(0L, coins - config.reserveCoins());
         spendable = spendable * config.capitalUsagePercent() / 100L;
         int unitCost = Math.max(1, activeQuote.getInputCost());
@@ -765,7 +765,7 @@ public class KspJewelryCrafterScript extends Script
             geRetry = 0;
             if (action == GrandExchangeAction.SELL)
             {
-                if (Rs2Inventory.count(itemName, true) > 0)
+                if (Rs2Inventory.itemQuantity(itemName, true) > 0)
                 {
                     outputPendingSale = itemName;
                     state = JewelryCrafterState.GE_SELL;
