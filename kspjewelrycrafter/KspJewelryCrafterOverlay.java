@@ -2,6 +2,7 @@ package net.runelite.client.plugins.microbot.kspjewelrycrafter;
 
 import net.runelite.client.ui.overlay.OverlayPanel;
 import net.runelite.client.ui.overlay.components.LineComponent;
+import net.runelite.client.ui.overlay.components.TitleComponent;
 
 import javax.inject.Inject;
 import java.awt.Dimension;
@@ -29,7 +30,9 @@ public class KspJewelryCrafterOverlay extends OverlayPanel
         setPreferredSize(new Dimension(OVERLAY_WIDTH, 0));
         panelComponent.setPreferredSize(new Dimension(OVERLAY_WIDTH, 0));
 
-        line("KSP Jewelry Crafter", "v" + KspJewelryCrafterPlugin.VERSION);
+        panelComponent.getChildren().add(TitleComponent.builder()
+            .text("KSP Jewelry Crafter v" + KspJewelryCrafterPlugin.VERSION)
+            .build());
         line("Status", shorten(script.getStatus(), 40));
         line("State", prettyState(script.getState()));
         line("Runtime", script.getFormattedRuntime());
@@ -77,7 +80,7 @@ public class KspJewelryCrafterOverlay extends OverlayPanel
             line("Last batch", format(script.getLastBatchMade()));
 
         line("Crafted", format(script.getCraftedCount()));
-        line("Est. net profit", gp(script.getEstimatedProfit()));
+        line("Total Profit", gp(script.getEstimatedProfit()));
         line("Est. profit / hr", gp(script.getEstimatedProfitPerHour()));
 
         line("GE offer", shorten(script.getPendingOfferSummary(), 40));
