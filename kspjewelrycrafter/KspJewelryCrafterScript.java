@@ -33,6 +33,7 @@ public class KspJewelryCrafterScript extends Script
 {
     private static final int LOOP_MS = 650;
     private static final int EDGEVILLE_FURNACE_ID = 16469;
+    private static final int EDGEVILLE_DIRECT_BANK_RADIUS = 20;
     private static final WorldPoint EDGEVILLE_BANK = new WorldPoint(3096, 3494, 0);
     private static final WorldPoint EDGEVILLE_FURNACE = new WorldPoint(3109, 3499, 0);
     private static final WorldPoint GRAND_EXCHANGE = new WorldPoint(3164, 3487, 0);
@@ -60,6 +61,8 @@ public class KspJewelryCrafterScript extends Script
     private int geRetry;
     private String outputPendingSale;
     private long waitingUntil;
+    private boolean goldMakeAllSelected;
+    private boolean silverMakeAllSelected;
 
     public JewelryCrafterState getState() { return state; }
     public String getStatus() { return status; }
@@ -88,6 +91,7 @@ public class KspJewelryCrafterScript extends Script
         outputPendingSale = null;
         waitingUntil = craftedCount = estimatedProfit = sessionStartedAt = 0L;
         startingCraftingXp = currentCraftingXp = lastBatchMade = currentBatchTarget = 0;
+        goldMakeAllSelected = silverMakeAllSelected = false;
 
         mainScheduledFuture = scheduledExecutorService.scheduleWithFixedDelay(() ->
         {
@@ -214,17 +218,7 @@ public class KspJewelryCrafterScript extends Script
         }
         activeQuote = latest;
 
-        if (distanceTo(EDGEVILLE_BANK) > 8)
-        {
-            status = "Walking to Edgeville bank";
-            Rs2Walker.walkTo(EDGEVILLE_BANK, 5);
-            return;
-        }
-        if (!Rs2Bank.isOpen() && !Rs2Bank.openBank())
-        {
-            status = "Opening Edgeville bank";
-            return;
-        }
+        if (!openEdgevilleBank()) return;
         if (!Rs2Bank.setWithdrawAsItem())
         {
             status = "Setting bank withdraw mode";
@@ -244,10 +238,14 @@ public class KspJewelryCrafterScript extends Script
 
         if (!hasMould || available <= 0)
         {
-            outputPendingSale = activeRecipe.getOutputName();
+            if (!prepareOutputForSale()) return;
+            if (!Rs2Bank.closeBank())
+            {
+                status = "Closing bank for GE trip";
+                return;
+            }
             state = JewelryCrafterState.TRAVEL_TO_GE;
             status = !hasMould ? "Need mould - going to GE" : "Out of inputs - going to GE";
-            Rs2Bank.closeBank();
             return;
         }
 
@@ -264,9 +262,28 @@ public class KspJewelryCrafterScript extends Script
         }
 
         currentBatchTarget = craftUnits;
-        Rs2Bank.closeBank();
+        if (!Rs2Bank.closeBank())
+        {
+            status = "Closing bank";
+            return;
+        }
         state = JewelryCrafterState.CRAFTING;
         status = "Ready: " + craftUnits + " x " + activeRecipe.getOutputName();
+    }
+
+    private boolean openEdgevilleBank()
+    {
+        if (Rs2Bank.isOpen()) return true;
+
+        status = "Interacting with Edgeville bank";
+        if (Rs2Bank.openBank()) return true;
+
+        if (distanceTo(EDGEVILLE_BANK) > EDGEVILLE_DIRECT_BANK_RADIUS && !Rs2Player.isMoving())
+        {
+            status = "Walking to Edgeville";
+            Rs2Walker.walkTo(EDGEVILLE_BANK, 10);
+        }
+        return false;
     }
 
     private boolean depositCraftedOutput()
@@ -278,6 +295,36 @@ public class KspJewelryCrafterScript extends Script
         if (sleepUntil(() -> Rs2Inventory.count(output, true) == 0, 4_000)) return true;
         status = "Waiting for output deposit";
         return false;
+    }
+
+    private boolean prepareOutputForSale()
+    {
+        String output = activeRecipe.getOutputName();
+        int carried = Rs2Inventory.count(output, true);
+        int banked = Rs2Bank.count(output, true);
+        if (banked <= 0)
+        {
+            outputPendingSale = carried > 0 ? output : null;
+            return true;
+        }
+
+        if (!Rs2Bank.setWithdrawAsNote())
+        {
+            status = "Setting noted output withdrawal";
+            return false;
+        }
+
+        int target = carried + banked;
+        status = "Withdrawing all output as notes";
+        if (!Rs2Bank.withdrawAll(output, true)) return false;
+        if (!sleepUntil(() -> Rs2Inventory.count(output, true) >= target, 5_000))
+        {
+            status = "Waiting for full noted output stack";
+            return false;
+        }
+
+        outputPendingSale = output;
+        return true;
     }
 
     private boolean ensureMould()
@@ -367,13 +414,7 @@ public class KspJewelryCrafterScript extends Script
             }
         }
 
-        status = "Selecting Make All";
-        if (!Rs2Widget.clickWidget("All", true))
-        {
-            status = "Unable to select Make All";
-            return;
-        }
-        sleep(120, 220);
+        if (!makeAllSelected()) return;
 
         String widgetName = craftingWidgetName(activeRecipe);
         status = "Selecting " + widgetName;
@@ -411,51 +452,78 @@ public class KspJewelryCrafterScript extends Script
         status = "Banking output";
     }
 
+    private boolean makeAllSelected()
+    {
+        boolean silver = activeRecipe.getBarName().equalsIgnoreCase("Silver bar");
+        if (silver ? silverMakeAllSelected : goldMakeAllSelected) return true;
+
+        status = "Selecting Make All";
+        if (!Rs2Widget.clickWidget("All", true))
+        {
+            status = "Unable to select Make All";
+            return false;
+        }
+        if (silver) silverMakeAllSelected = true;
+        else goldMakeAllSelected = true;
+        sleep(120, 220);
+        return true;
+    }
+
     private void travelToGe()
     {
-        if (Rs2Bank.isOpen()) Rs2Bank.closeBank();
+        if (Rs2Bank.isOpen() && !Rs2Bank.closeBank())
+        {
+            status = "Closing bank for GE trip";
+            return;
+        }
         if (distanceTo(GRAND_EXCHANGE) > 8)
         {
             status = "Walking to Grand Exchange";
-            Rs2Walker.walkTo(GRAND_EXCHANGE, 6);
+            if (!Rs2Player.isMoving()) Rs2Walker.walkTo(GRAND_EXCHANGE, 6);
             return;
         }
         state = JewelryCrafterState.GE_SELL;
-        status = "Selling crafted output";
+        status = outputPendingSale == null ? "No output pending - restocking" : "Selling crafted output";
     }
 
     private void sellOutput()
     {
         if (handlePendingOffer()) return;
 
-        String output = outputPendingSale != null ? outputPendingSale
-            : (activeRecipe == null ? null : activeRecipe.getOutputName());
-
-        if (!Rs2Bank.isOpen())
+        String output = outputPendingSale;
+        if (output == null)
         {
-            if (Rs2GrandExchange.isOpen()) Rs2GrandExchange.closeExchange();
-            if (!Rs2Bank.openBank()) { status = "Opening GE bank"; return; }
-        }
-
-        int bankedOutput = output == null ? 0 : Rs2Bank.count(output, true);
-        if (bankedOutput <= 0)
-        {
-            Rs2Bank.closeBank();
-            outputPendingSale = null;
-            geRetry = 0;
-            buyQueue.clear();
-            buyIndex = 0;
             state = JewelryCrafterState.GE_BUY;
             status = "Selecting profitable restock";
             return;
         }
 
-        if (!Rs2Bank.setWithdrawAsNote()) { status = "Setting noted withdrawals"; return; }
-        if (!Rs2Bank.withdrawAll(output, true)) { status = "Withdrawing output to sell"; return; }
-        Rs2Bank.closeBank();
-
-        if (!Rs2GrandExchange.openExchange()) { status = "Opening Grand Exchange"; return; }
         int qty = Rs2Inventory.count(output, true);
+        if (qty <= 0)
+        {
+            if (!recoverSaleStack(output)) return;
+            qty = Rs2Inventory.count(output, true);
+            if (qty <= 0)
+            {
+                outputPendingSale = null;
+                state = JewelryCrafterState.GE_BUY;
+                status = "No output left - restocking";
+                return;
+            }
+        }
+
+        if (Rs2Bank.isOpen() && !Rs2Bank.closeBank())
+        {
+            status = "Closing bank before selling";
+            return;
+        }
+        if (!Rs2GrandExchange.openExchange())
+        {
+            status = "Opening Grand Exchange";
+            return;
+        }
+
+        qty = Rs2Inventory.count(output, true);
         int itemId = prices.getItemId(output);
         int price = prices.sellOfferPrice(output, config.sellDiscountPercent(), geRetry);
         if (qty <= 0 || itemId <= 0 || price <= 0)
@@ -478,7 +546,56 @@ public class KspJewelryCrafterScript extends Script
             return;
         }
         pendingOffer = new PendingOffer(output, itemId, GrandExchangeAction.SELL, System.currentTimeMillis());
-        status = "Waiting for " + output + " to sell";
+        status = "Selling all " + qty + " x " + output;
+    }
+
+    private boolean recoverSaleStack(String output)
+    {
+        if (Rs2GrandExchange.isOpen())
+        {
+            Rs2GrandExchange.closeExchange();
+            if (Rs2GrandExchange.isOpen())
+            {
+                status = "Closing GE for output recovery";
+                return false;
+            }
+        }
+
+        if (!Rs2Bank.isOpen())
+        {
+            status = "Opening bank for output recovery";
+            if (!Rs2Bank.openBank()) return false;
+        }
+
+        int banked = Rs2Bank.count(output, true);
+        if (banked <= 0)
+        {
+            if (!Rs2Bank.closeBank())
+            {
+                status = "Closing empty output bank";
+                return false;
+            }
+            return true;
+        }
+
+        if (!Rs2Bank.setWithdrawAsNote())
+        {
+            status = "Setting noted output withdrawal";
+            return false;
+        }
+        status = "Recovering full output stack";
+        if (!Rs2Bank.withdrawAll(output, true)) return false;
+        if (!sleepUntil(() -> Rs2Inventory.count(output, true) >= banked, 5_000))
+        {
+            status = "Waiting for recovered output stack";
+            return false;
+        }
+        if (!Rs2Bank.closeBank())
+        {
+            status = "Closing bank after output recovery";
+            return false;
+        }
+        return true;
     }
 
     private void buyInputs()
@@ -544,13 +661,25 @@ public class KspJewelryCrafterScript extends Script
         activeRecipe = best;
         activeQuote = prices.quote(best, config);
 
-        if (Rs2GrandExchange.isOpen()) Rs2GrandExchange.closeExchange();
+        if (Rs2GrandExchange.isOpen())
+        {
+            Rs2GrandExchange.closeExchange();
+            if (Rs2GrandExchange.isOpen())
+            {
+                status = "Closing GE for restock check";
+                return false;
+            }
+        }
         if (!Rs2Bank.isOpen() && !Rs2Bank.openBank())
         {
             status = "Opening bank for capital check";
             return false;
         }
-        Rs2Bank.setWithdrawAsItem();
+        if (!Rs2Bank.setWithdrawAsItem())
+        {
+            status = "Setting bank withdraw mode";
+            return false;
+        }
 
         long coins = Rs2Bank.count("Coins", true) + (long) Rs2Inventory.count("Coins", true);
         long spendable = Math.max(0L, coins - config.reserveCoins());
@@ -569,6 +698,7 @@ public class KspJewelryCrafterScript extends Script
 
         if (target <= 0)
         {
+            if (Rs2Bank.isOpen()) Rs2Bank.closeBank();
             pause("Not enough spendable coins to restock", 15_000L);
             return false;
         }
@@ -588,7 +718,11 @@ public class KspJewelryCrafterScript extends Script
             if (needGems > 0) buyQueue.add(new BuyOrder(activeRecipe.getGemName(), needGems));
         }
 
-        Rs2Bank.closeBank();
+        if (!Rs2Bank.closeBank())
+        {
+            status = "Closing bank after restock check";
+            return false;
+        }
         if (buyQueue.isEmpty())
         {
             state = JewelryCrafterState.RETURN_TO_FURNACE;
@@ -619,17 +753,32 @@ public class KspJewelryCrafterScript extends Script
                 .toBank(true)
                 .closeAfterCompletion(false)
                 .build();
-            Rs2GrandExchange.processOffer(collect);
+            if (!Rs2GrandExchange.processOffer(collect))
+            {
+                status = "Collecting completed GE offer";
+                return true;
+            }
+
+            String itemName = pendingOffer.itemName;
             GrandExchangeAction action = pendingOffer.action;
             pendingOffer = null;
             geRetry = 0;
             if (action == GrandExchangeAction.SELL)
             {
-                outputPendingSale = null;
-                buyQueue.clear();
-                buyIndex = 0;
-                state = JewelryCrafterState.GE_BUY;
-                status = "Sale complete - selecting profitable restock";
+                if (Rs2Inventory.count(itemName, true) > 0)
+                {
+                    outputPendingSale = itemName;
+                    state = JewelryCrafterState.GE_SELL;
+                    status = "Selling remaining output";
+                }
+                else
+                {
+                    outputPendingSale = null;
+                    buyQueue.clear();
+                    buyIndex = 0;
+                    state = JewelryCrafterState.GE_BUY;
+                    status = "All output sold - selecting restock";
+                }
             }
             else
             {
@@ -702,11 +851,20 @@ public class KspJewelryCrafterScript extends Script
 
     private void returnToFurnace()
     {
-        if (Rs2GrandExchange.isOpen()) Rs2GrandExchange.closeExchange();
-        if (distanceTo(EDGEVILLE_BANK) > 8)
+        if (Rs2GrandExchange.isOpen())
+        {
+            Rs2GrandExchange.closeExchange();
+            if (Rs2GrandExchange.isOpen())
+            {
+                status = "Closing Grand Exchange";
+                return;
+            }
+        }
+
+        if (distanceTo(EDGEVILLE_BANK) > EDGEVILLE_DIRECT_BANK_RADIUS)
         {
             status = "Returning to Edgeville";
-            Rs2Walker.walkTo(EDGEVILLE_BANK, 5);
+            if (!Rs2Player.isMoving()) Rs2Walker.walkTo(EDGEVILLE_BANK, 10);
             return;
         }
         state = JewelryCrafterState.BANKING;
@@ -810,6 +968,7 @@ public class KspJewelryCrafterScript extends Script
         pendingOffer = null;
         buyQueue.clear();
         currentBatchTarget = 0;
+        goldMakeAllSelected = silverMakeAllSelected = false;
     }
 
     private static final class PendingOffer
