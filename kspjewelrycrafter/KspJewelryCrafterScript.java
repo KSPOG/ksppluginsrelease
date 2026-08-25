@@ -4,9 +4,8 @@ import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.GrandExchangeOffer;
 import net.runelite.api.GrandExchangeOfferState;
 import net.runelite.api.Skill;
+import net.runelite.api.TileObject;
 import net.runelite.api.coords.WorldPoint;
-import net.runelite.api.gameval.InterfaceID;
-import net.runelite.api.widgets.Widget;
 import net.runelite.client.plugins.microbot.Microbot;
 import net.runelite.client.plugins.microbot.Script;
 import net.runelite.client.plugins.microbot.util.bank.Rs2Bank;
@@ -15,12 +14,11 @@ import net.runelite.client.plugins.microbot.util.grandexchange.GrandExchangeActi
 import net.runelite.client.plugins.microbot.util.grandexchange.GrandExchangeRequest;
 import net.runelite.client.plugins.microbot.util.grandexchange.Rs2GrandExchange;
 import net.runelite.client.plugins.microbot.util.inventory.Rs2Inventory;
-import net.runelite.client.plugins.microbot.util.keyboard.Rs2Keyboard;
 import net.runelite.client.plugins.microbot.util.player.Rs2Player;
 import net.runelite.client.plugins.microbot.util.walker.Rs2Walker;
 import net.runelite.client.plugins.microbot.util.widget.Rs2Widget;
 
-import java.awt.event.KeyEvent;
+import javax.inject.Singleton;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
@@ -30,9 +28,11 @@ import static net.runelite.client.plugins.microbot.util.Global.sleep;
 import static net.runelite.client.plugins.microbot.util.Global.sleepUntil;
 
 @Slf4j
+@Singleton
 public class KspJewelryCrafterScript extends Script
 {
     private static final int LOOP_MS = 650;
+    private static final int EDGEVILLE_FURNACE_ID = 16469;
     private static final WorldPoint EDGEVILLE_BANK = new WorldPoint(3096, 3494, 0);
     private static final WorldPoint EDGEVILLE_FURNACE = new WorldPoint(3109, 3499, 0);
     private static final WorldPoint GRAND_EXCHANGE = new WorldPoint(3164, 3487, 0);
@@ -316,44 +316,51 @@ public class KspJewelryCrafterScript extends Script
             return;
         }
 
-        if (distanceTo(EDGEVILLE_FURNACE) > 6)
+        TileObject furnace = Rs2GameObject.findObjectById(EDGEVILLE_FURNACE_ID);
+        if (furnace == null)
         {
-            status = "Walking to Edgeville furnace";
-            Rs2Walker.walkTo(EDGEVILLE_FURNACE, 3);
+            status = distanceTo(EDGEVILLE_FURNACE) <= 6 ? "Finding nearby Edgeville furnace" : "Walking to Edgeville furnace";
+            if (!Rs2Player.isMoving()) Rs2Walker.walkTo(EDGEVILLE_FURNACE, 3);
             return;
         }
 
         int outputId = prices.getItemId(activeRecipe.getOutputName());
         int outputBefore = outputId <= 0 ? 0 : Rs2Inventory.count(outputId);
 
-        status = "Opening jewellery furnace interface";
-        if (!Rs2Inventory.use(activeRecipe.getBarName()))
+        if (!isJewelryProductionOpen())
         {
-            status = "Unable to select " + activeRecipe.getBarName();
+            status = "Opening jewellery furnace interface";
+            if (!Rs2GameObject.interact(furnace, "Smelt"))
+            {
+                status = "Unable to use Edgeville furnace";
+                return;
+            }
+            if (!sleepUntil(this::isJewelryProductionOpen, 5_000))
+            {
+                status = "Waiting for jewellery interface";
+                return;
+            }
+        }
+
+        status = "Selecting Make All";
+        if (!Rs2Widget.clickWidget("All", true))
+        {
+            status = "Unable to select Make All";
             return;
         }
         sleep(120, 220);
-        if (!Rs2GameObject.interact("Furnace"))
+
+        String widgetName = craftingWidgetName(activeRecipe);
+        status = "Selecting " + widgetName;
+        if (!Rs2Widget.clickWidget(widgetName))
         {
-            status = "Unable to use furnace";
-            return;
-        }
-        if (!sleepUntil(this::isProductionOpen, 4_000))
-        {
-            status = "Waiting for jewellery interface";
+            status = "Unable to select " + widgetName;
             return;
         }
 
-        if (!selectProduct(outputId, activeRecipe.getOutputName()))
-        {
-            status = "Unable to select " + activeRecipe.getOutputName();
-            return;
-        }
-        sleep(150, 260);
-        clickAllQuantity();
-        sleep(120, 220);
-
-        if (isProductionOpen()) Rs2Keyboard.keyPress(KeyEvent.VK_SPACE);
+        status = "Starting " + activeRecipe.getOutputName();
+        sleepUntil(() -> Rs2Player.isAnimating()
+            || Rs2Inventory.count(activeRecipe.getBarName(), true) < barsBefore, 5_000);
 
         status = "Crafting " + activeRecipe.getOutputName();
         sleepUntil(() -> Rs2Inventory.count(activeRecipe.getBarName(), true) == 0
@@ -702,54 +709,17 @@ public class KspJewelryCrafterScript extends Script
         }).orElse(Integer.MAX_VALUE);
     }
 
-    private boolean isProductionOpen()
+    private boolean isJewelryProductionOpen()
     {
-        return Microbot.getClientThread().runOnClientThreadOptional(() ->
-        {
-            Widget root = Microbot.getClient().getWidget(InterfaceID.SKILLMULTI, 0);
-            return root != null && !root.isHidden();
-        }).orElse(false);
+        return Rs2Widget.isGoldCraftingWidgetOpen() || Rs2Widget.isSilverCraftingWidgetOpen();
     }
 
-    private boolean selectProduct(int itemId, String fallbackText)
+    private String craftingWidgetName(JewelryRecipe recipe)
     {
-        return Microbot.getClientThread().runOnClientThreadOptional(() ->
-        {
-            Widget root = Microbot.getClient().getWidget(InterfaceID.SKILLMULTI, 0);
-            if (root == null || root.isHidden()) return false;
-            Widget product = findItemWidget(root, itemId);
-            if (product == null) product = Rs2Widget.searchChildren(fallbackText, root, true);
-            return product != null && !product.isHidden() && Rs2Widget.clickWidget(product);
-        }).orElse(false);
-    }
-
-    private Widget findItemWidget(Widget widget, int itemId)
-    {
-        if (widget == null || widget.isHidden()) return null;
-        if (itemId > 0 && widget.getItemId() == itemId) return widget;
-
-        Widget[][] groups = { widget.getChildren(), widget.getDynamicChildren(), widget.getStaticChildren(), widget.getNestedChildren() };
-        for (Widget[] group : groups)
-        {
-            if (group == null) continue;
-            for (Widget child : group)
-            {
-                Widget found = findItemWidget(child, itemId);
-                if (found != null) return found;
-            }
-        }
-        return null;
-    }
-
-    private void clickAllQuantity()
-    {
-        Microbot.getClientThread().runOnClientThreadOptional(() ->
-        {
-            Widget root = Microbot.getClient().getWidget(InterfaceID.SKILLMULTI, 0);
-            if (root == null || root.isHidden()) return false;
-            Widget all = Rs2Widget.searchChildren("All", root, true);
-            return all != null && !all.isHidden() && Rs2Widget.clickWidget(all);
-        });
+        String name = recipe.getOutputName();
+        if (name.endsWith(" (u)")) name = name.substring(0, name.length() - 4);
+        if (name.equalsIgnoreCase("Dragonstone bracelet")) return "Dragon bracelet";
+        return name;
     }
 
     public long getRuntimeMillis()

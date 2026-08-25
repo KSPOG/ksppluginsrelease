@@ -7,15 +7,9 @@ import javax.inject.Inject;
 import java.awt.Dimension;
 import java.awt.Graphics2D;
 
-/**
- * Informative session overlay for the profit-aware jewellery crafter.
- *
- * Profit figures are deliberately labelled as estimated: the script prices
- * recipes conservatively before crafting, but it does not yet maintain a
- * transaction-level realized P&L ledger from exact GE fills.
- */
 public class KspJewelryCrafterOverlay extends OverlayPanel
 {
+    private static final int OVERLAY_WIDTH = 235;
     private final KspJewelryCrafterScript script;
     private final KspJewelryCrafterConfig config;
 
@@ -24,6 +18,7 @@ public class KspJewelryCrafterOverlay extends OverlayPanel
     {
         this.script = script;
         this.config = config;
+        setPreferredSize(new Dimension(OVERLAY_WIDTH, 0));
     }
 
     @Override
@@ -32,7 +27,7 @@ public class KspJewelryCrafterOverlay extends OverlayPanel
         if (!config.showOverlay()) return null;
 
         line("KSP Jewelry Crafter", "v" + KspJewelryCrafterPlugin.VERSION);
-        line("Status", shorten(script.getStatus(), 28));
+        line("Status", shorten(script.getStatus(), 32));
         line("State", prettyState(script.getState()));
         line("Runtime", script.getFormattedRuntime());
 
@@ -69,7 +64,7 @@ public class KspJewelryCrafterOverlay extends OverlayPanel
             else
             {
                 line("Market", "Quote unavailable");
-                line("Reason", shorten(quote.getReason(), 28));
+                line("Reason", shorten(quote.getReason(), 32));
             }
         }
 
@@ -82,7 +77,7 @@ public class KspJewelryCrafterOverlay extends OverlayPanel
         line("Est. net profit", gp(script.getEstimatedProfit()));
         line("Est. profit / hr", gp(script.getEstimatedProfitPerHour()));
 
-        line("GE offer", shorten(script.getPendingOfferSummary(), 28));
+        line("GE offer", shorten(script.getPendingOfferSummary(), 32));
         line("GE retry", script.getGeRetry() + "/" + config.maxOfferRetries());
         line("Restock", script.getRestockProgress());
 
