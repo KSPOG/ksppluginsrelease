@@ -1,6 +1,5 @@
 package net.runelite.client.plugins.microbot.kspjewelrycrafter;
 
-import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.GrandExchangeOffer;
 import net.runelite.api.GrandExchangeOfferState;
@@ -41,19 +40,19 @@ public class KspJewelryCrafterScript extends Script
     private KspJewelryCrafterConfig config;
     private final JewelryPriceService prices = new JewelryPriceService();
 
-    @Getter private volatile JewelryCrafterState state = JewelryCrafterState.STOPPED;
-    @Getter private volatile String status = "Stopped";
-    @Getter private volatile JewelryRecipe activeRecipe;
-    @Getter private volatile JewelryQuote activeQuote;
-    @Getter private volatile boolean memberAccount;
-    @Getter private volatile int craftingLevel;
-    @Getter private volatile long craftedCount;
-    @Getter private volatile long estimatedProfit;
-    @Getter private volatile long sessionStartedAt;
-    @Getter private volatile int startingCraftingXp;
-    @Getter private volatile int currentCraftingXp;
-    @Getter private volatile int lastBatchMade;
-    @Getter private volatile int currentBatchTarget;
+    private volatile JewelryCrafterState state = JewelryCrafterState.STOPPED;
+    private volatile String status = "Stopped";
+    private volatile JewelryRecipe activeRecipe;
+    private volatile JewelryQuote activeQuote;
+    private volatile boolean memberAccount;
+    private volatile int craftingLevel;
+    private volatile long craftedCount;
+    private volatile long estimatedProfit;
+    private volatile long sessionStartedAt;
+    private volatile int startingCraftingXp;
+    private volatile int currentCraftingXp;
+    private volatile int lastBatchMade;
+    private volatile int currentBatchTarget;
 
     private PendingOffer pendingOffer;
     private final List<BuyOrder> buyQueue = new ArrayList<>();
@@ -61,6 +60,20 @@ public class KspJewelryCrafterScript extends Script
     private int geRetry;
     private String outputPendingSale;
     private long waitingUntil;
+
+    public JewelryCrafterState getState() { return state; }
+    public String getStatus() { return status; }
+    public JewelryRecipe getActiveRecipe() { return activeRecipe; }
+    public JewelryQuote getActiveQuote() { return activeQuote; }
+    public boolean isMemberAccount() { return memberAccount; }
+    public int getCraftingLevel() { return craftingLevel; }
+    public long getCraftedCount() { return craftedCount; }
+    public long getEstimatedProfit() { return estimatedProfit; }
+    public long getSessionStartedAt() { return sessionStartedAt; }
+    public int getStartingCraftingXp() { return startingCraftingXp; }
+    public int getCurrentCraftingXp() { return currentCraftingXp; }
+    public int getLastBatchMade() { return lastBatchMade; }
+    public int getCurrentBatchTarget() { return currentBatchTarget; }
 
     public boolean run(KspJewelryCrafterConfig config)
     {
@@ -203,7 +216,6 @@ public class KspJewelryCrafterScript extends Script
             return;
         }
 
-        // Hard profitability gate immediately before every furnace inventory.
         JewelryQuote latest = prices.quote(activeRecipe, config);
         if (!latest.meets(config))
         {
@@ -341,14 +353,7 @@ public class KspJewelryCrafterScript extends Script
         clickAllQuantity();
         sleep(120, 220);
 
-        if (!isProductionOpen())
-        {
-            // Some client revisions start production immediately after selecting All.
-        }
-        else
-        {
-            Rs2Keyboard.keyPress(KeyEvent.VK_SPACE);
-        }
+        if (isProductionOpen()) Rs2Keyboard.keyPress(KeyEvent.VK_SPACE);
 
         status = "Crafting " + activeRecipe.getOutputName();
         sleepUntil(() -> Rs2Inventory.count(activeRecipe.getBarName(), true) == 0
@@ -358,8 +363,6 @@ public class KspJewelryCrafterScript extends Script
         int made = Math.max(0, outputAfter - outputBefore);
         if (made == 0)
         {
-            // Inventory-count fallback: metal/gem consumption is authoritative even
-            // if the output item cache lagged a tick.
             int barsAfter = Rs2Inventory.count(activeRecipe.getBarName(), true);
             made = Math.max(0, barsBefore - barsAfter);
         }
@@ -499,7 +502,6 @@ public class KspJewelryCrafterScript extends Script
 
     private boolean buildBuyQueue()
     {
-        // Re-check profitability immediately before committing new capital.
         refreshAccountEligibility();
         JewelryRecipe best = chooseRecipe();
         if (best == null)
@@ -560,9 +562,6 @@ public class KspJewelryCrafterScript extends Script
         return true;
     }
 
-    /**
-     * Returns true while a pending offer owns the current GE step.
-     */
     private boolean handlePendingOffer()
     {
         if (pendingOffer == null) return false;
@@ -625,8 +624,6 @@ public class KspJewelryCrafterScript extends Script
             {
                 pendingOffer = null;
                 geRetry++;
-                // Rebuild deficits after a partial BUY. For a SELL, the unsold
-                // remainder is returned to bank and the sell state withdraws it again.
                 if (action == GrandExchangeAction.BUY)
                 {
                     buyQueue.clear();
@@ -751,7 +748,6 @@ public class KspJewelryCrafterScript extends Script
             return all != null && !all.isHidden() && Rs2Widget.clickWidget(all);
         });
     }
-
 
     public long getRuntimeMillis()
     {
