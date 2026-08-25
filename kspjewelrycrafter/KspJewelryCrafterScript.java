@@ -153,6 +153,7 @@ public class KspJewelryCrafterScript extends Script
         JewelryRecipe selected = chooseRecipe();
         if (selected == null)
         {
+            if (!closeBankIfDone("Closing bank - no eligible recipe")) return;
             pause("No eligible profitable jewellery recipe", 10_000L);
             return;
         }
@@ -160,6 +161,7 @@ public class KspJewelryCrafterScript extends Script
         JewelryQuote quote = prices.quote(selected, config);
         if (!quote.meets(config))
         {
+            if (!closeBankIfDone("Closing bank - recipe blocked")) return;
             pause("Selected recipe no longer meets profit floor", 10_000L);
             return;
         }
@@ -205,8 +207,8 @@ public class KspJewelryCrafterScript extends Script
     {
         if (activeRecipe == null)
         {
-            closeBankIfDone("Closing bank before re-evaluation");
             state = JewelryCrafterState.EVALUATING;
+            status = "Re-evaluating";
             return;
         }
 
@@ -215,7 +217,6 @@ public class KspJewelryCrafterScript extends Script
         {
             activeQuote = latest;
             if (bankWidgetOpen() && !depositCraftedOutput()) return;
-            if (!closeBankIfDone("Closing bank to re-evaluate")) return;
             state = JewelryCrafterState.EVALUATING;
             status = "Margin changed - re-evaluating";
             return;
@@ -527,10 +528,7 @@ public class KspJewelryCrafterScript extends Script
 
     private void travelToGe()
     {
-        if (bankWidgetOpen())
-        {
-            if (!closeBankIfDone("Closing bank for GE trip")) return;
-        }
+        if (bankWidgetOpen() && !closeBankIfDone("Closing bank for GE trip")) return;
         if (distanceTo(GRAND_EXCHANGE) > 8)
         {
             status = "Walking to Grand Exchange";
