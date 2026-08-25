@@ -5,12 +5,14 @@ import net.runelite.client.ui.overlay.components.LineComponent;
 import net.runelite.client.ui.overlay.components.TitleComponent;
 
 import javax.inject.Inject;
+import java.awt.Color;
 import java.awt.Dimension;
 import java.awt.Graphics2D;
 
 public class KspJewelryCrafterOverlay extends OverlayPanel
 {
     private static final int OVERLAY_WIDTH = 320;
+    private static final Color TITLE_GOLD = new Color(255, 215, 0);
     private final KspJewelryCrafterScript script;
     private final KspJewelryCrafterConfig config;
 
@@ -32,7 +34,9 @@ public class KspJewelryCrafterOverlay extends OverlayPanel
 
         panelComponent.getChildren().add(TitleComponent.builder()
             .text("KSP Jewelry Crafter v" + KspJewelryCrafterPlugin.VERSION)
+            .color(TITLE_GOLD)
             .build());
+        line(" ", "");
         line("Status", shorten(script.getStatus(), 40));
         line("State", prettyState(script.getState()));
         line("Runtime", script.getFormattedRuntime());
