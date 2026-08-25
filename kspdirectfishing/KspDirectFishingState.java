@@ -4,6 +4,7 @@ public enum KspDirectFishingState
 {
     STARTING,
     FISHING,
+    DROPPING,
     WALKING_TO_FISH,
     FINDING_FIRE,
     WALKING_TO_FIRE,
