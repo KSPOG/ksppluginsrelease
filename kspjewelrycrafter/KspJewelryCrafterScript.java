@@ -12,6 +12,7 @@ import net.runelite.client.plugins.microbot.util.bank.Rs2Bank;
 import net.runelite.client.plugins.microbot.util.gameobject.Rs2GameObject;
 import net.runelite.client.plugins.microbot.util.grandexchange.GrandExchangeAction;
 import net.runelite.client.plugins.microbot.util.grandexchange.GrandExchangeRequest;
+import net.runelite.client.plugins.microbot.util.grandexchange.GrandExchangeSlots;
 import net.runelite.client.plugins.microbot.util.grandexchange.Rs2GrandExchange;
 import net.runelite.client.plugins.microbot.util.inventory.Rs2Inventory;
 import net.runelite.client.plugins.microbot.util.player.Rs2Player;
@@ -59,7 +60,6 @@ public class KspJewelryCrafterScript extends Script
 
     private PendingOffer pendingOffer;
     private final List<BuyOrder> buyQueue = new ArrayList<>();
-    private int buyIndex;
     private int geRetry;
     private String outputPendingSale;
     private long waitingUntil;
@@ -97,7 +97,7 @@ public class KspJewelryCrafterScript extends Script
         activeQuote = null;
         pendingOffer = null;
         buyQueue.clear();
-        buyIndex = geRetry = 0;
+        geRetry = 0;
         outputPendingSale = null;
         waitingUntil = craftingXpGained = craftedCount = estimatedProfit = sessionStartedAt = 0L;
         startingCraftingLevel = lastBatchMade = currentBatchTarget = 0;
@@ -799,53 +799,238 @@ public class KspJewelryCrafterScript extends Script
 
     private void buyInputs()
     {
-        if (handlePendingOffer()) return;
         if (activeRecipe == null)
         {
+            buyQueue.clear();
             state = JewelryCrafterState.EVALUATING;
             return;
         }
 
-        if (buyQueue.isEmpty())
-        {
-            if (!buildBuyQueue()) return;
-        }
-        if (buyIndex >= buyQueue.size())
-        {
-            buyQueue.clear();
-            buyIndex = 0;
-            geRetry = 0;
-            if (Rs2GrandExchange.isOpen()) Rs2GrandExchange.closeExchange();
-            state = JewelryCrafterState.RETURN_TO_FURNACE;
-            status = "Restock complete";
-            return;
-        }
-
-        BuyOrder order = buyQueue.get(buyIndex);
+        if (buyQueue.isEmpty() && !buildBuyQueue()) return;
+        if (buyQueue.isEmpty()) return;
         if (!openVerifiedGe("Opening Grand Exchange")) return;
-        int price = prices.buyOfferPrice(order.itemName, config.buyMarkupPercent(), geRetry);
-        int itemId = prices.getItemId(order.itemName);
-        if (price <= 0 || itemId <= 0)
+
+        if (!monitorBuyOffers()) return;
+        if (allBuyOrdersDone())
         {
-            pause("No reliable buy price for " + order.itemName, 10_000L);
+            finishParallelRestock();
             return;
         }
 
-        GrandExchangeRequest request = GrandExchangeRequest.builder()
-            .action(GrandExchangeAction.BUY)
+        placeBuyOffers();
+        if (allBuyOrdersDone())
+        {
+            finishParallelRestock();
+            return;
+        }
+
+        int active = activeBuyOrders();
+        int queued = queuedBuyOrders();
+        status = active > 0
+            ? "Buying inputs: " + active + " active" + (queued > 0 ? ", " + queued + " queued" : "")
+            : "Waiting for free GE slot";
+    }
+
+    private boolean monitorBuyOffers()
+    {
+        long timeout = config.offerTimeoutSeconds() * 1_000L;
+        long now = System.currentTimeMillis();
+
+        for (BuyOrder order : buyQueue)
+        {
+            if (order.completed || order.failed || order.slot == null) continue;
+            OfferSnapshot offer = getOfferSnapshot(order.slot);
+            if (offer == null || offer.state == GrandExchangeOfferState.EMPTY)
+            {
+                order.slot = null;
+                order.placedAt = 0L;
+                continue;
+            }
+            if (offer.state == GrandExchangeOfferState.BOUGHT)
+            {
+                if (!collectBuyOrder(order)) return false;
+                order.completed = true;
+                order.remaining = 0;
+                order.slot = null;
+                order.placedAt = 0L;
+                status = "Bought " + order.itemName;
+            }
+        }
+
+        for (BuyOrder order : buyQueue)
+        {
+            if (order.completed || order.failed || order.slot == null || now - order.placedAt < timeout) continue;
+            return handleTimedOutBuyOrder(order);
+        }
+        return true;
+    }
+
+    private boolean collectBuyOrder(BuyOrder order)
+    {
+        GrandExchangeRequest collect = GrandExchangeRequest.builder()
+            .action(GrandExchangeAction.COLLECT)
+            .slot(order.slot)
             .itemName(order.itemName)
             .exact(true)
-            .quantity(order.quantity)
-            .price(price)
+            .toBank(true)
             .closeAfterCompletion(false)
             .build();
-        if (!Rs2GrandExchange.processOffer(request))
+        if (Rs2GrandExchange.processOffer(collect)) return true;
+        status = "Collecting " + order.itemName;
+        return false;
+    }
+
+    private boolean handleTimedOutBuyOrder(BuyOrder order)
+    {
+        OfferSnapshot offer = getOfferSnapshot(order.slot);
+        int filled = offer == null ? 0 : Math.min(order.remaining, Math.max(0, offer.quantitySold));
+        boolean retryLimit = order.retry >= config.maxOfferRetries();
+        status = (retryLimit ? "Aborting " : "Repricing ") + order.itemName;
+        if (!Rs2GrandExchange.abortOffer(order.itemName, true)) return false;
+
+        order.remaining = Math.max(0, order.remaining - filled);
+        order.slot = null;
+        order.placedAt = 0L;
+        if (order.remaining == 0)
         {
-            status = "GE buy placement failed: " + order.itemName;
+            order.completed = true;
+            return true;
+        }
+        if (retryLimit)
+        {
+            order.failed = true;
+            status = "GE retry limit reached: " + order.itemName;
+        }
+        else
+        {
+            order.retry++;
+            status = "Repricing " + order.itemName + " (retry " + order.retry + ")";
+        }
+        return true;
+    }
+
+    private void placeBuyOffers()
+    {
+        List<GrandExchangeSlots> freeSlots = getAvailableGeSlots();
+        if (freeSlots.isEmpty()) return;
+
+        int slotIndex = 0;
+        for (BuyOrder order : buyQueue)
+        {
+            if (slotIndex >= freeSlots.size()) break;
+            if (order.completed || order.failed || order.slot != null || order.remaining <= 0) continue;
+
+            GrandExchangeSlots slot = freeSlots.get(slotIndex++);
+            int itemId = prices.getItemId(order.itemName);
+            int price = prices.buyOfferPrice(order.itemName, config.buyMarkupPercent(), order.retry);
+            if (itemId <= 0 || price <= 0)
+            {
+                order.failed = true;
+                status = "No reliable buy price for " + order.itemName;
+                continue;
+            }
+
+            GrandExchangeRequest request = GrandExchangeRequest.builder()
+                .slot(slot)
+                .action(GrandExchangeAction.BUY)
+                .itemName(order.itemName)
+                .exact(true)
+                .quantity(order.remaining)
+                .price(price)
+                .closeAfterCompletion(false)
+                .build();
+            status = "Buying " + order.remaining + " x " + order.itemName
+                + " in GE slot " + (slot.ordinal() + 1);
+            if (!Rs2GrandExchange.processOffer(request))
+            {
+                status = "GE buy placement failed: " + order.itemName;
+                return;
+            }
+
+            order.itemId = itemId;
+            order.slot = slot;
+            order.placedAt = System.currentTimeMillis();
+            if (!sleepUntil(() -> offerMatches(order), 3_000))
+            {
+                status = "Waiting for GE slot confirmation: " + order.itemName;
+                order.slot = null;
+                order.placedAt = 0L;
+                return;
+            }
+        }
+    }
+
+    private boolean offerMatches(BuyOrder order)
+    {
+        OfferSnapshot offer = getOfferSnapshot(order.slot);
+        return offer != null && offer.itemId == order.itemId
+            && (offer.state == GrandExchangeOfferState.BUYING || offer.state == GrandExchangeOfferState.BOUGHT);
+    }
+
+    private List<GrandExchangeSlots> getAvailableGeSlots()
+    {
+        return Microbot.getClientThread().runOnClientThreadOptional(() ->
+        {
+            List<GrandExchangeSlots> free = new ArrayList<>();
+            GrandExchangeOffer[] offers = Microbot.getClient().getGrandExchangeOffers();
+            int max = Math.min(memberAccount ? 8 : 3, GrandExchangeSlots.values().length);
+            for (int i = 0; i < max; i++)
+            {
+                GrandExchangeOffer offer = offers != null && i < offers.length ? offers[i] : null;
+                if (offer == null || offer.getState() == GrandExchangeOfferState.EMPTY)
+                    free.add(GrandExchangeSlots.values()[i]);
+            }
+            return free;
+        }).orElse(new ArrayList<>());
+    }
+
+    private OfferSnapshot getOfferSnapshot(GrandExchangeSlots slot)
+    {
+        if (slot == null) return null;
+        return Microbot.getClientThread().runOnClientThreadOptional(() ->
+        {
+            GrandExchangeOffer[] offers = Microbot.getClient().getGrandExchangeOffers();
+            int index = slot.ordinal();
+            if (offers == null || index >= offers.length || offers[index] == null)
+                return new OfferSnapshot(0, GrandExchangeOfferState.EMPTY, 0);
+            GrandExchangeOffer offer = offers[index];
+            return new OfferSnapshot(offer.getItemId(), offer.getState(), offer.getQuantitySold());
+        }).orElse(null);
+    }
+
+    private boolean allBuyOrdersDone()
+    {
+        return !buyQueue.isEmpty() && buyQueue.stream().allMatch(o -> o.completed || o.failed);
+    }
+
+    private boolean hasFailedBuyOrders()
+    {
+        return buyQueue.stream().anyMatch(o -> o.failed);
+    }
+
+    private int activeBuyOrders()
+    {
+        return (int) buyQueue.stream().filter(o -> !o.completed && !o.failed && o.slot != null).count();
+    }
+
+    private int queuedBuyOrders()
+    {
+        return (int) buyQueue.stream().filter(o -> !o.completed && !o.failed && o.slot == null).count();
+    }
+
+    private void finishParallelRestock()
+    {
+        boolean failed = hasFailedBuyOrders();
+        buyQueue.clear();
+        geRetry = 0;
+        if (Rs2GrandExchange.isOpen()) Rs2GrandExchange.closeExchange();
+        if (failed)
+        {
+            pause("One or more input offers reached retry limit", 15_000L);
             return;
         }
-        pendingOffer = new PendingOffer(order.itemName, itemId, GrandExchangeAction.BUY, System.currentTimeMillis());
-        status = "Buying " + order.quantity + " x " + order.itemName;
+        state = JewelryCrafterState.RETURN_TO_FURNACE;
+        status = "Restock complete";
     }
 
     private boolean buildBuyQueue()
@@ -899,7 +1084,6 @@ public class KspJewelryCrafterScript extends Script
         }
 
         buyQueue.clear();
-        buyIndex = 0;
         if (!Rs2Inventory.hasItem(activeRecipe.getMouldName())
             && Rs2Bank.count(activeRecipe.getMouldName(), true) <= 0)
             buyQueue.add(new BuyOrder(activeRecipe.getMouldName(), 1));
@@ -929,11 +1113,7 @@ public class KspJewelryCrafterScript extends Script
         if (!openVerifiedGe("Opening GE to monitor offer")) return true;
 
         GrandExchangeOfferState live = findOfferState(pendingOffer.itemId, pendingOffer.action);
-        boolean complete = pendingOffer.action == GrandExchangeAction.BUY
-            ? live == GrandExchangeOfferState.BOUGHT
-            : live == GrandExchangeOfferState.SOLD;
-
-        if (complete)
+        if (live == GrandExchangeOfferState.SOLD)
         {
             GrandExchangeRequest collect = GrandExchangeRequest.builder()
                 .action(GrandExchangeAction.COLLECT)
@@ -947,30 +1127,20 @@ public class KspJewelryCrafterScript extends Script
             }
 
             String itemName = pendingOffer.itemName;
-            GrandExchangeAction action = pendingOffer.action;
             pendingOffer = null;
             geRetry = 0;
-            if (action == GrandExchangeAction.SELL)
+            if (Rs2Inventory.itemQuantity(itemName, true) > 0)
             {
-                if (Rs2Inventory.itemQuantity(itemName, true) > 0)
-                {
-                    outputPendingSale = itemName;
-                    state = JewelryCrafterState.GE_SELL;
-                    status = "Selling remaining output";
-                }
-                else
-                {
-                    outputPendingSale = null;
-                    buyQueue.clear();
-                    buyIndex = 0;
-                    state = JewelryCrafterState.GE_BUY;
-                    status = "All output sold - selecting restock";
-                }
+                outputPendingSale = itemName;
+                state = JewelryCrafterState.GE_SELL;
+                status = "Selling remaining output";
             }
             else
             {
-                buyIndex++;
-                status = "Input bought";
+                outputPendingSale = null;
+                buyQueue.clear();
+                state = JewelryCrafterState.GE_BUY;
+                status = "All output sold - selecting restock";
             }
             return true;
         }
@@ -979,14 +1149,12 @@ public class KspJewelryCrafterScript extends Script
         if (System.currentTimeMillis() - pendingOffer.placedAt >= timeout)
         {
             String itemName = pendingOffer.itemName;
-            GrandExchangeAction action = pendingOffer.action;
             if (geRetry >= config.maxOfferRetries())
             {
                 Rs2GrandExchange.abortOffer(itemName, true);
                 pendingOffer = null;
                 geRetry = 0;
                 buyQueue.clear();
-                buyIndex = 0;
                 state = JewelryCrafterState.EVALUATING;
                 pause("GE retry limit reached for " + itemName, 15_000L);
                 return true;
@@ -996,11 +1164,6 @@ public class KspJewelryCrafterScript extends Script
             {
                 pendingOffer = null;
                 geRetry++;
-                if (action == GrandExchangeAction.BUY)
-                {
-                    buyQueue.clear();
-                    buyIndex = 0;
-                }
                 status = "Repricing " + itemName + " (retry " + geRetry + ")";
             }
             return true;
@@ -1125,21 +1288,35 @@ public class KspJewelryCrafterScript extends Script
 
     public String getPendingOfferSummary()
     {
-        PendingOffer offer = pendingOffer;
-        if (offer == null) return "None";
-        String side = offer.action == GrandExchangeAction.BUY ? "BUY" : "SELL";
-        return side + " " + offer.itemName;
+        if (pendingOffer != null)
+        {
+            String side = pendingOffer.action == GrandExchangeAction.BUY ? "BUY" : "SELL";
+            return side + " " + pendingOffer.itemName;
+        }
+        int active = activeBuyOrders();
+        if (active > 0) return "BUY " + active + " slot" + (active == 1 ? "" : "s");
+        int queued = queuedBuyOrders();
+        return queued > 0 ? "BUY " + queued + " queued" : "None";
     }
 
     public String getRestockProgress()
     {
         if (buyQueue.isEmpty()) return "Idle";
-        int total = buyQueue.size();
-        int current = Math.min(total, Math.max(1, buyIndex + 1));
-        return current + "/" + total;
+        int completed = (int) buyQueue.stream().filter(o -> o.completed).count();
+        int failed = (int) buyQueue.stream().filter(o -> o.failed).count();
+        int active = activeBuyOrders();
+        String progress = completed + "/" + buyQueue.size() + " done";
+        if (active > 0) progress += ", " + active + " active";
+        if (failed > 0) progress += ", " + failed + " failed";
+        return progress;
     }
 
-    public int getGeRetry() { return geRetry; }
+    public int getGeRetry()
+    {
+        int retry = geRetry;
+        for (BuyOrder order : buyQueue) retry = Math.max(retry, order.retry);
+        return retry;
+    }
 
     @Override
     public void shutdown()
@@ -1174,6 +1351,33 @@ public class KspJewelryCrafterScript extends Script
     {
         final String itemName;
         final int quantity;
-        BuyOrder(String itemName, int quantity) { this.itemName = itemName; this.quantity = quantity; }
+        int remaining;
+        int itemId;
+        int retry;
+        GrandExchangeSlots slot;
+        long placedAt;
+        boolean completed;
+        boolean failed;
+
+        BuyOrder(String itemName, int quantity)
+        {
+            this.itemName = itemName;
+            this.quantity = quantity;
+            this.remaining = quantity;
+        }
+    }
+
+    private static final class OfferSnapshot
+    {
+        final int itemId;
+        final GrandExchangeOfferState state;
+        final int quantitySold;
+
+        OfferSnapshot(int itemId, GrandExchangeOfferState state, int quantitySold)
+        {
+            this.itemId = itemId;
+            this.state = state;
+            this.quantitySold = quantitySold;
+        }
     }
 }
