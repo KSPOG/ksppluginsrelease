@@ -695,8 +695,11 @@ public class KspJewelryCrafterScript extends Script
 
     private int distanceTo(WorldPoint point)
     {
-        if (Microbot.getClient().getLocalPlayer() == null) return Integer.MAX_VALUE;
-        return Microbot.getClient().getLocalPlayer().getWorldLocation().distanceTo2D(point);
+        return Microbot.getClientThread().runOnClientThreadOptional(() ->
+        {
+            if (Microbot.getClient().getLocalPlayer() == null) return Integer.MAX_VALUE;
+            return Microbot.getClient().getLocalPlayer().getWorldLocation().distanceTo2D(point);
+        }).orElse(Integer.MAX_VALUE);
     }
 
     private boolean isProductionOpen()
