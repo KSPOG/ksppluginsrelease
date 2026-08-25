@@ -49,11 +49,11 @@ public class KspJewelryCrafterScript extends Script
     private volatile JewelryQuote activeQuote;
     private volatile boolean memberAccount;
     private volatile int craftingLevel;
+    private volatile int startingCraftingLevel;
+    private volatile long craftingXpGained;
     private volatile long craftedCount;
     private volatile long estimatedProfit;
     private volatile long sessionStartedAt;
-    private volatile int startingCraftingXp;
-    private volatile int currentCraftingXp;
     private volatile int lastBatchMade;
     private volatile int currentBatchTarget;
 
@@ -66,17 +66,25 @@ public class KspJewelryCrafterScript extends Script
     private boolean goldMakeAllSelected;
     private boolean silverMakeAllSelected;
 
+    private JewelryRecipe monitoredRecipe;
+    private int monitoredBars;
+    private int monitoredGems;
+    private int monitoredOutput;
+    private int monitoredBatchMade;
+    private long lastCraftingInventoryChangeAt;
+    private boolean craftingMonitorPrimed;
+
     public JewelryCrafterState getState() { return state; }
     public String getStatus() { return status; }
     public JewelryRecipe getActiveRecipe() { return activeRecipe; }
     public JewelryQuote getActiveQuote() { return activeQuote; }
     public boolean isMemberAccount() { return memberAccount; }
     public int getCraftingLevel() { return craftingLevel; }
+    public int getCraftingLevelsGained() { return startingCraftingLevel <= 0 ? 0 : Math.max(0, craftingLevel - startingCraftingLevel); }
+    public long getCraftingXpGained() { return craftingXpGained; }
     public long getCraftedCount() { return craftedCount; }
     public long getEstimatedProfit() { return estimatedProfit; }
     public long getSessionStartedAt() { return sessionStartedAt; }
-    public int getStartingCraftingXp() { return startingCraftingXp; }
-    public int getCurrentCraftingXp() { return currentCraftingXp; }
     public int getLastBatchMade() { return lastBatchMade; }
     public int getCurrentBatchTarget() { return currentBatchTarget; }
 
@@ -91,9 +99,10 @@ public class KspJewelryCrafterScript extends Script
         buyQueue.clear();
         buyIndex = geRetry = 0;
         outputPendingSale = null;
-        waitingUntil = craftedCount = estimatedProfit = sessionStartedAt = 0L;
-        startingCraftingXp = currentCraftingXp = lastBatchMade = currentBatchTarget = 0;
+        waitingUntil = craftingXpGained = craftedCount = estimatedProfit = sessionStartedAt = 0L;
+        startingCraftingLevel = lastBatchMade = currentBatchTarget = 0;
         goldMakeAllSelected = silverMakeAllSelected = false;
+        resetCraftingMonitor();
 
         mainScheduledFuture = scheduledExecutorService.scheduleWithFixedDelay(() ->
         {
@@ -132,17 +141,19 @@ public class KspJewelryCrafterScript extends Script
     {
         sessionStartedAt = System.currentTimeMillis();
         refreshAccountEligibility();
-        startingCraftingXp = currentCraftingXp;
         state = JewelryCrafterState.EVALUATING;
         status = "Evaluating profitable recipes";
     }
 
     private void refreshAccountEligibility()
     {
-        craftingLevel = Microbot.getClientThread().runOnClientThreadOptional(
-            () -> Microbot.getClient().getRealSkillLevel(Skill.CRAFTING)).orElse(1);
-        currentCraftingXp = Microbot.getClientThread().runOnClientThreadOptional(
-            () -> Microbot.getClient().getSkillExperience(Skill.CRAFTING)).orElse(currentCraftingXp);
+        int level = Microbot.getClientThread().runOnClientThreadOptional(
+            () -> Microbot.getClient().getRealSkillLevel(Skill.CRAFTING)).orElse(-1);
+        if (level > 0)
+        {
+            craftingLevel = level;
+            if (startingCraftingLevel <= 0) startingCraftingLevel = level;
+        }
         try { memberAccount = Rs2Player.isMember(); }
         catch (Exception ex) { memberAccount = false; }
     }
@@ -151,13 +162,20 @@ public class KspJewelryCrafterScript extends Script
     {
         refreshAccountEligibility();
 
-        // Once a recipe has been selected, always inspect/finish its already-owned
-        // inputs before profitability is allowed to trigger a new GE cycle.
         if (activeRecipe != null && activeRecipe.isEligible(craftingLevel, memberAccount))
         {
             activeQuote = prices.quote(activeRecipe, config);
-            state = JewelryCrafterState.BANKING;
-            status = "Checking existing inputs";
+            if (hasCraftingInputsInInventory())
+            {
+                primeCraftingMonitor();
+                state = JewelryCrafterState.CRAFTING;
+                status = Rs2Player.isAnimating() ? "Detected active crafting" : "Using existing inventory inputs";
+            }
+            else
+            {
+                state = JewelryCrafterState.BANKING;
+                status = "Checking existing inputs";
+            }
             return;
         }
 
@@ -176,8 +194,17 @@ public class KspJewelryCrafterScript extends Script
 
         activeRecipe = selected;
         activeQuote = prices.quote(selected, config);
-        state = JewelryCrafterState.BANKING;
-        status = "Preparing " + selected.getOutputName();
+        if (hasCraftingInputsInInventory())
+        {
+            primeCraftingMonitor();
+            state = JewelryCrafterState.CRAFTING;
+            status = Rs2Player.isAnimating() ? "Detected active crafting" : "Using existing inventory inputs";
+        }
+        else
+        {
+            state = JewelryCrafterState.BANKING;
+            status = "Preparing " + selected.getOutputName();
+        }
     }
 
     private JewelryRecipe chooseRecipe()
@@ -220,9 +247,16 @@ public class KspJewelryCrafterScript extends Script
             return;
         }
 
-        // Update the overlay quote, but do not abandon already-owned inputs merely
-        // because the live margin moved. The profit gate is applied to new buys.
         activeQuote = prices.quote(activeRecipe, config);
+
+        if (!bankWidgetOpen() && hasCraftingInputsInInventory())
+        {
+            primeCraftingMonitor();
+            state = JewelryCrafterState.CRAFTING;
+            status = Rs2Player.isAnimating() ? "Crafting already in progress" : "Using carried inputs first";
+            return;
+        }
+        resetCraftingMonitor();
 
         if (!openVerifiedBank(true, "Interacting with Edgeville bank")) return;
         if (!Rs2Bank.setWithdrawAsItem())
@@ -236,8 +270,6 @@ public class KspJewelryCrafterScript extends Script
         boolean hasMould = Rs2Inventory.hasItem(activeRecipe.getMouldName())
             || Rs2Bank.count(activeRecipe.getMouldName(), true) > 0;
 
-        // GE is the last resort: only leave for selling/restocking after every
-        // usable input for the selected recipe has been consumed.
         if (!hasMould || available <= 0)
         {
             if (!prepareOutputForSale()) return;
@@ -258,6 +290,7 @@ public class KspJewelryCrafterScript extends Script
         }
 
         currentBatchTarget = craftUnits;
+        primeCraftingMonitor();
         leaveBank(JewelryCrafterState.CRAFTING,
             "Ready: " + craftUnits + " x " + activeRecipe.getOutputName());
     }
@@ -479,25 +512,121 @@ public class KspJewelryCrafterScript extends Script
         return false;
     }
 
+    private boolean hasCraftingInputsInInventory()
+    {
+        if (activeRecipe == null || !Rs2Inventory.hasItem(activeRecipe.getMouldName())) return false;
+        int bars = Rs2Inventory.count(activeRecipe.getBarName(), true);
+        return bars > 0 && (!activeRecipe.usesGem() || Rs2Inventory.count(activeRecipe.getGemName(), true) > 0);
+    }
+
+    private void primeCraftingMonitor()
+    {
+        if (activeRecipe == null) return;
+        monitoredRecipe = activeRecipe;
+        monitoredBars = Rs2Inventory.count(activeRecipe.getBarName(), true);
+        monitoredGems = activeRecipe.usesGem() ? Rs2Inventory.count(activeRecipe.getGemName(), true) : monitoredBars;
+        monitoredOutput = Rs2Inventory.count(activeRecipe.getOutputName(), true);
+        monitoredBatchMade = 0;
+        lastCraftingInventoryChangeAt = System.currentTimeMillis();
+        craftingMonitorPrimed = true;
+        currentBatchTarget = Math.min(monitoredBars, monitoredGems);
+    }
+
+    private boolean craftingInventoryChanged()
+    {
+        if (!craftingMonitorPrimed || monitoredRecipe != activeRecipe) return false;
+        return monitoredBars != Rs2Inventory.count(activeRecipe.getBarName(), true)
+            || monitoredGems != (activeRecipe.usesGem() ? Rs2Inventory.count(activeRecipe.getGemName(), true) : Rs2Inventory.count(activeRecipe.getBarName(), true))
+            || monitoredOutput != Rs2Inventory.count(activeRecipe.getOutputName(), true);
+    }
+
+    private int observeCraftingProgress()
+    {
+        if (!craftingMonitorPrimed || monitoredRecipe != activeRecipe)
+        {
+            primeCraftingMonitor();
+            return 0;
+        }
+
+        int bars = Rs2Inventory.count(activeRecipe.getBarName(), true);
+        int gems = activeRecipe.usesGem() ? Rs2Inventory.count(activeRecipe.getGemName(), true) : bars;
+        int output = Rs2Inventory.count(activeRecipe.getOutputName(), true);
+        int made = Math.max(0, monitoredBars - bars);
+        boolean changed = bars != monitoredBars || gems != monitoredGems || output != monitoredOutput;
+        monitoredBars = bars;
+        monitoredGems = gems;
+        monitoredOutput = output;
+
+        if (changed) lastCraftingInventoryChangeAt = System.currentTimeMillis();
+        if (made <= 0) return 0;
+
+        monitoredBatchMade += made;
+        lastBatchMade = monitoredBatchMade;
+        craftedCount += made;
+        craftingXpGained += Math.round(made * activeRecipe.getXp());
+        if (activeQuote != null && activeQuote.isValid())
+            estimatedProfit += (long) made * activeQuote.getProfit();
+        outputPendingSale = activeRecipe.getOutputName();
+        return made;
+    }
+
+    private void finishCraftingBatch()
+    {
+        observeCraftingProgress();
+        lastBatchMade = monitoredBatchMade;
+        currentBatchTarget = 0;
+        refreshAccountEligibility();
+        resetCraftingMonitor();
+        state = JewelryCrafterState.BANKING;
+        status = "Banking output";
+    }
+
+    private void resetCraftingMonitor()
+    {
+        monitoredRecipe = null;
+        monitoredBars = monitoredGems = monitoredOutput = monitoredBatchMade = 0;
+        lastCraftingInventoryChangeAt = 0L;
+        craftingMonitorPrimed = false;
+    }
+
     private void craftInventory()
     {
         if (activeRecipe == null)
         {
+            resetCraftingMonitor();
             state = JewelryCrafterState.EVALUATING;
             return;
         }
 
-        // Existing stock is intentionally finished even if the live margin moved.
-        // Profitability is re-applied only when a new restock is planned.
         activeQuote = prices.quote(activeRecipe, config);
+        if (!craftingMonitorPrimed || monitoredRecipe != activeRecipe) primeCraftingMonitor();
+        if (craftingInventoryChanged()) observeCraftingProgress();
 
-        int barsBefore = Rs2Inventory.count(activeRecipe.getBarName(), true);
-        int gemsBefore = activeRecipe.usesGem() ? Rs2Inventory.count(activeRecipe.getGemName(), true) : barsBefore;
-        int expected = Math.min(barsBefore, gemsBefore);
-        currentBatchTarget = Math.max(0, expected);
-        if (expected <= 0)
+        if (!hasCraftingInputsInInventory())
         {
-            state = JewelryCrafterState.BANKING;
+            finishCraftingBatch();
+            return;
+        }
+
+        if (Rs2Player.isAnimating())
+        {
+            status = "Crafting " + activeRecipe.getOutputName();
+            sleepUntil(() -> craftingInventoryChanged() || !Rs2Player.isAnimating(), 3_000);
+            if (craftingInventoryChanged()) observeCraftingProgress();
+            if (!hasCraftingInputsInInventory()) finishCraftingBatch();
+            return;
+        }
+
+        if (System.currentTimeMillis() - lastCraftingInventoryChangeAt < 1_500L)
+        {
+            status = "Waiting for next craft";
+            return;
+        }
+
+        if (sleepUntil(() -> Rs2Player.isAnimating() || craftingInventoryChanged(), 500))
+        {
+            if (craftingInventoryChanged()) observeCraftingProgress();
+            status = "Crafting " + activeRecipe.getOutputName();
             return;
         }
 
@@ -508,9 +637,6 @@ public class KspJewelryCrafterScript extends Script
             if (!Rs2Player.isMoving()) Rs2Walker.walkTo(EDGEVILLE_FURNACE, 3);
             return;
         }
-
-        int outputId = prices.getItemId(activeRecipe.getOutputName());
-        int outputBefore = outputId <= 0 ? 0 : Rs2Inventory.count(outputId);
 
         if (!isJewelryProductionOpen())
         {
@@ -538,32 +664,9 @@ public class KspJewelryCrafterScript extends Script
         }
 
         status = "Starting " + activeRecipe.getOutputName();
-        sleepUntil(() -> Rs2Player.isAnimating()
-            || Rs2Inventory.count(activeRecipe.getBarName(), true) < barsBefore, 5_000);
-
-        status = "Crafting " + activeRecipe.getOutputName();
-        sleepUntil(() -> Rs2Inventory.count(activeRecipe.getBarName(), true) == 0
-            || (activeRecipe.usesGem() && Rs2Inventory.count(activeRecipe.getGemName(), true) == 0), 50_000);
-
-        int outputAfter = outputId <= 0 ? outputBefore : Rs2Inventory.count(outputId);
-        int made = Math.max(0, outputAfter - outputBefore);
-        if (made == 0)
-        {
-            int barsAfter = Rs2Inventory.count(activeRecipe.getBarName(), true);
-            made = Math.max(0, barsBefore - barsAfter);
-        }
-        lastBatchMade = made;
-        currentBatchTarget = 0;
-        refreshAccountEligibility();
-        if (made > 0)
-        {
-            craftedCount += made;
-            if (activeQuote != null && activeQuote.isValid())
-                estimatedProfit += (long) made * activeQuote.getProfit();
-            outputPendingSale = activeRecipe.getOutputName();
-        }
-        state = JewelryCrafterState.BANKING;
-        status = "Banking output";
+        sleepUntil(() -> Rs2Player.isAnimating() || craftingInventoryChanged(), 5_000);
+        if (craftingInventoryChanged()) observeCraftingProgress();
+        if (!hasCraftingInputsInInventory()) finishCraftingBatch();
     }
 
     private boolean makeAllSelected()
@@ -585,6 +688,7 @@ public class KspJewelryCrafterScript extends Script
 
     private void travelToGe()
     {
+        resetCraftingMonitor();
         if (bankWidgetOpen() && !closeBankIfDone("Closing bank for GE trip")) return;
         if (distanceTo(GRAND_EXCHANGE) > 8)
         {
@@ -1007,15 +1111,10 @@ public class KspJewelryCrafterScript extends Script
         return String.format("%02d:%02d:%02d", hours, minutes, seconds);
     }
 
-    public int getCraftingXpGained()
-    {
-        return Math.max(0, currentCraftingXp - startingCraftingXp);
-    }
-
     public long getCraftingXpPerHour()
     {
         long elapsed = getRuntimeMillis();
-        return elapsed <= 0L ? 0L : Math.round(getCraftingXpGained() * 3_600_000.0 / elapsed);
+        return elapsed <= 0L ? 0L : Math.round(craftingXpGained * 3_600_000.0 / elapsed);
     }
 
     public long getEstimatedProfitPerHour()
@@ -1052,6 +1151,7 @@ public class KspJewelryCrafterScript extends Script
         buyQueue.clear();
         currentBatchTarget = 0;
         goldMakeAllSelected = silverMakeAllSelected = false;
+        resetCraftingMonitor();
     }
 
     private static final class PendingOffer
