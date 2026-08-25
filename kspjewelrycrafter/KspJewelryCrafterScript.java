@@ -78,23 +78,16 @@ public class KspJewelryCrafterScript extends Script
     public boolean run(KspJewelryCrafterConfig config)
     {
         this.config = config;
-        this.state = JewelryCrafterState.STARTING;
-        this.status = "Starting";
-        this.activeRecipe = null;
-        this.activeQuote = null;
-        this.pendingOffer = null;
-        this.buyQueue.clear();
-        this.buyIndex = 0;
-        this.geRetry = 0;
-        this.outputPendingSale = null;
-        this.waitingUntil = 0L;
-        this.craftedCount = 0L;
-        this.estimatedProfit = 0L;
-        this.sessionStartedAt = 0L;
-        this.startingCraftingXp = 0;
-        this.currentCraftingXp = 0;
-        this.lastBatchMade = 0;
-        this.currentBatchTarget = 0;
+        state = JewelryCrafterState.STARTING;
+        status = "Starting";
+        activeRecipe = null;
+        activeQuote = null;
+        pendingOffer = null;
+        buyQueue.clear();
+        buyIndex = geRetry = 0;
+        outputPendingSale = null;
+        waitingUntil = craftedCount = estimatedProfit = sessionStartedAt = 0L;
+        startingCraftingXp = currentCraftingXp = lastBatchMade = currentBatchTarget = 0;
 
         mainScheduledFuture = scheduledExecutorService.scheduleWithFixedDelay(() ->
         {
@@ -192,16 +185,10 @@ public class KspJewelryCrafterScript extends Script
         Comparator<JewelryQuote> comparator;
         switch (config.selectionMode())
         {
-            case BEST_ROI:
-                comparator = Comparator.comparingDouble(JewelryQuote::getRoi);
-                break;
-            case HIGHEST_LEVEL_PROFITABLE:
-                comparator = Comparator.comparingInt(q -> q.getRecipe().getCraftingLevel());
-                break;
+            case BEST_ROI: comparator = Comparator.comparingDouble(JewelryQuote::getRoi); break;
+            case HIGHEST_LEVEL_PROFITABLE: comparator = Comparator.comparingInt(q -> q.getRecipe().getCraftingLevel()); break;
             case BEST_PROFIT:
-            default:
-                comparator = Comparator.comparingInt(JewelryQuote::getProfit);
-                break;
+            default: comparator = Comparator.comparingInt(JewelryQuote::getProfit); break;
         }
         JewelryQuote best = viable.stream().max(comparator).orElse(null);
         if (best != null) activeQuote = best;
@@ -220,7 +207,7 @@ public class KspJewelryCrafterScript extends Script
         if (!latest.meets(config))
         {
             activeQuote = latest;
-            if (Rs2Bank.isOpen()) Rs2Bank.depositAll();
+            if (Rs2Bank.isOpen()) depositCraftedOutput();
             state = JewelryCrafterState.EVALUATING;
             status = "Margin changed - re-evaluating";
             return;
@@ -233,7 +220,6 @@ public class KspJewelryCrafterScript extends Script
             Rs2Walker.walkTo(EDGEVILLE_BANK, 5);
             return;
         }
-
         if (!Rs2Bank.isOpen() && !Rs2Bank.openBank())
         {
             status = "Opening Edgeville bank";
@@ -244,17 +230,17 @@ public class KspJewelryCrafterScript extends Script
             status = "Setting bank withdraw mode";
             return;
         }
+        if (!depositCraftedOutput()) return;
 
-        if (!Rs2Inventory.isEmpty())
-        {
-            Rs2Bank.depositAll();
-            sleepUntil(Rs2Inventory::isEmpty, 4_000);
-        }
-
-        int bars = Rs2Bank.count(activeRecipe.getBarName(), true);
-        int gems = activeRecipe.usesGem() ? Rs2Bank.count(activeRecipe.getGemName(), true) : Integer.MAX_VALUE;
-        int available = Math.min(bars, gems);
-        boolean hasMould = Rs2Bank.count(activeRecipe.getMouldName(), true) > 0;
+        int invBars = Rs2Inventory.count(activeRecipe.getBarName(), true);
+        int bankBars = Rs2Bank.count(activeRecipe.getBarName(), true);
+        int invGems = activeRecipe.usesGem() ? Rs2Inventory.count(activeRecipe.getGemName(), true) : Integer.MAX_VALUE;
+        int bankGems = activeRecipe.usesGem() ? Rs2Bank.count(activeRecipe.getGemName(), true) : 0;
+        int available = activeRecipe.usesGem()
+            ? Math.min(invBars + bankBars, invGems + bankGems)
+            : invBars + bankBars;
+        boolean hasMould = Rs2Inventory.hasItem(activeRecipe.getMouldName())
+            || Rs2Bank.count(activeRecipe.getMouldName(), true) > 0;
 
         if (!hasMould || available <= 0)
         {
@@ -265,27 +251,66 @@ public class KspJewelryCrafterScript extends Script
             return;
         }
 
-        int perInventory = activeRecipe.usesGem() ? 13 : 27;
-        int craftUnits = Math.min(perInventory, available);
-        if (!Rs2Bank.withdrawX(activeRecipe.getMouldName(), 1, true))
+        int craftUnits = Math.min(activeRecipe.usesGem() ? 13 : 27, available);
+        if (!ensureMould()) return;
+        if (!ensureInventoryAmount(activeRecipe.getBarName(), craftUnits)) return;
+        if (activeRecipe.usesGem() && !ensureInventoryAmount(activeRecipe.getGemName(), craftUnits)) return;
+
+        if (Rs2Inventory.count(activeRecipe.getBarName(), true) < craftUnits
+            || (activeRecipe.usesGem() && Rs2Inventory.count(activeRecipe.getGemName(), true) < craftUnits))
         {
-            status = "Withdrawing " + activeRecipe.getMouldName();
-            return;
-        }
-        if (!Rs2Bank.withdrawX(activeRecipe.getBarName(), craftUnits, true))
-        {
-            status = "Withdrawing " + activeRecipe.getBarName();
-            return;
-        }
-        if (activeRecipe.usesGem() && !Rs2Bank.withdrawX(activeRecipe.getGemName(), craftUnits, true))
-        {
-            status = "Withdrawing " + activeRecipe.getGemName();
+            status = "Inventory setup verification failed";
             return;
         }
 
+        currentBatchTarget = craftUnits;
         Rs2Bank.closeBank();
         state = JewelryCrafterState.CRAFTING;
-        status = "Walking to furnace";
+        status = "Ready: " + craftUnits + " x " + activeRecipe.getOutputName();
+    }
+
+    private boolean depositCraftedOutput()
+    {
+        String output = activeRecipe.getOutputName();
+        if (Rs2Inventory.count(output, true) <= 0) return true;
+        status = "Depositing crafted output";
+        if (!Rs2Bank.depositAll(output, true)) return false;
+        if (sleepUntil(() -> Rs2Inventory.count(output, true) == 0, 4_000)) return true;
+        status = "Waiting for output deposit";
+        return false;
+    }
+
+    private boolean ensureMould()
+    {
+        String mould = activeRecipe.getMouldName();
+        if (Rs2Inventory.hasItem(mould)) return true;
+        if (Rs2Bank.count(mould, true) <= 0)
+        {
+            status = mould + " not available";
+            return false;
+        }
+        status = "Withdrawing " + mould;
+        if (!Rs2Bank.withdrawOne(mould, true)) return false;
+        if (sleepUntil(() -> Rs2Inventory.hasItem(mould), 4_000)) return true;
+        status = "Waiting for " + mould;
+        return false;
+    }
+
+    private boolean ensureInventoryAmount(String item, int target)
+    {
+        int current = Rs2Inventory.count(item, true);
+        if (current >= target) return true;
+        int need = target - current;
+        if (Rs2Bank.count(item, true) < need)
+        {
+            status = "Not enough " + item.toLowerCase();
+            return false;
+        }
+        status = "Withdrawing " + need + " x " + item;
+        if (!Rs2Bank.withdrawX(item, need, true)) return false;
+        if (sleepUntil(() -> Rs2Inventory.count(item, true) >= target, 4_000)) return true;
+        status = "Waiting for " + item + " count";
+        return false;
     }
 
     private void craftInventory()
@@ -534,8 +559,11 @@ public class KspJewelryCrafterScript extends Script
         int affordable = (int) Math.min(Integer.MAX_VALUE, spendable / unitCost);
         int target = Math.min(config.maxRestockUnits(), affordable);
 
-        int existingBars = Rs2Bank.count(activeRecipe.getBarName(), true);
-        int existingGems = activeRecipe.usesGem() ? Rs2Bank.count(activeRecipe.getGemName(), true) : target;
+        int existingBars = Rs2Bank.count(activeRecipe.getBarName(), true)
+            + Rs2Inventory.count(activeRecipe.getBarName(), true);
+        int existingGems = activeRecipe.usesGem()
+            ? Rs2Bank.count(activeRecipe.getGemName(), true) + Rs2Inventory.count(activeRecipe.getGemName(), true)
+            : target;
         int existingUnits = Math.min(existingBars, existingGems);
         target = Math.max(target, Math.min(config.maxRestockUnits(), existingUnits));
 
@@ -547,7 +575,8 @@ public class KspJewelryCrafterScript extends Script
 
         buyQueue.clear();
         buyIndex = 0;
-        if (Rs2Bank.count(activeRecipe.getMouldName(), true) <= 0)
+        if (!Rs2Inventory.hasItem(activeRecipe.getMouldName())
+            && Rs2Bank.count(activeRecipe.getMouldName(), true) <= 0)
             buyQueue.add(new BuyOrder(activeRecipe.getMouldName(), 1));
 
         int needBars = Math.max(0, target - existingBars);
@@ -770,10 +799,7 @@ public class KspJewelryCrafterScript extends Script
         return current + "/" + total;
     }
 
-    public int getGeRetry()
-    {
-        return geRetry;
-    }
+    public int getGeRetry() { return geRetry; }
 
     @Override
     public void shutdown()
