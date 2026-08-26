@@ -57,6 +57,8 @@ public class KspBryophytaScript extends Script {
     private static final long LAIR_ENTRY_TRANSITION_TIMEOUT_MS = 10_000L;
     private static final long QUICK_EXIT_TRANSITION_TIMEOUT_MS = 8_000L;
     private static final long GROWTHLING_ATTACK_RETRY_MS = 3_000L;
+    private static final long SEWER_AGGRO_WALK_RETRY_MS = 1_500L;
+    private static final long WEB_SLASH_RETRY_MS = 1_500L;
     private static final long CHEST_OPEN_TIMEOUT_MS = 6_000L;
     private static final long ALTAR_INTERACTION_TIMEOUT_MS = 6_000L;
     private static final long MANHOLE_TRANSITION_TIMEOUT_MS = 8_000L;
@@ -65,6 +67,7 @@ public class KspBryophytaScript extends Script {
     private static final String FIRE_RUNE = "Fire rune";
     private static final String LAW_RUNE = "Law rune";
     private static final String MOSSY_KEY = "Mossy key";
+    private static final String DEADLY_RED_SPIDER = "Deadly red spider";
     private static final String STRENGTH_POTION_4 = "Strength potion(4)";
     private static final String[] EQUIP_ACTIONS = {"Wield", "Wear", "Equip"};
     private static final String[] GATE_ACTIONS = {"Open", "Unlock", "Enter"};
@@ -99,6 +102,7 @@ public class KspBryophytaScript extends Script {
     private int altarFailures;
     private int bossMissingScans;
     private int postKillEmptyScans;
+    private int postKillKeysAtStart;
 
     private volatile boolean growthlingWaveActive;
     private volatile int growthlingEmptyScans;
@@ -122,6 +126,8 @@ public class KspBryophytaScript extends Script {
     private boolean manholeOpenPending;
     private long manholeDescentStartedAt;
     private boolean webSlashPending;
+    private long webSlashSentAt;
+    private long sewerAggroWalkSentAt;
     private final Set<String> ignoredChestGroundDrops = new HashSet<>();
     private boolean teleportPending;
     private boolean bankClosePending;
@@ -156,7 +162,7 @@ public class KspBryophytaScript extends Script {
         state = BryophytaState.STARTING;
         status = "Starting - first action is a full Varrock restock.";
         kills = chestAttempts = mossyKeys = foodRemaining = prayerPoints = 0;
-        entryFailures = altarFailures = bossMissingScans = postKillEmptyScans = 0;
+        entryFailures = altarFailures = bossMissingScans = postKillEmptyScans = postKillKeysAtStart = 0;
         growthlingWaveActive = false;
         growthlingEmptyScans = 0;
         activeGrowthlingIndex = -1;
@@ -167,6 +173,7 @@ public class KspBryophytaScript extends Script {
         bossWasPresent = killRegisteredForCycle = prayerRestoredAfterBank = loadoutVerified = false;
         quickExitPending = chestLootPending = altarInteractionPending = manholeDescentPending = manholeOpenPending = false;
         webSlashPending = teleportPending = bankClosePending = false;
+        webSlashSentAt = sewerAggroWalkSentAt = 0L;
         bankEpochBeforeOpen = -1;
         teleportStartedAt = 0L;
         pendingChestLootKey = lastGateDialogueFingerprint = "";
@@ -665,6 +672,11 @@ public class KspBryophytaScript extends Script {
         if (handleLairEntryDialogue()) return;
         if (tryEnterNearbyLairGate()) return;
         if (handleNearbyWeb()) return;
+        if (isDeadlyRedSpiderAttackingPlayer()) {
+            handleSewerAggroWalk();
+            return;
+        }
+        sewerAggroWalkSentAt = 0L;
         walkToControlled(BRYOPHYTA_SEWER_ENTRANCE, 4, "Walking through Varrock Sewers to Bryophyta...");
     }
 
@@ -717,6 +729,7 @@ public class KspBryophytaScript extends Script {
         boolean webPresent = Microbot.getRs2TileObjectCache().query().withName("Web").within(8).nearestOnClientThread() != null;
         if (!webPresent) {
             webSlashPending = false;
+            webSlashSentAt = 0L;
             if (config.strategy() != BryophytaStrategy.MELEE && Rs2Equipment.isWearing(normalize(config.growthlingToolName()), true)) restoreMainWeaponIfNeeded();
             return false;
         }
@@ -724,16 +737,34 @@ public class KspBryophytaScript extends Script {
             if (!equipGrowthlingTool()) failAndStop("Could not equip the Growthling axe to slash the Varrock Sewers web.");
             return true;
         }
-        if (webSlashPending) {
-            if (Rs2Player.isAnimating() || Rs2Player.isMoving()) {
-                setStatus("Slash sent - checking whether web still exists...");
-                return true;
-            }
-            webSlashPending = false;
+        long now = System.currentTimeMillis();
+        if (webSlashPending && now - webSlashSentAt < WEB_SLASH_RETRY_MS) {
+            setStatus("Slash sent - checking whether web still exists...");
+            return true;
         }
+        webSlashPending = false;
         status = "Slashing visible sewer web...";
         webSlashPending = Microbot.getRs2TileObjectCache().query().withName("Web").within(8).interact("Slash");
+        if (webSlashPending) webSlashSentAt = now;
         return true;
+    }
+
+    private boolean isDeadlyRedSpiderAttackingPlayer() {
+        return Microbot.getRs2NpcCache().query().withName(DEADLY_RED_SPIDER).fromWorldView()
+                .where(Rs2NpcModel::isInteractingWithPlayer).nearestOnClientThread() != null;
+    }
+
+    private void handleSewerAggroWalk() {
+        setState(BryophytaState.WALKING_TO_LAIR, "Ignoring Deadly red spider - continuing to Bryophyta...");
+        Rs2Player.eatAt(config.eatAtPercent());
+        if (Rs2Player.isMoving()) return;
+        long now = System.currentTimeMillis();
+        if (now - sewerAggroWalkSentAt < SEWER_AGGRO_WALK_RETRY_MS) return;
+        WorldPoint target = Rs2Walker.getCurrentTarget();
+        if (target != null && target.distanceTo(BRYOPHYTA_SEWER_ENTRANCE) <= 4)
+            Rs2Walker.clearWalkingRoute("KSP Bryophyta: spider interrupted sewer travel");
+        Rs2Walker.walkTo(BRYOPHYTA_SEWER_ENTRANCE, 4);
+        sewerAggroWalkSentAt = now;
     }
 
     private boolean tryEnterNearbyLairGate() {
@@ -1035,6 +1066,7 @@ public class KspBryophytaScript extends Script {
         kills++;
         killRegisteredForCycle = true;
         bossMissingScans = postKillEmptyScans = 0;
+        postKillKeysAtStart = Rs2Inventory.itemQuantity(MOSSY_KEY);
         setState(BryophytaState.LOOTING, "Bryophyta defeated - waiting for ground drops.");
         Rs2Prayer.disableAllPrayers();
     }
@@ -1045,6 +1077,12 @@ public class KspBryophytaScript extends Script {
     }
 
     private void handlePostKill(long now) {
+        int currentKeys = Rs2Inventory.itemQuantity(MOSSY_KEY);
+        if (config.openRewardChest() && currentKeys > postKillKeysAtStart) {
+            setState(BryophytaState.OPENING_CHEST, "New Mossy key looted - opening reward chest...");
+            handleChest(now);
+            return;
+        }
         if (config.lootBossDrops()) {
             if (attemptBossLoot()) { postKillEmptyScans = 0; return; }
             if (++postKillEmptyScans < POST_KILL_EMPTY_SCANS) {
@@ -1052,7 +1090,7 @@ public class KspBryophytaScript extends Script {
                 return;
             }
         }
-        if (Rs2Inventory.itemQuantity(MOSSY_KEY) <= 0) { handleQuickExitReset(now); return; }
+        if (currentKeys <= 0) { handleQuickExitReset(now); return; }
         if (config.openRewardChest()) { handleChest(now); return; }
         setState(BryophytaState.WAITING_FOR_RESPAWN, "Waiting for next Bryophyta cycle...");
         bossWasPresent = killRegisteredForCycle = false;
@@ -1104,7 +1142,7 @@ public class KspBryophytaScript extends Script {
         quickExitPending = false;
         quickExitStartedAt = 0L;
         bossWasPresent = killRegisteredForCycle = false;
-        postKillEmptyScans = 0;
+        postKillEmptyScans = postKillKeysAtStart = 0;
         growthlingWaveActive = false;
         growthlingEmptyScans = 0;
         activeGrowthlingIndex = -1;
@@ -1117,11 +1155,14 @@ public class KspBryophytaScript extends Script {
         chestKeysBeforeOpen = Rs2Inventory.itemQuantity(MOSSY_KEY);
         if (chestKeysBeforeOpen <= 0) { handleQuickExitReset(now); return; }
         if (!objectVisible(BRYOPHYTA_CHEST_OBJECT_ID, Rs2Player.getWorldLocation(), 20)) {
-            setState(BryophytaState.OPENING_CHEST, "Waiting for reward chest 56378...");
+            setState(BryophytaState.OPENING_CHEST, "Mossy key ready - waiting for reward chest 56378...");
             return;
         }
-        setState(BryophytaState.OPENING_CHEST, "Opening visible Bryophyta reward chest...");
-        if (!Microbot.getRs2TileObjectCache().query().withId(BRYOPHYTA_CHEST_OBJECT_ID).within(20).interact("Open")) return;
+        setState(BryophytaState.OPENING_CHEST, "Opening Bryophyta reward chest with Mossy key...");
+        if (!Microbot.getRs2TileObjectCache().query().withId(BRYOPHYTA_CHEST_OBJECT_ID).within(20).interact("Open")) {
+            setStatus("Chest 56378 visible - waiting for Open interaction...");
+            return;
+        }
         chestAttempts++;
         ignoredChestGroundDrops.clear();
         pendingChestLootKey = "";
@@ -1221,6 +1262,7 @@ public class KspBryophytaScript extends Script {
         pendingChestLootKey = "";
         bossWasPresent = false;
         killRegisteredForCycle = false;
+        postKillKeysAtStart = 0;
         setState(BryophytaState.WAITING_FOR_RESPAWN, message);
     }
 
@@ -1402,6 +1444,7 @@ public class KspBryophytaScript extends Script {
         quickExitPending = altarInteractionPending = manholeDescentPending = manholeOpenPending = lairEntryPending = false;
         webSlashPending = bankClosePending = false;
         quickExitStartedAt = altarInteractionStartedAt = manholeDescentStartedAt = lairEntryStartedAt = 0L;
+        webSlashSentAt = sewerAggroWalkSentAt = 0L;
         lastGateDialogueFingerprint = "";
         gateContinueHandled = false;
     }
