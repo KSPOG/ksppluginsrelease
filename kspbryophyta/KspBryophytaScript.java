@@ -558,11 +558,9 @@ public class KspBryophytaScript extends Script {
 
     private boolean interactEquip(String itemName) {
         if (Rs2Equipment.isWearing(itemName, true)) return true;
-        if (!Rs2Inventory.contains(itemName, true)) return false;
         Rs2ItemModel item = Rs2Inventory.get(itemName, true);
         if (item == null) return false;
-        if (Rs2Bank.isOpen()) return Rs2Bank.wearItem(item.getId());
-        return interactInventory(itemName, EQUIP_ACTIONS);
+        return Rs2Bank.isOpen() ? Rs2Bank.wearItem(item.getId()) : interactInventory(itemName, EQUIP_ACTIONS);
     }
 
     private boolean equipAmmoStack(String itemName) {
