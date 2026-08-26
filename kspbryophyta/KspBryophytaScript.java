@@ -140,6 +140,7 @@ public class KspBryophytaScript extends Script {
                 if (!Rs2Bank.isOpen() && !ensureAutoRetaliateDisabled()) return;
                 if (isInsideLair()) handleInsideLair(); else handleOutsideLair();
             } catch (Exception ex) {
+                if (isInterruption(ex)) return;
                 Microbot.logStackTrace(getClass().getSimpleName(), ex);
                 failAndStop("Unexpected error: " + ex.getClass().getSimpleName());
             }
@@ -430,11 +431,7 @@ public class KspBryophytaScript extends Script {
                 return;
             }
             int epoch = Rs2Bank.getBankLiveEpoch();
-            boolean opened = Microbot.getRs2TileObjectCache().query().withName("Bank booth").within(10).interact("Bank");
-            if (!opened) {
-                Rs2NpcModel banker = Microbot.getRs2NpcCache().query().withName("Banker").fromWorldView().nearestOnClientThread();
-                opened = banker != null && banker.click("Bank");
-            }
+            boolean opened = Rs2Bank.openBank();
             if (opened) bankEpochBeforeOpen = epoch;
             setStatus(opened ? "Bank interaction sent - checking bank widget/container..." : "Waiting for visible Varrock East bank target...");
             return;
@@ -1429,6 +1426,12 @@ public class KspBryophytaScript extends Script {
                 ? null : Microbot.getClient().getLocalPlayer().getInteracting()).orElse(null);
     }
     private static String normalize(String value) { return value == null ? "" : value.trim(); }
+    private static boolean isInterruption(Throwable error) {
+        if (Thread.currentThread().isInterrupted()) return true;
+        for (Throwable cause = error; cause != null; cause = cause.getCause())
+            if (cause instanceof InterruptedException) return true;
+        return false;
+    }
     private void setState(BryophytaState newState, String newStatus) { state = newState; setStatus(newStatus); }
 
     private void failAndStop(String reason) {
@@ -1437,9 +1440,9 @@ public class KspBryophytaScript extends Script {
         status = reason;
         Microbot.status = reason;
         Microbot.showMessage("KSP Bryophyta: " + reason);
-        super.shutdown();
         Rs2Prayer.disableAllPrayers();
         state = BryophytaState.STOPPED;
+        super.shutdown();
     }
 
     public BryophytaState getState() { return state; }
@@ -1453,8 +1456,8 @@ public class KspBryophytaScript extends Script {
 
     @Override
     public void shutdown() {
-        super.shutdown();
         Rs2Prayer.disableAllPrayers();
         if (state != BryophytaState.STOPPED) setStopped("Stopped.");
+        super.shutdown();
     }
 }
