@@ -33,7 +33,7 @@ import java.awt.*;
         isExternal = PluginConstants.IS_EXTERNAL
 )
 public class AutoMiningPlugin extends Plugin {
-    public static final String version = "1.0.31";
+    public static final String version = "1.0.32";
     @Inject
     private Client client;
 
