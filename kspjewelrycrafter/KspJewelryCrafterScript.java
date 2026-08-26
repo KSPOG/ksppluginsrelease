@@ -41,6 +41,7 @@ public class KspJewelryCrafterScript extends Script
     private static final int BANK_WIDGET_GROUP = 12;
     private static final int BANK_WIDGET_CHILD = 1;
     private static final int GE_PRICE_X_CHILD = 12;
+    private static final long TARGET_INTERACTION_TIMEOUT_MS = 8_000L;
     private static final WorldPoint EDGEVILLE_BANK = new WorldPoint(3096, 3494, 0);
     private static final WorldPoint EDGEVILLE_FURNACE = new WorldPoint(3109, 3499, 0);
     private static final WorldPoint GRAND_EXCHANGE = new WorldPoint(3164, 3487, 0);
@@ -69,6 +70,8 @@ public class KspJewelryCrafterScript extends Script
     private long waitingUntil;
     private boolean goldMakeAllSelected;
     private boolean silverMakeAllSelected;
+    private long bankInteractionSentAt;
+    private long furnaceInteractionSentAt;
 
     private JewelryRecipe monitoredRecipe;
     private int monitoredBars;
@@ -106,6 +109,7 @@ public class KspJewelryCrafterScript extends Script
         waitingUntil = craftingXpGained = craftedCount = estimatedProfit = sessionStartedAt = 0L;
         startingCraftingLevel = lastBatchMade = currentBatchTarget = 0;
         goldMakeAllSelected = silverMakeAllSelected = false;
+        bankInteractionSentAt = furnaceInteractionSentAt = 0L;
         resetCraftingMonitor();
 
         mainScheduledFuture = scheduledExecutorService.scheduleWithFixedDelay(() ->
@@ -253,6 +257,7 @@ public class KspJewelryCrafterScript extends Script
         activeQuote = prices.quote(activeRecipe, config);
         if (!bankWidgetOpen() && hasCraftingInputsInInventory())
         {
+            bankInteractionSentAt = 0L;
             primeCraftingMonitor();
             state = JewelryCrafterState.CRAFTING;
             status = Rs2Player.isAnimating() ? "Crafting already in progress" : "Using carried inputs first";
@@ -366,10 +371,19 @@ public class KspJewelryCrafterScript extends Script
         int epoch = Rs2Bank.getBankLiveEpoch();
         if (wasOpen)
         {
+            bankInteractionSentAt = 0L;
             if (Rs2Bank.verifyBankMirrorAfterOpen(true, epoch)) return true;
             status = "Waiting for bank contents";
             return sleepUntil(() -> Rs2Bank.verifyBankMirrorAfterOpen(true, epoch), 4_000);
         }
+
+        long now = System.currentTimeMillis();
+        if (bankInteractionSentAt > 0L && now - bankInteractionSentAt < TARGET_INTERACTION_TIMEOUT_MS)
+        {
+            status = Rs2Player.isMoving() ? "Approaching bank" : "Waiting for bank widget";
+            return false;
+        }
+        bankInteractionSentAt = 0L;
 
         status = openingStatus;
         if (!Rs2Bank.openBank())
@@ -381,11 +395,13 @@ public class KspJewelryCrafterScript extends Script
             }
             return false;
         }
+        bankInteractionSentAt = now;
         if (!sleepUntil(this::bankWidgetOpen, 5_000))
         {
             status = "Waiting for bank widget";
             return false;
         }
+        bankInteractionSentAt = 0L;
         if (!sleepUntil(() -> Rs2Bank.verifyBankMirrorAfterOpen(false, epoch), 4_000))
         {
             status = "Waiting for bank contents";
@@ -396,10 +412,18 @@ public class KspJewelryCrafterScript extends Script
 
     private boolean closeBankIfDone(String closingStatus)
     {
-        if (!bankWidgetOpen()) return true;
+        if (!bankWidgetOpen())
+        {
+            bankInteractionSentAt = 0L;
+            return true;
+        }
         status = closingStatus;
         if (!Rs2Bank.closeBank()) return false;
-        if (sleepUntil(() -> !bankWidgetOpen(), 5_000)) return true;
+        if (sleepUntil(() -> !bankWidgetOpen(), 5_000))
+        {
+            bankInteractionSentAt = 0L;
+            return true;
+        }
         status = "Waiting for bank widget to close";
         return false;
     }
@@ -407,6 +431,7 @@ public class KspJewelryCrafterScript extends Script
     private boolean leaveBank(JewelryCrafterState nextState, String nextStatus)
     {
         if (!closeBankIfDone("Closing bank - banking complete")) return false;
+        bankInteractionSentAt = 0L;
         state = nextState;
         status = nextStatus;
         return true;
@@ -564,6 +589,7 @@ public class KspJewelryCrafterScript extends Script
         observeCraftingProgress();
         lastBatchMade = monitoredBatchMade;
         currentBatchTarget = 0;
+        furnaceInteractionSentAt = 0L;
         refreshAccountEligibility();
         resetCraftingMonitor();
         state = JewelryCrafterState.BANKING;
@@ -582,6 +608,7 @@ public class KspJewelryCrafterScript extends Script
     {
         if (activeRecipe == null)
         {
+            furnaceInteractionSentAt = 0L;
             resetCraftingMonitor();
             state = JewelryCrafterState.EVALUATING;
             return;
@@ -594,6 +621,7 @@ public class KspJewelryCrafterScript extends Script
             finishCraftingBatch();
             return;
         }
+        if (isJewelryProductionOpen()) furnaceInteractionSentAt = 0L;
 
         if (Rs2Player.isAnimating())
         {
@@ -615,6 +643,17 @@ public class KspJewelryCrafterScript extends Script
             return;
         }
 
+        if (!isJewelryProductionOpen() && furnaceInteractionSentAt > 0L)
+        {
+            long elapsed = System.currentTimeMillis() - furnaceInteractionSentAt;
+            if (elapsed < TARGET_INTERACTION_TIMEOUT_MS)
+            {
+                status = Rs2Player.isMoving() ? "Approaching Edgeville furnace" : "Waiting for jewellery interface";
+                return;
+            }
+            furnaceInteractionSentAt = 0L;
+        }
+
         TileObject furnace = Rs2GameObject.findObjectById(EDGEVILLE_FURNACE_ID);
         if (furnace == null)
         {
@@ -630,11 +669,13 @@ public class KspJewelryCrafterScript extends Script
                 status = "Unable to use Edgeville furnace";
                 return;
             }
+            furnaceInteractionSentAt = System.currentTimeMillis();
             if (!sleepUntil(this::isJewelryProductionOpen, 5_000))
             {
                 status = "Waiting for jewellery interface";
                 return;
             }
+            furnaceInteractionSentAt = 0L;
         }
         if (!makeAllSelected()) return;
 
@@ -669,6 +710,7 @@ public class KspJewelryCrafterScript extends Script
 
     private void travelToGe()
     {
+        furnaceInteractionSentAt = 0L;
         resetCraftingMonitor();
         if (bankWidgetOpen() && !closeBankIfDone("Closing bank for GE trip")) return;
         if (distanceTo(GRAND_EXCHANGE) > 8)
@@ -1475,6 +1517,7 @@ public class KspJewelryCrafterScript extends Script
         buyQueue.clear();
         currentBatchTarget = 0;
         goldMakeAllSelected = silverMakeAllSelected = false;
+        bankInteractionSentAt = furnaceInteractionSentAt = 0L;
         resetCraftingMonitor();
     }
 
