@@ -678,7 +678,7 @@ public class KspBryophytaScript extends Script {
             } else if (System.currentTimeMillis() - manholeDescentStartedAt > MANHOLE_TRANSITION_TIMEOUT_MS) {
                 manholeDescentPending = false;
                 setStatus("Sewer transition did not occur - rechecking manhole state...");
-            } else setStatus("Climb-down sent - checking for sewer region...");
+            } else setStatus("Climb-down sent - checking for underground region...");
             return;
         }
         if (player.distanceTo(VARROCK_MANHOLE_APPROACH) > 1) {
