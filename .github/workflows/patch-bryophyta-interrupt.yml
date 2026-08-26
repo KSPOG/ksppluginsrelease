@@ -4,21 +4,23 @@ on:
   push:
     branches:
       - fix/bryophyta-interrupt-safe-bank
+    paths:
+      - .github/workflows/patch-bryophyta-interrupt.yml
 
 permissions:
   contents: write
 
 jobs:
   patch:
-    if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           ref: fix/bryophyta-interrupt-safe-bank
       - name: Apply targeted source patch
-        shell: python
+        shell: bash
         run: |
+          python3 <<'PY'
           from pathlib import Path
 
           script = Path('kspbryophyta/KspBryophytaScript.java')
@@ -109,7 +111,9 @@ jobs:
           ptext = plugin.read_text(encoding='utf-8')
           assert 'public static final String VERSION = "0.1.22";' in ptext, 'Bryophyta version changed unexpectedly'
           plugin.write_text(ptext.replace('public static final String VERSION = "0.1.22";', 'public static final String VERSION = "0.1.23";', 1), encoding='utf-8')
+          PY
       - name: Commit patch
+        shell: bash
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
