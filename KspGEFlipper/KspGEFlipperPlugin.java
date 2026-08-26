@@ -11,7 +11,7 @@ import javax.inject.Inject;
 
 @PluginDescriptor(
         name = PluginConstants.KSP + "GE Flipper",
-        description = "Execution-aware Grand Exchange flipping using live OSRS Wiki latest, 5m and 1h market data",
+        description = "Self-calibrating execution-aware Grand Exchange flipping using live OSRS Wiki prices",
         tags = {"ge", "flip", "flipping", "money", "ksp", "microbot"},
         version = KspGEFlipperPlugin.VERSION,
         minClientVersion = "0.0.3",
@@ -19,7 +19,7 @@ import javax.inject.Inject;
         isExternal = PluginConstants.IS_EXTERNAL
 )
 public class KspGEFlipperPlugin extends Plugin {
-    public static final String VERSION = "0.2.0";
+    public static final String VERSION = "0.3.0";
 
     @Inject private KspGEFlipperConfig config;
     @Inject private KspGEFlipperScript script;
