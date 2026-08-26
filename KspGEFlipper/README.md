@@ -1,63 +1,102 @@
-# KSP GE Flipper v0.2.0
+# KSP GE Flipper v0.3.0
 
-Automatic, execution-aware Grand Exchange flipper for Microbot.
+Automatic, execution-aware Grand Exchange flipper for Microbot with persistent self-calibration.
 
-## v0.2.0 decision engine
+## v0.3.0 self-calibrating execution model
 
-This release upgrades the old raw-profit market scanner into a clean-room deterministic recommendation engine. It does **not** claim to reproduce any private Flipping Copilot server formula or private model.
+The deterministic v0.2.0 market model is still the baseline. v0.3.0 adds a conservative feedback layer that compares predictions with real GE outcomes and gradually corrects systematic execution errors.
 
-The engine now:
+For every accepted recommendation the plugin now records:
 
-- Uses OSRS Wiki `latest`, `5m`, `1h`, and `mapping` market data.
-- Filters by membership, current buy limits, quote freshness, matched volume, ROI, blocked items, and configured whitelist.
-- Uses the current 2% GE seller tax, 5M gp per-item cap, tax-free sales below 50 gp, and known exempt utility items.
-- Builds a lightweight forecast from latest/5m/1h price agreement, short-horizon trend, spread stability, quote freshness, and volume.
-- Produces a deterministic confidence score and uncertainty estimate. These are local heuristics, not a copied ML model.
-- Searches multiple prices inside the live spread rather than always applying one fixed undercut.
-- Estimates fill probability and expected trade duration from quantity, matched hourly flow, price aggressiveness, uncertainty, and confidence.
-- Ranks candidates by execution-adjusted expected GP/hour rather than raw total profit alone.
-- Sizes quantities by available cash, GE buy limit, risk profile, configured capital cap, timeframe, and a conservative share of observed liquidity.
-- Supports LOW / MEDIUM / HIGH risk profiles and a configurable strategy timeframe.
-- Supports reserved GE slots and keeps unrelated/manual offers untouched.
-- Supports a blocked-item list in addition to the existing optional whitelist.
-- Adds an optional short-horizon dump/recovery detector. It is disabled by default and uses its own minimum-profit threshold.
-- Reevaluates stale offers with hysteresis: WAIT when there is no material reason to churn, MODIFY when fresh utility materially improves, and ABORT stale unfilled buys when the opportunity has materially deteriorated.
-- Fixes stale-buy relisting so a cancelled unfilled buy can actually be placed again at its improved price instead of simply disappearing.
-- Keeps sell repricing tax-safe by never deliberately listing below calculated break-even.
-- Emits structured `KSP_GE` telemetry for recommendations, fills, reprices, aborts, and completed flips so later calibration can compare predictions with real outcomes.
+- predicted buy and sell price
+- predicted quantity
+- predicted profit
+- predicted total duration
+- predicted execution probability
+- predicted confidence
+- actual average buy fill price
+- actual average sell fill price when exposed by the GE offer data
+- actual realized profit
+- actual end-to-end duration
+- modification/reprice count
+- completed vs aborted outcome
 
-## Overlay
+Finished outcomes are aggregated into EWMA calibration buckets for both the overall strategy type (`NORMAL` / `DUMP`) and individual items. Item-specific learning is blended with the larger global sample so a single item cannot overfit the engine quickly.
 
-The overlay shows:
+### What learning changes
 
-- status and account type
-- runtime, cash, and capital committed
-- active buy/sell flip counts
-- candidate item and candidate type
-- selected buy and sell prices
-- quantity and net ROI
-- estimated profit
-- estimated duration
-- execution-adjusted expected GP/hour
-- deterministic confidence
-- matched 1h volume
-- realized profit and realized profit/hour
-- completed flips and market item count
+After the configured warm-up sample count, the learned model can adjust:
 
-## Important model boundaries
+- expected duration
+- execution/fill probability
+- confidence
+- expected realized profit
+- liquidity sizing (conservatively, through the execution correction)
 
-The confidence, duration, fill-probability, dump-recovery, and utility formulas in v0.2.0 are independent heuristics. The OSRS Wiki aggregate price feeds are not a full order book, so expected duration and GP/hour are estimates and must be calibrated against real fills before being treated as predictive statistics.
+These corrections feed directly back into candidate GP/hour and utility ranking.
 
-The plugin logs recommendation/execution telemetry specifically to make that calibration possible in a later release.
+Learning is bounded. With the default `Max learned adjustment % = 35`, no learned duration/execution/profit factor can move more than 35% away from the deterministic baseline. This prevents a small or noisy sample from destabilizing trading decisions.
+
+### Default learning settings
+
+- Self-calibration: enabled
+- Warm-up flips: 8 finished outcomes
+- Learning rate: 0.12 EWMA
+- Maximum learned adjustment: 35%
+
+The overlay shows whether the model is `Learning`, `Active`, or `Disabled`, along with sample count and the current duration, execution, profit, and modification-rate calibration metrics.
+
+## Persistence
+
+Calibration data is stored locally at:
+
+```text
+~/.runelite/ksp-ge-flipper-calibration.json
+```
+
+On Windows this normally resolves beneath the current user's profile directory. The file is written atomically where the filesystem supports it.
+
+Only finished calibration statistics are persisted. Active GE offers are still managed by the current plugin session, so disabling the plugin while it owns active offers is still not recommended.
+
+## Partial-fill accounting fix
+
+v0.3.0 also fixes sell accounting across cancel/reprice cycles. GE offer filled quantity is per offer, while the flip tracks lifetime sold quantity. The plugin now keeps separate per-offer accounted quantity/value fields, preventing fills on a newly relisted sell from being ignored because an earlier offer already had a larger lifetime sold count.
+
+Where `GrandExchangeOfferDetails.getSpent()` exposes cumulative exchanged value, the plugin uses the delta to estimate the actual average fill price. If it is unavailable or zero, it safely falls back to the listed sell price.
+
+## Existing decision engine
+
+The engine continues to:
+
+- use OSRS Wiki `latest`, `5m`, `1h`, and `mapping` data
+- filter by membership, buy limits, quote freshness, liquidity, ROI, blocked items, and whitelist
+- apply current GE tax handling used by the plugin
+- forecast from latest/5m/1h agreement, trend, spread stability, freshness, and volume
+- search multiple prices inside the spread
+- estimate fill probability and duration
+- rank by execution-adjusted expected GP/hour and risk-adjusted utility
+- size by cash, buy limit, risk profile, liquidity, timeframe, and capital cap
+- support LOW / MEDIUM / HIGH risk
+- support reserved GE slots
+- support optional dump/recovery opportunities
+- reevaluate stale offers with WAIT / MODIFY / ABORT-style hysteresis
+- keep sell repricing above tax-adjusted break-even
+- emit structured `KSP_GE` telemetry
+
+## Model boundary
+
+This remains an independent clean-room implementation. The learned factors are derived only from this plugin's own observed outcomes. They do not reproduce or claim to recover Flipping Copilot's private server model.
+
+The feedback loop is deliberately calibration-first rather than unrestricted online machine learning: it learns systematic prediction error while keeping the underlying deterministic market logic inspectable and bounded.
 
 ## Install
 
-Copy the `KspGEFlipper` folder into your Microbot-Hub source tree under the matching `net/runelite/client/plugins/microbot/` package path, or use it with your KSP source loader workflow.
+Copy the `KspGEFlipper` folder into your Microbot-Hub source tree under the matching `net/runelite/client/plugins/microbot/` package path, or use it with the KSP source-loader workflow.
 
 ## Notes
 
-- Buy-limit tracking is still session-local. Restarting the plugin resets its local 4-hour usage tracker.
+- Buy-limit tracking remains session-local.
 - Existing/manual GE offers are left alone.
 - Do not disable the plugin while it has active flips unless you intend to manage those offers manually afterward.
-- Dump mode is higher risk and is deliberately disabled by default.
-- This release remains local-only; a future backend can persist market history, portfolios, recommendation snapshots, and execution outcomes without changing the core clean-room separation between market data, forecasting, execution modeling, and account-state-aware action policy.
+- Dump mode remains higher risk and disabled by default.
+- A future backend can centralize calibration across accounts/devices, but v0.3.0 intentionally keeps learning local and auditable.

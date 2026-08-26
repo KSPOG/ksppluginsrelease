@@ -20,7 +20,15 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
 import static net.runelite.client.plugins.microbot.util.Global.sleep;
@@ -33,15 +41,18 @@ public class KspGEFlipperScript extends Script {
             "old school bond", "chisel", "gardening trowel", "glassblowing pipe", "hammer", "needle",
             "pestle and mortar", "rake", "saw", "secateurs", "seed dibber", "shears", "spade", "watering can");
 
-    public static volatile String status = "Idle", bestCandidate = "-", candidateType = "-";
+    public static volatile String status = "Idle", bestCandidate = "-", candidateType = "-", calibrationStatus = "Learning";
     public static volatile long cash, profit, capitalUsed, candidateProfit, candidateGpPerHour;
     public static volatile int activeFlips, buyingFlips, sellingFlips, completedFlips, candidateBuy, candidateSell,
-            candidateQty, candidateVolume, candidateExpectedMinutes, marketItems;
-    public static volatile double candidateRoi, candidateConfidence;
+            candidateQty, candidateVolume, candidateExpectedMinutes, marketItems, calibrationSamples, candidateCalibrationSamples;
+    public static volatile double candidateRoi, candidateConfidence, calibrationDurationMultiplier = 1,
+            calibrationExecutionMultiplier = 1, calibrationProfitMultiplier = 1, calibrationModificationRate,
+            candidateDurationMultiplier = 1, candidateExecutionMultiplier = 1, candidateProfitMultiplier = 1;
     public static volatile boolean members;
     private static volatile long started;
 
     private final Market market = new Market();
+    private final KspGEFlipperCalibration calibration = new KspGEFlipperCalibration();
     private final Map<Integer, Flip> flips = new HashMap<>();
     private final Map<Integer, LimitWindow> limits = new HashMap<>();
     private final Map<Integer, Long> cooldowns = new HashMap<>();
@@ -53,7 +64,7 @@ public class KspGEFlipperScript extends Script {
         started = System.currentTimeMillis();
         profit = capitalUsed = candidateProfit = candidateGpPerHour = 0;
         activeFlips = buyingFlips = sellingFlips = completedFlips = candidateBuy = candidateSell = candidateQty =
-                candidateVolume = candidateExpectedMinutes = marketItems = 0;
+                candidateVolume = candidateExpectedMinutes = marketItems = candidateCalibrationSamples = 0;
         candidateRoi = candidateConfidence = 0;
         candidateType = "-";
         bestCandidate = "-";
@@ -61,6 +72,8 @@ public class KspGEFlipperScript extends Script {
         limits.clear();
         cooldowns.clear();
         nextBankTry = 0;
+        calibration.load();
+        refreshCalibrationStats();
 
         mainScheduledFuture = scheduledExecutorService.scheduleWithFixedDelay(() -> {
             try {
@@ -78,6 +91,7 @@ public class KspGEFlipperScript extends Script {
         members = Rs2WorldUtil.isMemberAccount();
         cash = Rs2Inventory.itemQuantity(COINS);
         updateStats();
+        refreshCalibrationStats();
 
         market.refreshIfNeeded();
         marketItems = market.items.size();
@@ -91,6 +105,7 @@ public class KspGEFlipperScript extends Script {
 
         cash = Rs2Inventory.itemQuantity(COINS);
         updateStats();
+        refreshCalibrationStats();
         if (flips.isEmpty() && "-".equals(bestCandidate)) status = "Scanning market";
     }
 
@@ -149,6 +164,7 @@ public class KspGEFlipperScript extends Script {
                 return;
             }
             telemetry("BUY_ABORTED", flip, 0, flip.buyPrice, 0);
+            calibration.abort(flip.suggestionId, calibrationLearningRate());
             flips.remove(flip.item.id);
             cooldowns.put(flip.item.id, System.currentTimeMillis() + 30_000);
             return;
@@ -162,15 +178,19 @@ public class KspGEFlipperScript extends Script {
         flip.clearPendingBuyPlan();
         flip.abortRequested = false;
         flip.changed = System.currentTimeMillis();
-        telemetry("BUY_FILLED", flip, qty, Math.max(1, (int) (spent / Math.max(1, qty))), spent);
+        int actualBuyPrice = Math.max(1, (int) Math.round(spent / (double) Math.max(1, qty)));
+        calibration.recordBuyFill(flip.suggestionId, qty, actualBuyPrice);
+        telemetry("BUY_FILLED", flip, qty, actualBuyPrice, spent);
         status = "Bought " + qty + " x " + flip.item.name;
     }
 
     private void finishSell(GrandExchangeSlots slot, GrandExchangeOfferDetails details, Flip flip, boolean complete) {
-        accountSold(flip, details.getQuantitySold());
+        accountSold(flip, details);
         Rs2GrandExchange.collectOffer(slot, false);
         if (complete || flip.sold >= flip.boughtQty) {
-            telemetry("FLIP_COMPLETED", flip, flip.sold, flip.sellPrice, 0);
+            telemetry("FLIP_COMPLETED", flip, flip.sold, flip.lastActualSellPrice > 0 ? flip.lastActualSellPrice : flip.sellPrice,
+                    flip.realizedProfit);
+            calibration.complete(flip.suggestionId, calibrationLearningRate());
             flips.remove(flip.item.id);
             completedFlips++;
             status = "Completed " + flip.item.name;
@@ -191,11 +211,8 @@ public class KspGEFlipperScript extends Script {
             GrandExchangeOfferDetails details = Rs2GrandExchange.getOfferDetails(slot);
             if (details == null || !details.isInProgress()) continue;
 
-            if (flip.selling) {
-                reevaluateSell(slot, details, flip, now);
-            } else {
-                reevaluateBuy(slot, flip, now);
-            }
+            if (flip.selling) reevaluateSell(slot, details, flip, now);
+            else reevaluateBuy(slot, flip, now);
         }
     }
 
@@ -233,9 +250,12 @@ public class KspGEFlipperScript extends Script {
             flip.pendingExpectedMinutes = fresh.expectedMinutes;
             flip.pendingExpectedGpPerHour = fresh.gpPerHour;
             flip.pendingConfidence = fresh.confidence;
+            flip.pendingExecutionProbability = fresh.executionProbability;
+            flip.pendingPredictedProfit = fresh.profit;
             flip.pendingBuyReprice = true;
             flip.abortRequested = false;
-            telemetry("BUY_MODIFY", flip, flip.requestedQty, fresh.buy, 0);
+            calibration.recordModification(flip.suggestionId);
+            telemetry("BUY_MODIFY", flip, flip.requestedQty, fresh.buy, fresh.profit);
             Rs2GrandExchange.cancelSpecificOffers(Collections.singletonList(slot), false);
             flip.changed = now;
             return;
@@ -246,7 +266,7 @@ public class KspGEFlipperScript extends Script {
     }
 
     private void reevaluateSell(GrandExchangeSlots slot, GrandExchangeOfferDetails details, Flip flip, long now) {
-        accountSold(flip, details.getQuantitySold());
+        accountSold(flip, details);
         if (flip.sold >= flip.boughtQty) return;
 
         int extraSteps = sellRepriceSteps(flip);
@@ -254,6 +274,7 @@ public class KspGEFlipperScript extends Script {
         double deltaPct = Math.abs(percentChange(flip.sellPrice, target));
         if (target != flip.sellPrice && deltaPct >= Math.max(0, config.sellRepricePercent())) {
             status = "Repricing sell: " + flip.item.name;
+            calibration.recordModification(flip.suggestionId);
             telemetry("SELL_MODIFY", flip, flip.boughtQty - flip.sold, target, 0);
             flip.reprices += Math.max(0, extraSteps - 1);
             Rs2GrandExchange.cancelSpecificOffers(Collections.singletonList(slot), false);
@@ -269,10 +290,11 @@ public class KspGEFlipperScript extends Script {
         for (Flip flip : new ArrayList<>(flips.values())) {
             if (flip.selling || flip.abortRequested || Rs2GrandExchange.findSlotForItem(flip.item.id, false) != null) continue;
 
-            long available = Rs2Inventory.itemQuantity(COINS) - Math.max(0, config.reserveCoins());
+            long available = availableCash();
             int limit = remainingLimit(flip.item.id, flip.item.limit);
             int qty = (int) Math.min(Math.min(flip.requestedQty, limit), available / Math.max(1, flip.buyPrice));
             if (qty <= 0) {
+                calibration.abort(flip.suggestionId, calibrationLearningRate());
                 flips.remove(flip.item.id);
                 cooldowns.put(flip.item.id, System.currentTimeMillis() + 30_000);
                 continue;
@@ -293,6 +315,7 @@ public class KspGEFlipperScript extends Script {
             if (!flip.selling || Rs2GrandExchange.findSlotForItem(flip.item.id, true) != null) continue;
             int remaining = flip.boughtQty - flip.sold;
             if (remaining <= 0) {
+                calibration.complete(flip.suggestionId, calibrationLearningRate());
                 flips.remove(flip.item.id);
                 continue;
             }
@@ -303,6 +326,7 @@ public class KspGEFlipperScript extends Script {
             status = "Selling " + flip.item.name + " @ " + price;
             if (Rs2GrandExchange.sellItem(flip.item.name, qty, price)) {
                 flip.sellPrice = price;
+                flip.beginSellOffer();
                 flip.changed = System.currentTimeMillis();
                 telemetry("SELL_LISTED", flip, qty, price, 0);
             }
@@ -349,6 +373,7 @@ public class KspGEFlipperScript extends Script {
 
             Flip flip = new Flip(candidate);
             flips.put(candidate.item.id, flip);
+            registerPrediction(flip, candidate);
             telemetry("RECOMMENDATION_ACCEPTED", flip, candidate.qty, candidate.buy, candidate.profit);
             occupied.add(candidate.item.id);
         }
@@ -373,8 +398,15 @@ public class KspGEFlipperScript extends Script {
 
         Flip flip = new Flip(candidate);
         flips.put(candidate.item.id, flip);
+        registerPrediction(flip, candidate);
         telemetry("DUMP_RECOMMENDATION_ACCEPTED", flip, candidate.qty, candidate.buy, candidate.profit);
         occupied.add(candidate.item.id);
+    }
+
+    private void registerPrediction(Flip flip, Candidate candidate) {
+        calibration.registerRecommendation(flip.suggestionId, candidate.item.id, candidate.type.name(), candidate.buy,
+                candidate.sell, candidate.qty, candidate.profit, candidate.expectedMinutes, candidate.confidence,
+                candidate.executionProbability);
     }
 
     private long availableCash() {
@@ -436,19 +468,23 @@ public class KspGEFlipperScript extends Script {
 
         MarketWindow effectiveFive = five == null ? hour : five;
         Forecast forecast = forecast(quote, effectiveFive, hour, maxAge, nowSec);
+        KspGEFlipperCalibration.Adjustment adjustment = calibration.adjustment(item.id, type.name(),
+                config.enableSelfCalibration(), config.calibrationWarmupSamples(), config.calibrationMaxAdjustmentPercent());
+        forecast = forecast.adjusted(adjustment.confidenceMultiplier);
         RiskProfile risk = riskProfile();
         if (forecast.confidence < risk.minConfidence) return null;
 
         if (type == CandidateType.DUMP) {
             if (!config.enableDumpOpportunities() || !isDump(quote, effectiveFive, hour)) return null;
-            return dumpCandidate(item, quote, effectiveFive, hour, forecast, risk, budget, volume);
+            return dumpCandidate(item, quote, effectiveFive, hour, forecast, risk, adjustment, budget, volume);
         }
         if (config.enableDumpOpportunities() && isDump(quote, effectiveFive, hour)) return null;
-        return normalCandidate(item, quote, effectiveFive, hour, forecast, risk, budget, volume);
+        return normalCandidate(item, quote, effectiveFive, hour, forecast, risk, adjustment, budget, volume);
     }
 
     private Candidate normalCandidate(Item item, Quote quote, MarketWindow five, MarketWindow hour, Forecast forecast,
-                                      RiskProfile risk, long budget, int volume) {
+                                      RiskProfile risk, KspGEFlipperCalibration.Adjustment adjustment,
+                                      long budget, int volume) {
         int spread = quote.high - quote.low;
         int baseBuyEdge = Math.max(1, Math.min(spread / 3, edge(quote.low)));
         int baseSellEdge = Math.max(1, Math.min(spread / 3, edge(quote.high)));
@@ -465,27 +501,31 @@ public class KspGEFlipperScript extends Script {
             double roi = net * 100.0 / buy;
             if (net <= 0 || roi < Math.max(0, config.minNetRoi())) continue;
 
-            int qty = sizedQuantity(item, buy, budget, volume, risk, false);
+            int qty = sizedQuantity(item, buy, budget, volume, risk, false, adjustment);
             if (qty <= 0) continue;
-            long tradeProfit = net * qty;
-            if (tradeProfit < Math.max(0, config.minTradeProfit())) continue;
+            long rawProfit = net * qty;
+            long calibratedProfit = Math.round(rawProfit * adjustment.profitMultiplier);
+            if (calibratedProfit < Math.max(0, config.minTradeProfit())) continue;
 
             double aggression = clamp(((buy - quote.low) + (quote.high - sell)) / (double) spread, 0, 1);
-            double fillProbability = fillProbability(forecast, aggression, volume);
-            double expectedMinutes = expectedDurationMinutes(qty, volume, aggression, forecast, fillProbability);
-            double gpPerHour = tradeProfit * 60.0 / expectedMinutes * fillProbability;
+            double fillProbability = clamp(fillProbability(forecast, aggression, volume) * adjustment.executionMultiplier, 0.10, 0.99);
+            double expectedMinutes = clamp(expectedDurationMinutes(qty, volume, aggression, forecast, fillProbability)
+                    * adjustment.durationMultiplier, 2.0, 720.0);
+            double gpPerHour = calibratedProfit * 60.0 / expectedMinutes * fillProbability;
             if (gpPerHour < Math.max(0, config.minExpectedGpPerHour())) continue;
             double utility = utility(gpPerHour, forecast, risk, fillProbability);
 
-            Candidate candidate = new Candidate(item, CandidateType.NORMAL, buy, sell, qty, net, roi, tradeProfit,
-                    volume, expectedMinutes, gpPerHour, forecast.confidence, fillProbability, utility);
+            Candidate candidate = new Candidate(item, CandidateType.NORMAL, buy, sell, qty, net, roi,
+                    calibratedProfit, rawProfit, volume, expectedMinutes, gpPerHour, forecast.confidence,
+                    fillProbability, utility, adjustment);
             if (best == null || candidate.utility > best.utility) best = candidate;
         }
         return best;
     }
 
     private Candidate dumpCandidate(Item item, Quote quote, MarketWindow five, MarketWindow hour, Forecast forecast,
-                                    RiskProfile risk, long budget, int volume) {
+                                    RiskProfile risk, KspGEFlipperCalibration.Adjustment adjustment,
+                                    long budget, int volume) {
         int spread = quote.high - quote.low;
         int buy = quote.low + Math.max(1, Math.min(spread / 4, edge(quote.low)));
         int recovery = (int) Math.round(five.avgLow * 0.65 + hour.avgLow * 0.35);
@@ -496,30 +536,35 @@ public class KspGEFlipperScript extends Script {
         double roi = net * 100.0 / buy;
         if (net <= 0 || roi < Math.max(0, config.minNetRoi())) return null;
 
-        int qty = sizedQuantity(item, buy, budget, volume, risk, true);
+        int qty = sizedQuantity(item, buy, budget, volume, risk, true, adjustment);
         if (qty <= 0) return null;
-        long tradeProfit = net * qty;
-        if (tradeProfit < Math.max(0, config.dumpMinPredictedProfit())) return null;
+        long rawProfit = net * qty;
+        long calibratedProfit = Math.round(rawProfit * adjustment.profitMultiplier);
+        if (calibratedProfit < Math.max(0, config.dumpMinPredictedProfit())) return null;
 
         double dropPct = (hour.avgLow - quote.low) * 100.0 / Math.max(1, hour.avgLow);
         double volumeAcceleration = five.lowVolume <= 0 || hour.lowVolume <= 0
                 ? 1.0 : five.lowVolume * 12.0 / hour.lowVolume;
         double recoveryProbability = clamp(0.25 + forecast.confidence * 0.35
                 + Math.min(0.20, dropPct / 50.0) + Math.min(0.20, Math.max(0, volumeAcceleration - 1.0) * 0.10), 0.20, 0.90);
+        recoveryProbability = clamp(recoveryProbability * adjustment.executionMultiplier, 0.10, 0.95);
         double expectedMinutes = Math.max(5.0, clamp(config.timeframeMinutes(), 5, 240) * 0.75)
                 * (1.0 + forecast.uncertaintyPct * 5.0) / recoveryProbability;
-        double gpPerHour = tradeProfit * 60.0 / expectedMinutes * recoveryProbability;
+        expectedMinutes = clamp(expectedMinutes * adjustment.durationMultiplier, 3.0, 720.0);
+        double gpPerHour = calibratedProfit * 60.0 / expectedMinutes * recoveryProbability;
         if (gpPerHour < Math.max(0, config.minExpectedGpPerHour())) return null;
         double utility = utility(gpPerHour, forecast, risk, recoveryProbability);
 
-        return new Candidate(item, CandidateType.DUMP, buy, sell, qty, net, roi, tradeProfit, volume,
-                expectedMinutes, gpPerHour, forecast.confidence, recoveryProbability, utility);
+        return new Candidate(item, CandidateType.DUMP, buy, sell, qty, net, roi, calibratedProfit, rawProfit,
+                volume, expectedMinutes, gpPerHour, forecast.confidence, recoveryProbability, utility, adjustment);
     }
 
-    private int sizedQuantity(Item item, int buy, long budget, int hourlyVolume, RiskProfile risk, boolean dump) {
+    private int sizedQuantity(Item item, int buy, long budget, int hourlyVolume, RiskProfile risk, boolean dump,
+                              KspGEFlipperCalibration.Adjustment adjustment) {
         int limit = remainingLimit(item.id, item.limit);
         int timeframe = clamp(config.timeframeMinutes(), 5, 240);
-        double participation = risk.liquidityParticipation * (dump ? 0.60 : 1.0);
+        double executionSizing = clamp(adjustment.executionMultiplier, 0.70, 1.15);
+        double participation = risk.liquidityParticipation * executionSizing * (dump ? 0.60 : 1.0);
         int liquidQty = Math.max(1, (int) Math.floor(hourlyVolume * (timeframe / 60.0) * participation));
         long affordable = budget / Math.max(1, buy);
         return (int) Math.min(Math.min(limit, liquidQty), Math.min(Integer.MAX_VALUE, affordable));
@@ -574,7 +619,8 @@ public class KspGEFlipperScript extends Script {
         return clamp(0.20 + aggression * 0.40 + forecast.confidence * 0.25 + volumeScore * 0.15, 0.15, 0.98);
     }
 
-    private double expectedDurationMinutes(int qty, int hourlyVolume, double aggression, Forecast forecast, double fillProbability) {
+    private double expectedDurationMinutes(int qty, int hourlyVolume, double aggression, Forecast forecast,
+                                           double fillProbability) {
         double flowMinutes = 60.0 * qty / Math.max(1, hourlyVolume);
         double priceFactor = 1.30 - aggression * 0.65;
         double uncertaintyFactor = 1.0 + forecast.uncertaintyPct * 6.0;
@@ -594,9 +640,7 @@ public class KspGEFlipperScript extends Script {
     private int sellPrice(Flip flip, int extraSteps) {
         Quote quote = market.quotes.get(flip.item.id);
         int multiplier = Math.max(1, flip.reprices + 1 + Math.max(0, extraSteps));
-        int target = quote == null || quote.high <= 0
-                ? flip.sellPrice
-                : quote.high - edge(quote.high) * multiplier;
+        int target = quote == null || quote.high <= 0 ? flip.sellPrice : quote.high - edge(quote.high) * multiplier;
         long unitCost = Math.max(1, (flip.buySpent + flip.boughtQty - 1) / Math.max(1, flip.boughtQty));
         return Math.max(1, Math.max(target, minSellFor(unitCost, flip.item.name)));
     }
@@ -610,16 +654,37 @@ public class KspGEFlipperScript extends Script {
         return Math.max(1, (int) Math.ceil(requiredDelta / (double) baseEdge));
     }
 
-    private void accountSold(Flip flip, int totalSold) {
-        int sold = Math.min(totalSold, flip.boughtQty);
-        if (sold <= flip.sold) return;
-        int delta = sold - flip.sold;
-        long oldCost = flip.buySpent * flip.sold / Math.max(1, flip.boughtQty);
-        long newCost = flip.buySpent * sold / Math.max(1, flip.boughtQty);
-        long realized = (long) flip.sellPrice * delta - tax(flip.item.name, flip.sellPrice) * delta - (newCost - oldCost);
+    private void accountSold(Flip flip, GrandExchangeOfferDetails details) {
+        int offerSold = Math.max(0, details.getQuantitySold());
+        if (offerSold <= flip.sellOfferAccountedQty || flip.sold >= flip.boughtQty) return;
+
+        int delta = Math.min(offerSold - flip.sellOfferAccountedQty, flip.boughtQty - flip.sold);
+        if (delta <= 0) return;
+
+        long cumulativeValue = Math.max(0, details.getSpent());
+        long deltaRevenue;
+        if (cumulativeValue > 0 && cumulativeValue >= flip.sellOfferAccountedValue) {
+            deltaRevenue = cumulativeValue - flip.sellOfferAccountedValue;
+        } else {
+            deltaRevenue = (long) flip.sellPrice * delta;
+        }
+        if (deltaRevenue <= 0) deltaRevenue = (long) flip.sellPrice * delta;
+        int actualPrice = Math.max(1, (int) Math.round(deltaRevenue / (double) delta));
+
+        int oldSold = flip.sold;
+        int newSold = Math.min(flip.boughtQty, oldSold + delta);
+        long oldCost = flip.buySpent * oldSold / Math.max(1, flip.boughtQty);
+        long newCost = flip.buySpent * newSold / Math.max(1, flip.boughtQty);
+        long realized = deltaRevenue - tax(flip.item.name, actualPrice) * delta - (newCost - oldCost);
+
         profit += realized;
-        flip.sold = sold;
-        telemetry("SELL_FILLED", flip, delta, flip.sellPrice, realized);
+        flip.realizedProfit += realized;
+        flip.sold = newSold;
+        flip.sellOfferAccountedQty = offerSold;
+        flip.sellOfferAccountedValue = cumulativeValue > 0 ? cumulativeValue : flip.sellOfferAccountedValue + deltaRevenue;
+        flip.lastActualSellPrice = actualPrice;
+        calibration.recordSellFill(flip.suggestionId, delta, actualPrice, realized);
+        telemetry("SELL_FILLED", flip, delta, actualPrice, realized);
     }
 
     private void showCandidate(Candidate candidate) {
@@ -634,14 +699,19 @@ public class KspGEFlipperScript extends Script {
         candidateExpectedMinutes = (int) Math.round(candidate.expectedMinutes);
         candidateGpPerHour = Math.round(candidate.gpPerHour);
         candidateConfidence = candidate.confidence;
+        candidateCalibrationSamples = candidate.calibrationSamples;
+        candidateDurationMultiplier = candidate.durationMultiplier;
+        candidateExecutionMultiplier = candidate.executionMultiplier;
+        candidateProfitMultiplier = candidate.profitMultiplier;
     }
 
     private void clearCandidateOverlay() {
         bestCandidate = "-";
         candidateType = "-";
-        candidateBuy = candidateSell = candidateQty = candidateVolume = candidateExpectedMinutes = 0;
+        candidateBuy = candidateSell = candidateQty = candidateVolume = candidateExpectedMinutes = candidateCalibrationSamples = 0;
         candidateProfit = candidateGpPerHour = 0;
         candidateRoi = candidateConfidence = 0;
+        candidateDurationMultiplier = candidateExecutionMultiplier = candidateProfitMultiplier = 1;
     }
 
     private void updateStats() {
@@ -653,6 +723,23 @@ public class KspGEFlipperScript extends Script {
             used += flip.selling ? Math.max(0, flip.buySpent) : (long) flip.buyPrice * Math.max(0, flip.requestedQty);
         }
         capitalUsed = used;
+    }
+
+    private void refreshCalibrationStats() {
+        KspGEFlipperCalibration.Summary summary = calibration.summary();
+        calibrationSamples = summary.samples;
+        calibrationDurationMultiplier = summary.durationMultiplier;
+        calibrationExecutionMultiplier = summary.executionMultiplier;
+        calibrationProfitMultiplier = summary.profitMultiplier;
+        calibrationModificationRate = summary.modificationRate;
+        if (!config.enableSelfCalibration()) calibrationStatus = "Disabled";
+        else if (summary.samples < Math.max(1, config.calibrationWarmupSamples())) {
+            calibrationStatus = "Learning " + summary.samples + "/" + Math.max(1, config.calibrationWarmupSamples());
+        } else calibrationStatus = "Active";
+    }
+
+    private double calibrationLearningRate() {
+        return clamp(config.calibrationLearningRate(), 0.01, 1.0);
     }
 
     private int remainingLimit(int id, int limit) {
@@ -671,9 +758,7 @@ public class KspGEFlipperScript extends Script {
     private Set<String> itemSet(String raw) {
         if (raw == null || raw.isBlank()) return Collections.emptySet();
         Set<String> out = new HashSet<>();
-        for (String item : raw.split(",")) {
-            if (!item.isBlank()) out.add(item.trim().toLowerCase(Locale.ROOT));
-        }
+        for (String item : raw.split(",")) if (!item.isBlank()) out.add(item.trim().toLowerCase(Locale.ROOT));
         return out;
     }
 
@@ -726,20 +811,18 @@ public class KspGEFlipperScript extends Script {
     }
 
     private void telemetry(String event, Flip flip, int qty, int price, long value) {
-        log.info("KSP_GE event={} suggestion={} itemId={} item=\"{}\" type={} qty={} price={} value={} confidence={} expectedMinutes={} expectedGpPerHour={}",
+        log.info("KSP_GE event={} suggestion={} itemId={} item=\"{}\" type={} qty={} price={} value={} confidence={} expectedMinutes={} expectedGpPerHour={} predictedProfit={} realizedProfit={} modifications={}",
                 event, flip.suggestionId, flip.item.id, flip.item.name, flip.type, qty, price, value,
                 String.format(Locale.ROOT, "%.3f", flip.confidence),
-                String.format(Locale.ROOT, "%.1f", flip.expectedMinutes), Math.round(flip.expectedGpPerHour));
+                String.format(Locale.ROOT, "%.1f", flip.expectedMinutes), Math.round(flip.expectedGpPerHour),
+                flip.predictedProfit, flip.realizedProfit, flip.reprices);
     }
 
     private static int clamp(int value, int min, int max) { return Math.max(min, Math.min(max, value)); }
     private static double clamp(double value, double min, double max) { return Math.max(min, Math.min(max, value)); }
     public static Duration runtime() { return Duration.ofMillis(Math.max(0, System.currentTimeMillis() - started)); }
 
-    private enum CandidateType {
-        NORMAL,
-        DUMP
-    }
+    private enum CandidateType { NORMAL, DUMP }
 
     private static final class RiskProfile {
         final double maxItemExposure;
@@ -767,6 +850,10 @@ public class KspGEFlipperScript extends Script {
             this.uncertaintyPct = uncertaintyPct;
             this.confidence = confidence;
         }
+
+        Forecast adjusted(double multiplier) {
+            return new Forecast(lowMean, highMean, uncertaintyPct, clamp(confidence * multiplier, 0.10, 0.97));
+        }
     }
 
     private static final class Flip {
@@ -781,10 +868,13 @@ public class KspGEFlipperScript extends Script {
         int reprices;
         long buySpent;
         long changed = System.currentTimeMillis();
+        long predictedProfit;
+        long realizedProfit;
         double entryUtility;
         double expectedMinutes;
         double expectedGpPerHour;
         double confidence;
+        double executionProbability;
         boolean selling;
         boolean pendingBuyReprice;
         boolean abortRequested;
@@ -794,6 +884,11 @@ public class KspGEFlipperScript extends Script {
         double pendingExpectedMinutes;
         double pendingExpectedGpPerHour;
         double pendingConfidence;
+        double pendingExecutionProbability;
+        long pendingPredictedProfit;
+        int sellOfferAccountedQty;
+        long sellOfferAccountedValue;
+        int lastActualSellPrice;
 
         Flip(Candidate candidate) {
             item = candidate.item;
@@ -801,10 +896,12 @@ public class KspGEFlipperScript extends Script {
             buyPrice = candidate.buy;
             sellPrice = candidate.sell;
             requestedQty = candidate.qty;
+            predictedProfit = candidate.profit;
             entryUtility = candidate.utility;
             expectedMinutes = candidate.expectedMinutes;
             expectedGpPerHour = candidate.gpPerHour;
             confidence = candidate.confidence;
+            executionProbability = candidate.executionProbability;
         }
 
         void applyPendingBuyPlan() {
@@ -815,6 +912,8 @@ public class KspGEFlipperScript extends Script {
             expectedMinutes = pendingExpectedMinutes;
             expectedGpPerHour = pendingExpectedGpPerHour;
             confidence = pendingConfidence;
+            executionProbability = pendingExecutionProbability;
+            predictedProfit = pendingPredictedProfit;
             clearPendingBuyPlan();
         }
 
@@ -826,6 +925,13 @@ public class KspGEFlipperScript extends Script {
             pendingExpectedMinutes = 0;
             pendingExpectedGpPerHour = 0;
             pendingConfidence = 0;
+            pendingExecutionProbability = 0;
+            pendingPredictedProfit = 0;
+        }
+
+        void beginSellOffer() {
+            sellOfferAccountedQty = 0;
+            sellOfferAccountedValue = 0;
         }
     }
 
@@ -848,16 +954,21 @@ public class KspGEFlipperScript extends Script {
         final int volume;
         final long net;
         final long profit;
+        final long rawProfit;
         final double roi;
         final double expectedMinutes;
         final double gpPerHour;
         final double confidence;
         final double executionProbability;
         final double utility;
+        final int calibrationSamples;
+        final double durationMultiplier;
+        final double executionMultiplier;
+        final double profitMultiplier;
 
         Candidate(Item item, CandidateType type, int buy, int sell, int qty, long net, double roi, long profit,
-                  int volume, double expectedMinutes, double gpPerHour, double confidence,
-                  double executionProbability, double utility) {
+                  long rawProfit, int volume, double expectedMinutes, double gpPerHour, double confidence,
+                  double executionProbability, double utility, KspGEFlipperCalibration.Adjustment adjustment) {
             this.item = item;
             this.type = type;
             this.buy = buy;
@@ -866,12 +977,17 @@ public class KspGEFlipperScript extends Script {
             this.net = net;
             this.roi = roi;
             this.profit = profit;
+            this.rawProfit = rawProfit;
             this.volume = volume;
             this.expectedMinutes = expectedMinutes;
             this.gpPerHour = gpPerHour;
             this.confidence = confidence;
             this.executionProbability = executionProbability;
             this.utility = utility;
+            this.calibrationSamples = adjustment.samples;
+            this.durationMultiplier = adjustment.durationMultiplier;
+            this.executionMultiplier = adjustment.executionMultiplier;
+            this.profitMultiplier = adjustment.profitMultiplier;
         }
     }
 

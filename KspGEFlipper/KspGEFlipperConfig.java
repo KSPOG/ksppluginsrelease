@@ -25,6 +25,9 @@ public interface KspGEFlipperConfig extends Config {
     @ConfigSection(name = "Execution", description = "Offer pricing, reevaluation and hysteresis", position = 3)
     String execution = "execution";
 
+    @ConfigSection(name = "Learning", description = "Persistent self-calibration from actual GE outcomes", position = 4)
+    String learning = "learning";
+
     @ConfigItem(keyName = "walkToGe", name = "Walk to GE", description = "Walk to the Grand Exchange when needed", position = 0, section = trading)
     default boolean walkToGe() { return true; }
 
@@ -58,13 +61,13 @@ public interface KspGEFlipperConfig extends Config {
     @ConfigItem(keyName = "dumpDropPercent", name = "Dump drop threshold %", description = "Minimum latest-low deviation below the 1h low average before an item can be treated as a dump", position = 3, section = strategy)
     default double dumpDropPercent() { return 2.5; }
 
-    @ConfigItem(keyName = "dumpMinPredictedProfit", name = "Min dump profit", description = "Minimum estimated net profit for a dump-recovery candidate", position = 4, section = strategy)
+    @ConfigItem(keyName = "dumpMinPredictedProfit", name = "Min dump profit", description = "Minimum calibrated net profit for a dump-recovery candidate", position = 4, section = strategy)
     default int dumpMinPredictedProfit() { return 5_000; }
 
     @ConfigItem(keyName = "minNetRoi", name = "Min net ROI %", description = "Minimum ROI after GE tax", position = 0, section = market)
     default double minNetRoi() { return 0.30; }
 
-    @ConfigItem(keyName = "minTradeProfit", name = "Min trade profit", description = "Minimum estimated profit for the sized normal flip", position = 1, section = market)
+    @ConfigItem(keyName = "minTradeProfit", name = "Min trade profit", description = "Minimum calibrated expected profit for the sized normal flip", position = 1, section = market)
     default int minTradeProfit() { return 1_000; }
 
     @ConfigItem(keyName = "minExpectedGpPerHour", name = "Min expected GP/h", description = "Optional execution-adjusted GP/hour floor. Zero disables this filter.", position = 2, section = market)
@@ -90,4 +93,16 @@ public interface KspGEFlipperConfig extends Config {
 
     @ConfigItem(keyName = "sellRepricePercent", name = "Sell reprice delta %", description = "Minimum tax-safe sell-target change required before cancelling and relisting a stale sell", position = 4, section = execution)
     default double sellRepricePercent() { return 0.10; }
+
+    @ConfigItem(keyName = "enableSelfCalibration", name = "Enable self-calibration", description = "Use completed/aborted flips to calibrate duration, execution probability, confidence and realized-profit expectations", position = 0, section = learning)
+    default boolean enableSelfCalibration() { return true; }
+
+    @ConfigItem(keyName = "calibrationWarmupSamples", name = "Warm-up flips", description = "Number of finished outcomes required before learned corrections affect recommendations", position = 1, section = learning)
+    default int calibrationWarmupSamples() { return 8; }
+
+    @ConfigItem(keyName = "calibrationLearningRate", name = "Learning rate", description = "EWMA update rate for new outcomes. Lower values adapt more slowly and are less noisy.", position = 2, section = learning)
+    default double calibrationLearningRate() { return 0.12; }
+
+    @ConfigItem(keyName = "calibrationMaxAdjustmentPercent", name = "Max learned adjustment %", description = "Hard bound around the deterministic model for learned duration/execution/profit corrections", position = 3, section = learning)
+    default double calibrationMaxAdjustmentPercent() { return 35.0; }
 }
