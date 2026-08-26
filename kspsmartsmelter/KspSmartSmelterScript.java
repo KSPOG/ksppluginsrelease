@@ -17,13 +17,11 @@ import net.runelite.client.plugins.microbot.util.grandexchange.GrandExchangeActi
 import net.runelite.client.plugins.microbot.util.grandexchange.GrandExchangeRequest;
 import net.runelite.client.plugins.microbot.util.grandexchange.Rs2GrandExchange;
 import net.runelite.client.plugins.microbot.util.inventory.Rs2Inventory;
-import net.runelite.client.plugins.microbot.util.keyboard.Rs2Keyboard;
 import net.runelite.client.plugins.microbot.util.walker.Rs2Walker;
 import net.runelite.client.plugins.microbot.util.widget.Rs2Widget;
 import net.runelite.client.plugins.microbot.util.world.Rs2WorldUtil;
 
 import javax.inject.Inject;
-import java.awt.event.KeyEvent;
 import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
@@ -124,7 +122,6 @@ public class KspSmartSmelterScript extends Script {
         if (newScore >= required && !hasOneCycleInInventory(selectedQuote.getRoute())) {
             selectedQuote = best;
         } else {
-            // Refresh the price quote for the current route if it is still in the eligible list.
             selectedQuote = quotes.stream()
                     .filter(q -> q.getRoute() == selectedQuote.getRoute())
                     .findFirst()
@@ -260,59 +257,58 @@ public class KspSmartSmelterScript extends Script {
     }
 
     private boolean openWorkBank() {
+        if (Rs2Bank.isOpen()) {
+            return true;
+        }
+
         FurnaceLocation location = config.furnaceLocation();
         state = SmartSmelterState.WALKING_TO_BANK;
+        Microbot.status = "Opening " + location.getDisplayName() + " bank";
+
+        // Interact first when a bank is already loaded/reachable in the selected area.
+        if (Rs2Bank.openBank() && sleepUntil(Rs2Bank::isOpen, 2500)) {
+            return true;
+        }
 
         if (location != FurnaceLocation.CURRENT_AREA && location.getBankPoint() != null) {
             Microbot.status = "Walking to " + location.getDisplayName() + " bank";
-            Rs2Walker.walkTo(location.getBankPoint());
+            Rs2Walker.walkTo(location.getBankPoint(), 4);
         }
-
-        if (!Rs2Bank.isOpen()) {
-            Rs2Bank.openBank();
-        }
-
-        return sleepUntil(Rs2Bank::isOpen, 8000);
+        return false;
     }
 
     private void smeltTrip() {
         SmeltRoute route = selectedQuote.getRoute();
         state = SmartSmelterState.WALKING_TO_FURNACE;
-
         FurnaceLocation location = config.furnaceLocation();
-        if (location != FurnaceLocation.CURRENT_AREA && location.getFurnacePoint() != null) {
-            Microbot.status = "Walking to " + location.getDisplayName() + " furnace";
-            Rs2Walker.walkTo(location.getFurnacePoint());
-        }
-
-        Rs2TileObjectModel furnace = Microbot.getRs2TileObjectCache()
-                .query()
-                .withName("Furnace")
-                .nearestOnClientThread();
-
-        if (furnace == null) {
-            Microbot.status = "Cannot find Furnace";
-            sleep(1000);
-            return;
-        }
 
         int beforeOutput = Rs2Inventory.itemQuantity(route.getOutputId());
         int beforeCycles = inventoryCycles(route);
-        if (!furnace.click("Smelt")) {
-            Microbot.status = "Could not interact with Furnace";
-            return;
+
+        // Reuse an already-open product/smithing widget instead of clicking the furnace again.
+        if (!isSmeltingInterfaceOpen(route)) {
+            Rs2TileObjectModel furnace = findConfiguredFurnace(location);
+            if (furnace == null) {
+                if (location != FurnaceLocation.CURRENT_AREA && location.getFurnacePoint() != null) {
+                    Microbot.status = "Walking to " + location.getDisplayName() + " furnace";
+                    Rs2Walker.walkTo(location.getFurnacePoint(), 4);
+                } else {
+                    Microbot.status = "Cannot find Furnace";
+                }
+                return;
+            }
+
+            Microbot.status = "Opening furnace interface";
+            if (!furnace.click("Smelt")) {
+                Microbot.status = "Could not interact with Furnace";
+                return;
+            }
         }
 
         state = SmartSmelterState.SMELTING;
         Microbot.status = "Smelting " + route.getOutputName();
 
-        boolean started;
-        if (route.isCannonballs()) {
-            started = startCannonballs();
-        } else {
-            started = startNormalBar(route);
-        }
-
+        boolean started = route.isCannonballs() ? startCannonballs() : startNormalBar(route);
         if (!started) {
             Microbot.status = "Could not start " + route.getOutputName();
             return;
@@ -334,6 +330,25 @@ public class KspSmartSmelterScript extends Script {
         Microbot.status = "Trip complete: " + route.getOutputName();
     }
 
+    private Rs2TileObjectModel findConfiguredFurnace(FurnaceLocation location) {
+        if (location != FurnaceLocation.CURRENT_AREA && location.getFurnacePoint() != null) {
+            return Microbot.getRs2TileObjectCache().query()
+                    .withName("Furnace")
+                    .within(location.getFurnacePoint(), 8)
+                    .nearestOnClientThread();
+        }
+        return Microbot.getRs2TileObjectCache().query()
+                .withName("Furnace")
+                .nearestOnClientThread();
+    }
+
+    private boolean isSmeltingInterfaceOpen(SmeltRoute route) {
+        if (route.isCannonballs()) {
+            return Rs2Widget.getWidget(CANNONBALL_INTERFACE) != null || Rs2Widget.hasWidget("Cannonball");
+        }
+        return Rs2Widget.isSmithingWidgetOpen() || Rs2Widget.isProductionWidgetOpen();
+    }
+
     private boolean startCannonballs() {
         if (!sleepUntil(() ->
                 Rs2Widget.getWidget(CANNONBALL_INTERFACE) != null
@@ -350,8 +365,18 @@ public class KspSmartSmelterScript extends Script {
     }
 
     private boolean startNormalBar(SmeltRoute route) {
-        if (!sleepUntil(Rs2Widget::isSmithingWidgetOpen, 5000)) {
+        if (!sleepUntil(() -> Rs2Widget.isSmithingWidgetOpen() || Rs2Widget.isProductionWidgetOpen(), 5000)) {
             return false;
+        }
+
+        // The generic product dialogue (SKILLMULTI) is separate from the Smithing widget.
+        if (Rs2Widget.isProductionWidgetOpen()) {
+            Microbot.status = "Selecting " + route.getOutputName() + " / All";
+            Rs2Widget.enableQuantityOption("All");
+            sleep(100, 180);
+            if (Rs2Widget.handleProcessingInterface(route.getOutputName())) {
+                return true;
+            }
         }
 
         Widget widget = findSmeltActionWidget(route);
@@ -368,11 +393,12 @@ public class KspSmartSmelterScript extends Script {
 
     private Widget findSmeltActionWidget(SmeltRoute route) {
         return Microbot.getClientThread().runOnClientThreadOptional(() -> {
-            Widget root = Microbot.getClient().getWidget(InterfaceID.SMITHING, 0);
-            if (root == null) {
-                return null;
+            Widget production = Microbot.getClient().getWidget(InterfaceID.SKILLMULTI, 0);
+            Widget found = findSmeltActionWidgetRecursive(production, route);
+            if (found != null) {
+                return found;
             }
-            return findSmeltActionWidgetRecursive(root, route);
+            return findSmeltActionWidgetRecursive(Microbot.getClient().getWidget(InterfaceID.SMITHING, 0), route);
         }).orElse(null);
     }
 
