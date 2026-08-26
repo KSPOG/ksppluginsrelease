@@ -1,0 +1,10 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "ksp-ge-flipper-relay",
+  "main": "src/index.js",
+  "compatibility_date": "2026-08-27",
+  "workers_dev": true,
+  "secrets": {
+    "required": ["ORIGIN_URL", "CLIENT_API_KEY", "ORIGIN_API_KEY"]
+  }
+}

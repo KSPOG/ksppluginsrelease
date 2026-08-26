@@ -72,6 +72,10 @@ The compose deployment starts PostgreSQL 17 and the backend on port `8181`.
 - `GET /v1/portfolio?account=...`
 - `GET /v1/metrics`
 
+## Cloudflare Worker relay
+
+The Java server cannot run inside a Cloudflare Worker. To give the plugin a stable HTTPS endpoint while keeping the server API key off clients, deploy the Worker relay in [`cloudflare-worker`](cloudflare-worker/README.md). It validates a plugin-specific key and injects the server's `KSP_API_KEY` only when forwarding to the HTTPS Java-server origin.
+
 ## Replay harness
 
 Input CSV columns:

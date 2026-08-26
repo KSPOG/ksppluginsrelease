@@ -1,0 +1,4 @@
+# Do not commit a real .dev.vars file.
+ORIGIN_URL=https://your-public-java-server.example.com
+CLIENT_API_KEY=generate-a-long-random-plugin-key
+ORIGIN_API_KEY=the-value-of-KSP_API_KEY-on-the-java-server
