@@ -53,6 +53,7 @@ public class KspBryophytaScript extends Script {
     private static final int VARROCK_ALTAR_OBJECT_ID = 14860;
 
     private static final int LOOP_DELAY_MS = 100;
+    private static final int POST_KILL_EMPTY_SCANS = 30;
     private static final long LAIR_ENTRY_TRANSITION_TIMEOUT_MS = 10_000L;
     private static final long QUICK_EXIT_TRANSITION_TIMEOUT_MS = 8_000L;
     private static final long GROWTHLING_ATTACK_RETRY_MS = 3_000L;
@@ -677,7 +678,7 @@ public class KspBryophytaScript extends Script {
             } else if (System.currentTimeMillis() - manholeDescentStartedAt > MANHOLE_TRANSITION_TIMEOUT_MS) {
                 manholeDescentPending = false;
                 setStatus("Sewer transition did not occur - rechecking manhole state...");
-            } else setStatus("Climb-down sent - checking for underground region...");
+            } else setStatus("Climb-down sent - checking for sewer region...");
             return;
         }
         if (player.distanceTo(VARROCK_MANHOLE_APPROACH) > 1) {
@@ -1034,7 +1035,7 @@ public class KspBryophytaScript extends Script {
         kills++;
         killRegisteredForCycle = true;
         bossMissingScans = postKillEmptyScans = 0;
-        setState(BryophytaState.LOOTING, "Bryophyta defeated - checking ground drops.");
+        setState(BryophytaState.LOOTING, "Bryophyta defeated - waiting for ground drops.");
         Rs2Prayer.disableAllPrayers();
     }
 
@@ -1046,8 +1047,8 @@ public class KspBryophytaScript extends Script {
     private void handlePostKill(long now) {
         if (config.lootBossDrops()) {
             if (attemptBossLoot()) { postKillEmptyScans = 0; return; }
-            if (++postKillEmptyScans < 2) {
-                setState(BryophytaState.LOOTING, "No boss ground item visible - rechecking cache...");
+            if (++postKillEmptyScans < POST_KILL_EMPTY_SCANS) {
+                setState(BryophytaState.LOOTING, "Waiting for Bryophyta drops (" + postKillEmptyScans + "/" + POST_KILL_EMPTY_SCANS + ")...");
                 return;
             }
         }
@@ -1072,7 +1073,8 @@ public class KspBryophytaScript extends Script {
         Rs2TileItemModel item = Microbot.getRs2TileItemCache().query().fromWorldView().withName(itemName).within(8).nearestOnClientThread();
         if (item == null || !item.isLootAble()) return false;
         status = "Looting " + itemName + "...";
-        return item.pickup();
+        item.pickup();
+        return true;
     }
 
     private void handleQuickExitReset(long now) {
