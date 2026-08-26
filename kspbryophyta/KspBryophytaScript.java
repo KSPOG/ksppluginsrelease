@@ -302,12 +302,12 @@ public class KspBryophytaScript extends Script {
 
     private void maintainTravelPrayer() {
         WorldPoint player = Rs2Player.getWorldLocation();
-        boolean underground = isUnderground(player);
-        boolean entering = lairEntryPending || state == BryophytaState.ENTERING_LAIR;
-        boolean atGate = underground && objectVisible(BRYOPHYTA_GATE_OBJECT_ID, BRYOPHYTA_SEWER_ENTRANCE, 8);
-        if (config.protectFromMagic() && !Rs2Prayer.isOutOfPrayer() && (atGate || entering)) {
+        boolean atGate = player != null && isUnderground(player)
+                && player.distanceTo(BRYOPHYTA_SEWER_ENTRANCE) <= 8
+                && objectVisible(BRYOPHYTA_GATE_OBJECT_ID, BRYOPHYTA_SEWER_ENTRANCE, 8);
+        if (config.protectFromMagic() && !Rs2Prayer.isOutOfPrayer() && atGate) {
             Rs2Prayer.toggle(Rs2PrayerEnum.PROTECT_MAGIC, true);
-        } else if (!entering && !atGate && Rs2Prayer.isPrayerActive(Rs2PrayerEnum.PROTECT_MAGIC)) {
+        } else if (!atGate && Rs2Prayer.isPrayerActive(Rs2PrayerEnum.PROTECT_MAGIC)) {
             Rs2Prayer.toggle(Rs2PrayerEnum.PROTECT_MAGIC, false);
         }
     }
