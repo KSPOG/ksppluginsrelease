@@ -47,12 +47,15 @@ public class KspBryophytaScript extends Script {
     static final int GROWTHLING_NPC_ID = 8194;
     private static final int BRYOPHYTA_CHEST_OBJECT_ID = 56378;
     private static final int BRYOPHYTA_GATE_OBJECT_ID = 32534;
+    private static final int BRYOPHYTA_EXIT_OBJECT_ID = 32535;
     private static final int VARROCK_MANHOLE_CLOSED_OBJECT_ID = 881;
     private static final int VARROCK_MANHOLE_OPEN_OBJECT_ID = 882;
     private static final int VARROCK_ALTAR_OBJECT_ID = 14860;
 
     private static final int LOOP_DELAY_MS = 100;
     private static final long LAIR_ENTRY_TRANSITION_TIMEOUT_MS = 10_000L;
+    private static final long QUICK_EXIT_TRANSITION_TIMEOUT_MS = 8_000L;
+    private static final long GROWTHLING_ATTACK_RETRY_MS = 3_000L;
     private static final long CHEST_OPEN_TIMEOUT_MS = 6_000L;
     private static final long ALTAR_INTERACTION_TIMEOUT_MS = 6_000L;
     private static final long MANHOLE_TRANSITION_TIMEOUT_MS = 8_000L;
@@ -99,13 +102,14 @@ public class KspBryophytaScript extends Script {
     private volatile boolean growthlingWaveActive;
     private volatile int growthlingEmptyScans;
     private volatile int activeGrowthlingIndex = -1;
-    private volatile int spawnedGrowthlingIndex = -1;
-    private volatile int pendingGrowthlingAttackIndex = -1;
+    private volatile long growthlingAttackSentAt;
     private volatile boolean bossAttackPending;
     private volatile boolean lairEntryPending;
     private volatile String lastGateDialogueFingerprint = "";
     private volatile boolean gateContinueHandled;
     private long lairEntryStartedAt;
+    private boolean quickExitPending;
+    private long quickExitStartedAt;
     private boolean chestLootPending;
     private int chestKeysBeforeOpen;
     private long chestOpenRequestedAt;
@@ -154,12 +158,13 @@ public class KspBryophytaScript extends Script {
         entryFailures = altarFailures = bossMissingScans = postKillEmptyScans = 0;
         growthlingWaveActive = false;
         growthlingEmptyScans = 0;
-        activeGrowthlingIndex = spawnedGrowthlingIndex = pendingGrowthlingAttackIndex = -1;
+        activeGrowthlingIndex = -1;
+        growthlingAttackSentAt = 0L;
         bossAttackPending = false;
-        chestOpenRequestedAt = chestOpenConfirmedAt = 0L;
+        quickExitStartedAt = chestOpenRequestedAt = chestOpenConfirmedAt = 0L;
         chestKeysBeforeOpen = 0;
         bossWasPresent = killRegisteredForCycle = prayerRestoredAfterBank = loadoutVerified = false;
-        chestLootPending = altarInteractionPending = manholeDescentPending = manholeOpenPending = false;
+        quickExitPending = chestLootPending = altarInteractionPending = manholeDescentPending = manholeOpenPending = false;
         webSlashPending = teleportPending = bankClosePending = false;
         bankEpochBeforeOpen = -1;
         teleportStartedAt = 0L;
@@ -205,6 +210,7 @@ public class KspBryophytaScript extends Script {
     private void handleInsideLair() {
         long now = System.currentTimeMillis();
         if (chestLootPending) { handleChestLoot(now); return; }
+        if (quickExitPending) { handleQuickExitReset(now); return; }
         if (killRegisteredForCycle) { handlePostKill(now); return; }
         if (restockRequired || shouldEmergencyRestock()) {
             restockRequired = true;
@@ -241,9 +247,8 @@ public class KspBryophytaScript extends Script {
 
     private void handleOutsideLair() {
         WorldPoint player = Rs2Player.getWorldLocation();
-        if (player == null) {
-            return;
-        }
+        if (player == null) return;
+        if (quickExitPending) completeQuickExitReset();
 
         if (restockRequired) {
             if (isUnderground(player)) {
@@ -255,9 +260,7 @@ public class KspBryophytaScript extends Script {
             return;
         }
 
-        if (!Rs2Bank.isOpen()) {
-            maintainTravelPrayer();
-        }
+        if (!Rs2Bank.isOpen()) maintainTravelPrayer();
 
         if (!prayerRestoredAfterBank) {
             if (isUnderground(player)) {
@@ -790,13 +793,7 @@ public class KspBryophytaScript extends Script {
     }
 
     public void onClientTick() {
-        if (!isRunning()) return;
-        if (lairEntryPending) serviceLairGateWidgetNow();
-        if (spawnedGrowthlingIndex >= 0 && state != BryophytaState.STOPPED) {
-            Rs2NpcModel spawned = findGrowthlingByIndex(spawnedGrowthlingIndex);
-            if (spawned != null && isGrowthlingActionable(spawned)
-                    && Rs2Equipment.isWearing(normalize(config.growthlingToolName()), true)) handleGrowthlings(spawned);
-        }
+        if (isRunning() && lairEntryPending) serviceLairGateWidgetNow();
     }
 
     private boolean serviceLairGateWidgetNow() {
@@ -869,28 +866,22 @@ public class KspBryophytaScript extends Script {
             return;
         }
         int index = growthling.getIndex();
+        long now = System.currentTimeMillis();
         markGrowthlingSeen();
-        int interacting = interactingGrowthlingIndex();
-        if (interacting >= 0) {
-            activeGrowthlingIndex = interacting;
-            pendingGrowthlingAttackIndex = -1;
-            if (spawnedGrowthlingIndex == interacting) spawnedGrowthlingIndex = -1;
-            setStatus("Growthling engaged - checking death/HP state...");
-            return;
-        }
-        if (pendingGrowthlingAttackIndex == index) {
-            if (Rs2Player.isAnimating() || Rs2Player.isMoving()) return;
-            pendingGrowthlingAttackIndex = -1;
-        }
-        setStatus("Attacking visible Growthling " + index + "...");
-        if (growthling.click("Attack")) {
-            activeGrowthlingIndex = index;
-            pendingGrowthlingAttackIndex = index;
-            if (spawnedGrowthlingIndex == index) spawnedGrowthlingIndex = -1;
+        if (activeGrowthlingIndex == index && growthlingAttackSentAt > 0L) {
+            if (isPlayerInteractingWith(growthling) || Rs2Player.isMoving() || Rs2Player.isAnimating()
+                    || now - growthlingAttackSentAt < GROWTHLING_ATTACK_RETRY_MS) {
+                setStatus("Growthling " + index + " engaged - waiting for kill...");
+                return;
+            }
+            setStatus("Growthling " + index + " attack stalled - retrying...");
         } else {
-            activeGrowthlingIndex = -1;
-            pendingGrowthlingAttackIndex = -1;
+            activeGrowthlingIndex = index;
+            growthlingAttackSentAt = 0L;
+            setStatus("Attacking Growthling " + index + "...");
         }
+        growthling.click("Attack");
+        growthlingAttackSentAt = now;
     }
 
     private boolean equipGrowthlingTool() {
@@ -1060,6 +1051,7 @@ public class KspBryophytaScript extends Script {
                 return;
             }
         }
+        if (Rs2Inventory.itemQuantity(MOSSY_KEY) <= 0) { handleQuickExitReset(now); return; }
         if (config.openRewardChest()) { handleChest(now); return; }
         setState(BryophytaState.WAITING_FOR_RESPAWN, "Waiting for next Bryophyta cycle...");
         bossWasPresent = killRegisteredForCycle = false;
@@ -1083,9 +1075,45 @@ public class KspBryophytaScript extends Script {
         return item.pickup();
     }
 
+    private void handleQuickExitReset(long now) {
+        if (quickExitPending) {
+            if (!isInstancedRegion()) {
+                completeQuickExitReset();
+                return;
+            }
+            if (now - quickExitStartedAt > QUICK_EXIT_TRANSITION_TIMEOUT_MS) {
+                quickExitPending = false;
+                quickExitStartedAt = 0L;
+                setStatus("Quick-exit transition timed out - retrying Rock Pile...");
+            } else setState(BryophytaState.WAITING_FOR_RESPAWN, "Quick-exit sent - waiting for Varrock Sewers...");
+            return;
+        }
+        setState(BryophytaState.WAITING_FOR_RESPAWN, "No Mossy key - using Quick-exit Rock Pile...");
+        if (!Microbot.getRs2TileObjectCache().query().withId(BRYOPHYTA_EXIT_OBJECT_ID).interact("Quick-exit")) {
+            setStatus("Waiting for Quick-exit Rock Pile 32535...");
+            return;
+        }
+        quickExitPending = true;
+        quickExitStartedAt = now;
+        setStatus("Quick-exit sent - waiting for Varrock Sewers...");
+    }
+
+    private void completeQuickExitReset() {
+        quickExitPending = false;
+        quickExitStartedAt = 0L;
+        bossWasPresent = killRegisteredForCycle = false;
+        postKillEmptyScans = 0;
+        growthlingWaveActive = false;
+        growthlingEmptyScans = 0;
+        activeGrowthlingIndex = -1;
+        growthlingAttackSentAt = 0L;
+        clearLairEntryPending();
+        setState(BryophytaState.WALKING_TO_LAIR, "Quick-exit complete - re-entering Bryophyta.");
+    }
+
     private void handleChest(long now) {
         chestKeysBeforeOpen = Rs2Inventory.itemQuantity(MOSSY_KEY);
-        if (chestKeysBeforeOpen <= 0) { finishChestCycle("No Mossy key available - waiting for Bryophyta respawn."); return; }
+        if (chestKeysBeforeOpen <= 0) { handleQuickExitReset(now); return; }
         if (!objectVisible(BRYOPHYTA_CHEST_OBJECT_ID, Rs2Player.getWorldLocation(), 20)) {
             setState(BryophytaState.OPENING_CHEST, "Waiting for reward chest 56378...");
             return;
@@ -1278,25 +1306,11 @@ public class KspBryophytaScript extends Script {
     }
 
     private Rs2NpcModel getNearestGrowthling() {
-        int interactingIndex = interactingGrowthlingIndex();
-        if (interactingIndex >= 0) {
-            Rs2NpcModel interacting = findGrowthlingByIndex(interactingIndex);
-            if (isGrowthlingActionable(interacting)) {
-                activeGrowthlingIndex = interactingIndex;
-                pendingGrowthlingAttackIndex = -1;
-                markGrowthlingSeen();
-                return interacting;
-            }
-        }
-        if (spawnedGrowthlingIndex >= 0) {
-            Rs2NpcModel spawned = findGrowthlingByIndex(spawnedGrowthlingIndex);
-            if (isGrowthlingActionable(spawned)) { markGrowthlingSeen(); return spawned; }
-            spawnedGrowthlingIndex = -1;
-        }
         if (activeGrowthlingIndex >= 0) {
             Rs2NpcModel active = findGrowthlingByIndex(activeGrowthlingIndex);
             if (isGrowthlingActionable(active)) { markGrowthlingSeen(); return active; }
-            activeGrowthlingIndex = pendingGrowthlingAttackIndex = -1;
+            activeGrowthlingIndex = -1;
+            growthlingAttackSentAt = 0L;
         }
         Rs2NpcModel next = Microbot.getRs2NpcCache().query().withId(GROWTHLING_NPC_ID).fromWorldView()
                 .where(this::isGrowthlingActionable).nearestOnClientThread();
@@ -1308,16 +1322,6 @@ public class KspBryophytaScript extends Script {
     private Rs2NpcModel findGrowthlingByIndex(int index) {
         return Microbot.getRs2NpcCache().query().withId(GROWTHLING_NPC_ID).fromWorldView()
                 .where(npc -> npc != null && npc.getIndex() == index).nearestOnClientThread();
-    }
-
-    private int interactingGrowthlingIndex() {
-        return Microbot.getClientThread().runOnClientThreadOptional(() -> {
-            if (Microbot.getClient() == null || Microbot.getClient().getLocalPlayer() == null) return -1;
-            net.runelite.api.Actor target = Microbot.getClient().getLocalPlayer().getInteracting();
-            if (!(target instanceof net.runelite.api.NPC)) return -1;
-            net.runelite.api.NPC npc = (net.runelite.api.NPC) target;
-            return npc.getId() == GROWTHLING_NPC_ID ? npc.getIndex() : -1;
-        }).orElse(-1);
     }
 
     private void markGrowthlingSeen() {
@@ -1333,22 +1337,23 @@ public class KspBryophytaScript extends Script {
         }
         growthlingWaveActive = false;
         growthlingEmptyScans = 0;
-        activeGrowthlingIndex = spawnedGrowthlingIndex = pendingGrowthlingAttackIndex = -1;
+        activeGrowthlingIndex = -1;
+        growthlingAttackSentAt = 0L;
         return false;
     }
 
     public void onGrowthlingSpawned(int index) {
         if (!isRunning()) return;
-        spawnedGrowthlingIndex = index;
         growthlingEmptyScans = 0;
         markGrowthlingSeen();
     }
 
     public void onGrowthlingDespawned(int index) {
         if (!isRunning()) return;
-        if (activeGrowthlingIndex == index) activeGrowthlingIndex = -1;
-        if (spawnedGrowthlingIndex == index) spawnedGrowthlingIndex = -1;
-        if (pendingGrowthlingAttackIndex == index) pendingGrowthlingAttackIndex = -1;
+        if (activeGrowthlingIndex == index) {
+            activeGrowthlingIndex = -1;
+            growthlingAttackSentAt = 0L;
+        }
         growthlingWaveActive = true;
     }
 
@@ -1360,9 +1365,12 @@ public class KspBryophytaScript extends Script {
 
     private boolean isGrowthlingActionable(Rs2NpcModel npc) { return npc != null && !isGrowthlingDeadOrDying(npc); }
 
+    private boolean isInstancedRegion() {
+        return Microbot.getClientThread().runOnClientThreadOptional(() -> Microbot.getClient() != null && Microbot.getClient().isInInstancedRegion()).orElse(false);
+    }
+
     private boolean isInsideLair() {
-        boolean instanced = Microbot.getClientThread().runOnClientThreadOptional(() -> Microbot.getClient() != null && Microbot.getClient().isInInstancedRegion()).orElse(false);
-        if (instanced) return true;
+        if (isInstancedRegion()) return true;
         if (getBryophyta() != null || getNearestGrowthling() != null) return true;
         return Microbot.getRs2TileObjectCache().query().withId(BRYOPHYTA_CHEST_OBJECT_ID).fromWorldView().within(30).nearestOnClientThread() != null;
     }
@@ -1389,9 +1397,9 @@ public class KspBryophytaScript extends Script {
     }
 
     private void resetTransitions() {
-        altarInteractionPending = manholeDescentPending = manholeOpenPending = lairEntryPending = false;
+        quickExitPending = altarInteractionPending = manholeDescentPending = manholeOpenPending = lairEntryPending = false;
         webSlashPending = bankClosePending = false;
-        altarInteractionStartedAt = manholeDescentStartedAt = lairEntryStartedAt = 0L;
+        quickExitStartedAt = altarInteractionStartedAt = manholeDescentStartedAt = lairEntryStartedAt = 0L;
         lastGateDialogueFingerprint = "";
         gateContinueHandled = false;
     }
