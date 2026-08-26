@@ -1,0 +1,119 @@
+name: Patch Bryophyta interruption handling
+
+on:
+  push:
+    branches:
+      - fix/bryophyta-interrupt-safe-bank
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/bryophyta-interrupt-safe-bank
+      - name: Apply targeted source patch
+        shell: python
+        run: |
+          from pathlib import Path
+
+          script = Path('kspbryophyta/KspBryophytaScript.java')
+          text = script.read_text(encoding='utf-8')
+
+          old = '''            } catch (Exception ex) {
+                Microbot.logStackTrace(getClass().getSimpleName(), ex);
+                failAndStop("Unexpected error: " + ex.getClass().getSimpleName());
+            }
+'''
+          new = '''            } catch (Exception ex) {
+                if (isInterruption(ex)) return;
+                Microbot.logStackTrace(getClass().getSimpleName(), ex);
+                failAndStop("Unexpected error: " + ex.getClass().getSimpleName());
+            }
+'''
+          assert old in text, 'scheduler catch block not found'
+          text = text.replace(old, new, 1)
+
+          old = '''            int epoch = Rs2Bank.getBankLiveEpoch();
+            boolean opened = Microbot.getRs2TileObjectCache().query().withName("Bank booth").within(10).interact("Bank");
+            if (!opened) {
+                Rs2NpcModel banker = Microbot.getRs2NpcCache().query().withName("Banker").fromWorldView().nearestOnClientThread();
+                opened = banker != null && banker.click("Bank");
+            }
+            if (opened) bankEpochBeforeOpen = epoch;
+'''
+          new = '''            int epoch = Rs2Bank.getBankLiveEpoch();
+            boolean opened = Rs2Bank.openBank();
+            if (opened) bankEpochBeforeOpen = epoch;
+'''
+          assert old in text, 'Varrock bank interaction block not found'
+          text = text.replace(old, new, 1)
+
+          old = '''    private static String normalize(String value) { return value == null ? "" : value.trim(); }
+    private void setState(BryophytaState newState, String newStatus) { state = newState; setStatus(newStatus); }
+
+    private void failAndStop(String reason) {
+'''
+          new = '''    private static String normalize(String value) { return value == null ? "" : value.trim(); }
+    private static boolean isInterruption(Throwable error) {
+        if (Thread.currentThread().isInterrupted()) return true;
+        for (Throwable cause = error; cause != null; cause = cause.getCause())
+            if (cause instanceof InterruptedException) return true;
+        return false;
+    }
+    private void setState(BryophytaState newState, String newStatus) { state = newState; setStatus(newStatus); }
+
+    private void failAndStop(String reason) {
+'''
+          assert old in text, 'helper insertion point not found'
+          text = text.replace(old, new, 1)
+
+          old = '''        Microbot.status = reason;
+        Microbot.showMessage("KSP Bryophyta: " + reason);
+        super.shutdown();
+        Rs2Prayer.disableAllPrayers();
+        state = BryophytaState.STOPPED;
+'''
+          new = '''        Microbot.status = reason;
+        Microbot.showMessage("KSP Bryophyta: " + reason);
+        Rs2Prayer.disableAllPrayers();
+        state = BryophytaState.STOPPED;
+        super.shutdown();
+'''
+          assert old in text, 'failAndStop shutdown ordering block not found'
+          text = text.replace(old, new, 1)
+
+          old = '''    @Override
+    public void shutdown() {
+        super.shutdown();
+        Rs2Prayer.disableAllPrayers();
+        if (state != BryophytaState.STOPPED) setStopped("Stopped.");
+    }
+'''
+          new = '''    @Override
+    public void shutdown() {
+        Rs2Prayer.disableAllPrayers();
+        if (state != BryophytaState.STOPPED) setStopped("Stopped.");
+        super.shutdown();
+    }
+'''
+          assert old in text, 'shutdown block not found'
+          text = text.replace(old, new, 1)
+          script.write_text(text, encoding='utf-8')
+
+          plugin = Path('kspbryophyta/KspBryophytaPlugin.java')
+          ptext = plugin.read_text(encoding='utf-8')
+          assert 'public static final String VERSION = "0.1.22";' in ptext, 'Bryophyta version changed unexpectedly'
+          plugin.write_text(ptext.replace('public static final String VERSION = "0.1.22";', 'public static final String VERSION = "0.1.23";', 1), encoding='utf-8')
+      - name: Commit patch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add kspbryophyta/KspBryophytaScript.java kspbryophyta/KspBryophytaPlugin.java
+          git diff --cached --quiet && exit 0
+          git commit -m "Fix Bryophyta client-thread interruption handling"
+          git push origin HEAD:fix/bryophyta-interrupt-safe-bank
