@@ -378,30 +378,41 @@ public class KspJewelryCrafterScript extends Script
         }
 
         long now = System.currentTimeMillis();
-        if (bankInteractionSentAt > 0L && now - bankInteractionSentAt < TARGET_INTERACTION_TIMEOUT_MS)
+        if (bankInteractionSentAt > 0L
+            && (Rs2Player.isMoving() || now - bankInteractionSentAt < TARGET_INTERACTION_TIMEOUT_MS))
         {
             status = Rs2Player.isMoving() ? "Approaching bank" : "Waiting for bank widget";
             return false;
         }
         bankInteractionSentAt = 0L;
 
-        status = openingStatus;
-        if (!Rs2Bank.openBank())
+        if (edgeville && distanceTo(EDGEVILLE_BANK) > EDGEVILLE_DIRECT_BANK_RADIUS)
         {
-            if (edgeville && distanceTo(EDGEVILLE_BANK) > EDGEVILLE_DIRECT_BANK_RADIUS && !Rs2Player.isMoving())
-            {
-                status = "Walking to Edgeville";
-                Rs2Walker.walkTo(EDGEVILLE_BANK, 10);
-            }
+            status = "Walking to Edgeville";
+            if (!Rs2Player.isMoving()) Rs2Walker.walkTo(EDGEVILLE_BANK, 10);
             return false;
         }
-        bankInteractionSentAt = now;
+
+        status = openingStatus;
+        long attemptStartedAt = System.currentTimeMillis();
+        bankInteractionSentAt = attemptStartedAt;
+        if (!Rs2Bank.openBank())
+        {
+            // Rs2Bank.openBank() sends the interaction before waiting up to 5 seconds.
+            // Keep the latch when it actually spent time waiting; clear it only for an immediate no-target failure.
+            if (System.currentTimeMillis() - attemptStartedAt < 750L) bankInteractionSentAt = 0L;
+            else bankInteractionSentAt = System.currentTimeMillis();
+            status = bankInteractionSentAt > 0L
+                ? (Rs2Player.isMoving() ? "Approaching bank" : "Waiting for bank widget")
+                : "Bank target not ready";
+            return false;
+        }
+        bankInteractionSentAt = 0L;
         if (!sleepUntil(this::bankWidgetOpen, 5_000))
         {
             status = "Waiting for bank widget";
             return false;
         }
-        bankInteractionSentAt = 0L;
         if (!sleepUntil(() -> Rs2Bank.verifyBankMirrorAfterOpen(false, epoch), 4_000))
         {
             status = "Waiting for bank contents";
@@ -646,7 +657,7 @@ public class KspJewelryCrafterScript extends Script
         if (!isJewelryProductionOpen() && furnaceInteractionSentAt > 0L)
         {
             long elapsed = System.currentTimeMillis() - furnaceInteractionSentAt;
-            if (elapsed < TARGET_INTERACTION_TIMEOUT_MS)
+            if (Rs2Player.isMoving() || elapsed < TARGET_INTERACTION_TIMEOUT_MS)
             {
                 status = Rs2Player.isMoving() ? "Approaching Edgeville furnace" : "Waiting for jewellery interface";
                 return;
