@@ -249,11 +249,13 @@ public class KspGEFlipperScript extends Script {
         accountSold(flip, details.getQuantitySold());
         if (flip.sold >= flip.boughtQty) return;
 
-        int target = sellPrice(flip);
+        int extraSteps = sellRepriceSteps(flip);
+        int target = sellPrice(flip, extraSteps);
         double deltaPct = Math.abs(percentChange(flip.sellPrice, target));
         if (target != flip.sellPrice && deltaPct >= Math.max(0, config.sellRepricePercent())) {
             status = "Repricing sell: " + flip.item.name;
             telemetry("SELL_MODIFY", flip, flip.boughtQty - flip.sold, target, 0);
+            flip.reprices += Math.max(0, extraSteps - 1);
             Rs2GrandExchange.cancelSpecificOffers(Collections.singletonList(slot), false);
             flip.changed = now;
             return;
@@ -586,12 +588,26 @@ public class KspGEFlipperScript extends Script {
     }
 
     private int sellPrice(Flip flip) {
+        return sellPrice(flip, 0);
+    }
+
+    private int sellPrice(Flip flip, int extraSteps) {
         Quote quote = market.quotes.get(flip.item.id);
+        int multiplier = Math.max(1, flip.reprices + 1 + Math.max(0, extraSteps));
         int target = quote == null || quote.high <= 0
                 ? flip.sellPrice
-                : quote.high - edge(quote.high) * Math.max(1, flip.reprices + 1);
+                : quote.high - edge(quote.high) * multiplier;
         long unitCost = Math.max(1, (flip.buySpent + flip.boughtQty - 1) / Math.max(1, flip.boughtQty));
         return Math.max(1, Math.max(target, minSellFor(unitCost, flip.item.name)));
+    }
+
+    private int sellRepriceSteps(Flip flip) {
+        Quote quote = market.quotes.get(flip.item.id);
+        int reference = quote == null || quote.high <= 0 ? Math.max(1, flip.sellPrice) : quote.high;
+        int baseEdge = Math.max(1, edge(reference));
+        long requiredDelta = Math.max(baseEdge, Math.round(Math.max(1, flip.sellPrice)
+                * Math.max(0, config.sellRepricePercent()) / 100.0));
+        return Math.max(1, (int) Math.ceil(requiredDelta / (double) baseEdge));
     }
 
     private void accountSold(Flip flip, int totalSold) {
