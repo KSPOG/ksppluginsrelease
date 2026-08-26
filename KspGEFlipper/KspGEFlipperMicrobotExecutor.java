@@ -154,6 +154,8 @@ final class KspGEFlipperMicrobotExecutor implements KspGEFlipperSuggestionExecut
 
     private boolean ensureCoins(long required) {
         if (Rs2Inventory.itemQuantity(COINS) >= required) return true;
+        collectCompletedSells();
+        if (Rs2Inventory.itemQuantity(COINS) >= required) return true;
         long deficit = required - Rs2Inventory.itemQuantity(COINS);
         if (deficit <= 0) return true;
         status = "Loading coins from bank";
@@ -167,6 +169,8 @@ final class KspGEFlipperMicrobotExecutor implements KspGEFlipperSuggestionExecut
 
     private boolean ensureItem(int itemId, int quantity) {
         if (Rs2Inventory.itemQuantity(itemId) >= quantity) return true;
+        collectCompletedBuys(itemId);
+        if (Rs2Inventory.itemQuantity(itemId) >= quantity) return true;
         int deficit = quantity - Rs2Inventory.itemQuantity(itemId);
         status = "Loading sale item from bank";
         if (Rs2GrandExchange.isOpen()) Rs2GrandExchange.closeExchange();
@@ -175,6 +179,34 @@ final class KspGEFlipperMicrobotExecutor implements KspGEFlipperSuggestionExecut
         sleep(150);
         Rs2Bank.closeBank();
         return ok && Rs2Inventory.itemQuantity(itemId) > 0;
+    }
+
+    private void collectCompletedSells() {
+        Map<GrandExchangeSlots, GrandExchangeOfferDetails> completed = Rs2GrandExchange.getCompletedOffers();
+        boolean hasSell = completed.values().stream().anyMatch(d -> d != null && d.isSelling() && d.getQuantitySold() > 0);
+        if (!hasSell || !ensureGe()) return;
+        status = "Collecting GE sale proceeds";
+        for (Map.Entry<GrandExchangeSlots, GrandExchangeOfferDetails> entry : completed.entrySet()) {
+            GrandExchangeOfferDetails d = entry.getValue();
+            if (d != null && d.isSelling() && d.getQuantitySold() > 0) {
+                Rs2GrandExchange.collectOffer(entry.getKey(), false);
+                sleep(100);
+            }
+        }
+    }
+
+    private void collectCompletedBuys(int itemId) {
+        Map<GrandExchangeSlots, GrandExchangeOfferDetails> completed = Rs2GrandExchange.getCompletedOffers();
+        boolean hasBuy = completed.values().stream().anyMatch(d -> d != null && !d.isSelling() && d.getItemId() == itemId && d.getQuantitySold() > 0);
+        if (!hasBuy || !ensureGe()) return;
+        status = "Collecting completed GE buy";
+        for (Map.Entry<GrandExchangeSlots, GrandExchangeOfferDetails> entry : completed.entrySet()) {
+            GrandExchangeOfferDetails d = entry.getValue();
+            if (d != null && !d.isSelling() && d.getItemId() == itemId && d.getQuantitySold() > 0) {
+                Rs2GrandExchange.collectOffer(entry.getKey(), false);
+                sleep(100);
+            }
+        }
     }
 
     private boolean ensureGe() {

@@ -42,7 +42,7 @@ public final class FileStore implements Store {
     @Override public void saveRecommendation(String accountKey, TradeSuggestion suggestion, Map<String,Double> features, StrategyPreferences preferences) {
         recommendations.put(suggestion.id(), suggestion); recommendationStatuses.put(suggestion.id(), "ISSUED"); append("recommendations.jsonl", Map.of("accountKey",accountKey,"suggestion",suggestion,"features",features,"preferences",preferences,"status","ISSUED"));
     }
-    @Override public Optional<TradeSuggestion> recommendation(UUID id) { return Optional.ofNullable(recommendations.get(id)); }
+    @Override public Optional<TradeSuggestion> recommendation(UUID id) { if(id==null)return Optional.empty(); return Optional.ofNullable(recommendations.get(id)); }
     @Override public void markRecommendationStatus(UUID id,String status){ if(id==null)return; recommendationStatuses.put(id,status); append("recommendation_status.jsonl",Map.of("id",id,"status",status,"at",java.time.Instant.now())); }
     @Override public String recommendationStatus(UUID id){ return id==null?"UNKNOWN":recommendationStatuses.getOrDefault(id,"UNKNOWN"); }
     @Override public Map<String,Long> recommendationActionCounts(){ Map<String,Long> out=new HashMap<>(); for(TradeSuggestion s:recommendations.values()) out.merge(s.type().name(),1L,Long::sum); return out; }
