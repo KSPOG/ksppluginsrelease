@@ -1,0 +1,46 @@
+name: GE Flipper Embedded Plugin
+
+on:
+  push:
+    paths:
+      - 'KspGEFlipper/**'
+      - '.github/workflows/ge-flipper-embedded.yml'
+  pull_request:
+    paths:
+      - 'KspGEFlipper/**'
+      - '.github/workflows/ge-flipper-embedded.yml'
+
+jobs:
+  compile:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout KSP sources
+        uses: actions/checkout@v4
+        with:
+          path: ksp
+
+      - name: Checkout Microbot
+        uses: actions/checkout@v4
+        with:
+          repository: chsami/Microbot
+          path: microbot
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Install GE Flipper sources into Microbot tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          target="microbot/runelite-client/src/main/java/net/runelite/client/plugins/microbot/kspgeflipper"
+          rm -rf "$target"
+          mkdir -p "$target"
+          cp ksp/KspGEFlipper/*.java "$target"/
+
+      - name: Compile Microbot client
+        working-directory: microbot
+        run: ./gradlew :client:compileJava --no-daemon --stacktrace

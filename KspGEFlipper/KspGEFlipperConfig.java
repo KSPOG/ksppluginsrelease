@@ -8,7 +8,7 @@ import net.runelite.client.config.ConfigSection;
 @ConfigGroup("kspgeflipper")
 public interface KspGEFlipperConfig extends Config {
     enum RiskLevel { LOW, MEDIUM, HIGH }
-    enum EngineMode { AUTO, SERVER, LOCAL }
+    enum EngineMode { AUTO, EMBEDDED, REMOTE, SERVER, LOCAL }
     enum ExecutionMode { MANUAL, AUTO }
 
     @ConfigSection(name = "Trading", description = "Capital, account and GE-slot allocation", position = 0)
@@ -21,7 +21,9 @@ public interface KspGEFlipperConfig extends Config {
     String execution = "execution";
     @ConfigSection(name = "Learning", description = "Persistent self-calibration from actual GE outcomes", position = 4)
     String learning = "learning";
-    @ConfigSection(name = "Backend", description = "Remote recommendation, persistence and portfolio service", position = 5)
+    @ConfigSection(name = "Embedded core", description = "In-process market history, forecasting, portfolio and calibration", position = 5)
+    String embedded = "embedded";
+    @ConfigSection(name = "Remote backend", description = "Optional shared backend for multi-client synchronization", position = 6)
     String backend = "backend";
 
     @ConfigItem(keyName = "walkToGe", name = "Walk to GE", description = "Walk to the Grand Exchange when needed", position = 0, section = trading)
@@ -91,9 +93,14 @@ public interface KspGEFlipperConfig extends Config {
     @ConfigItem(keyName = "calibrationMaxAdjustmentPercent", name = "Max learned adjustment %", description = "Hard local bound around deterministic execution estimates", position = 3, section = learning)
     default double calibrationMaxAdjustmentPercent() { return 35.0; }
 
-    @ConfigItem(keyName = "engineMode", name = "Engine mode", description = "AUTO uses the server when healthy and otherwise starts the local fallback", position = 0, section = backend)
-    default EngineMode engineMode() { return EngineMode.AUTO; }
-    @ConfigItem(keyName = "backendUrl", name = "Backend URL", description = "KSP GE Flipper server base URL", position = 1, section = backend)
+    @ConfigItem(keyName = "embeddedMarketPollSeconds", name = "Market refresh (s)", description = "How often embedded mode refreshes Wiki market snapshots", position = 0, section = embedded)
+    default int embeddedMarketPollSeconds() { return 30; }
+    @ConfigItem(keyName = "embeddedHistoryPoints", name = "History points / item", description = "Bounded 5-minute market-history points retained per liquid item in embedded mode (288 = about 24h)", position = 1, section = embedded)
+    default int embeddedHistoryPoints() { return 288; }
+
+    @ConfigItem(keyName = "engineMode", name = "Engine mode", description = "EMBEDDED runs the full backend inside the plugin. REMOTE/SERVER uses the optional shared service. AUTO prefers embedded and falls back to local.", position = 0, section = backend)
+    default EngineMode engineMode() { return EngineMode.EMBEDDED; }
+    @ConfigItem(keyName = "backendUrl", name = "Backend URL", description = "Optional KSP GE Flipper remote server base URL", position = 1, section = backend)
     default String backendUrl() { return "http://127.0.0.1:8181"; }
     @ConfigItem(keyName = "backendApiKey", name = "Backend API key", description = "Optional X-KSP-API-Key configured on the server", position = 2, section = backend)
     default String backendApiKey() { return ""; }
@@ -101,6 +108,6 @@ public interface KspGEFlipperConfig extends Config {
     default String accountKey() { return ""; }
     @ConfigItem(keyName = "backendPollSeconds", name = "Recommendation poll (s)", description = "How often account state is synchronized and a new recommendation is requested", position = 4, section = backend)
     default int backendPollSeconds() { return 3; }
-    @ConfigItem(keyName = "backendFallback", name = "Auto fallback", description = "In AUTO mode, use the local engine when the backend is unavailable during startup", position = 5, section = backend)
+    @ConfigItem(keyName = "backendFallback", name = "Auto fallback", description = "Use the legacy local engine if the selected embedded/remote engine cannot start", position = 5, section = backend)
     default boolean backendFallback() { return true; }
 }

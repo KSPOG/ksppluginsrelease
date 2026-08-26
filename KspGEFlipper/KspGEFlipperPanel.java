@@ -18,20 +18,22 @@ import java.util.concurrent.TimeUnit;
 /** Side panel for recommendation detail, probabilistic forecasts, portfolio, and model metrics. */
 final class KspGEFlipperPanel extends PluginPanel {
     private final KspGEFlipperConfig config;
+    private final KspGEFlipperRuntime runtime;
     private final JTextArea suggestion = textArea();
     private final JTextArea portfolio = textArea();
     private final JTextArea analytics = textArea();
     private final ForecastGraph forecastGraph = new ForecastGraph();
-    private final JLabel forecastTitle = new JLabel("No server forecast selected", SwingConstants.CENTER);
+    private final JLabel forecastTitle = new JLabel("No forecast selected", SwingConstants.CENTER);
     private final ScheduledExecutorService worker = Executors.newSingleThreadScheduledExecutor(r -> {
         Thread t = new Thread(r, "ksp-ge-panel-refresh"); t.setDaemon(true); return t;
     });
     private final Timer localTimer;
     private volatile boolean closed;
 
-    KspGEFlipperPanel(KspGEFlipperConfig config) {
+    KspGEFlipperPanel(KspGEFlipperConfig config, KspGEFlipperRuntime runtime) {
         super(false);
         this.config = config;
+        this.runtime = runtime;
         setLayout(new BorderLayout());
         JTabbedPane tabs = new JTabbedPane();
         tabs.addTab("Suggestion", scroll(suggestion));
@@ -42,7 +44,7 @@ final class KspGEFlipperPanel extends PluginPanel {
 
         localTimer = new Timer(1_000, e -> refreshSuggestion());
         localTimer.start();
-        worker.scheduleWithFixedDelay(this::refreshServerData, 1, 5, TimeUnit.SECONDS);
+        worker.scheduleWithFixedDelay(this::refreshEngineData, 1, 5, TimeUnit.SECONDS);
         refreshSuggestion();
     }
 
@@ -78,19 +80,32 @@ final class KspGEFlipperPanel extends PluginPanel {
         suggestion.setText(b.toString());
     }
 
-    private void refreshServerData() {
-        if (closed || !KspGEFlipperRuntime.engine.startsWith("Server")) return;
+    private void refreshEngineData() {
+        if (closed) return;
         try {
-            KspGEFlipperBackendClient client = new KspGEFlipperBackendClient(config.backendUrl(), config.backendApiKey());
-            String account = URLEncoder.encode(KspGEFlipperRuntime.accountKey, StandardCharsets.UTF_8);
-            JsonObject portfolioJson = client.json("/v1/portfolio?account=" + account);
-            JsonObject metricJson = client.json("/v1/metrics");
-            String portfolioText = portfolioSummary(portfolioJson);
-            String metricText = metricSummary(metricJson);
-
+            JsonObject portfolioJson;
+            JsonObject metricJson;
             JsonObject priceJson = null;
             int itemId = KspGEFlipperRuntime.itemId;
-            if (itemId > 0) priceJson = client.json("/v1/prices/" + itemId + "?timeframe=" + Math.max(5, config.timeframeMinutes()));
+
+            if (KspGEFlipperRuntime.engine.startsWith("Embedded")) {
+                KspGEFlipperEmbeddedScript.JsonAccess embedded = runtime.embeddedData();
+                if (embedded == null) return;
+                portfolioJson = embedded.portfolio(KspGEFlipperRuntime.accountKey);
+                metricJson = embedded.metrics();
+                if (itemId > 0) priceJson = embedded.price(itemId, Math.max(5, config.timeframeMinutes()));
+            } else if (KspGEFlipperRuntime.engine.startsWith("Remote")) {
+                KspGEFlipperBackendClient client = new KspGEFlipperBackendClient(config.backendUrl(), config.backendApiKey());
+                String account = URLEncoder.encode(KspGEFlipperRuntime.accountKey, StandardCharsets.UTF_8);
+                portfolioJson = client.json("/v1/portfolio?account=" + account);
+                metricJson = client.json("/v1/metrics");
+                if (itemId > 0) priceJson = client.json("/v1/prices/" + itemId + "?timeframe=" + Math.max(5, config.timeframeMinutes()));
+            } else {
+                return;
+            }
+
+            String portfolioText = portfolioSummary(portfolioJson);
+            String metricText = metricSummary(metricJson);
             JsonObject finalPriceJson = priceJson;
             SwingUtilities.invokeLater(() -> {
                 portfolio.setText(portfolioText);
@@ -101,7 +116,7 @@ final class KspGEFlipperPanel extends PluginPanel {
                 }
             });
         } catch (Exception e) {
-            SwingUtilities.invokeLater(() -> analytics.setText("Backend panel refresh unavailable:\n" + e.getMessage()));
+            SwingUtilities.invokeLater(() -> analytics.setText("Engine panel refresh unavailable:\n" + e.getMessage()));
         }
     }
 

@@ -17,7 +17,7 @@ import javax.inject.Inject;
 
 @PluginDescriptor(
         name = PluginConstants.KSP + "GE Flipper",
-        description = "State-aware GE flipping with optional persistent forecasting/portfolio backend and local fallback",
+        description = "Embedded state-aware GE flipping with persistent forecasts, portfolio calibration, optional remote sharing and local fallback",
         tags = {"ge", "flip", "flipping", "money", "ksp", "microbot", "forecast", "portfolio"},
         version = KspGEFlipperPlugin.VERSION,
         minClientVersion = "0.0.3",
@@ -25,7 +25,7 @@ import javax.inject.Inject;
         isExternal = PluginConstants.IS_EXTERNAL
 )
 public class KspGEFlipperPlugin extends Plugin {
-    public static final String VERSION = "1.0.0";
+    public static final String VERSION = "1.1.0";
 
     @Inject private KspGEFlipperConfig config;
     @Inject private KspGEFlipperRuntime runtime;
@@ -43,7 +43,7 @@ public class KspGEFlipperPlugin extends Plugin {
     @Override
     protected void startUp() {
         overlayManager.add(overlay);
-        panel = new KspGEFlipperPanel(config);
+        panel = new KspGEFlipperPanel(config, runtime);
         navButton = NavigationButton.builder()
                 .tooltip("KSP GE Flipper")
                 .icon(createIcon())

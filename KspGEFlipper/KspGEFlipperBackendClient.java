@@ -7,7 +7,7 @@ import java.net.URI;
 import java.net.http.*;
 import java.time.Duration;
 
-final class KspGEFlipperBackendClient {
+final class KspGEFlipperBackendClient implements KspGEFlipperExecutionSink {
     private final Gson gson = new Gson();
     private final HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(3)).build();
     private final String baseUrl;
@@ -40,7 +40,7 @@ final class KspGEFlipperBackendClient {
         return gson.fromJson(response.body(), KspGEFlipperBackendDtos.Suggestion.class);
     }
 
-    void transaction(KspGEFlipperBackendDtos.TradeExecution execution) throws Exception {
+    public void transaction(KspGEFlipperBackendDtos.TradeExecution execution) throws Exception {
         HttpResponse<String> response = send(request("/v1/transactions")
                 .header("Content-Type", "application/json")
                 .POST(HttpRequest.BodyPublishers.ofString(gson.toJson(execution))).build());

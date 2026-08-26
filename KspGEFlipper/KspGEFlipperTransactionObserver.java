@@ -8,13 +8,13 @@ import java.time.Instant;
 import java.util.*;
 
 final class KspGEFlipperTransactionObserver {
-    private final KspGEFlipperBackendClient client;
+    private final KspGEFlipperExecutionSink sink;
     private final KspGEFlipperOfferTracker tracker;
     private final String accountKey;
     private final LinkedHashSet<String> sent = new LinkedHashSet<>();
 
-    KspGEFlipperTransactionObserver(KspGEFlipperBackendClient client, KspGEFlipperOfferTracker tracker, String accountKey) {
-        this.client = client; this.tracker = tracker; this.accountKey = accountKey;
+    KspGEFlipperTransactionObserver(KspGEFlipperExecutionSink sink, KspGEFlipperOfferTracker tracker, String accountKey) {
+        this.sink = sink; this.tracker = tracker; this.accountKey = accountKey;
     }
 
     void poll() {
@@ -41,7 +41,7 @@ final class KspGEFlipperTransactionObserver {
                 tx.recommendationOriginatedTrade = attribution != null;
                 tx.firstFillAt = (times.firstFill == null ? times.firstSeen : times.firstFill).toString();
                 tx.fullFillAt = Instant.now().toString();
-                client.transaction(tx);
+                sink.transaction(tx);
                 remember(fingerprint);
             } catch (Exception ignored) {
                 // Retry next poll; telemetry should not stop GE management.
