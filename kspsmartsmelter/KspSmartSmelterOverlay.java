@@ -80,16 +80,19 @@ public class KspSmartSmelterOverlay extends OverlayPanel {
                 addInputLines(quote.getRoute());
             }
 
+            boolean sessionStarted = script.getStartedAt() > 0;
             addSection("Session");
-            add("Runtime", formatDuration(System.currentTimeMillis() - script.getStartedAt()));
+            add("Runtime", sessionStarted
+                    ? formatDuration(System.currentTimeMillis() - script.getStartedAt())
+                    : "00:00:00");
             add("Trips", String.valueOf(script.getCompletedTrips()));
             add("Restocks", String.valueOf(script.getRestockCount()));
             add("Output made", formatNumber(script.getOutputProduced()));
             add("Output / h", formatNumber(script.getOutputPerHour()));
             add("Expected profit", signedGp(script.getExpectedSessionProfit()));
             add("Expected GP / h", signedGp(script.getExpectedProfitPerHour()));
-            add("Smithing XP", formatNumber(script.getSmithingXpGained()));
-            add("Smithing XP / h", formatNumber(script.getSmithingXpPerHour()));
+            add("Smithing XP", sessionStarted ? formatNumber(script.getSmithingXpGained()) : "0");
+            add("Smithing XP / h", sessionStarted ? formatNumber(script.getSmithingXpPerHour()) : "0");
 
             addSection("GE Restock");
             add("Enabled", config.autoRestock() ? "Yes" : "No");
