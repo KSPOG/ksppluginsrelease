@@ -92,22 +92,34 @@ final class SmartGeTrader
         }
 
         GrandExchangeSlots requestedSlot = freeSlots.get(0);
-        GrandExchangeRequest.Builder builder = GrandExchangeRequest.builder()
-            .action(action)
-            .itemName(itemName)
-            .exact(true)
-            .quantity(quantity)
-            .price(price)
-            .closeAfterCompletion(false);
-
-        // Jewellery Crafter explicitly owns BUY slots. SELL placement is left to Microbot's
-        // inventory-offer path, then resolved from the live client offer array.
+        GrandExchangeRequest request;
         if (action == GrandExchangeAction.BUY)
         {
-            builder.slot(requestedSlot);
+            // Jewellery Crafter explicitly owns BUY slots.
+            request = GrandExchangeRequest.builder()
+                .slot(requestedSlot)
+                .action(GrandExchangeAction.BUY)
+                .itemName(itemName)
+                .exact(true)
+                .quantity(quantity)
+                .price(price)
+                .closeAfterCompletion(false)
+                .build();
+        }
+        else
+        {
+            // SELL placement is left to Microbot's inventory-offer path, then resolved from the
+            // live client offer array, matching Jewellery Crafter.
+            request = GrandExchangeRequest.builder()
+                .action(GrandExchangeAction.SELL)
+                .itemName(itemName)
+                .exact(true)
+                .quantity(quantity)
+                .price(price)
+                .closeAfterCompletion(false)
+                .build();
         }
 
-        GrandExchangeRequest request = builder.build();
         Microbot.status = action == GrandExchangeAction.BUY
             ? "Buying " + quantity + " x " + itemName + " in GE slot " + (requestedSlot.ordinal() + 1)
             : "Selling " + quantity + " x " + itemName;
@@ -115,7 +127,7 @@ final class SmartGeTrader
         if (!Rs2GrandExchange.processOffer(request))
         {
             // processOffer may have progressed far enough for the offer to exist. Do not blindly
-            // retry and create a duplicate; a subsequent pass will recover it by item/state.
+            // retry and create a duplicate; a subsequent pass can recover it by item/state.
             GrandExchangeSlots recovered = findOfferSlot(itemId, action);
             if (recovered != null)
             {
@@ -130,8 +142,10 @@ final class SmartGeTrader
             );
         }
 
-        GrandExchangeSlots slot = action == GrandExchangeAction.BUY ? requestedSlot : null;
-        final GrandExchangeSlots expectedBuySlot = slot;
+        final GrandExchangeSlots expectedBuySlot = action == GrandExchangeAction.BUY
+            ? requestedSlot
+            : null;
+
         boolean registered = sleepUntil(() ->
             (expectedBuySlot != null && offerMatches(expectedBuySlot, itemId, action))
                 || findOfferSlot(itemId, action) != null
@@ -189,10 +203,9 @@ final class SmartGeTrader
             int filled = snapshot.quantitySold > 0 ? snapshot.quantitySold : requestedQuantity;
             if (!collectSlotToBank(slot))
             {
-                return TradeResult.partial(
-                    Math.min(requestedQuantity, filled),
-                    "Offer completed; waiting for collection"
-                );
+                // Do not let the caller debit its remaining restock budget until collection is
+                // confirmed. The next pass will recover this same completed offer.
+                return TradeResult.failed("Offer completed; waiting for collection");
             }
             return TradeResult.completed(Math.min(requestedQuantity, filled));
         }
