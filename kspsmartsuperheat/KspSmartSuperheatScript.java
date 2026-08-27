@@ -437,10 +437,7 @@ public class KspSmartSuperheatScript extends Script
         long budget = afterReserve * config.maxSpendPercent() / 100L;
         spendableCoins = clampInt(budget);
 
-        int perBar = Math.max(1, activeQuote.getInputCostPerBar());
-        int affordableBars = (int) Math.min(Integer.MAX_VALUE, budget / perBar);
-        int targetBars = Math.min(config.restockTargetBars(), affordableBars);
-
+        int targetBars = calculateAffordableRestockBars(activeRecipe, activeQuote, freeFireRunes, budget);
         if (targetBars <= 0)
         {
             state = SmartSuperheatState.WAITING_FOR_PROFIT;
@@ -449,11 +446,14 @@ public class KspSmartSuperheatScript extends Script
             return;
         }
 
+        long[] remainingBudget = {budget};
+
         if (!buyMissing(
             activeRecipe.getPrimaryOreName(),
             activeRecipe.getPrimaryOreId(),
             targetBars * activeRecipe.getPrimaryOrePerBar(),
-            activeQuote.getPrimaryBuyPrice()))
+            activeQuote.getPrimaryBuyPrice(),
+            remainingBudget))
         {
             return;
         }
@@ -463,7 +463,8 @@ public class KspSmartSuperheatScript extends Script
                 activeRecipe.getSecondaryOreName(),
                 activeRecipe.getSecondaryOreId(),
                 targetBars * activeRecipe.getSecondaryOrePerBar(),
-                activeQuote.getSecondaryBuyPrice()))
+                activeQuote.getSecondaryBuyPrice(),
+                remainingBudget))
         {
             return;
         }
@@ -473,18 +474,29 @@ public class KspSmartSuperheatScript extends Script
                 "Coal",
                 ItemID.COAL,
                 targetBars * activeRecipe.getCoalPerBar(),
-                activeQuote.getCoalBuyPrice()))
+                activeQuote.getCoalBuyPrice(),
+                remainingBudget))
         {
             return;
         }
 
-        if (!buyMissing("Nature rune", ItemID.NATURERUNE, targetBars, activeQuote.getNatureBuyPrice()))
+        if (!buyMissing(
+            "Nature rune",
+            ItemID.NATURERUNE,
+            targetBars,
+            activeQuote.getNatureBuyPrice(),
+            remainingBudget))
         {
             return;
         }
 
         if (!freeFireRunes
-            && !buyMissing("Fire rune", ItemID.FIRERUNE, targetBars * 4, activeQuote.getFireBuyPrice()))
+            && !buyMissing(
+                "Fire rune",
+                ItemID.FIRERUNE,
+                targetBars * 4,
+                activeQuote.getFireBuyPrice(),
+                remainingBudget))
         {
             return;
         }
@@ -508,7 +520,12 @@ public class KspSmartSuperheatScript extends Script
         }
     }
 
-    private boolean buyMissing(String itemName, int itemId, int desiredTotal, int offerPrice)
+    private boolean buyMissing(
+        String itemName,
+        int itemId,
+        int desiredTotal,
+        int offerPrice,
+        long[] remainingBudget)
     {
         if (!ensureBankOpen())
         {
@@ -522,15 +539,29 @@ public class KspSmartSuperheatScript extends Script
             return true;
         }
 
-        long requiredCoinsLong = (long) missing * offerPrice;
-        int requiredCoins = clampInt(requiredCoinsLong);
-        if (requiredCoins <= 0)
+        if (offerPrice <= 0 || remainingBudget == null || remainingBudget.length == 0)
         {
             status = "Invalid purchase cost for " + itemName;
             return false;
         }
 
-        if (!ensureCoinsInInventory(requiredCoins))
+        long currentCoins = (long) Rs2Bank.count(ItemID.COINS) + Rs2Inventory.count(ItemID.COINS);
+        long usableCoins = Math.max(0L, currentCoins - config.cashReserve());
+        long offerBudget = Math.min(Math.max(0L, remainingBudget[0]), usableCoins);
+        int affordableQuantity = clampInt(offerBudget / offerPrice);
+        int quantityToBuy = Math.min(missing, affordableQuantity);
+
+        if (quantityToBuy <= 0)
+        {
+            spendableCoins = clampInt(remainingBudget[0]);
+            status = "Insufficient coins for " + itemName;
+            state = SmartSuperheatState.WAITING_FOR_PROFIT;
+            nextNoProfitScanAt = System.currentTimeMillis() + config.priceRefreshSeconds() * 1000L;
+            return false;
+        }
+
+        int requiredCoins = clampInt((long) quantityToBuy * offerPrice);
+        if (requiredCoins <= 0 || !ensureCoinsInInventory(requiredCoins))
         {
             status = "Insufficient coins for " + itemName;
             state = SmartSuperheatState.WAITING_FOR_PROFIT;
@@ -539,11 +570,11 @@ public class KspSmartSuperheatScript extends Script
         }
 
         Rs2Bank.closeBank();
-        status = "Buying " + formatNumber(missing) + " " + itemName;
+        status = "Buying " + formatNumber(quantityToBuy) + " " + itemName;
 
         SmartGeTrader.TradeResult result = SmartGeTrader.buyToBank(
             itemName,
-            missing,
+            quantityToBuy,
             offerPrice,
             config.geOfferTimeoutSeconds()
         );
@@ -554,13 +585,18 @@ public class KspSmartSuperheatScript extends Script
             return false;
         }
 
-        if (result.getFilledQuantity() <= 0)
+        int filled = result.getFilledQuantity();
+        if (filled <= 0)
         {
             status = "No fill for " + itemName;
             return false;
         }
 
-        status = "Bought " + formatNumber(result.getFilledQuantity()) + " " + itemName;
+        long committed = Math.min(remainingBudget[0], (long) filled * offerPrice);
+        remainingBudget[0] = Math.max(0L, remainingBudget[0] - committed);
+        spendableCoins = clampInt(remainingBudget[0]);
+
+        status = "Bought " + formatNumber(filled) + " " + itemName;
         sleep(250, 500);
         return true;
     }
@@ -824,6 +860,140 @@ public class KspSmartSuperheatScript extends Script
         Rs2Bank.setWithdrawAsItem();
         Rs2Bank.withdrawX(ItemID.COINS, missing);
         return sleepUntil(() -> Rs2Inventory.count(ItemID.COINS) >= required, INVENTORY_TIMEOUT_MS);
+    }
+
+    private int calculateAffordableRestockBars(
+        SuperheatRecipe recipe,
+        SuperheatQuote quote,
+        boolean freeFire,
+        long budget)
+    {
+        if (!Rs2Bank.isOpen() || recipe == null || quote == null || budget <= 0L)
+        {
+            return 0;
+        }
+
+        long upperBound = resourceBarCapacity(
+            recipe.getPrimaryOreId(),
+            recipe.getPrimaryOrePerBar(),
+            quote.getPrimaryBuyPrice(),
+            budget);
+
+        if (recipe.hasSecondaryOre())
+        {
+            upperBound = Math.min(upperBound, resourceBarCapacity(
+                recipe.getSecondaryOreId(),
+                recipe.getSecondaryOrePerBar(),
+                quote.getSecondaryBuyPrice(),
+                budget));
+        }
+
+        if (recipe.getCoalPerBar() > 0)
+        {
+            upperBound = Math.min(upperBound, resourceBarCapacity(
+                ItemID.COAL,
+                recipe.getCoalPerBar(),
+                quote.getCoalBuyPrice(),
+                budget));
+        }
+
+        upperBound = Math.min(upperBound, resourceBarCapacity(
+            ItemID.NATURERUNE,
+            1,
+            quote.getNatureBuyPrice(),
+            budget));
+
+        if (!freeFire)
+        {
+            upperBound = Math.min(upperBound, resourceBarCapacity(
+                ItemID.FIRERUNE,
+                4,
+                quote.getFireBuyPrice(),
+                budget));
+        }
+
+        int low = 0;
+        int high = clampInt(upperBound);
+        while (low < high)
+        {
+            int mid = low + (high - low + 1) / 2;
+            if (calculateRestockCost(recipe, quote, freeFire, mid) <= budget)
+            {
+                low = mid;
+            }
+            else
+            {
+                high = mid - 1;
+            }
+        }
+
+        return low;
+    }
+
+    private long resourceBarCapacity(int itemId, int amountPerBar, int offerPrice, long budget)
+    {
+        if (itemId <= 0 || amountPerBar <= 0 || offerPrice <= 0)
+        {
+            return 0L;
+        }
+
+        long banked = Math.max(0, Rs2Bank.count(itemId));
+        long purchasable = Math.max(0L, budget) / offerPrice;
+        return Math.max(0L, (banked + purchasable) / amountPerBar);
+    }
+
+    private long calculateRestockCost(
+        SuperheatRecipe recipe,
+        SuperheatQuote quote,
+        boolean freeFire,
+        int bars)
+    {
+        if (bars <= 0)
+        {
+            return 0L;
+        }
+
+        long total = missingPurchaseCost(
+            recipe.getPrimaryOreId(),
+            (long) bars * recipe.getPrimaryOrePerBar(),
+            quote.getPrimaryBuyPrice());
+
+        if (recipe.hasSecondaryOre())
+        {
+            total += missingPurchaseCost(
+                recipe.getSecondaryOreId(),
+                (long) bars * recipe.getSecondaryOrePerBar(),
+                quote.getSecondaryBuyPrice());
+        }
+
+        if (recipe.getCoalPerBar() > 0)
+        {
+            total += missingPurchaseCost(
+                ItemID.COAL,
+                (long) bars * recipe.getCoalPerBar(),
+                quote.getCoalBuyPrice());
+        }
+
+        total += missingPurchaseCost(ItemID.NATURERUNE, bars, quote.getNatureBuyPrice());
+
+        if (!freeFire)
+        {
+            total += missingPurchaseCost(ItemID.FIRERUNE, (long) bars * 4L, quote.getFireBuyPrice());
+        }
+
+        return total;
+    }
+
+    private long missingPurchaseCost(int itemId, long desiredTotal, int offerPrice)
+    {
+        if (itemId <= 0 || desiredTotal <= 0L || offerPrice <= 0)
+        {
+            return 0L;
+        }
+
+        long banked = Math.max(0, Rs2Bank.count(itemId));
+        long missing = Math.max(0L, desiredTotal - banked);
+        return missing * offerPrice;
     }
 
     private int calculateCraftableBarsInBank(SuperheatRecipe recipe, boolean freeFire)
