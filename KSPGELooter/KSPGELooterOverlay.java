@@ -26,7 +26,7 @@ public class KSPGELooterOverlay extends OverlayPanel
     public Dimension render(java.awt.Graphics2D graphics)
     {
         panelComponent.getChildren().clear();
-        panelComponent.setPreferredSize(new Dimension(300, 430));
+        panelComponent.setPreferredSize(new Dimension(300, 460));
 
         Duration runtime = KSPGELooterScript.getRuntime();
         long lootGpPerHour = perHour(KSPGELooterScript.totalLootGeValue, runtime);
@@ -42,8 +42,12 @@ public class KSPGELooterOverlay extends OverlayPanel
         addLine("Runtime:", formatDuration(runtime));
         addLine("Priority mode:", config.priorityMode() ? "ON" : "OFF");
         addLine("Priority takeover:", KSPGELooterScript.priorityTakeoverActive ? "ACTIVE" : "Idle");
-        addLine("Script pause:", KSPGELooterScript.priorityPauseOwned ? "Owned by looter" : "Not owned");
+        addLine("Script pause:", KSPGELooterScript.priorityPauseOwned
+                ? "Owned by looter"
+                : (KSPGELooterScript.priorityTakeoverActive ? "Shared / external" : "Not owned"));
 
+        addLine("Ground items:", Integer.toString(KSPGELooterScript.groundItemsSeen));
+        addLine("Eligible loot:", Integer.toString(KSPGELooterScript.eligibleGroundItems));
         addLine("Target:", KSPGELooterScript.targetName);
         addLine("Target GE:", formatGp(KSPGELooterScript.targetGeValue));
         addLine("Minimum GE:", formatGp(Math.max(0, config.minimumGeValue())));
@@ -78,10 +82,7 @@ public class KSPGELooterOverlay extends OverlayPanel
     private static long perHour(long value, Duration runtime)
     {
         long seconds = runtime.getSeconds();
-        if (value <= 0L || seconds <= 0L)
-        {
-            return 0L;
-        }
+        if (value <= 0L || seconds <= 0L) return 0L;
         return Math.round(value * 3600.0D / seconds);
     }
 
@@ -96,18 +97,9 @@ public class KSPGELooterOverlay extends OverlayPanel
 
     private static String formatGp(long value)
     {
-        if (value >= 1_000_000_000L)
-        {
-            return String.format("%.2fB", value / 1_000_000_000.0D);
-        }
-        if (value >= 1_000_000L)
-        {
-            return String.format("%.2fM", value / 1_000_000.0D);
-        }
-        if (value >= 1_000L)
-        {
-            return String.format("%.1fK", value / 1_000.0D);
-        }
+        if (value >= 1_000_000_000L) return String.format("%.2fB", value / 1_000_000_000.0D);
+        if (value >= 1_000_000L) return String.format("%.2fM", value / 1_000_000.0D);
+        if (value >= 1_000L) return String.format("%.1fK", value / 1_000.0D);
         return Long.toString(value);
     }
 }
