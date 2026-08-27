@@ -1,0 +1,141 @@
+name: Temporary Smart Smelter GE v0.0.5
+
+on:
+  push:
+    branches:
+      - fix/smart-smelter-ge-widgets-v005
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Patch Smart Smelter
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          script = Path('kspsmartsmelter/KspSmartSmelterScript.java')
+          text = script.read_text()
+
+          text = text.replace('import net.runelite.client.plugins.microbot.util.grandexchange.GrandExchangeAction;\n', '')
+          text = text.replace('import net.runelite.client.plugins.microbot.util.grandexchange.GrandExchangeRequest;\n', '')
+
+          old_open = '''        state = SmartSmelterState.RESTOCKING;
+        if (!Rs2GrandExchange.isOpen() && !Rs2GrandExchange.openExchange()) {
+            Microbot.status = "Could not open Grand Exchange";
+            return;
+        }
+'''
+          new_open = '''        state = SmartSmelterState.RESTOCKING;
+        if (!SmartSmelterGeTrader.ensureOverview()) {
+            Microbot.status = "Could not open Grand Exchange";
+            return;
+        }
+'''
+          if old_open not in text:
+              raise SystemExit('restock GE-open block not found')
+          text = text.replace(old_open, new_open, 1)
+
+          old_buy = '''        for (int i = 0; i < ids.length; i++) {
+            int wanted = targetCycles * quantities[i];
+            GrandExchangeRequest request = GrandExchangeRequest.builder()
+                    .action(GrandExchangeAction.BUY)
+                    .itemName(itemName(ids[i]))
+                    .quantity(wanted)
+                    .percent(config.buyPercent())
+                    .build();
+
+            if (!Rs2GrandExchange.processOffer(request)) {
+                Microbot.status = "Failed placing buy: " + itemName(ids[i]);
+                Rs2GrandExchange.backToOverview();
+            }
+        }
+'''
+          new_buy = '''        for (int i = 0; i < ids.length; i++) {
+            int wanted = targetCycles * quantities[i];
+            String inputName = itemName(ids[i]);
+            Microbot.status = "Placing GE buy: " + inputName;
+
+            if (!SmartSmelterGeTrader.placeBuy(inputName, wanted, config.buyPercent())) {
+                Microbot.status = "GE buy widget entry failed: " + inputName;
+                SmartSmelterGeTrader.recoverToOverview();
+                lastPriceScan = 0L;
+                return;
+            }
+
+            // Confirm has returned us to the overview; let the slot widgets settle before
+            // starting the next ingredient offer.
+            sleep(650, 950);
+        }
+'''
+          if old_buy not in text:
+              raise SystemExit('restock buy block not found')
+          text = text.replace(old_buy, new_buy, 1)
+
+          old_sell_open = '''        if (quantity <= 0 || !Rs2GrandExchange.openExchange()) {
+            return;
+        }
+
+        GrandExchangeRequest sell = GrandExchangeRequest.builder()
+                .action(GrandExchangeAction.SELL)
+                .itemName(itemName(route.getOutputId()))
+                .quantity(quantity)
+                .percent(config.sellPercent())
+                .build();
+
+        if (Rs2GrandExchange.processOffer(sell)) {
+'''
+          new_sell_open = '''        if (quantity <= 0 || !SmartSmelterGeTrader.ensureOverview()) {
+            return;
+        }
+
+        String outputName = itemName(route.getOutputId());
+        if (SmartSmelterGeTrader.placeSell(outputName, quantity, config.sellPercent())) {
+'''
+          if old_sell_open not in text:
+              raise SystemExit('sell GE block not found')
+          text = text.replace(old_sell_open, new_sell_open, 1)
+
+          old_sell_fail = '''        } else {
+            Rs2GrandExchange.backToOverview();
+        }
+'''
+          new_sell_fail = '''        } else {
+            Microbot.status = "GE sell widget entry failed: " + outputName;
+            SmartSmelterGeTrader.recoverToOverview();
+        }
+'''
+          # This exact block occurs elsewhere, so replace the last occurrence in sellBankedOutput.
+          idx = text.rfind(old_sell_fail)
+          if idx < 0:
+              raise SystemExit('sell failure block not found')
+          text = text[:idx] + new_sell_fail + text[idx + len(old_sell_fail):]
+
+          if 'Rs2GrandExchange.processOffer(' in text:
+              raise SystemExit('processOffer still present in Smart Smelter')
+
+          script.write_text(text)
+
+          plugin = Path('kspsmartsmelter/KspSmartSmelterPlugin.java')
+          p = plugin.read_text()
+          if 'VERSION = "0.0.4"' not in p:
+              raise SystemExit('expected Smart Smelter v0.0.4 not found')
+          plugin.write_text(p.replace('VERSION = "0.0.4"', 'VERSION = "0.0.5"', 1))
+
+          # The temporary workflow must not remain in the PR.
+          Path('.github/workflows/temp-smart-smelter-ge-v005.yml').unlink()
+          PY
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "fix: stage and verify Smart Smelter GE widgets"
+          git push
