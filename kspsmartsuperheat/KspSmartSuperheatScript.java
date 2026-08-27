@@ -27,6 +27,8 @@ public class KspSmartSuperheatScript extends Script
     private static final int LOOP_DELAY_MS = 500;
     private static final int BANK_TIMEOUT_MS = 6_000;
     private static final int INVENTORY_TIMEOUT_MS = 4_000;
+    private static final int BATCH_WITHDRAW_TIMEOUT_MS = 3_500;
+    private static final int MAX_BATCH_WITHDRAW_ATTEMPTS = 3;
     private static final int COIN_WITHDRAW_TIMEOUT_MS = 8_000;
     private static final int COIN_WITHDRAW_SETTLE_TIMEOUT_MS = 4_000;
     private static final int MAX_COIN_WITHDRAW_ATTEMPTS = 2;
@@ -157,8 +159,7 @@ public class KspSmartSuperheatScript extends Script
 
     private void startSession()
     {
-        int magic = getRealLevel(Skill.MAGIC);
-        if (magic < 43)
+        if (getRealLevel(Skill.MAGIC) < 43)
         {
             state = SmartSuperheatState.ERROR;
             status = "43 Magic required";
@@ -313,11 +314,15 @@ public class KspSmartSuperheatScript extends Script
         }
 
         currentBatchTarget = maxBatch;
-        withdrawBatch(activeRecipe, maxBatch, freeFireRunes);
-
-        if (!inventoryHasCastSupplies(activeRecipe, freeFireRunes))
+        if (!withdrawBatch(activeRecipe, maxBatch, freeFireRunes))
         {
-            status = "Waiting for batch withdrawal";
+            status = "Waiting for complete batch withdrawal";
+            return;
+        }
+
+        if (!inventoryHasBatchSupplies(activeRecipe, maxBatch, freeFireRunes))
+        {
+            status = "Batch ratio incomplete - retrying";
             return;
         }
 
@@ -734,7 +739,6 @@ public class KspSmartSuperheatScript extends Script
             return;
         }
 
-        // Give the bank withdraw-mode widget time to settle before touching the bar stack.
         sleep(500, 750);
         int inventoryBefore = inventoryCountByName(saleRecipe.getOutputName());
         Rs2Bank.withdrawX(saleRecipe.getOutputId(), toSell);
@@ -921,53 +925,186 @@ public class KspSmartSuperheatScript extends Script
             return;
         }
 
-        int banked = Math.max(0, Rs2Bank.count(ItemID.NATURERUNE));
-        if (banked <= 0)
+        for (int attempt = 1; attempt <= MAX_BATCH_WITHDRAW_ATTEMPTS; attempt++)
         {
-            return;
-        }
+            int banked = Math.max(0, Rs2Bank.count(ItemID.NATURERUNE));
+            if (banked <= 0)
+            {
+                return;
+            }
 
-        if (!Rs2Bank.setWithdrawAsItem())
-        {
-            return;
-        }
+            if (!Rs2Bank.setWithdrawAsItem())
+            {
+                sleep(250, 450);
+                continue;
+            }
 
-        int before = Rs2Inventory.itemQuantity(ItemID.NATURERUNE);
-        Rs2Bank.withdrawX(ItemID.NATURERUNE, banked);
-        sleepUntil(
-            () -> Rs2Inventory.itemQuantity(ItemID.NATURERUNE) > before
-                || Rs2Bank.count(ItemID.NATURERUNE) <= 0,
-            INVENTORY_TIMEOUT_MS
-        );
+            int beforeInventory = Rs2Inventory.itemQuantity(ItemID.NATURERUNE);
+            int beforeBank = banked;
+            Rs2Bank.withdrawX(ItemID.NATURERUNE, banked);
+            sleepUntil(
+                () -> Rs2Inventory.itemQuantity(ItemID.NATURERUNE) > beforeInventory
+                    || (Rs2Bank.isOpen() && Rs2Bank.count(ItemID.NATURERUNE) < beforeBank),
+                BATCH_WITHDRAW_TIMEOUT_MS
+            );
+            sleep(300, 500);
+        }
     }
 
-    private void withdrawBatch(SuperheatRecipe recipe, int bars, boolean freeFire)
+    private boolean withdrawBatch(SuperheatRecipe recipe, int bars, boolean freeFire)
     {
-        if (bars <= 0) return;
+        if (recipe == null || bars <= 0 || !Rs2Bank.isOpen())
+        {
+            return false;
+        }
 
-        Rs2Bank.withdrawX(recipe.getPrimaryOreId(), bars * recipe.getPrimaryOrePerBar());
-        sleep(120, 220);
+        int primaryTarget = bars * recipe.getPrimaryOrePerBar();
+        if (!ensureInventoryAmount(recipe.getPrimaryOreId(), primaryTarget, recipe.getPrimaryOreName()))
+        {
+            return false;
+        }
 
         if (recipe.hasSecondaryOre())
         {
-            Rs2Bank.withdrawX(recipe.getSecondaryOreId(), bars * recipe.getSecondaryOrePerBar());
-            sleep(120, 220);
+            int secondaryTarget = bars * recipe.getSecondaryOrePerBar();
+            if (!ensureInventoryAmount(recipe.getSecondaryOreId(), secondaryTarget, recipe.getSecondaryOreName()))
+            {
+                return false;
+            }
         }
 
         if (recipe.getCoalPerBar() > 0)
         {
-            Rs2Bank.withdrawX(ItemID.COAL, bars * recipe.getCoalPerBar());
-            sleep(120, 220);
+            int coalTarget = bars * recipe.getCoalPerBar();
+            if (!ensureInventoryAmount(ItemID.COAL, coalTarget, "Coal"))
+            {
+                return false;
+            }
         }
 
-        // Nature runes stay in the persistent inventory stack and are not batch-withdrawn.
-        if (!freeFire)
+        // Nature runes are persistent, but a complete batch still requires one per bar.
+        ensureAllNatureRunesInInventory();
+        if (Rs2Inventory.itemQuantity(ItemID.NATURERUNE) < bars)
         {
-            Rs2Bank.withdrawX(ItemID.FIRERUNE, bars * 4);
-            sleep(120, 220);
+            return false;
         }
 
-        sleepUntil(() -> inventoryHasCastSupplies(recipe, freeFire), INVENTORY_TIMEOUT_MS);
+        if (!freeFire && !ensureInventoryAmount(ItemID.FIRERUNE, bars * 4, "Fire rune"))
+        {
+            return false;
+        }
+
+        return inventoryHasBatchSupplies(recipe, bars, freeFire);
+    }
+
+    private boolean ensureInventoryAmount(int itemId, int requiredTotal, String itemName)
+    {
+        if (itemId <= 0 || requiredTotal <= 0)
+        {
+            return true;
+        }
+
+        for (int attempt = 1; attempt <= MAX_BATCH_WITHDRAW_ATTEMPTS; attempt++)
+        {
+            if (!Rs2Bank.isOpen())
+            {
+                return false;
+            }
+
+            int current = Rs2Inventory.itemQuantity(itemId);
+            if (current >= requiredTotal)
+            {
+                return true;
+            }
+
+            int banked = Math.max(0, Rs2Bank.count(itemId));
+            if (banked <= 0)
+            {
+                log.debug(
+                    "Batch withdrawal shortfall for {}: required={}, inventory={}, bank=0",
+                    itemName,
+                    requiredTotal,
+                    current
+                );
+                return false;
+            }
+
+            int deficit = requiredTotal - current;
+            int request = Math.min(deficit, banked);
+            int before = current;
+            status = "Withdrawing " + formatNumber(request) + " " + itemName;
+
+            log.debug(
+                "Batch withdrawal {}/{} for {}: required={}, inventory={}, bank={}, request={}",
+                attempt,
+                MAX_BATCH_WITHDRAW_ATTEMPTS,
+                itemName,
+                requiredTotal,
+                current,
+                banked,
+                request
+            );
+
+            if (!Rs2Bank.withdrawX(itemId, request))
+            {
+                sleep(300, 500);
+                continue;
+            }
+
+            boolean changed = sleepUntil(
+                () -> Rs2Inventory.itemQuantity(itemId) > before,
+                BATCH_WITHDRAW_TIMEOUT_MS
+            );
+
+            if (changed)
+            {
+                sleep(350, 550);
+            }
+            else
+            {
+                sleep(450, 700);
+            }
+        }
+
+        int actual = Rs2Inventory.itemQuantity(itemId);
+        if (actual < requiredTotal)
+        {
+            log.debug(
+                "Batch withdrawal incomplete for {}: required={}, actual={}",
+                itemName,
+                requiredTotal,
+                actual
+            );
+        }
+        return actual >= requiredTotal;
+    }
+
+    private boolean inventoryHasBatchSupplies(SuperheatRecipe recipe, int bars, boolean freeFire)
+    {
+        if (recipe == null || bars <= 0)
+        {
+            return false;
+        }
+
+        if (Rs2Inventory.itemQuantity(recipe.getPrimaryOreId()) < bars * recipe.getPrimaryOrePerBar())
+        {
+            return false;
+        }
+        if (recipe.hasSecondaryOre()
+            && Rs2Inventory.itemQuantity(recipe.getSecondaryOreId()) < bars * recipe.getSecondaryOrePerBar())
+        {
+            return false;
+        }
+        if (recipe.getCoalPerBar() > 0
+            && Rs2Inventory.itemQuantity(ItemID.COAL) < bars * recipe.getCoalPerBar())
+        {
+            return false;
+        }
+        if (Rs2Inventory.itemQuantity(ItemID.NATURERUNE) < bars)
+        {
+            return false;
+        }
+        return freeFire || Rs2Inventory.itemQuantity(ItemID.FIRERUNE) >= bars * 4;
     }
 
     private boolean ensureCoinsInInventory(int required)
