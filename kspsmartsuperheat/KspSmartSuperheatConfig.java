@@ -68,24 +68,12 @@ public interface KspSmartSuperheatConfig extends Config
         return 1;
     }
 
-    @Range(min = 1, max = 5000)
-    @ConfigItem(
-        keyName = "restockTargetBars",
-        name = "Restock target",
-        description = "Maximum number of bars worth of ingredients to restock at once. Actual quantity is reduced to fit available capital.",
-        position = 5
-    )
-    default int restockTargetBars()
-    {
-        return 500;
-    }
-
     @Range(min = 0, max = 100000000)
     @ConfigItem(
         keyName = "cashReserve",
         name = "Cash reserve",
         description = "Coins the plugin will leave untouched when deciding how much it can spend.",
-        position = 6
+        position = 5
     )
     default int cashReserve()
     {
@@ -97,7 +85,7 @@ public interface KspSmartSuperheatConfig extends Config
         keyName = "maxSpendPercent",
         name = "Max spend %",
         description = "Maximum percentage of spendable cash that one restock plan may commit.",
-        position = 7
+        position = 6
     )
     default int maxSpendPercent()
     {
@@ -109,7 +97,7 @@ public interface KspSmartSuperheatConfig extends Config
         keyName = "priceRefreshSeconds",
         name = "Price refresh",
         description = "Seconds between profitability re-checks while processing.",
-        position = 8
+        position = 7
     )
     default int priceRefreshSeconds()
     {
@@ -121,7 +109,7 @@ public interface KspSmartSuperheatConfig extends Config
         keyName = "geOfferTimeoutSeconds",
         name = "GE offer timeout",
         description = "How long to wait for a restock/sale offer before aborting and collecting the partial fill.",
-        position = 9
+        position = 8
     )
     default int geOfferTimeoutSeconds()
     {
@@ -133,7 +121,7 @@ public interface KspSmartSuperheatConfig extends Config
         keyName = "bankOverheadSeconds",
         name = "Bank overhead estimate",
         description = "Estimated seconds spent banking per inventory. Used only when ranking recipes by projected GP/h.",
-        position = 10
+        position = 9
     )
     default int bankOverheadSeconds()
     {
@@ -145,7 +133,7 @@ public interface KspSmartSuperheatConfig extends Config
         keyName = "castDelayMinMs",
         name = "Cast delay minimum",
         description = "Minimum helper delay used by the Superheat Item interaction.",
-        position = 11
+        position = 10
     )
     default int castDelayMinMs()
     {
@@ -157,7 +145,7 @@ public interface KspSmartSuperheatConfig extends Config
         keyName = "castDelayMaxMs",
         name = "Cast delay maximum",
         description = "Maximum helper delay used by the Superheat Item interaction.",
-        position = 12
+        position = 11
     )
     default int castDelayMaxMs()
     {
@@ -168,7 +156,7 @@ public interface KspSmartSuperheatConfig extends Config
         keyName = "autoSellOutput",
         name = "Auto-sell output",
         description = "Sell bars made by this plugin session when more cash is needed for restocking. Existing bars are not intentionally liquidated.",
-        position = 13
+        position = 12
     )
     default boolean autoSellOutput()
     {
@@ -179,7 +167,7 @@ public interface KspSmartSuperheatConfig extends Config
         keyName = "bankWholeInventory",
         name = "Bank whole inventory",
         description = "Deposit the whole inventory before preparing a Superheat batch. Disable to leave unrelated inventory items untouched.",
-        position = 14
+        position = 13
     )
     default boolean bankWholeInventory()
     {
