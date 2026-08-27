@@ -20,19 +20,12 @@ import javax.inject.Inject;
 )
 public class KSPGELooterPlugin extends Plugin
 {
-    public static final String VERSION = "0.1.3";
+    public static final String VERSION = "0.1.4";
 
-    @Inject
-    private KSPGELooterConfig config;
-
-    @Inject
-    private KSPGELooterScript script;
-
-    @Inject
-    private KSPGELooterOverlay overlay;
-
-    @Inject
-    private OverlayManager overlayManager;
+    @Inject private KSPGELooterConfig config;
+    @Inject private KSPGELooterScript script;
+    @Inject private KSPGELooterOverlay overlay;
+    @Inject private OverlayManager overlayManager;
 
     @Provides
     KSPGELooterConfig provideConfig(ConfigManager configManager)

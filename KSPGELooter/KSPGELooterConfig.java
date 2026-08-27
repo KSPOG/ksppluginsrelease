@@ -57,7 +57,7 @@ public interface KSPGELooterConfig extends Config
     )
     default boolean priorityMode()
     {
-        return false;
+        return true;
     }
 
     @ConfigItem(
