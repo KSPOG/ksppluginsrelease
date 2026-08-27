@@ -48,13 +48,29 @@ Projected GP/hour is used to rank otherwise-profitable recipes. It accounts for 
 - Each ingredient purchase must fit the remaining pre-funded plan. If observed cash/bank state drifts, the plugin stays in `RESTOCKING` and recalculates the plan instead of entering `WAITING_FOR_PROFIT` with a misleading ingredient-level insufficient-coins message.
 - Partial GE fills stop the current purchase chain and trigger a fresh plan using the materials actually collected plus the refunded cash. This prevents buying a full amount of Coal/runes against only a partially filled ore purchase.
 - Coins already in the inventory are kept there while the plugin remains in `RESTOCKING`, including when `Bank whole inventory` is enabled.
+- **All available Nature runes are withdrawn as items and kept in one persistent inventory stack.** Bank and inventory Nature runes are treated as one supply pool for affordability and craftable-bar calculations.
 - Restocking uses only free GE slots.
 - The plugin does **not** intentionally cancel unrelated GE offers.
 - Buy/sell offers time out, abort, and collect partial fills rather than waiting forever.
 
+## Grand Exchange entry pacing
+
+Buy offers are entered as a staged transaction instead of firing the entire GE sequence immediately:
+
+1. Open and settle the GE interface.
+2. Open a free buy slot and wait for the item-search prompt.
+3. Select the exact item and wait for the offer controls.
+4. Enter the requested buy price and verify the GE price value actually changed.
+5. Enter the requested quantity and verify the GE quantity value actually changed.
+6. Only then press Confirm.
+
+Price and quantity entry are retried when the GE does not register the requested value, which prevents default-price/default-quantity offers caused by UI timing.
+
 ## Output safety
 
 The plugin tracks bars it created during the current session. When `Auto-sell output` is enabled, selling is bounded by both the tracked session output and a protected bank baseline captured before that recipe begins processing. This is designed to keep pre-existing banked bars out of automated sales, including after partial GE fills.
+
+Produced bars are explicitly withdrawn with the bank in **note mode** before they are offered on the Grand Exchange. The plugin waits for the note-mode switch to settle and verifies that the bar stack appeared in inventory before beginning the sale.
 
 Because session tracking and protected baselines reset when the plugin/client restarts, previously produced bars are treated as pre-existing stock on the next run rather than automatically sold.
 
@@ -80,9 +96,9 @@ The overlay shows:
 
 ## Important behavior
 
-`Bank whole inventory` is enabled by default so the plugin has a predictable 28-slot processing inventory.
+`Bank whole inventory` is enabled by default so the plugin has a predictable processing inventory. The persistent Nature-rune stack is exempt from that banking cleanup.
 
-During normal processing/selling it still banks the configured inventory as before. During `RESTOCKING`, the active coin stack is deliberately preserved so consecutive GE offers can reuse one stackable cash balance without unnecessary bank round-trips.
+During `RESTOCKING`, the active coin stack is also deliberately preserved so consecutive GE offers can reuse one stackable cash balance without unnecessary bank round-trips. Outside restocking, coins may be returned to the bank while Nature runes remain in inventory.
 
 Disable `Bank whole inventory` if you want unrelated inventory items left untouched. Doing so may reduce or prevent valid Superheat batches when too few inventory slots remain.
 
