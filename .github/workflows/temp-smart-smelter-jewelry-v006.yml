@@ -1,171 +1,26 @@
-name: Temporary Smart Smelter Jewellery GE Patch
+name: SmartSmelterJewelryPatch
 
-on:
-  push:
-    branches:
-      - fix/smart-smelter-jewelry-ge-v006
+on: push
 
 permissions:
   contents: write
 
 jobs:
   patch:
-    if: github.actor != 'github-actions[bot]'
+    if: ${{ github.actor != 'github-actions[bot]' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-
-      - name: Patch Smart Smelter
-        shell: bash
+      - name: Apply patch
+        run: python3 .github/patch-smart-smelter-v006.py
+      - name: Commit patch
         run: |
-          python3 - <<'PY'
-          from pathlib import Path
-          import re
-
-          p = Path('kspsmartsmelter/KspSmartSmelterScript.java')
-          s = p.read_text()
-
-          restock = '''    private void restock(SmeltRoute route) {
-        restockCount++;
-        state = SmartSmelterState.WALKING_TO_GE;
-        Microbot.status = "Walking to Grand Exchange";
-        Rs2Walker.walkTo(GRAND_EXCHANGE);
-
-        if (config.autoSellOutput()) {
-            sellBankedOutput(route);
-        }
-
-        state = SmartSmelterState.RESTOCKING;
-        if (!SmartSmelterGeTrader.ensureOverview()) {
-            Microbot.status = "Could not open Grand Exchange";
-            return;
-        }
-
-        int targetCycles = Math.max(1, config.restockCycles());
-        int[] ids = route.getInputIds();
-        int[] quantities = route.getInputQuantities();
-
-        for (int i = 0; i < ids.length; i++) {
-            int desired = targetCycles * quantities[i];
-            int existing = bankQuantity(ids[i]) + Rs2Inventory.itemQuantity(ids[i]);
-            int wanted = Math.max(0, desired - existing);
-            if (wanted <= 0) {
-                continue;
-            }
-
-            String inputName = itemName(ids[i]);
-            Microbot.status = "Placing GE buy: " + inputName;
-            if (!SmartSmelterGeTrader.placeBuy(ids[i], inputName, wanted, config.buyPercent())) {
-                Microbot.status = "GE buy placement/verification failed: " + inputName;
-                lastPriceScan = 0L;
-                return;
-            }
-
-            sleep(450, 700);
-        }
-
-        state = SmartSmelterState.WAITING_FOR_OFFERS;
-        Microbot.status = SmartSmelterGeTrader.hasOpenOffers()
-                ? "Waiting for GE restock offers"
-                : "Restock offers completed";
-        sleep(Math.max(3, config.offerWaitSeconds()) * 1000);
-
-        if (!SmartSmelterGeTrader.collectCompletedToBank()) {
-            return;
-        }
-
-        if (Rs2GrandExchange.isOpen()) {
-            Rs2GrandExchange.closeExchange();
-        }
-
-        lastPriceScan = 0;
-        state = SmartSmelterState.WALKING_TO_BANK;
-    }
-'''
-
-          sell = '''    private void sellBankedOutput(SmeltRoute route) {
-        if (!Rs2Bank.isOpen()) {
-            Rs2Bank.openBank();
-        }
-        if (!sleepUntil(Rs2Bank::isOpen, 5000)) {
-            return;
-        }
-
-        String outputName = itemName(route.getOutputId());
-        int quantity = bankQuantity(route.getOutputId());
-        if (quantity <= 0) {
-            Rs2Bank.closeBank();
-            return;
-        }
-
-        if (!Rs2Bank.setWithdrawAsNote()) {
-            Microbot.status = "Setting noted output withdrawal";
-            return;
-        }
-
-        Microbot.status = "Withdrawing noted " + outputName;
-        if (!Rs2Bank.withdrawAll(outputName, true)) {
-            Microbot.status = "Failed withdrawing noted " + outputName;
-            return;
-        }
-
-        if (!sleepUntil(() -> Rs2Inventory.itemQuantity(outputName, true) >= quantity, 5000)) {
-            Microbot.status = "Waiting for noted output stack";
-            return;
-        }
-
-        quantity = Rs2Inventory.itemQuantity(outputName, true);
-        Rs2Bank.closeBank();
-        sleepUntil(() -> !Rs2Bank.isOpen(), 3000);
-
-        if (quantity <= 0 || !SmartSmelterGeTrader.ensureOverview()) {
-            return;
-        }
-
-        if (SmartSmelterGeTrader.placeSell(
-                route.getOutputId(), outputName, quantity, config.sellPercent())) {
-            state = SmartSmelterState.WAITING_FOR_OFFERS;
-            Microbot.status = "Selling " + route.getOutputName();
-            sleep(Math.max(3, config.offerWaitSeconds()) * 1000);
-            SmartSmelterGeTrader.collectCompletedToBank();
-        } else {
-            Microbot.status = "GE sell placement/verification failed: " + outputName;
-            SmartSmelterGeTrader.recoverToOverview();
-        }
-    }
-'''
-
-          s, n1 = re.subn(
-              r'    private void restock\(SmeltRoute route\) \{.*?\n    \}\n\n    private void sellBankedOutput',
-              restock + '\n    private void sellBankedOutput', s, count=1, flags=re.S)
-          if n1 != 1:
-              raise SystemExit(f'restock replacement count={n1}')
-
-          s, n2 = re.subn(
-              r'    private void sellBankedOutput\(SmeltRoute route\) \{.*?\n    \}\n\n    private String itemName',
-              sell + '\n    private String itemName', s, count=1, flags=re.S)
-          if n2 != 1:
-              raise SystemExit(f'sell replacement count={n2}')
-
-          marker = '        state = SmartSmelterState.BANKING;\n        Microbot.status = "Preparing " + route.getOutputName();\n\n        depositProductionInventory(route);'
-          replacement = '        state = SmartSmelterState.BANKING;\n        Microbot.status = "Preparing " + route.getOutputName();\n\n        if (!Rs2Bank.setWithdrawAsItem()) {\n            Microbot.status = "Setting bank item withdrawal mode";\n            return;\n        }\n\n        depositProductionInventory(route);'
-          if marker not in s:
-              raise SystemExit('prepareNextTrip item-mode marker not found')
-          s = s.replace(marker, replacement, 1)
-          p.write_text(s)
-
-          v = Path('kspsmartsmelter/KspSmartSmelterPlugin.java')
-          t = v.read_text()
-          if 'VERSION = "0.0.5"' not in t:
-              raise SystemExit('version marker not found')
-          v.write_text(t.replace('VERSION = "0.0.5"', 'VERSION = "0.0.6"', 1))
-          PY
-
+          rm -f .github/patch-smart-smelter-v006.py
           rm -f .github/workflows/temp-smart-smelter-jewelry-v006.yml
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add kspsmartsmelter .github/workflows/temp-smart-smelter-jewelry-v006.yml
+          git add kspsmartsmelter .github
           git commit -m "Port Jewellery Crafter GE handling to Smart Smelter"
           git push
