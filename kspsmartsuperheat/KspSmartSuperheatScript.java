@@ -916,7 +916,7 @@ public class KspSmartSuperheatScript extends Script
         int high = clampInt(upperBound);
         while (low < high)
         {
-            int mid = low + (high - low + 1) / 2;
+            int mid = low + (int) (((long) high - low + 1L) / 2L);
             if (calculateRestockCost(recipe, quote, freeFire, mid) <= budget)
             {
                 low = mid;
@@ -939,7 +939,9 @@ public class KspSmartSuperheatScript extends Script
 
         long banked = Math.max(0, Rs2Bank.count(itemId));
         long purchasable = Math.max(0L, budget) / offerPrice;
-        return Math.max(0L, (banked + purchasable) / amountPerBar);
+        long capacity = Math.max(0L, (banked + purchasable) / amountPerBar);
+        long safeCapacity = Integer.MAX_VALUE / (long) amountPerBar;
+        return Math.min(capacity, safeCapacity);
     }
 
     private long calculateRestockCost(
