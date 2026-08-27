@@ -295,8 +295,8 @@ public class KspSmartSuperheatScript extends Script
         {
             int stackSlotsNeeded = 1 + (freeFireRunes ? 0 : 1);
             int occupiedWorkStacks = 0;
-            if (Rs2Inventory.count(ItemID.NATURE_RUNE) > 0) occupiedWorkStacks++;
-            if (!freeFireRunes && Rs2Inventory.count(ItemID.FIRE_RUNE) > 0) occupiedWorkStacks++;
+            if (Rs2Inventory.count(ItemID.NATURERUNE) > 0) occupiedWorkStacks++;
+            if (!freeFireRunes && Rs2Inventory.count(ItemID.FIRERUNE) > 0) occupiedWorkStacks++;
             int availableSlots = Rs2Inventory.emptySlotCount() + occupiedWorkStacks;
             int materialSlots = Math.max(1, activeRecipe.getMaterialSlotsPerBar());
             maxBatch = Math.min(maxBatch, Math.max(0, (availableSlots - stackSlotsNeeded) / materialSlots));
@@ -478,13 +478,13 @@ public class KspSmartSuperheatScript extends Script
             return;
         }
 
-        if (!buyMissing("Nature rune", ItemID.NATURE_RUNE, targetBars, activeQuote.getNatureBuyPrice()))
+        if (!buyMissing("Nature rune", ItemID.NATURERUNE, targetBars, activeQuote.getNatureBuyPrice()))
         {
             return;
         }
 
         if (!freeFireRunes
-            && !buyMissing("Fire rune", ItemID.FIRE_RUNE, targetBars * 4, activeQuote.getFireBuyPrice()))
+            && !buyMissing("Fire rune", ItemID.FIRERUNE, targetBars * 4, activeQuote.getFireBuyPrice()))
         {
             return;
         }
@@ -756,8 +756,8 @@ public class KspSmartSuperheatScript extends Script
         }
 
         depositIfPresent(ItemID.COAL);
-        depositIfPresent(ItemID.NATURE_RUNE);
-        depositIfPresent(ItemID.FIRE_RUNE);
+        depositIfPresent(ItemID.NATURERUNE);
+        depositIfPresent(ItemID.FIRERUNE);
         depositIfPresent(ItemID.COINS);
     }
 
@@ -789,12 +789,12 @@ public class KspSmartSuperheatScript extends Script
             sleep(120, 220);
         }
 
-        Rs2Bank.withdrawX(ItemID.NATURE_RUNE, bars);
+        Rs2Bank.withdrawX(ItemID.NATURERUNE, bars);
         sleep(120, 220);
 
         if (!freeFire)
         {
-            Rs2Bank.withdrawX(ItemID.FIRE_RUNE, bars * 4);
+            Rs2Bank.withdrawX(ItemID.FIRERUNE, bars * 4);
             sleep(120, 220);
         }
 
@@ -845,11 +845,11 @@ public class KspSmartSuperheatScript extends Script
             bars = Math.min(bars, Rs2Bank.count(ItemID.COAL) / recipe.getCoalPerBar());
         }
 
-        bars = Math.min(bars, Rs2Bank.count(ItemID.NATURE_RUNE));
+        bars = Math.min(bars, Rs2Bank.count(ItemID.NATURERUNE));
 
         if (!freeFire)
         {
-            bars = Math.min(bars, Rs2Bank.count(ItemID.FIRE_RUNE) / 4);
+            bars = Math.min(bars, Rs2Bank.count(ItemID.FIRERUNE) / 4);
         }
 
         return Math.max(0, bars);
@@ -872,8 +872,8 @@ public class KspSmartSuperheatScript extends Script
             && Rs2Inventory.count(recipe.getSecondaryOreId()) < recipe.getSecondaryOrePerBar()) return false;
         if (recipe.getCoalPerBar() > 0
             && Rs2Inventory.count(ItemID.COAL) < recipe.getCoalPerBar()) return false;
-        if (Rs2Inventory.count(ItemID.NATURE_RUNE) < 1) return false;
-        return freeFire || Rs2Inventory.count(ItemID.FIRE_RUNE) >= 4;
+        if (Rs2Inventory.count(ItemID.NATURERUNE) < 1) return false;
+        return freeFire || Rs2Inventory.count(ItemID.FIRERUNE) >= 4;
     }
 
     private boolean hasInfiniteFireSource()

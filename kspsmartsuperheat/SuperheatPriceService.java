@@ -38,7 +38,7 @@ public final class SuperheatPriceService
     {
         MarketPrice primary = get(recipe.getPrimaryOreId());
         MarketPrice output = get(recipe.getOutputId());
-        MarketPrice nature = get(ItemID.NATURE_RUNE);
+        MarketPrice nature = get(ItemID.NATURERUNE);
 
         if (primary == null) return SuperheatQuote.invalid(recipe, "No live price for " + recipe.getPrimaryOreName(), freeFireRunes);
         if (output == null) return SuperheatQuote.invalid(recipe, "No live price for " + recipe.getOutputName(), freeFireRunes);
@@ -46,7 +46,7 @@ public final class SuperheatPriceService
 
         MarketPrice secondary = recipe.hasSecondaryOre() ? get(recipe.getSecondaryOreId()) : null;
         MarketPrice coal = recipe.getCoalPerBar() > 0 ? get(ItemID.COAL) : null;
-        MarketPrice fire = freeFireRunes ? null : get(ItemID.FIRE_RUNE);
+        MarketPrice fire = freeFireRunes ? null : get(ItemID.FIRERUNE);
 
         if (recipe.hasSecondaryOre() && secondary == null)
             return SuperheatQuote.invalid(recipe, "No live price for " + recipe.getSecondaryOreName(), freeFireRunes);
