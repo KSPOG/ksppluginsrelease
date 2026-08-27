@@ -2,6 +2,7 @@ package net.runelite.client.plugins.microbot.kspsmartsuperheat;
 
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.Skill;
+import net.runelite.api.gameval.InterfaceID;
 import net.runelite.api.gameval.ItemID;
 import net.runelite.client.plugins.microbot.Microbot;
 import net.runelite.client.plugins.microbot.Script;
@@ -12,6 +13,7 @@ import net.runelite.client.plugins.microbot.util.inventory.Rs2Inventory;
 import net.runelite.client.plugins.microbot.util.inventory.Rs2ItemModel;
 import net.runelite.client.plugins.microbot.util.magic.Rs2Magic;
 import net.runelite.client.plugins.microbot.util.player.Rs2Player;
+import net.runelite.client.plugins.microbot.util.widget.Rs2Widget;
 
 import java.util.EnumMap;
 import java.util.Locale;
@@ -26,6 +28,7 @@ public class KspSmartSuperheatScript extends Script
 {
     private static final int LOOP_DELAY_MS = 500;
     private static final int BANK_TIMEOUT_MS = 6_000;
+    private static final int BANK_WIDGET_TIMEOUT_MS = 4_000;
     private static final int INVENTORY_TIMEOUT_MS = 4_000;
     private static final int BATCH_WITHDRAW_TIMEOUT_MS = 3_500;
     private static final int MAX_BATCH_WITHDRAW_ATTEMPTS = 3;
@@ -34,6 +37,11 @@ public class KspSmartSuperheatScript extends Script
     private static final int MAX_COIN_WITHDRAW_ATTEMPTS = 2;
     private static final int CAST_RESULT_TIMEOUT_MS = 4_500;
     private static final int MAX_CAST_FAILURES = 3;
+
+    private static final int BANK_GROUP = 12;
+    private static final int BANK_ROOT_CHILD = 1;
+    private static final int BANK_AMOUNT_PROMPT_GROUP = 162;
+    private static final int BANK_AMOUNT_PROMPT_CHILD = 43;
 
     private static final String[] FIRE_RUNE_STAVES = {
         "Staff of fire",
@@ -260,9 +268,9 @@ public class KspSmartSuperheatScript extends Script
             return;
         }
 
-        if (!Rs2Bank.setWithdrawAsItem())
+        if (!ensureBankItemMode())
         {
-            status = "Restoring bank item mode";
+            status = "Waiting for bank item mode";
             return;
         }
 
@@ -416,9 +424,9 @@ public class KspSmartSuperheatScript extends Script
             return;
         }
 
-        if (!Rs2Bank.setWithdrawAsItem())
+        if (!ensureBankItemMode())
         {
-            status = "Restoring bank item mode";
+            status = "Waiting for bank item mode";
             return;
         }
 
@@ -712,6 +720,12 @@ public class KspSmartSuperheatScript extends Script
             return;
         }
 
+        if (!ensureBankItemMode())
+        {
+            status = "Waiting for bank item mode";
+            return;
+        }
+
         normalizeInventoryForBank();
         ensureAllNatureRunesInInventory();
 
@@ -733,19 +747,40 @@ public class KspSmartSuperheatScript extends Script
             return;
         }
 
-        if (!Rs2Bank.setWithdrawAsNote())
+        if (!ensureBankNoteMode())
         {
-            status = "Switching bank to note mode";
+            status = "Waiting for bank note mode";
             return;
         }
 
-        sleep(500, 750);
+        if (!waitForBankAmountPromptClosed())
+        {
+            status = "Waiting for bank amount prompt";
+            return;
+        }
+
+        Rs2ItemModel outputRow = Rs2Bank.findBankItem(saleRecipe.getOutputId());
+        if (outputRow == null)
+        {
+            status = "Waiting for bar bank widget";
+            return;
+        }
+
+        sleep(400, 650);
         int inventoryBefore = inventoryCountByName(saleRecipe.getOutputName());
-        Rs2Bank.withdrawX(saleRecipe.getOutputId(), toSell);
+        int epochBefore = Rs2Bank.getBankLiveEpoch();
+        if (!Rs2Bank.withdrawX(saleRecipe.getOutputId(), toSell))
+        {
+            status = "Could not request noted " + saleRecipe.getOutputName();
+            return;
+        }
+
         sleepUntil(
             () -> inventoryCountByName(saleRecipe.getOutputName()) > inventoryBefore,
             INVENTORY_TIMEOUT_MS
         );
+        Rs2Bank.syncBankInventoryAfterChange(epochBefore);
+        waitForBankAmountPromptClosed();
 
         int inventoryQty = inventoryCountByName(saleRecipe.getOutputName()) - inventoryBefore;
         if (inventoryQty <= 0)
@@ -819,33 +854,113 @@ public class KspSmartSuperheatScript extends Script
         if (Rs2GrandExchange.isOpen())
         {
             Rs2GrandExchange.closeExchange();
-            sleep(150, 300);
+            sleepUntil(() -> !Rs2GrandExchange.isOpen(), BANK_WIDGET_TIMEOUT_MS);
         }
 
         if (Rs2Bank.isOpen())
         {
-            return true;
+            return ensureBankWidgetsReady();
         }
 
         if (Rs2Bank.openBank())
         {
-            return sleepUntil(Rs2Bank::isOpen, BANK_TIMEOUT_MS);
+            if (!sleepUntil(Rs2Bank::isOpen, BANK_TIMEOUT_MS))
+            {
+                return false;
+            }
+            return ensureBankWidgetsReady();
         }
 
         Rs2GrandExchange.walkToGrandExchange();
         sleepUntil(() -> !Rs2Player.isMoving(), 20_000);
 
-        if (!Rs2Bank.openBank())
+        if (!Rs2Bank.openBank() || !sleepUntil(Rs2Bank::isOpen, BANK_TIMEOUT_MS))
         {
             return false;
         }
 
-        return sleepUntil(Rs2Bank::isOpen, BANK_TIMEOUT_MS);
+        return ensureBankWidgetsReady();
+    }
+
+    private boolean bankWidgetsReady()
+    {
+        return Rs2Bank.isOpen()
+            && Rs2Widget.isWidgetVisible(BANK_GROUP, BANK_ROOT_CHILD)
+            && Rs2Widget.getWidget(InterfaceID.Bankmain.NOTE) != null
+            && Rs2Widget.getWidget(InterfaceID.Bankmain.QUANTITY1_TEXT) != null;
+    }
+
+    private boolean ensureBankWidgetsReady()
+    {
+        return bankWidgetsReady() || sleepUntil(this::bankWidgetsReady, BANK_WIDGET_TIMEOUT_MS);
+    }
+
+    private boolean ensureBankItemMode()
+    {
+        if (!ensureBankWidgetsReady())
+        {
+            return false;
+        }
+
+        if (Rs2Bank.hasWithdrawAsItem())
+        {
+            return true;
+        }
+
+        // Do not use Rs2Bank.setWithdrawAsItem(). In the current Microbot helper,
+        // the item-mode branch clicks Bankmain.QUANTITY1_TEXT, which changes the
+        // default withdrawal quantity instead of toggling note/item mode.
+        if (!Rs2Widget.clickWidget(InterfaceID.Bankmain.NOTE))
+        {
+            return false;
+        }
+
+        return sleepUntil(
+            () -> bankWidgetsReady() && Rs2Bank.hasWithdrawAsItem(),
+            BANK_WIDGET_TIMEOUT_MS
+        );
+    }
+
+    private boolean ensureBankNoteMode()
+    {
+        if (!ensureBankWidgetsReady())
+        {
+            return false;
+        }
+
+        if (!Rs2Bank.hasWithdrawAsItem())
+        {
+            return true;
+        }
+
+        if (!Rs2Widget.clickWidget(InterfaceID.Bankmain.NOTE))
+        {
+            return false;
+        }
+
+        return sleepUntil(
+            () -> bankWidgetsReady() && !Rs2Bank.hasWithdrawAsItem(),
+            BANK_WIDGET_TIMEOUT_MS
+        );
+    }
+
+    private boolean bankAmountPromptOpen()
+    {
+        var prompt = Rs2Widget.getWidget(BANK_AMOUNT_PROMPT_GROUP, BANK_AMOUNT_PROMPT_CHILD);
+        return prompt != null
+            && prompt.getText() != null
+            && prompt.getText().equalsIgnoreCase("Enter amount:");
+    }
+
+    private boolean waitForBankAmountPromptClosed()
+    {
+        return !bankAmountPromptOpen()
+            || sleepUntil(() -> !bankAmountPromptOpen(), BANK_WIDGET_TIMEOUT_MS);
     }
 
     private void normalizeInventoryForBank()
     {
-        if (!Rs2Bank.isOpen())
+        if (!ensureBankWidgetsReady())
         {
             return;
         }
@@ -877,7 +992,7 @@ public class KspSmartSuperheatScript extends Script
 
     private void normalizeInventoryForRestock()
     {
-        if (!Rs2Bank.isOpen())
+        if (!ensureBankWidgetsReady())
         {
             return;
         }
@@ -911,78 +1026,64 @@ public class KspSmartSuperheatScript extends Script
 
     private void depositIfPresent(int itemId)
     {
-        if (itemId > 0 && Rs2Inventory.itemQuantity(itemId) > 0)
+        if (itemId <= 0 || Rs2Inventory.itemQuantity(itemId) <= 0 || !ensureBankWidgetsReady())
         {
-            Rs2Bank.depositAll(itemId);
-            sleep(100, 180);
+            return;
+        }
+
+        int epochBefore = Rs2Bank.getBankLiveEpoch();
+        if (Rs2Bank.depositAll(itemId))
+        {
+            Rs2Bank.syncBankInventoryAfterChange(epochBefore);
+            sleep(120, 220);
         }
     }
 
     private void ensureAllNatureRunesInInventory()
     {
-        if (!Rs2Bank.isOpen())
+        if (!ensureBankWidgetsReady() || !ensureBankItemMode())
         {
             return;
         }
 
-        for (int attempt = 1; attempt <= MAX_BATCH_WITHDRAW_ATTEMPTS; attempt++)
+        int totalNatureRunes = Rs2Inventory.itemQuantity(ItemID.NATURERUNE)
+            + Math.max(0, Rs2Bank.count(ItemID.NATURERUNE));
+        if (totalNatureRunes > 0)
         {
-            int banked = Math.max(0, Rs2Bank.count(ItemID.NATURERUNE));
-            if (banked <= 0)
-            {
-                return;
-            }
-
-            if (!Rs2Bank.setWithdrawAsItem())
-            {
-                sleep(250, 450);
-                continue;
-            }
-
-            int beforeInventory = Rs2Inventory.itemQuantity(ItemID.NATURERUNE);
-            int beforeBank = banked;
-            Rs2Bank.withdrawX(ItemID.NATURERUNE, banked);
-            sleepUntil(
-                () -> Rs2Inventory.itemQuantity(ItemID.NATURERUNE) > beforeInventory
-                    || (Rs2Bank.isOpen() && Rs2Bank.count(ItemID.NATURERUNE) < beforeBank),
-                BATCH_WITHDRAW_TIMEOUT_MS
-            );
-            sleep(300, 500);
+            ensureInventoryAmount(ItemID.NATURERUNE, totalNatureRunes, "Nature rune");
         }
     }
 
     private boolean withdrawBatch(SuperheatRecipe recipe, int bars, boolean freeFire)
     {
-        if (recipe == null || bars <= 0 || !Rs2Bank.isOpen())
+        if (recipe == null || bars <= 0 || !ensureBankWidgetsReady() || !ensureBankItemMode())
         {
             return false;
         }
 
-        int primaryTarget = bars * recipe.getPrimaryOrePerBar();
-        if (!ensureInventoryAmount(recipe.getPrimaryOreId(), primaryTarget, recipe.getPrimaryOreName()))
+        if (!ensureInventoryAmount(
+            recipe.getPrimaryOreId(),
+            bars * recipe.getPrimaryOrePerBar(),
+            recipe.getPrimaryOreName()))
         {
             return false;
         }
 
-        if (recipe.hasSecondaryOre())
+        if (recipe.hasSecondaryOre()
+            && !ensureInventoryAmount(
+                recipe.getSecondaryOreId(),
+                bars * recipe.getSecondaryOrePerBar(),
+                recipe.getSecondaryOreName()))
         {
-            int secondaryTarget = bars * recipe.getSecondaryOrePerBar();
-            if (!ensureInventoryAmount(recipe.getSecondaryOreId(), secondaryTarget, recipe.getSecondaryOreName()))
-            {
-                return false;
-            }
+            return false;
         }
 
-        if (recipe.getCoalPerBar() > 0)
+        if (recipe.getCoalPerBar() > 0
+            && !ensureInventoryAmount(ItemID.COAL, bars * recipe.getCoalPerBar(), "Coal"))
         {
-            int coalTarget = bars * recipe.getCoalPerBar();
-            if (!ensureInventoryAmount(ItemID.COAL, coalTarget, "Coal"))
-            {
-                return false;
-            }
+            return false;
         }
 
-        // Nature runes are persistent, but a complete batch still requires one per bar.
         ensureAllNatureRunesInInventory();
         if (Rs2Inventory.itemQuantity(ItemID.NATURERUNE) < bars)
         {
@@ -1006,9 +1107,10 @@ public class KspSmartSuperheatScript extends Script
 
         for (int attempt = 1; attempt <= MAX_BATCH_WITHDRAW_ATTEMPTS; attempt++)
         {
-            if (!Rs2Bank.isOpen())
+            if (!ensureBankWidgetsReady() || !ensureBankItemMode() || !waitForBankAmountPromptClosed())
             {
-                return false;
+                sleep(250, 450);
+                continue;
             }
 
             int current = Rs2Inventory.itemQuantity(itemId);
@@ -1018,20 +1120,31 @@ public class KspSmartSuperheatScript extends Script
             }
 
             int banked = Math.max(0, Rs2Bank.count(itemId));
-            if (banked <= 0)
+            Rs2ItemModel bankRow = Rs2Bank.findBankItem(itemId);
+            if (banked <= 0 || bankRow == null)
             {
                 log.debug(
-                    "Batch withdrawal shortfall for {}: required={}, inventory={}, bank=0",
+                    "Batch withdrawal shortfall for {}: required={}, inventory={}, bank={}",
                     itemName,
                     requiredTotal,
-                    current
+                    current,
+                    banked
                 );
                 return false;
             }
 
             int deficit = requiredTotal - current;
             int request = Math.min(deficit, banked);
+            int emptySlots = Rs2Inventory.emptySlotCount();
+            if ((!bankRow.isStackable() && emptySlots < request)
+                || (bankRow.isStackable() && current <= 0 && emptySlots <= 0))
+            {
+                status = "Waiting for inventory space for " + itemName;
+                return false;
+            }
+
             int before = current;
+            int epochBefore = Rs2Bank.getBankLiveEpoch();
             status = "Withdrawing " + formatNumber(request) + " " + itemName;
 
             log.debug(
@@ -1047,6 +1160,7 @@ public class KspSmartSuperheatScript extends Script
 
             if (!Rs2Bank.withdrawX(itemId, request))
             {
+                waitForBankAmountPromptClosed();
                 sleep(300, 500);
                 continue;
             }
@@ -1056,14 +1170,9 @@ public class KspSmartSuperheatScript extends Script
                 BATCH_WITHDRAW_TIMEOUT_MS
             );
 
-            if (changed)
-            {
-                sleep(350, 550);
-            }
-            else
-            {
-                sleep(450, 700);
-            }
+            Rs2Bank.syncBankInventoryAfterChange(epochBefore);
+            waitForBankAmountPromptClosed();
+            sleep(changed ? 300 : 450, changed ? 500 : 700);
         }
 
         int actual = Rs2Inventory.itemQuantity(itemId);
@@ -1109,16 +1218,17 @@ public class KspSmartSuperheatScript extends Script
 
     private boolean ensureCoinsInInventory(int required)
     {
-        if (!Rs2Bank.isOpen() || required <= 0)
+        if (required <= 0 || !ensureBankWidgetsReady())
         {
             return false;
         }
 
         for (int attempt = 1; attempt <= MAX_COIN_WITHDRAW_ATTEMPTS; attempt++)
         {
-            if (!Rs2Bank.isOpen())
+            if (!ensureBankWidgetsReady() || !ensureBankItemMode() || !waitForBankAmountPromptClosed())
             {
-                return false;
+                sleep(250, 450);
+                continue;
             }
 
             int inventoryCoins = Rs2Inventory.itemQuantity(ItemID.COINS);
@@ -1133,15 +1243,18 @@ public class KspSmartSuperheatScript extends Script
                 return false;
             }
 
-            int missing = required - inventoryCoins;
-            if (!Rs2Bank.setWithdrawAsItem())
+            Rs2ItemModel coinRow = Rs2Bank.findBankItem(ItemID.COINS);
+            if (coinRow == null || (inventoryCoins <= 0 && Rs2Inventory.emptySlotCount() <= 0))
             {
-                sleep(200, 350);
-                continue;
+                status = "Waiting for coin bank widget";
+                return false;
             }
 
+            int missing = required - inventoryCoins;
             int bankBefore = bankCoins;
             int inventoryBefore = inventoryCoins;
+            int epochBefore = Rs2Bank.getBankLiveEpoch();
+
             log.debug(
                 "Coin stack top-up {}/{}: required={}, inventory={}, bank={}, missing={}",
                 attempt,
@@ -1152,12 +1265,20 @@ public class KspSmartSuperheatScript extends Script
                 missing
             );
 
-            Rs2Bank.withdrawX(ItemID.COINS, missing);
+            if (!Rs2Bank.withdrawX(ItemID.COINS, missing))
+            {
+                waitForBankAmountPromptClosed();
+                sleep(300, 500);
+                continue;
+            }
 
             boolean transferObserved = sleepUntil(() ->
                     Rs2Inventory.itemQuantity(ItemID.COINS) > inventoryBefore
                         || (Rs2Bank.isOpen() && Rs2Bank.count(ItemID.COINS) < bankBefore),
                 COIN_WITHDRAW_TIMEOUT_MS);
+
+            Rs2Bank.syncBankInventoryAfterChange(epochBefore);
+            waitForBankAmountPromptClosed();
 
             if (Rs2Inventory.itemQuantity(ItemID.COINS) >= required)
             {
@@ -1171,7 +1292,7 @@ public class KspSmartSuperheatScript extends Script
                 return true;
             }
 
-            sleep(250, 450);
+            sleep(300, 500);
         }
 
         return Rs2Inventory.itemQuantity(ItemID.COINS) >= required;
