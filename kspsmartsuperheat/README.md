@@ -39,10 +39,11 @@ Projected GP/hour is used to rank otherwise-profitable recipes. It accounts for 
 
 ## Smart restocking
 
-- Restock size is capped by `Restock target`.
-- It is automatically reduced to fit available capital.
+- Restock quantity is calculated from the coins currently available to the plugin rather than a fixed bar target.
+- Existing banked ores/runes are included when calculating how many complete bars can be funded, so the plugin only budgets for missing ingredients.
 - `Cash reserve` is never intentionally allocated to a new restock plan.
 - `Max spend %` limits how much spendable cash one restock may commit.
+- Every individual GE buy is capped by both the remaining restock budget and the coins currently available before the offer is placed.
 - Restocking uses only free GE slots.
 - The plugin does **not** intentionally cancel unrelated GE offers.
 - Buy/sell offers time out, abort, and collect partial fills rather than waiting forever.
