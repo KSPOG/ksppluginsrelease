@@ -12,7 +12,7 @@ import javax.inject.Inject;
 import javax.inject.Singleton;
 
 @PluginDescriptor(
-        name = "KSP Smart Smelter",
+        name = PluginConstants.KSP + "Smart Smelter",
         description = "Automatically selects profitable furnace smelting and cannonball processing routes.",
         authors = {"KSP"},
         version = KspSmartSmelterPlugin.VERSION,

@@ -13,7 +13,7 @@ import java.time.Duration;
 import java.time.Instant;
 
 @PluginDescriptor(
-        name = "KSP Flesh Crawlers",
+        name = PluginConstants.KSP + "Flesh Crawlers",
         description = "Deterministic Stronghold Flesh Crawler trainer with fixed room navigation, combat balancing, looting and food banking.",
         tags = {"ksp", "microbot", "combat", "flesh crawler", "stronghold of security", "training"},
         authors = {"KSP"},
