@@ -1,0 +1,158 @@
+name: Temporary Smart Superheat Funding Patch
+
+on:
+  push:
+    branches:
+      - fix/smart-superheat-funding-v0012
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Patch Smart Superheat funding
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          script = Path('kspsmartsuperheat/KspSmartSuperheatScript.java')
+          text = script.read_text()
+
+          pattern = re.compile(
+              r'    private boolean ensureCoinsInInventory\(int required\)\n    \{.*?\n    \}\n\n    private int calculateAffordableRestockBars',
+              re.S,
+          )
+
+          replacement = '''    private boolean ensureCoinsInInventory(int required)
+    {
+        if (required <= 0)
+        {
+            return false;
+        }
+
+        // Always trust an already-funded inventory stack before requiring bank widgets.
+        // This prevents a transient bank/widget close from sending the state machine back
+        // to "Funding restock plan" when the required cash is already present.
+        int inventoryCoins = Rs2Inventory.itemQuantity(ItemID.COINS);
+        if (inventoryCoins >= required)
+        {
+            return true;
+        }
+
+        if (!ensureBankWidgetsReady() || !ensureBankItemMode() || !waitForBankAmountPromptClosed())
+        {
+            return false;
+        }
+
+        for (int attempt = 1; attempt <= MAX_COIN_WITHDRAW_ATTEMPTS; attempt++)
+        {
+            inventoryCoins = Rs2Inventory.itemQuantity(ItemID.COINS);
+            if (inventoryCoins >= required)
+            {
+                return true;
+            }
+
+            int bankCoins = Rs2Bank.count(ItemID.COINS);
+            long liquidCoins = (long) inventoryCoins + bankCoins;
+            if (liquidCoins < required)
+            {
+                return false;
+            }
+
+            if (bankCoins <= 0)
+            {
+                return inventoryCoins >= required;
+            }
+
+            // Withdraw-All deliberately avoids the bank X-amount selector/prompt for
+            // stackable coins. The configured reserve remains protected because the
+            // atomic GE plan is still capped by executableBudget/plannedCost.
+            if (Rs2Inventory.isFull())
+            {
+                status = "Waiting for inventory space for coins";
+                return false;
+            }
+
+            int inventoryBefore = inventoryCoins;
+            int bankBefore = bankCoins;
+            int epochBefore = Rs2Bank.getBankLiveEpoch();
+            status = "Withdrawing available coins";
+
+            log.debug(
+                "Coin stack funding {}/{}: required={}, inventory={}, bank={}, liquid={}",
+                attempt,
+                MAX_COIN_WITHDRAW_ATTEMPTS,
+                required,
+                inventoryCoins,
+                bankCoins,
+                liquidCoins
+            );
+
+            if (!Rs2Bank.withdrawAll(ItemID.COINS))
+            {
+                sleep(300, 500);
+                continue;
+            }
+
+            boolean transferObserved = sleepUntil(() ->
+                    Rs2Inventory.itemQuantity(ItemID.COINS) > inventoryBefore
+                        || (Rs2Bank.isOpen() && Rs2Bank.count(ItemID.COINS) < bankBefore),
+                COIN_WITHDRAW_TIMEOUT_MS);
+
+            Rs2Bank.syncBankInventoryAfterChange(epochBefore);
+
+            int fundedCoins = Rs2Inventory.itemQuantity(ItemID.COINS);
+            if (fundedCoins >= required)
+            {
+                return true;
+            }
+
+            if (transferObserved && sleepUntil(
+                () -> Rs2Inventory.itemQuantity(ItemID.COINS) >= required,
+                COIN_WITHDRAW_SETTLE_TIMEOUT_MS))
+            {
+                return true;
+            }
+
+            log.debug(
+                "Coin funding not yet complete: required={}, inventory={}, bank={}",
+                required,
+                Rs2Inventory.itemQuantity(ItemID.COINS),
+                Rs2Bank.isOpen() ? Rs2Bank.count(ItemID.COINS) : -1
+            );
+            sleep(300, 500);
+        }
+
+        return Rs2Inventory.itemQuantity(ItemID.COINS) >= required;
+    }
+
+    private int calculateAffordableRestockBars'''
+
+          patched, count = pattern.subn(replacement, text)
+          if count != 1:
+              raise SystemExit(f'Expected to replace one ensureCoinsInInventory method, replaced {count}')
+          script.write_text(patched)
+
+          plugin = Path('kspsmartsuperheat/KspSmartSuperheatPlugin.java')
+          ptext = plugin.read_text()
+          old = 'public static final String VERSION = "0.0.11";'
+          new = 'public static final String VERSION = "0.0.12";'
+          if old not in ptext:
+              raise SystemExit('Expected v0.0.11 version marker not found')
+          plugin.write_text(ptext.replace(old, new, 1))
+
+          Path('.github/workflows/temp-smart-superheat-funding-patch.yml').unlink()
+          PY
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Fix Smart Superheat restock coin funding loop"
+          git push origin HEAD:fix/smart-superheat-funding-v0012
