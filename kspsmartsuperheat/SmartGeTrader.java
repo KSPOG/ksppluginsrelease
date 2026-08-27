@@ -1,41 +1,74 @@
 package net.runelite.client.plugins.microbot.kspsmartsuperheat;
 
 import lombok.extern.slf4j.Slf4j;
+import net.runelite.api.GrandExchangeOffer;
+import net.runelite.api.GrandExchangeOfferState;
 import net.runelite.api.gameval.InterfaceID;
-import net.runelite.api.gameval.VarbitID;
-import net.runelite.api.widgets.Widget;
 import net.runelite.client.plugins.microbot.Microbot;
 import net.runelite.client.plugins.microbot.util.bank.Rs2Bank;
+import net.runelite.client.plugins.microbot.util.grandexchange.GrandExchangeAction;
+import net.runelite.client.plugins.microbot.util.grandexchange.GrandExchangeRequest;
 import net.runelite.client.plugins.microbot.util.grandexchange.GrandExchangeSlots;
 import net.runelite.client.plugins.microbot.util.grandexchange.Rs2GrandExchange;
-import net.runelite.client.plugins.microbot.util.keyboard.Rs2Keyboard;
 import net.runelite.client.plugins.microbot.util.player.Rs2Player;
 import net.runelite.client.plugins.microbot.util.widget.Rs2Widget;
+import net.runelite.client.plugins.microbot.util.world.Rs2WorldUtil;
 
-import java.util.Arrays;
-import java.util.HashSet;
+import java.util.ArrayList;
 import java.util.List;
-import java.util.Set;
-import java.util.function.IntSupplier;
 
 import static net.runelite.client.plugins.microbot.util.Global.sleep;
 import static net.runelite.client.plugins.microbot.util.Global.sleepUntil;
 
+/**
+ * Grand Exchange execution for Smart Superheat.
+ *
+ * <p>The initial offer path mirrors KSP Jewellery Crafter: exact
+ * {@link GrandExchangeRequest} placement followed by verification against the client's live
+ * {@link GrandExchangeOffer} array. No GE setup-child arithmetic or inferred "free before / free
+ * after" slot detection is used.</p>
+ */
 @Slf4j
 final class SmartGeTrader
 {
     private static final int UI_TIMEOUT_MS = 5_000;
-    private static final int FIELD_ATTEMPTS = 3;
+    private static final int OFFER_CONFIRM_TIMEOUT_MS = 3_500;
 
     private SmartGeTrader()
     {
     }
 
-    static TradeResult buyToBank(String itemName, int quantity, int price, int timeoutSeconds)
+    static TradeResult buyToBank(
+        int itemId,
+        String itemName,
+        int quantity,
+        int price,
+        int timeoutSeconds)
     {
-        if (quantity <= 0 || price <= 0)
+        return execute(itemId, itemName, quantity, price, timeoutSeconds, GrandExchangeAction.BUY);
+    }
+
+    static TradeResult sellFromInventory(
+        int itemId,
+        String itemName,
+        int quantity,
+        int price,
+        int timeoutSeconds)
+    {
+        return execute(itemId, itemName, quantity, price, timeoutSeconds, GrandExchangeAction.SELL);
+    }
+
+    private static TradeResult execute(
+        int itemId,
+        String itemName,
+        int quantity,
+        int price,
+        int timeoutSeconds,
+        GrandExchangeAction action)
+    {
+        if (itemId <= 0 || itemName == null || itemName.isBlank() || quantity <= 0 || price <= 0)
         {
-            return TradeResult.failed("Invalid buy request");
+            return TradeResult.failed("Invalid " + actionName(action) + " request");
         }
 
         if (!ensureExchangeOpen())
@@ -43,223 +76,142 @@ final class SmartGeTrader
             return TradeResult.failed("Could not open Grand Exchange");
         }
 
-        GrandExchangeSlots targetSlot = Rs2GrandExchange.getAvailableSlot();
-        if (targetSlot == null)
+        // Recovery / duplicate guard. If a previous pass already created this offer, monitor it
+        // instead of placing another full restock order.
+        GrandExchangeSlots existing = findOfferSlot(itemId, action);
+        if (existing != null)
+        {
+            Microbot.status = "GE " + actionName(action) + " already active: " + itemName;
+            return waitForOffer(existing, itemId, itemName, quantity, timeoutSeconds, action);
+        }
+
+        List<GrandExchangeSlots> freeSlots = getAvailableGeSlots();
+        if (freeSlots.isEmpty())
         {
             return TradeResult.failed("No free Grand Exchange slot");
         }
 
-        Set<GrandExchangeSlots> freeBefore = captureAvailableSlots();
-        if (!placeBuyOfferSlow(itemName, price, quantity, targetSlot))
+        GrandExchangeSlots requestedSlot = freeSlots.get(0);
+        GrandExchangeRequest.Builder builder = GrandExchangeRequest.builder()
+            .action(action)
+            .itemName(itemName)
+            .exact(true)
+            .quantity(quantity)
+            .price(price)
+            .closeAfterCompletion(false);
+
+        // Jewellery Crafter explicitly owns BUY slots. SELL placement is left to Microbot's
+        // inventory-offer path, then resolved from the live client offer array.
+        if (action == GrandExchangeAction.BUY)
         {
+            builder.slot(requestedSlot);
+        }
+
+        GrandExchangeRequest request = builder.build();
+        Microbot.status = action == GrandExchangeAction.BUY
+            ? "Buying " + quantity + " x " + itemName + " in GE slot " + (requestedSlot.ordinal() + 1)
+            : "Selling " + quantity + " x " + itemName;
+
+        if (!Rs2GrandExchange.processOffer(request))
+        {
+            // processOffer may have progressed far enough for the offer to exist. Do not blindly
+            // retry and create a duplicate; a subsequent pass will recover it by item/state.
+            GrandExchangeSlots recovered = findOfferSlot(itemId, action);
+            if (recovered != null)
+            {
+                return waitForOffer(recovered, itemId, itemName, quantity, timeoutSeconds, action);
+            }
+
             recoverToOverview();
-            return TradeResult.failed("GE buy entry failed - retrying");
-        }
-
-        GrandExchangeSlots slot = waitForNewOccupiedSlot(freeBefore, itemName, false);
-        if (slot == null)
-        {
-            return TradeResult.failed("Could not resolve buy offer slot");
-        }
-
-        boolean completed = sleepUntil(() -> Rs2GrandExchange.hasBoughtOffer(slot), timeoutSeconds * 1000);
-        int filled = safeBought(slot);
-
-        if (completed)
-        {
-            if (filled <= 0) filled = quantity;
-            Rs2GrandExchange.collectOffer(slot, true);
-            return TradeResult.completed(filled);
-        }
-
-        Rs2GrandExchange.cancelSpecificOffers(List.of(slot), true);
-        return TradeResult.partial(filled, "Buy timed out; partial fill collected");
-    }
-
-    static TradeResult sellFromInventory(String itemName, int quantity, int price, int timeoutSeconds)
-    {
-        if (quantity <= 0 || price <= 0)
-        {
-            return TradeResult.failed("Invalid sell request");
-        }
-
-        if (!ensureExchangeOpen())
-        {
-            return TradeResult.failed("Could not open Grand Exchange");
-        }
-
-        if (Rs2GrandExchange.getAvailableSlotsCount() <= 0)
-        {
-            return TradeResult.failed("No free Grand Exchange slot");
-        }
-
-        // Give the GE inventory/offer widgets time to settle before Microbot starts
-        // its sell sequence. This is particularly important after withdrawing notes.
-        sleep(700, 1_000);
-
-        Set<GrandExchangeSlots> freeBefore = captureAvailableSlots();
-        if (!Rs2GrandExchange.sellItem(itemName, quantity, price))
-        {
-            return TradeResult.failed("GE sell placement failed");
-        }
-
-        GrandExchangeSlots slot = waitForNewOccupiedSlot(freeBefore, itemName, true);
-        if (slot == null)
-        {
-            return TradeResult.failed("Could not resolve sell offer slot");
-        }
-
-        boolean completed = sleepUntil(() -> Rs2GrandExchange.hasSoldOffer(slot), timeoutSeconds * 1000);
-        int filled = safeSold(slot);
-
-        if (completed)
-        {
-            if (filled <= 0) filled = quantity;
-            Rs2GrandExchange.collectOffer(slot, true);
-            return TradeResult.completed(filled);
-        }
-
-        Rs2GrandExchange.cancelSpecificOffers(List.of(slot), true);
-        return TradeResult.partial(filled, "Sell timed out; partial fill collected");
-    }
-
-    private static boolean placeBuyOfferSlow(String itemName, int price, int quantity, GrandExchangeSlots slot)
-    {
-        Widget slotWidget = getSlotWidget(slot);
-        Widget buyButton = slotWidget == null ? null : slotWidget.getChild(0);
-        if (buyButton == null || !Rs2Widget.clickWidget(buyButton))
-        {
-            log.debug("Unable to click GE buy button for slot {}", slot);
-            return false;
-        }
-
-        if (!sleepUntil(Rs2GrandExchange::isOfferScreenOpen, UI_TIMEOUT_MS))
-        {
-            return false;
-        }
-        sleep(650, 900);
-
-        if (!Rs2Widget.sleepUntilHasWidgetText(
-            "Start typing the name of an item to search for it",
-            162,
-            52,
-            false,
-            UI_TIMEOUT_MS))
-        {
-            log.debug("GE item-search prompt did not become ready for {}", itemName);
-            return false;
-        }
-
-        Rs2Keyboard.typeString(itemName);
-        if (!sleepUntil(() -> Rs2GrandExchange.getSearchResultWidget(itemName, true) != null, UI_TIMEOUT_MS))
-        {
-            log.debug("No exact GE search result for {}", itemName);
-            return false;
-        }
-
-        var itemResult = Rs2GrandExchange.getSearchResultWidget(itemName, true);
-        if (itemResult == null)
-        {
-            return false;
-        }
-
-        // Microbot's search-result widget needs its result index as param0. Keep that
-        // exact interaction, then deliberately wait for the actual offer controls.
-        Rs2Widget.clickWidgetFast(itemResult.getLeft(), itemResult.getRight(), 1);
-        if (!sleepUntil(() -> getOfferChild(12) != null && getOfferChild(7) != null, UI_TIMEOUT_MS))
-        {
-            return false;
-        }
-        sleep(750, 1_050);
-
-        if (!setOfferField("price", 12, price, () -> Microbot.getVarbitValue(4398)))
-        {
-            return false;
-        }
-
-        sleep(500, 750);
-
-        if (!setOfferField(
-            "quantity",
-            7,
-            quantity,
-            () -> Microbot.getVarbitValue(VarbitID.GE_NEWOFFER_QUANTITY)))
-        {
-            return false;
-        }
-
-        sleep(650, 900);
-
-        Widget confirm = Rs2Widget.findWidget("Confirm", true);
-        if (confirm == null || !Rs2Widget.clickWidget(confirm))
-        {
-            log.debug("GE Confirm widget unavailable after setting {} x {} @ {}", quantity, itemName, price);
-            return false;
-        }
-
-        return sleepUntil(() -> !Rs2GrandExchange.isOfferScreenOpen(), UI_TIMEOUT_MS);
-    }
-
-    private static boolean setOfferField(
-        String fieldName,
-        int offerChild,
-        int target,
-        IntSupplier observedValue)
-    {
-        if (target <= 0)
-        {
-            return false;
-        }
-
-        if (observedValue.getAsInt() == target)
-        {
-            return true;
-        }
-
-        for (int attempt = 1; attempt <= FIELD_ATTEMPTS; attempt++)
-        {
-            Widget xButton = getOfferChild(offerChild);
-            if (xButton == null)
-            {
-                sleep(300, 500);
-                continue;
-            }
-
-            if (!Rs2Widget.clickWidget(xButton))
-            {
-                sleep(300, 500);
-                continue;
-            }
-
-            // Do not type until the GE chatbox input has actually appeared.
-            if (!sleepUntil(() -> Rs2Widget.getWidget(InterfaceID.Chatbox.MES_TEXT2) != null, UI_TIMEOUT_MS))
-            {
-                continue;
-            }
-
-            sleep(650, 950);
-            Rs2GrandExchange.setChatboxValue(target);
-            sleep(550, 800);
-            Rs2Keyboard.enter();
-
-            if (sleepUntil(() -> observedValue.getAsInt() == target, 3_000))
-            {
-                sleep(500, 750);
-                return true;
-            }
-
-            log.debug(
-                "GE {} entry attempt {}/{} did not register: target={}, observed={}",
-                fieldName,
-                attempt,
-                FIELD_ATTEMPTS,
-                target,
-                observedValue.getAsInt()
+            return TradeResult.failed(
+                Rs2GrandExchange.isOpen()
+                    ? "GE " + actionName(action) + " placement failed"
+                    : "GE closed during " + actionName(action) + " placement"
             );
-            sleep(500, 750);
         }
 
-        return false;
+        GrandExchangeSlots slot = action == GrandExchangeAction.BUY ? requestedSlot : null;
+        final GrandExchangeSlots expectedBuySlot = slot;
+        boolean registered = sleepUntil(() ->
+            (expectedBuySlot != null && offerMatches(expectedBuySlot, itemId, action))
+                || findOfferSlot(itemId, action) != null
+                || !Rs2GrandExchange.isOpen(),
+            OFFER_CONFIRM_TIMEOUT_MS
+        );
+
+        if (!registered)
+        {
+            return TradeResult.failed("Waiting for GE " + actionName(action) + " slot confirmation");
+        }
+
+        GrandExchangeSlots resolved = findOfferSlot(itemId, action);
+        if (resolved == null && expectedBuySlot != null && offerMatches(expectedBuySlot, itemId, action))
+        {
+            resolved = expectedBuySlot;
+        }
+
+        if (resolved == null)
+        {
+            return TradeResult.failed("Could not resolve " + actionName(action) + " offer slot");
+        }
+
+        return waitForOffer(resolved, itemId, itemName, quantity, timeoutSeconds, action);
+    }
+
+    private static TradeResult waitForOffer(
+        GrandExchangeSlots slot,
+        int itemId,
+        String itemName,
+        int requestedQuantity,
+        int timeoutSeconds,
+        GrandExchangeAction action)
+    {
+        if (slot == null)
+        {
+            return TradeResult.failed("Missing GE offer slot");
+        }
+
+        GrandExchangeOfferState completedState = action == GrandExchangeAction.BUY
+            ? GrandExchangeOfferState.BOUGHT
+            : GrandExchangeOfferState.SOLD;
+
+        sleepUntil(() ->
+        {
+            OfferSnapshot snapshot = getOfferSnapshot(slot);
+            return snapshot != null
+                && snapshot.itemId == itemId
+                && snapshot.state == completedState;
+        }, Math.max(1, timeoutSeconds) * 1_000);
+
+        OfferSnapshot snapshot = getOfferSnapshot(slot);
+        if (snapshot != null && snapshot.itemId == itemId && snapshot.state == completedState)
+        {
+            int filled = snapshot.quantitySold > 0 ? snapshot.quantitySold : requestedQuantity;
+            if (!collectSlotToBank(slot))
+            {
+                return TradeResult.partial(
+                    Math.min(requestedQuantity, filled),
+                    "Offer completed; waiting for collection"
+                );
+            }
+            return TradeResult.completed(Math.min(requestedQuantity, filled));
+        }
+
+        int filled = snapshot != null && snapshot.itemId == itemId
+            ? Math.max(0, snapshot.quantitySold)
+            : 0;
+
+        if (snapshot != null && snapshot.itemId == itemId && isActiveState(snapshot.state, action))
+        {
+            Microbot.status = "GE " + actionName(action) + " timed out: " + itemName;
+            Rs2GrandExchange.cancelSpecificOffers(List.of(slot), true);
+            sleepUntil(() -> isSlotEmpty(slot), UI_TIMEOUT_MS);
+        }
+
+        return TradeResult.partial(
+            Math.min(requestedQuantity, filled),
+            capitalize(actionName(action)) + " timed out; partial fill collected"
+        );
     }
 
     static boolean ensureExchangeOpen()
@@ -267,129 +219,245 @@ final class SmartGeTrader
         if (Rs2Bank.isOpen())
         {
             Rs2Bank.closeBank();
-            sleep(500, 750);
+            if (!sleepUntil(() -> !Rs2Bank.isOpen(), UI_TIMEOUT_MS))
+            {
+                return false;
+            }
+            sleep(250, 450);
         }
 
-        if (Rs2GrandExchange.isOfferScreenOpen())
+        if (!openVerifiedGe())
         {
-            recoverToOverview();
+            Rs2GrandExchange.walkToGrandExchange();
+            sleepUntil(() -> !Rs2Player.isMoving(), 20_000);
+            if (!openVerifiedGe())
+            {
+                return false;
+            }
         }
 
-        if (Rs2GrandExchange.isOpen())
+        if (!geSubScreenOpen())
         {
-            sleep(500, 750);
             return true;
         }
 
-        if (Rs2GrandExchange.openExchange())
+        return recoverToOverview();
+    }
+
+    private static boolean openVerifiedGe()
+    {
+        if (Rs2GrandExchange.isOpen())
         {
-            sleepUntil(Rs2GrandExchange::isOpen, UI_TIMEOUT_MS);
-            sleep(700, 1_000);
-            return Rs2GrandExchange.isOpen();
+            return true;
         }
 
-        Rs2GrandExchange.walkToGrandExchange();
-        sleepUntil(() -> !Rs2Player.isMoving(), 20_000);
         if (!Rs2GrandExchange.openExchange())
         {
             return false;
         }
 
-        sleepUntil(Rs2GrandExchange::isOpen, UI_TIMEOUT_MS);
-        sleep(700, 1_000);
-        return Rs2GrandExchange.isOpen();
+        return sleepUntil(Rs2GrandExchange::isOpen, UI_TIMEOUT_MS);
     }
 
-    private static void recoverToOverview()
+    private static boolean recoverToOverview()
     {
-        if (Rs2GrandExchange.isOfferScreenOpen())
+        if (!Rs2GrandExchange.isOpen())
         {
-            Rs2GrandExchange.backToOverview();
-            sleepUntil(() -> !Rs2GrandExchange.isOfferScreenOpen(), UI_TIMEOUT_MS);
-            sleep(500, 750);
+            return false;
         }
+        if (!geSubScreenOpen())
+        {
+            return true;
+        }
+
+        Microbot.status = "Returning to GE overview";
+        Rs2GrandExchange.backToOverview();
+        boolean ready = sleepUntil(
+            () -> Rs2GrandExchange.isOpen() && !geSubScreenOpen(),
+            4_000
+        );
+        if (ready)
+        {
+            sleep(250, 450);
+        }
+        return ready;
     }
 
-    private static Widget getSlotWidget(GrandExchangeSlots slot)
+    private static boolean geSetupOpen()
+    {
+        return Rs2Widget.isWidgetVisible(InterfaceID.GeOffers.SETUP);
+    }
+
+    private static boolean geSubScreenOpen()
+    {
+        return Rs2GrandExchange.isOfferScreenOpen() || geSetupOpen();
+    }
+
+    private static List<GrandExchangeSlots> getAvailableGeSlots()
+    {
+        return Microbot.getClientThread().runOnClientThreadOptional(() ->
+        {
+            List<GrandExchangeSlots> free = new ArrayList<>();
+            GrandExchangeOffer[] offers = Microbot.getClient().getGrandExchangeOffers();
+            int max = Math.min(
+                Rs2WorldUtil.isMemberAccount() ? 8 : 3,
+                GrandExchangeSlots.values().length
+            );
+
+            for (int i = 0; i < max; i++)
+            {
+                GrandExchangeOffer offer = offers != null && i < offers.length ? offers[i] : null;
+                if (offer == null || offer.getState() == GrandExchangeOfferState.EMPTY)
+                {
+                    free.add(GrandExchangeSlots.values()[i]);
+                }
+            }
+            return free;
+        }).orElse(new ArrayList<>());
+    }
+
+    private static GrandExchangeSlots findOfferSlot(int itemId, GrandExchangeAction action)
+    {
+        if (itemId <= 0)
+        {
+            return null;
+        }
+
+        return Microbot.getClientThread().runOnClientThreadOptional(() ->
+        {
+            GrandExchangeOffer[] offers = Microbot.getClient().getGrandExchangeOffers();
+            if (offers == null)
+            {
+                return null;
+            }
+
+            int max = Math.min(offers.length, GrandExchangeSlots.values().length);
+            for (int i = 0; i < max; i++)
+            {
+                GrandExchangeOffer offer = offers[i];
+                if (offer == null || offer.getItemId() != itemId)
+                {
+                    continue;
+                }
+
+                GrandExchangeOfferState state = offer.getState();
+                if (action == GrandExchangeAction.BUY
+                    && (state == GrandExchangeOfferState.BUYING || state == GrandExchangeOfferState.BOUGHT))
+                {
+                    return GrandExchangeSlots.values()[i];
+                }
+                if (action == GrandExchangeAction.SELL
+                    && (state == GrandExchangeOfferState.SELLING || state == GrandExchangeOfferState.SOLD))
+                {
+                    return GrandExchangeSlots.values()[i];
+                }
+            }
+            return null;
+        }).orElse(null);
+    }
+
+    private static OfferSnapshot getOfferSnapshot(GrandExchangeSlots slot)
     {
         if (slot == null)
         {
             return null;
         }
-        return Rs2Widget.getWidget(InterfaceID.GE_OFFERS, 7 + slot.ordinal());
-    }
 
-    private static Widget getOfferChild(int childIndex)
-    {
-        Widget offerContainer = Rs2Widget.getWidget(InterfaceID.GE_OFFERS, 26);
-        return offerContainer == null ? null : offerContainer.getChild(childIndex);
-    }
-
-    private static Set<GrandExchangeSlots> captureAvailableSlots()
-    {
-        GrandExchangeSlots[] slots = Rs2GrandExchange.getAvailableSlots();
-        return slots == null
-            ? new HashSet<>()
-            : new HashSet<>(Arrays.asList(slots));
-    }
-
-    private static GrandExchangeSlots waitForNewOccupiedSlot(
-        Set<GrandExchangeSlots> freeBefore,
-        String itemName,
-        boolean selling)
-    {
-        final GrandExchangeSlots[] slot = new GrandExchangeSlots[1];
-
-        sleepUntil(() ->
+        return Microbot.getClientThread().runOnClientThreadOptional(() ->
         {
-            GrandExchangeSlots[] freeNowArray = Rs2GrandExchange.getAvailableSlots();
-            Set<GrandExchangeSlots> freeNow = freeNowArray == null
-                ? new HashSet<>()
-                : new HashSet<>(Arrays.asList(freeNowArray));
-
-            for (GrandExchangeSlots candidate : freeBefore)
+            GrandExchangeOffer[] offers = Microbot.getClient().getGrandExchangeOffers();
+            int index = slot.ordinal();
+            if (offers == null || index >= offers.length || offers[index] == null)
             {
-                if (!freeNow.contains(candidate))
-                {
-                    slot[0] = candidate;
-                    return true;
-                }
+                return new OfferSnapshot(0, GrandExchangeOfferState.EMPTY, 0, 0);
             }
 
+            GrandExchangeOffer offer = offers[index];
+            return new OfferSnapshot(
+                offer.getItemId(),
+                offer.getState(),
+                offer.getQuantitySold(),
+                offer.getPrice()
+            );
+        }).orElse(null);
+    }
+
+    private static boolean offerMatches(
+        GrandExchangeSlots slot,
+        int itemId,
+        GrandExchangeAction action)
+    {
+        OfferSnapshot snapshot = getOfferSnapshot(slot);
+        return snapshot != null
+            && snapshot.itemId == itemId
+            && (action == GrandExchangeAction.BUY
+                ? snapshot.state == GrandExchangeOfferState.BUYING
+                    || snapshot.state == GrandExchangeOfferState.BOUGHT
+                : snapshot.state == GrandExchangeOfferState.SELLING
+                    || snapshot.state == GrandExchangeOfferState.SOLD);
+    }
+
+    private static boolean isActiveState(GrandExchangeOfferState state, GrandExchangeAction action)
+    {
+        return action == GrandExchangeAction.BUY
+            ? state == GrandExchangeOfferState.BUYING
+            : state == GrandExchangeOfferState.SELLING;
+    }
+
+    private static boolean isSlotEmpty(GrandExchangeSlots slot)
+    {
+        OfferSnapshot snapshot = getOfferSnapshot(slot);
+        return snapshot == null || snapshot.state == GrandExchangeOfferState.EMPTY;
+    }
+
+    private static boolean collectSlotToBank(GrandExchangeSlots slot)
+    {
+        if (slot == null)
+        {
             return false;
-        }, 3_000);
-
-        if (slot[0] == null)
-        {
-            slot[0] = Rs2GrandExchange.findSlotForItem(itemName, selling);
         }
 
-        return slot[0];
+        if (!ensureExchangeOpen())
+        {
+            return false;
+        }
+
+        Rs2GrandExchange.collectOffer(slot, true);
+        return sleepUntil(() -> isSlotEmpty(slot), UI_TIMEOUT_MS);
     }
 
-    private static int safeBought(GrandExchangeSlots slot)
+    private static String actionName(GrandExchangeAction action)
     {
-        try
-        {
-            return Math.max(0, Rs2GrandExchange.getItemsBoughtFromOffer(slot));
-        }
-        catch (RuntimeException ex)
-        {
-            log.debug("Could not read bought amount: {}", ex.getMessage());
-            return 0;
-        }
+        return action == GrandExchangeAction.BUY ? "buy" : "sell";
     }
 
-    private static int safeSold(GrandExchangeSlots slot)
+    private static String capitalize(String value)
     {
-        try
+        if (value == null || value.isEmpty())
         {
-            return Math.max(0, Rs2GrandExchange.getItemsSoldFromOffer(slot));
+            return "Trade";
         }
-        catch (RuntimeException ex)
+        return Character.toUpperCase(value.charAt(0)) + value.substring(1);
+    }
+
+    private static final class OfferSnapshot
+    {
+        private final int itemId;
+        private final GrandExchangeOfferState state;
+        private final int quantitySold;
+        @SuppressWarnings("unused")
+        private final int price;
+
+        private OfferSnapshot(
+            int itemId,
+            GrandExchangeOfferState state,
+            int quantitySold,
+            int price)
         {
-            log.debug("Could not read sold amount: {}", ex.getMessage());
-            return 0;
+            this.itemId = itemId;
+            this.state = state;
+            this.quantitySold = Math.max(0, quantitySold);
+            this.price = price;
         }
     }
 
