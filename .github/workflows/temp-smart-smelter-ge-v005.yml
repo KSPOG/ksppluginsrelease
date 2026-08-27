@@ -1,141 +1,24 @@
-name: Temporary Smart Smelter GE v0.0.5
-
+name: SmartSmelterPatch
 on:
   push:
     branches:
       - fix/smart-smelter-ge-widgets-v005
-
 permissions:
   contents: write
-
 jobs:
   patch:
-    if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-
-      - name: Patch Smart Smelter
+      - name: Apply patch
+        shell: bash
         run: |
-          python3 - <<'PY'
-          from pathlib import Path
-
-          script = Path('kspsmartsmelter/KspSmartSmelterScript.java')
-          text = script.read_text()
-
-          text = text.replace('import net.runelite.client.plugins.microbot.util.grandexchange.GrandExchangeAction;\n', '')
-          text = text.replace('import net.runelite.client.plugins.microbot.util.grandexchange.GrandExchangeRequest;\n', '')
-
-          old_open = '''        state = SmartSmelterState.RESTOCKING;
-        if (!Rs2GrandExchange.isOpen() && !Rs2GrandExchange.openExchange()) {
-            Microbot.status = "Could not open Grand Exchange";
-            return;
-        }
-'''
-          new_open = '''        state = SmartSmelterState.RESTOCKING;
-        if (!SmartSmelterGeTrader.ensureOverview()) {
-            Microbot.status = "Could not open Grand Exchange";
-            return;
-        }
-'''
-          if old_open not in text:
-              raise SystemExit('restock GE-open block not found')
-          text = text.replace(old_open, new_open, 1)
-
-          old_buy = '''        for (int i = 0; i < ids.length; i++) {
-            int wanted = targetCycles * quantities[i];
-            GrandExchangeRequest request = GrandExchangeRequest.builder()
-                    .action(GrandExchangeAction.BUY)
-                    .itemName(itemName(ids[i]))
-                    .quantity(wanted)
-                    .percent(config.buyPercent())
-                    .build();
-
-            if (!Rs2GrandExchange.processOffer(request)) {
-                Microbot.status = "Failed placing buy: " + itemName(ids[i]);
-                Rs2GrandExchange.backToOverview();
-            }
-        }
-'''
-          new_buy = '''        for (int i = 0; i < ids.length; i++) {
-            int wanted = targetCycles * quantities[i];
-            String inputName = itemName(ids[i]);
-            Microbot.status = "Placing GE buy: " + inputName;
-
-            if (!SmartSmelterGeTrader.placeBuy(inputName, wanted, config.buyPercent())) {
-                Microbot.status = "GE buy widget entry failed: " + inputName;
-                SmartSmelterGeTrader.recoverToOverview();
-                lastPriceScan = 0L;
-                return;
-            }
-
-            // Confirm has returned us to the overview; let the slot widgets settle before
-            // starting the next ingredient offer.
-            sleep(650, 950);
-        }
-'''
-          if old_buy not in text:
-              raise SystemExit('restock buy block not found')
-          text = text.replace(old_buy, new_buy, 1)
-
-          old_sell_open = '''        if (quantity <= 0 || !Rs2GrandExchange.openExchange()) {
-            return;
-        }
-
-        GrandExchangeRequest sell = GrandExchangeRequest.builder()
-                .action(GrandExchangeAction.SELL)
-                .itemName(itemName(route.getOutputId()))
-                .quantity(quantity)
-                .percent(config.sellPercent())
-                .build();
-
-        if (Rs2GrandExchange.processOffer(sell)) {
-'''
-          new_sell_open = '''        if (quantity <= 0 || !SmartSmelterGeTrader.ensureOverview()) {
-            return;
-        }
-
-        String outputName = itemName(route.getOutputId());
-        if (SmartSmelterGeTrader.placeSell(outputName, quantity, config.sellPercent())) {
-'''
-          if old_sell_open not in text:
-              raise SystemExit('sell GE block not found')
-          text = text.replace(old_sell_open, new_sell_open, 1)
-
-          old_sell_fail = '''        } else {
-            Rs2GrandExchange.backToOverview();
-        }
-'''
-          new_sell_fail = '''        } else {
-            Microbot.status = "GE sell widget entry failed: " + outputName;
-            SmartSmelterGeTrader.recoverToOverview();
-        }
-'''
-          # This exact block occurs elsewhere, so replace the last occurrence in sellBankedOutput.
-          idx = text.rfind(old_sell_fail)
-          if idx < 0:
-              raise SystemExit('sell failure block not found')
-          text = text[:idx] + new_sell_fail + text[idx + len(old_sell_fail):]
-
-          if 'Rs2GrandExchange.processOffer(' in text:
-              raise SystemExit('processOffer still present in Smart Smelter')
-
-          script.write_text(text)
-
-          plugin = Path('kspsmartsmelter/KspSmartSmelterPlugin.java')
-          p = plugin.read_text()
-          if 'VERSION = "0.0.4"' not in p:
-              raise SystemExit('expected Smart Smelter v0.0.4 not found')
-          plugin.write_text(p.replace('VERSION = "0.0.4"', 'VERSION = "0.0.5"', 1))
-
-          # The temporary workflow must not remain in the PR.
-          Path('.github/workflows/temp-smart-smelter-ge-v005.yml').unlink()
-          PY
-
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          echo 'CmZyb20gcGF0aGxpYiBpbXBvcnQgUGF0aAoKc2NyaXB0ID0gUGF0aCgia3Nwc21hcnRzbWVsdGVyL0tzcFNtYXJ0U21lbHRlclNjcmlwdC5qYXZhIikKdGV4dCA9IHNjcmlwdC5yZWFkX3RleHQoKQoKdGV4dCA9IHRleHQucmVwbGFjZSgiaW1wb3J0IG5ldC5ydW5lbGl0ZS5jbGllbnQucGx1Z2lucy5taWNyb2JvdC51dGlsLmdyYW5kZXhjaGFuZ2UuR3JhbmRFeGNoYW5nZUFjdGlvbjtcbiIsICIiKQp0ZXh0ID0gdGV4dC5yZXBsYWNlKCJpbXBvcnQgbmV0LnJ1bmVsaXRlLmNsaWVudC5wbHVnaW5zLm1pY3JvYm90LnV0aWwuZ3JhbmRleGNoYW5nZS5HcmFuZEV4Y2hhbmdlUmVxdWVzdDtcbiIsICIiKQoKb2xkX29wZW4gPSAnJycgICAgICAgIHN0YXRlID0gU21hcnRTbWVsdGVyU3RhdGUuUkVTVE9DS0lORzsKICAgICAgICBpZiAoIVJzMkdyYW5kRXhjaGFuZ2UuaXNPcGVuKCkgJiYgIVJzMkdyYW5kRXhjaGFuZ2Uub3BlbkV4Y2hhbmdlKCkpIHsKICAgICAgICAgICAgTWljcm9ib3Quc3RhdHVzID0gIkNvdWxkIG5vdCBvcGVuIEdyYW5kIEV4Y2hhbmdlIjsKICAgICAgICAgICAgcmV0dXJuOwogICAgICAgIH0KJycnCm5ld19vcGVuID0gJycnICAgICAgICBzdGF0ZSA9IFNtYXJ0U21lbHRlclN0YXRlLlJFU1RPQ0tJTkc7CiAgICAgICAgaWYgKCFTbWFydFNtZWx0ZXJHZVRyYWRlci5lbnN1cmVPdmVydmlldygpKSB7CiAgICAgICAgICAgIE1pY3JvYm90LnN0YXR1cyA9ICJDb3VsZCBub3Qgb3BlbiBHcmFuZCBFeGNoYW5nZSI7CiAgICAgICAgICAgIHJldHVybjsKICAgICAgICB9CicnJwppZiBvbGRfb3BlbiBub3QgaW4gdGV4dDoKICAgIHJhaXNlIFN5c3RlbUV4aXQoInJlc3RvY2sgR0Utb3BlbiBibG9jayBub3QgZm91bmQiKQp0ZXh0ID0gdGV4dC5yZXBsYWNlKG9sZF9vcGVuLCBuZXdfb3BlbiwgMSkKCm9sZF9idXkgPSAnJycgICAgICAgIGZvciAoaW50IGkgPSAwOyBpIDwgaWRzLmxlbmd0aDsgaSsrKSB7CiAgICAgICAgICAgIGludCB3YW50ZWQgPSB0YXJnZXRDeWNsZXMgKiBxdWFudGl0aWVzW2ldOwogICAgICAgICAgICBHcmFuZEV4Y2hhbmdlUmVxdWVzdCByZXF1ZXN0ID0gR3JhbmRFeGNoYW5nZVJlcXVlc3QuYnVpbGRlcigpCiAgICAgICAgICAgICAgICAgICAgLmFjdGlvbihHcmFuZEV4Y2hhbmdlQWN0aW9uLkJVWSkKICAgICAgICAgICAgICAgICAgICAuaXRlbU5hbWUoaXRlbU5hbWUoaWRzW2ldKSkKICAgICAgICAgICAgICAgICAgICAucXVhbnRpdHkod2FudGVkKQogICAgICAgICAgICAgICAgICAgIC5wZXJjZW50KGNvbmZpZy5idXlQZXJjZW50KCkpCiAgICAgICAgICAgICAgICAgICAgLmJ1aWxkKCk7CgogICAgICAgICAgICBpZiAoIVJzMkdyYW5kRXhjaGFuZ2UucHJvY2Vzc09mZmVyKHJlcXVlc3QpKSB7CiAgICAgICAgICAgICAgICBNaWNyb2JvdC5zdGF0dXMgPSAiRmFpbGVkIHBsYWNpbmcgYnV5OiAiICsgaXRlbU5hbWUoaWRzW2ldKTsKICAgICAgICAgICAgICAgIFJzMkdyYW5kRXhjaGFuZ2UuYmFja1RvT3ZlcnZpZXcoKTsKICAgICAgICAgICAgfQogICAgICAgIH0KJycnCm5ld19idXkgPSAnJycgICAgICAgIGZvciAoaW50IGkgPSAwOyBpIDwgaWRzLmxlbmd0aDsgaSsrKSB7CiAgICAgICAgICAgIGludCB3YW50ZWQgPSB0YXJnZXRDeWNsZXMgKiBxdWFudGl0aWVzW2ldOwogICAgICAgICAgICBTdHJpbmcgaW5wdXROYW1lID0gaXRlbU5hbWUoaWRzW2ldKTsKICAgICAgICAgICAgTWljcm9ib3Quc3RhdHVzID0gIlBsYWNpbmcgR0UgYnV5OiAiICsgaW5wdXROYW1lOwoKICAgICAgICAgICAgaWYgKCFTbWFydFNtZWx0ZXJHZVRyYWRlci5wbGFjZUJ1eShpbnB1dE5hbWUsIHdhbnRlZCwgY29uZmlnLmJ1eVBlcmNlbnQoKSkpIHsKICAgICAgICAgICAgICAgIE1pY3JvYm90LnN0YXR1cyA9ICJHRSBidXkgd2lkZ2V0IGVudHJ5IGZhaWxlZDogIiArIGlucHV0TmFtZTsKICAgICAgICAgICAgICAgIFNtYXJ0U21lbHRlckdlVHJhZGVyLnJlY292ZXJUb092ZXJ2aWV3KCk7CiAgICAgICAgICAgICAgICBsYXN0UHJpY2VTY2FuID0gMEw7CiAgICAgICAgICAgICAgICByZXR1cm47CiAgICAgICAgICAgIH0KCiAgICAgICAgICAgIHNsZWVwKDY1MCwgOTUwKTsKICAgICAgICB9CicnJwppZiBvbGRfYnV5IG5vdCBpbiB0ZXh0OgogICAgcmFpc2UgU3lzdGVtRXhpdCgicmVzdG9jayBidXkgYmxvY2sgbm90IGZvdW5kIikKdGV4dCA9IHRleHQucmVwbGFjZShvbGRfYnV5LCBuZXdfYnV5LCAxKQoKb2xkX3NlbGwgPSAnJycgICAgICAgIGlmIChxdWFudGl0eSA8PSAwIHx8ICFSczJHcmFuZEV4Y2hhbmdlLm9wZW5FeGNoYW5nZSgpKSB7CiAgICAgICAgICAgIHJldHVybjsKICAgICAgICB9CgogICAgICAgIEdyYW5kRXhjaGFuZ2VSZXF1ZXN0IHNlbGwgPSBHcmFuZEV4Y2hhbmdlUmVxdWVzdC5idWlsZGVyKCkKICAgICAgICAgICAgICAgIC5hY3Rpb24oR3JhbmRFeGNoYW5nZUFjdGlvbi5TRUxMKQogICAgICAgICAgICAgICAgLml0ZW1OYW1lKGl0ZW1OYW1lKHJvdXRlLmdldE91dHB1dElkKCkpKQogICAgICAgICAgICAgICAgLnF1YW50aXR5KHF1YW50aXR5KQogICAgICAgICAgICAgICAgLnBlcmNlbnQoY29uZmlnLnNlbGxQZXJjZW50KCkpCiAgICAgICAgICAgICAgICAuYnVpbGQoKTsKCiAgICAgICAgaWYgKFJzMkdyYW5kRXhjaGFuZ2UucHJvY2Vzc09mZmVyKHNlbGwpKSB7CiAgICAgICAgICAgIHN0YXRlID0gU21hcnRTbWVsdGVyU3RhdGUuV0FJVElOR19GT1JfT0ZGRVJTOwogICAgICAgICAgICBNaWNyb2JvdC5zdGF0dXMgPSAiU2VsbGluZyAiICsgcm91dGUuZ2V0T3V0cHV0TmFtZSgpOwogICAgICAgICAgICBzbGVlcChNYXRoLm1heCgzLCBjb25maWcub2ZmZXJXYWl0U2Vjb25kcygpKSAqIDEwMDApOwogICAgICAgICAgICBSczJHcmFuZEV4Y2hhbmdlLmNvbGxlY3RBbGxUb0JhbmsoKTsKICAgICAgICB9IGVsc2UgewogICAgICAgICAgICBSczJHcmFuZEV4Y2hhbmdlLmJhY2tUb092ZXJ2aWV3KCk7CiAgICAgICAgfQonJycKbmV3X3NlbGwgPSAnJycgICAgICAgIGlmIChxdWFudGl0eSA8PSAwIHx8ICFTbWFydFNtZWx0ZXJHZVRyYWRlci5lbnN1cmVPdmVydmlldygpKSB7CiAgICAgICAgICAgIHJldHVybjsKICAgICAgICB9CgogICAgICAgIFN0cmluZyBvdXRwdXROYW1lID0gaXRlbU5hbWUocm91dGUuZ2V0T3V0cHV0SWQoKSk7CiAgICAgICAgaWYgKFNtYXJ0U21lbHRlckdlVHJhZGVyLnBsYWNlU2VsbChvdXRwdXROYW1lLCBxdWFudGl0eSwgY29uZmlnLnNlbGxQZXJjZW50KCkpKSB7CiAgICAgICAgICAgIHN0YXRlID0gU21hcnRTbWVsdGVyU3RhdGUuV0FJVElOR19GT1JfT0ZGRVJTOwogICAgICAgICAgICBNaWNyb2JvdC5zdGF0dXMgPSAiU2VsbGluZyAiICsgcm91dGUuZ2V0T3V0cHV0TmFtZSgpOwogICAgICAgICAgICBzbGVlcChNYXRoLm1heCgzLCBjb25maWcub2ZmZXJXYWl0U2Vjb25kcygpKSAqIDEwMDApOwogICAgICAgICAgICBSczJHcmFuZEV4Y2hhbmdlLmNvbGxlY3RBbGxUb0JhbmsoKTsKICAgICAgICB9IGVsc2UgewogICAgICAgICAgICBNaWNyb2JvdC5zdGF0dXMgPSAiR0Ugc2VsbCB3aWRnZXQgZW50cnkgZmFpbGVkOiAiICsgb3V0cHV0TmFtZTsKICAgICAgICAgICAgU21hcnRTbWVsdGVyR2VUcmFkZXIucmVjb3ZlclRvT3ZlcnZpZXcoKTsKICAgICAgICB9CicnJwppZiBvbGRfc2VsbCBub3QgaW4gdGV4dDoKICAgIHJhaXNlIFN5c3RlbUV4aXQoInNlbGwgR0UgYmxvY2sgbm90IGZvdW5kIikKdGV4dCA9IHRleHQucmVwbGFjZShvbGRfc2VsbCwgbmV3X3NlbGwsIDEpCgppZiAiUnMyR3JhbmRFeGNoYW5nZS5wcm9jZXNzT2ZmZXIoIiBpbiB0ZXh0OgogICAgcmFpc2UgU3lzdGVtRXhpdCgicHJvY2Vzc09mZmVyIHN0aWxsIHByZXNlbnQiKQpzY3JpcHQud3JpdGVfdGV4dCh0ZXh0KQoKcGx1Z2luID0gUGF0aCgia3Nwc21hcnRzbWVsdGVyL0tzcFNtYXJ0U21lbHRlclBsdWdpbi5qYXZhIikKcCA9IHBsdWdpbi5yZWFkX3RleHQoKQppZiAnVkVSU0lPTiA9ICIwLjAuNCInIG5vdCBpbiBwOgogICAgcmFpc2UgU3lzdGVtRXhpdCgiZXhwZWN0ZWQgdjAuMC40IG5vdCBmb3VuZCIpCnBsdWdpbi53cml0ZV90ZXh0KHAucmVwbGFjZSgnVkVSU0lPTiA9ICIwLjAuNCInLCAnVkVSU0lPTiA9ICIwLjAuNSInLCAxKSkKCndmID0gUGF0aCgiLmdpdGh1Yi93b3JrZmxvd3MvdGVtcC1zbWFydC1zbWVsdGVyLWdlLXYwMDUueW1sIikKaWYgd2YuZXhpc3RzKCk6CiAgICB3Zi51bmxpbmsoKQo=' | base64 -d > /tmp/patch.py
+          python3 /tmp/patch.py
+          git config user.name github-actions-bot
+          git config user.email github-actions-bot@users.noreply.github.com
           git add -A
-          git commit -m "fix: stage and verify Smart Smelter GE widgets"
+          git commit -m 'fix: stage and verify Smart Smelter GE widgets'
           git push
