@@ -43,9 +43,11 @@ Projected GP/hour is used to rank otherwise-profitable recipes. It accounts for 
 - Existing banked ores/runes are included when calculating how many complete bars can be funded, so the plugin only budgets for missing ingredients.
 - `Cash reserve` is never intentionally allocated to a new restock plan.
 - `Max spend %` limits how much spendable cash one restock may commit.
-- Every individual GE buy is capped by both the remaining restock budget and the coins currently available before the offer is placed.
+- Before the first GE ingredient offer is placed, the plugin calculates the **complete missing-input cost** for the selected number of bars and funds that whole plan into the stackable inventory coin balance.
+- A later ingredient such as Coal is no longer independently resized against a newly observed cash snapshot after earlier ingredients have already been purchased.
+- Each ingredient purchase must fit the remaining pre-funded plan. If observed cash/bank state drifts, the plugin stays in `RESTOCKING` and recalculates the plan instead of entering `WAITING_FOR_PROFIT` with a misleading ingredient-level insufficient-coins message.
+- Partial GE fills stop the current purchase chain and trigger a fresh plan using the materials actually collected plus the refunded cash. This prevents buying a full amount of Coal/runes against only a partially filled ore purchase.
 - Coins already in the inventory are kept there while the plugin remains in `RESTOCKING`, including when `Bank whole inventory` is enabled.
-- Subsequent GE buys top up the existing stackable coin stack only when the next offer requires more coins; restock retries do not intentionally deposit the stack back into the bank first.
 - Restocking uses only free GE slots.
 - The plugin does **not** intentionally cancel unrelated GE offers.
 - Buy/sell offers time out, abort, and collect partial fills rather than waiting forever.

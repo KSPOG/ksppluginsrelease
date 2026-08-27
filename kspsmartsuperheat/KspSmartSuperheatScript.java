@@ -438,17 +438,16 @@ public class KspSmartSuperheatScript extends Script
         long coinTotal = (long) Rs2Bank.count(ItemID.COINS) + Rs2Inventory.count(ItemID.COINS);
         long afterReserve = Math.max(0L, coinTotal - config.cashReserve());
         long budget = afterReserve * config.maxSpendPercent() / 100L;
-        spendableCoins = clampInt(budget);
+        long executableBudget = Math.min(budget, Integer.MAX_VALUE);
+        spendableCoins = clampInt(executableBudget);
 
-        log.debug(
-            "Restock liquid cash: inventory={}, bank={}, reserve={}, budget={}",
-            Rs2Inventory.count(ItemID.COINS),
-            Rs2Bank.count(ItemID.COINS),
-            config.cashReserve(),
-            budget
+        int targetBars = calculateAffordableRestockBars(
+            activeRecipe,
+            activeQuote,
+            freeFireRunes,
+            executableBudget
         );
 
-        int targetBars = calculateAffordableRestockBars(activeRecipe, activeQuote, freeFireRunes, budget);
         if (targetBars <= 0)
         {
             state = SmartSuperheatState.WAITING_FOR_PROFIT;
@@ -457,7 +456,49 @@ public class KspSmartSuperheatScript extends Script
             return;
         }
 
-        long[] remainingBudget = {budget};
+        long plannedCost = calculateRestockCost(activeRecipe, activeQuote, freeFireRunes, targetBars);
+        if (plannedCost <= 0L || plannedCost > executableBudget || plannedCost > Integer.MAX_VALUE)
+        {
+            status = "Replanning restock budget";
+            return;
+        }
+
+        int plannedCoins = (int) plannedCost;
+        if (!ensureCoinsInInventory(plannedCoins))
+        {
+            long liquidCoins = (long) Rs2Bank.count(ItemID.COINS) + Rs2Inventory.count(ItemID.COINS);
+            log.debug(
+                "Restock funding retry: targetBars={}, plannedCost={}, inventory={}, bank={}, liquid={}",
+                targetBars,
+                plannedCost,
+                Rs2Inventory.count(ItemID.COINS),
+                Rs2Bank.count(ItemID.COINS),
+                liquidCoins
+            );
+
+            if (Math.max(0L, liquidCoins - config.cashReserve()) <= 0L)
+            {
+                state = SmartSuperheatState.WAITING_FOR_PROFIT;
+                nextNoProfitScanAt = System.currentTimeMillis() + config.priceRefreshSeconds() * 1000L;
+                status = "Not enough spendable cash";
+            }
+            else
+            {
+                status = "Funding restock plan";
+            }
+            return;
+        }
+
+        log.debug(
+            "Atomic restock plan: bars={}, plannedCost={}, inventoryCoins={}, bankCoins={}, reserve={}",
+            targetBars,
+            plannedCost,
+            Rs2Inventory.count(ItemID.COINS),
+            Rs2Bank.count(ItemID.COINS),
+            config.cashReserve()
+        );
+
+        long[] remainingBudget = {plannedCost};
 
         if (!buyMissing(
             activeRecipe.getPrimaryOreName(),
@@ -525,9 +566,7 @@ public class KspSmartSuperheatScript extends Script
         }
         else
         {
-            state = SmartSuperheatState.WAITING_FOR_PROFIT;
-            nextNoProfitScanAt = System.currentTimeMillis() + config.priceRefreshSeconds() * 1000L;
-            status = "Restock did not yield a complete recipe";
+            status = "Verifying restock";
         }
     }
 
@@ -556,50 +595,46 @@ public class KspSmartSuperheatScript extends Script
             return false;
         }
 
-        long currentCoins = (long) Rs2Bank.count(ItemID.COINS) + Rs2Inventory.count(ItemID.COINS);
-        long usableCoins = Math.max(0L, currentCoins - config.cashReserve());
-        long offerBudget = Math.min(Math.max(0L, remainingBudget[0]), usableCoins);
-        int affordableQuantity = clampInt(offerBudget / offerPrice);
-        int quantityToBuy = Math.min(missing, affordableQuantity);
-
-        if (quantityToBuy <= 0)
-        {
-            spendableCoins = clampInt(remainingBudget[0]);
-            status = "Insufficient coins for " + itemName;
-            state = SmartSuperheatState.WAITING_FOR_PROFIT;
-            nextNoProfitScanAt = System.currentTimeMillis() + config.priceRefreshSeconds() * 1000L;
-            return false;
-        }
-
-        int requiredCoins = clampInt((long) quantityToBuy * offerPrice);
-        if (requiredCoins <= 0)
+        long requiredCoinsLong = (long) missing * offerPrice;
+        if (requiredCoinsLong <= 0L || requiredCoinsLong > Integer.MAX_VALUE)
         {
             status = "Invalid purchase cost for " + itemName;
             return false;
         }
 
-        if (!ensureCoinsInInventory(requiredCoins))
+        if (requiredCoinsLong > remainingBudget[0])
         {
-            long totalCoinsAfter = (long) Rs2Bank.count(ItemID.COINS) + Rs2Inventory.count(ItemID.COINS);
-            if (totalCoinsAfter < requiredCoins)
-            {
-                status = "Insufficient coins for " + itemName;
-                state = SmartSuperheatState.WAITING_FOR_PROFIT;
-                nextNoProfitScanAt = System.currentTimeMillis() + config.priceRefreshSeconds() * 1000L;
-            }
-            else
-            {
-                status = "Retrying coin withdrawal for " + itemName;
-            }
+            log.debug(
+                "Restock budget drift for {}: required={}, remaining={}",
+                itemName,
+                requiredCoinsLong,
+                remainingBudget[0]
+            );
+            status = "Replanning budget for " + itemName;
+            return false;
+        }
+
+        int requiredCoins = (int) requiredCoinsLong;
+        if (Rs2Inventory.count(ItemID.COINS) < requiredCoins && !ensureCoinsInInventory(requiredCoins))
+        {
+            log.debug(
+                "Restock cash drift for {}: required={}, inventory={}, bank={}, remainingPlan={}",
+                itemName,
+                requiredCoins,
+                Rs2Inventory.count(ItemID.COINS),
+                Rs2Bank.count(ItemID.COINS),
+                remainingBudget[0]
+            );
+            status = "Replanning cash for " + itemName;
             return false;
         }
 
         Rs2Bank.closeBank();
-        status = "Buying " + formatNumber(quantityToBuy) + " " + itemName;
+        status = "Buying " + formatNumber(missing) + " " + itemName;
 
         SmartGeTrader.TradeResult result = SmartGeTrader.buyToBank(
             itemName,
-            quantityToBuy,
+            missing,
             offerPrice,
             config.geOfferTimeoutSeconds()
         );
@@ -610,7 +645,7 @@ public class KspSmartSuperheatScript extends Script
             return false;
         }
 
-        int filled = result.getFilledQuantity();
+        int filled = Math.min(missing, result.getFilledQuantity());
         if (filled <= 0)
         {
             status = "No fill for " + itemName;
@@ -620,6 +655,13 @@ public class KspSmartSuperheatScript extends Script
         long committed = Math.min(remainingBudget[0], (long) filled * offerPrice);
         remainingBudget[0] = Math.max(0L, remainingBudget[0] - committed);
         spendableCoins = clampInt(remainingBudget[0]);
+
+        if (filled < missing)
+        {
+            status = "Partial " + itemName + " fill - replanning";
+            sleep(250, 500);
+            return false;
+        }
 
         status = "Bought " + formatNumber(filled) + " " + itemName;
         sleep(250, 500);
