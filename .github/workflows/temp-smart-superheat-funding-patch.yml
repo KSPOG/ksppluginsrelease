@@ -20,124 +20,16 @@ jobs:
         run: |
           python3 - <<'PY'
           from pathlib import Path
+          import base64
           import re
 
           script = Path('kspsmartsuperheat/KspSmartSuperheatScript.java')
           text = script.read_text()
-
-          pattern = re.compile(
-              r'    private boolean ensureCoinsInInventory\(int required\)\n    \{.*?\n    \}\n\n    private int calculateAffordableRestockBars',
-              re.S,
-          )
-
-          replacement = '''    private boolean ensureCoinsInInventory(int required)
-    {
-        if (required <= 0)
-        {
-            return false;
-        }
-
-        // Always trust an already-funded inventory stack before requiring bank widgets.
-        // This prevents a transient bank/widget close from sending the state machine back
-        // to "Funding restock plan" when the required cash is already present.
-        int inventoryCoins = Rs2Inventory.itemQuantity(ItemID.COINS);
-        if (inventoryCoins >= required)
-        {
-            return true;
-        }
-
-        if (!ensureBankWidgetsReady() || !ensureBankItemMode() || !waitForBankAmountPromptClosed())
-        {
-            return false;
-        }
-
-        for (int attempt = 1; attempt <= MAX_COIN_WITHDRAW_ATTEMPTS; attempt++)
-        {
-            inventoryCoins = Rs2Inventory.itemQuantity(ItemID.COINS);
-            if (inventoryCoins >= required)
-            {
-                return true;
-            }
-
-            int bankCoins = Rs2Bank.count(ItemID.COINS);
-            long liquidCoins = (long) inventoryCoins + bankCoins;
-            if (liquidCoins < required)
-            {
-                return false;
-            }
-
-            if (bankCoins <= 0)
-            {
-                return inventoryCoins >= required;
-            }
-
-            // Withdraw-All deliberately avoids the bank X-amount selector/prompt for
-            // stackable coins. The configured reserve remains protected because the
-            // atomic GE plan is still capped by executableBudget/plannedCost.
-            if (Rs2Inventory.isFull())
-            {
-                status = "Waiting for inventory space for coins";
-                return false;
-            }
-
-            int inventoryBefore = inventoryCoins;
-            int bankBefore = bankCoins;
-            int epochBefore = Rs2Bank.getBankLiveEpoch();
-            status = "Withdrawing available coins";
-
-            log.debug(
-                "Coin stack funding {}/{}: required={}, inventory={}, bank={}, liquid={}",
-                attempt,
-                MAX_COIN_WITHDRAW_ATTEMPTS,
-                required,
-                inventoryCoins,
-                bankCoins,
-                liquidCoins
-            );
-
-            if (!Rs2Bank.withdrawAll(ItemID.COINS))
-            {
-                sleep(300, 500);
-                continue;
-            }
-
-            boolean transferObserved = sleepUntil(() ->
-                    Rs2Inventory.itemQuantity(ItemID.COINS) > inventoryBefore
-                        || (Rs2Bank.isOpen() && Rs2Bank.count(ItemID.COINS) < bankBefore),
-                COIN_WITHDRAW_TIMEOUT_MS);
-
-            Rs2Bank.syncBankInventoryAfterChange(epochBefore);
-
-            int fundedCoins = Rs2Inventory.itemQuantity(ItemID.COINS);
-            if (fundedCoins >= required)
-            {
-                return true;
-            }
-
-            if (transferObserved && sleepUntil(
-                () -> Rs2Inventory.itemQuantity(ItemID.COINS) >= required,
-                COIN_WITHDRAW_SETTLE_TIMEOUT_MS))
-            {
-                return true;
-            }
-
-            log.debug(
-                "Coin funding not yet complete: required={}, inventory={}, bank={}",
-                required,
-                Rs2Inventory.itemQuantity(ItemID.COINS),
-                Rs2Bank.isOpen() ? Rs2Bank.count(ItemID.COINS) : -1
-            );
-            sleep(300, 500);
-        }
-
-        return Rs2Inventory.itemQuantity(ItemID.COINS) >= required;
-    }
-
-    private int calculateAffordableRestockBars'''
-
+          pattern = re.compile(r'    private boolean ensureCoinsInInventory\(int required\)\n    \{.*?\n    \}\n\n    private int calculateAffordableRestockBars', re.S)
+          replacement = base64.b64decode('ICAgIHByaXZhdGUgYm9vbGVhbiBlbnN1cmVDb2luc0luSW52ZW50b3J5KGludCByZXF1aXJlZCkKICAgIHsKICAgICAgICBpZiAocmVxdWlyZWQgPD0gMCkKICAgICAgICB7CiAgICAgICAgICAgIHJldHVybiBmYWxzZTsKICAgICAgICB9CgogICAgICAgIC8vIEFsd2F5cyB0cnVzdCBhbiBhbHJlYWR5LWZ1bmRlZCBpbnZlbnRvcnkgc3RhY2sgYmVmb3JlIHJlcXVpcmluZyBiYW5rIHdpZGdldHMuCiAgICAgICAgLy8gVGhpcyBwcmV2ZW50cyBhIHRyYW5zaWVudCBiYW5rL3dpZGdldCBjbG9zZSBmcm9tIHNlbmRpbmcgdGhlIHN0YXRlIG1hY2hpbmUgYmFjawogICAgICAgIC8vIHRvICJGdW5kaW5nIHJlc3RvY2sgcGxhbiIgd2hlbiB0aGUgcmVxdWlyZWQgY2FzaCBpcyBhbHJlYWR5IHByZXNlbnQuCiAgICAgICAgaW50IGludmVudG9yeUNvaW5zID0gUnMySW52ZW50b3J5Lml0ZW1RdWFudGl0eShJdGVtSUQuQ09JTlMpOwogICAgICAgIGlmIChpbnZlbnRvcnlDb2lucyA+PSByZXF1aXJlZCkKICAgICAgICB7CiAgICAgICAgICAgIHJldHVybiB0cnVlOwogICAgICAgIH0KCiAgICAgICAgaWYgKCFlbnN1cmVCYW5rV2lkZ2V0c1JlYWR5KCkgfHwgIWVuc3VyZUJhbmtJdGVtTW9kZSgpIHx8ICF3YWl0Rm9yQmFua0Ftb3VudFByb21wdENsb3NlZCgpKQogICAgICAgIHsKICAgICAgICAgICAgcmV0dXJuIGZhbHNlOwogICAgICAgIH0KCiAgICAgICAgZm9yIChpbnQgYXR0ZW1wdCA9IDE7IGF0dGVtcHQgPD0gTUFYX0NPSU5fV0lUSERSQVdfQVRURU1QVFM7IGF0dGVtcHQrKykKICAgICAgICB7CiAgICAgICAgICAgIGludmVudG9yeUNvaW5zID0gUnMySW52ZW50b3J5Lml0ZW1RdWFudGl0eShJdGVtSUQuQ09JTlMpOwogICAgICAgICAgICBpZiAoaW52ZW50b3J5Q29pbnMgPj0gcmVxdWlyZWQpCiAgICAgICAgICAgIHsKICAgICAgICAgICAgICAgIHJldHVybiB0cnVlOwogICAgICAgICAgICB9CgogICAgICAgICAgICBpbnQgYmFua0NvaW5zID0gUnMyQmFuay5jb3VudChJdGVtSUQuQ09JTlMpOwogICAgICAgICAgICBsb25nIGxpcXVpZENvaW5zID0gKGxvbmcpIGludmVudG9yeUNvaW5zICsgYmFua0NvaW5zOwogICAgICAgICAgICBpZiAobGlxdWlkQ29pbnMgPCByZXF1aXJlZCkKICAgICAgICAgICAgewogICAgICAgICAgICAgICAgcmV0dXJuIGZhbHNlOwogICAgICAgICAgICB9CgogICAgICAgICAgICBpZiAoYmFua0NvaW5zIDw9IDApCiAgICAgICAgICAgIHsKICAgICAgICAgICAgICAgIHJldHVybiBpbnZlbnRvcnlDb2lucyA+PSByZXF1aXJlZDsKICAgICAgICAgICAgfQoKICAgICAgICAgICAgLy8gV2l0aGRyYXctQWxsIGRlbGliZXJhdGVseSBhdm9pZHMgdGhlIGJhbmsgWC1hbW91bnQgc2VsZWN0b3IvcHJvbXB0IGZvcgogICAgICAgICAgICAvLyBzdGFja2FibGUgY29pbnMuIFRoZSBjb25maWd1cmVkIHJlc2VydmUgcmVtYWlucyBwcm90ZWN0ZWQgYmVjYXVzZSB0aGUKICAgICAgICAgICAgLy8gYXRvbWljIEdFIHBsYW4gaXMgc3RpbGwgY2FwcGVkIGJ5IGV4ZWN1dGFibGVCdWRnZXQvcGxhbm5lZENvc3QuCiAgICAgICAgICAgIGlmIChSczJJbnZlbnRvcnkuaXNGdWxsKCkpCiAgICAgICAgICAgIHsKICAgICAgICAgICAgICAgIHN0YXR1cyA9ICJXYWl0aW5nIGZvciBpbnZlbnRvcnkgc3BhY2UgZm9yIGNvaW5zIjsKICAgICAgICAgICAgICAgIHJldHVybiBmYWxzZTsKICAgICAgICAgICAgfQoKICAgICAgICAgICAgaW50IGludmVudG9yeUJlZm9yZSA9IGludmVudG9yeUNvaW5zOwogICAgICAgICAgICBpbnQgYmFua0JlZm9yZSA9IGJhbmtDb2luczsKICAgICAgICAgICAgaW50IGVwb2NoQmVmb3JlID0gUnMyQmFuay5nZXRCYW5rTGl2ZUVwb2NoKCk7CiAgICAgICAgICAgIHN0YXR1cyA9ICJXaXRoZHJhd2luZyBhdmFpbGFibGUgY29pbnMiOwoKICAgICAgICAgICAgbG9nLmRlYnVnKAogICAgICAgICAgICAgICAgIkNvaW4gc3RhY2sgZnVuZGluZyB7fS97fTogcmVxdWlyZWQ9e30sIGludmVudG9yeT17fSwgYmFuaz17fSwgbGlxdWlkPXt9IiwKICAgICAgICAgICAgICAgIGF0dGVtcHQsCiAgICAgICAgICAgICAgICBNQVhfQ09JTl9XSVRIRFJBV19BVFRFTVBUUywKICAgICAgICAgICAgICAgIHJlcXVpcmVkLAogICAgICAgICAgICAgICAgaW52ZW50b3J5Q29pbnMsCiAgICAgICAgICAgICAgICBiYW5rQ29pbnMsCiAgICAgICAgICAgICAgICBsaXF1aWRDb2lucwogICAgICAgICAgICApOwoKICAgICAgICAgICAgaWYgKCFSczJCYW5rLndpdGhkcmF3QWxsKEl0ZW1JRC5DT0lOUykpCiAgICAgICAgICAgIHsKICAgICAgICAgICAgICAgIHNsZWVwKDMwMCwgNTAwKTsKICAgICAgICAgICAgICAgIGNvbnRpbnVlOwogICAgICAgICAgICB9CgogICAgICAgICAgICBib29sZWFuIHRyYW5zZmVyT2JzZXJ2ZWQgPSBzbGVlcFVudGlsKCgpIC0+CiAgICAgICAgICAgICAgICAgICAgUnMySW52ZW50b3J5Lml0ZW1RdWFudGl0eShJdGVtSUQuQ09JTlMpID4gaW52ZW50b3J5QmVmb3JlCiAgICAgICAgICAgICAgICAgICAgICAgIHx8IChSczJCYW5rLmlzT3BlbigpICYmIFJzMkJhbmsuY291bnQoSXRlbUlELkNPSU5TKSA8IGJhbmtCZWZvcmUpLAogICAgICAgICAgICAgICAgQ09JTl9XSVRIRFJBV19USU1FT1VUX01TKTsKCiAgICAgICAgICAgIFJzMkJhbmsuc3luY0JhbmtJbnZlbnRvcnlBZnRlckNoYW5nZShlcG9jaEJlZm9yZSk7CgogICAgICAgICAgICBpbnQgZnVuZGVkQ29pbnMgPSBSczJJbnZlbnRvcnkuaXRlbVF1YW50aXR5KEl0ZW1JRC5DT0lOUyk7CiAgICAgICAgICAgIGlmIChmdW5kZWRDb2lucyA+PSByZXF1aXJlZCkKICAgICAgICAgICAgewogICAgICAgICAgICAgICAgcmV0dXJuIHRydWU7CiAgICAgICAgICAgIH0KCiAgICAgICAgICAgIGlmICh0cmFuc2Zlck9ic2VydmVkICYmIHNsZWVwVW50aWwoCiAgICAgICAgICAgICAgICAoKSAtPiBSczJJbnZlbnRvcnkuaXRlbVF1YW50aXR5KEl0ZW1JRC5DT0lOUykgPj0gcmVxdWlyZWQsCiAgICAgICAgICAgICAgICBDT0lOX1dJVEhEUkFXX1NFVFRMRV9USU1FT1VUX01TKSkKICAgICAgICAgICAgewogICAgICAgICAgICAgICAgcmV0dXJuIHRydWU7CiAgICAgICAgICAgIH0KCiAgICAgICAgICAgIGxvZy5kZWJ1ZygKICAgICAgICAgICAgICAgICJDb2luIGZ1bmRpbmcgbm90IHlldCBjb21wbGV0ZTogcmVxdWlyZWQ9e30sIGludmVudG9yeT17fSwgYmFuaz17fSIsCiAgICAgICAgICAgICAgICByZXF1aXJlZCwKICAgICAgICAgICAgICAgIFJzMkludmVudG9yeS5pdGVtUXVhbnRpdHkoSXRlbUlELkNPSU5TKSwKICAgICAgICAgICAgICAgIFJzMkJhbmsuaXNPcGVuKCkgPyBSczJCYW5rLmNvdW50KEl0ZW1JRC5DT0lOUykgOiAtMQogICAgICAgICAgICApOwogICAgICAgICAgICBzbGVlcCgzMDAsIDUwMCk7CiAgICAgICAgfQoKICAgICAgICByZXR1cm4gUnMySW52ZW50b3J5Lml0ZW1RdWFudGl0eShJdGVtSUQuQ09JTlMpID49IHJlcXVpcmVkOwogICAgfQoKICAgIHByaXZhdGUgaW50IGNhbGN1bGF0ZUFmZm9yZGFibGVSZXN0b2NrQmFycw==').decode()
           patched, count = pattern.subn(replacement, text)
           if count != 1:
-              raise SystemExit(f'Expected to replace one ensureCoinsInInventory method, replaced {count}')
+              raise SystemExit(f'Expected one ensureCoinsInInventory replacement, got {count}')
           script.write_text(patched)
 
           plugin = Path('kspsmartsuperheat/KspSmartSuperheatPlugin.java')
