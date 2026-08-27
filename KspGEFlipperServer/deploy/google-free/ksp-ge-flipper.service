@@ -1,0 +1,19 @@
+[Unit]
+Description=KSP GE Flipper Backend
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=kspge
+Group=kspge
+EnvironmentFile=/etc/ksp-ge-flipper.env
+WorkingDirectory=/opt/ksp-ge-flipper
+ExecStart=/usr/bin/java -Xms64m -Xmx384m -XX:+UseSerialGC -jar /opt/ksp-ge-flipper/server.jar
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
