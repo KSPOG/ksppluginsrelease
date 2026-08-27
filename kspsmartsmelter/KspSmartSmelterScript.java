@@ -69,18 +69,21 @@ public class KspSmartSmelterScript extends Script {
                     refreshRoute();
                 }
 
-                if (selectedQuote == null) {
+                RouteQuote quoteSnapshot = selectedQuote;
+                SmeltRoute routeSnapshot = quoteSnapshot == null ? null : quoteSnapshot.getRoute();
+                if (quoteSnapshot == null || routeSnapshot == null) {
                     state = SmartSmelterState.NO_PROFITABLE_ROUTE;
                     Microbot.status = "No profitable eligible route";
+                    lastPriceScan = 0L;
                     return;
                 }
 
-                if (hasOneCycleInInventory(selectedQuote.getRoute())) {
-                    smeltTrip();
+                if (hasOneCycleInInventory(routeSnapshot)) {
+                    smeltTrip(routeSnapshot, quoteSnapshot);
                     return;
                 }
 
-                prepareNextTrip();
+                prepareNextTrip(routeSnapshot);
             } catch (Exception ex) {
                 Microbot.logStackTrace(getClass().getSimpleName(), ex);
                 Microbot.status = "Smart Smelter recovered from an error";
@@ -110,20 +113,22 @@ public class KspSmartSmelterScript extends Script {
         }
 
         RouteQuote best = quotes.get(0);
-        if (selectedQuote == null || selectedQuote.getRoute() == best.getRoute()) {
+        RouteQuote current = selectedQuote;
+        SmeltRoute currentRoute = current == null ? null : current.getRoute();
+        if (current == null || currentRoute == null || currentRoute == best.getRoute()) {
             selectedQuote = best;
             return;
         }
 
-        double currentScore = score(selectedQuote);
+        double currentScore = score(current);
         double newScore = score(best);
         double required = currentScore * (1.0 + Math.max(0, config.switchAdvantagePercent()) / 100.0);
 
-        if (newScore >= required && !hasOneCycleInInventory(selectedQuote.getRoute())) {
+        if (newScore >= required && !hasOneCycleInInventory(currentRoute)) {
             selectedQuote = best;
         } else {
             selectedQuote = quotes.stream()
-                    .filter(q -> q.getRoute() == selectedQuote.getRoute())
+                    .filter(q -> q != null && q.getRoute() == currentRoute)
                     .findFirst()
                     .orElse(best);
         }
@@ -139,8 +144,14 @@ public class KspSmartSmelterScript extends Script {
         return quote.getTripProfit();
     }
 
-    private void prepareNextTrip() {
-        SmeltRoute route = selectedQuote.getRoute();
+    private void prepareNextTrip(SmeltRoute route) {
+        if (route == null) {
+            selectedQuote = null;
+            lastPriceScan = 0L;
+            state = SmartSmelterState.NO_PROFITABLE_ROUTE;
+            Microbot.status = "Route changed - rescanning";
+            return;
+        }
 
         if (!openWorkBank()) {
             return;
@@ -277,8 +288,14 @@ public class KspSmartSmelterScript extends Script {
         return false;
     }
 
-    private void smeltTrip() {
-        SmeltRoute route = selectedQuote.getRoute();
+    private void smeltTrip(SmeltRoute route, RouteQuote quoteSnapshot) {
+        if (route == null || quoteSnapshot == null) {
+            selectedQuote = null;
+            lastPriceScan = 0L;
+            state = SmartSmelterState.NO_PROFITABLE_ROUTE;
+            Microbot.status = "Route changed - rescanning";
+            return;
+        }
         state = SmartSmelterState.WALKING_TO_FURNACE;
         FurnaceLocation location = config.furnaceLocation();
 
@@ -322,9 +339,7 @@ public class KspSmartSmelterScript extends Script {
         int processedCycles = Math.max(0, beforeCycles - inventoryCycles(route));
 
         outputProduced += produced;
-        if (selectedQuote != null && selectedQuote.getRoute() == route) {
-            expectedSessionProfit += processedCycles * selectedQuote.getProfitPerCycle();
-        }
+        expectedSessionProfit += processedCycles * quoteSnapshot.getProfitPerCycle();
         completedTrips++;
 
         Microbot.status = "Trip complete: " + route.getOutputName();
