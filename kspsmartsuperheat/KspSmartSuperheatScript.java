@@ -27,6 +27,9 @@ public class KspSmartSuperheatScript extends Script
     private static final int LOOP_DELAY_MS = 500;
     private static final int BANK_TIMEOUT_MS = 6_000;
     private static final int INVENTORY_TIMEOUT_MS = 4_000;
+    private static final int COIN_WITHDRAW_TIMEOUT_MS = 8_000;
+    private static final int COIN_WITHDRAW_SETTLE_TIMEOUT_MS = 4_000;
+    private static final int MAX_COIN_WITHDRAW_ATTEMPTS = 2;
     private static final int CAST_RESULT_TIMEOUT_MS = 4_500;
     private static final int MAX_CAST_FAILURES = 3;
 
@@ -561,11 +564,25 @@ public class KspSmartSuperheatScript extends Script
         }
 
         int requiredCoins = clampInt((long) quantityToBuy * offerPrice);
-        if (requiredCoins <= 0 || !ensureCoinsInInventory(requiredCoins))
+        if (requiredCoins <= 0)
         {
-            status = "Insufficient coins for " + itemName;
-            state = SmartSuperheatState.WAITING_FOR_PROFIT;
-            nextNoProfitScanAt = System.currentTimeMillis() + config.priceRefreshSeconds() * 1000L;
+            status = "Invalid purchase cost for " + itemName;
+            return false;
+        }
+
+        if (!ensureCoinsInInventory(requiredCoins))
+        {
+            long totalCoinsAfter = (long) Rs2Bank.count(ItemID.COINS) + Rs2Inventory.count(ItemID.COINS);
+            if (totalCoinsAfter < requiredCoins)
+            {
+                status = "Insufficient coins for " + itemName;
+                state = SmartSuperheatState.WAITING_FOR_PROFIT;
+                nextNoProfitScanAt = System.currentTimeMillis() + config.priceRefreshSeconds() * 1000L;
+            }
+            else
+            {
+                status = "Retrying coin withdrawal for " + itemName;
+            }
             return false;
         }
 
@@ -630,8 +647,6 @@ public class KspSmartSuperheatScript extends Script
             return;
         }
 
-        // Keep the selected sale recipe effectively final for the inventory-change
-        // lambda below and make the whole sale attempt operate on one stable recipe.
         final SuperheatRecipe saleRecipe = recipeToSell;
 
         if (!ensureBankOpen())
@@ -649,8 +664,6 @@ public class KspSmartSuperheatScript extends Script
         int toSell = Math.min(trackedAmount, sessionOwnedInBank);
         if (toSell <= 0)
         {
-            // If tracking says bars remain but the bank is back at/below the
-            // protected pre-session baseline, prefer leaving bars untouched.
             unsoldProduced.put(saleRecipe, 0);
             return;
         }
@@ -839,27 +852,71 @@ public class KspSmartSuperheatScript extends Script
 
     private boolean ensureCoinsInInventory(int required)
     {
-        if (!Rs2Bank.isOpen())
+        if (!Rs2Bank.isOpen() || required <= 0)
         {
             return false;
         }
 
-        int inventoryCoins = Rs2Inventory.count(ItemID.COINS);
-        if (inventoryCoins >= required)
+        for (int attempt = 1; attempt <= MAX_COIN_WITHDRAW_ATTEMPTS; attempt++)
         {
-            return true;
+            if (!Rs2Bank.isOpen())
+            {
+                return false;
+            }
+
+            int inventoryCoins = Rs2Inventory.count(ItemID.COINS);
+            if (inventoryCoins >= required)
+            {
+                return true;
+            }
+
+            int bankCoins = Rs2Bank.count(ItemID.COINS);
+            if ((long) inventoryCoins + bankCoins < required)
+            {
+                return false;
+            }
+
+            int missing = required - inventoryCoins;
+            if (!Rs2Bank.setWithdrawAsItem())
+            {
+                sleep(200, 350);
+                continue;
+            }
+
+            int bankBefore = bankCoins;
+            log.debug(
+                "Coin withdrawal attempt {}/{}: required={}, inventory={}, bank={}, missing={}",
+                attempt,
+                MAX_COIN_WITHDRAW_ATTEMPTS,
+                required,
+                inventoryCoins,
+                bankCoins,
+                missing
+            );
+
+            Rs2Bank.withdrawX(ItemID.COINS, missing);
+
+            boolean transferObserved = sleepUntil(() ->
+                    Rs2Inventory.count(ItemID.COINS) >= required
+                        || (Rs2Bank.isOpen() && Rs2Bank.count(ItemID.COINS) < bankBefore),
+                COIN_WITHDRAW_TIMEOUT_MS);
+
+            if (Rs2Inventory.count(ItemID.COINS) >= required)
+            {
+                return true;
+            }
+
+            if (transferObserved && sleepUntil(
+                () -> Rs2Inventory.count(ItemID.COINS) >= required,
+                COIN_WITHDRAW_SETTLE_TIMEOUT_MS))
+            {
+                return true;
+            }
+
+            sleep(250, 450);
         }
 
-        int missing = required - inventoryCoins;
-        int bankCoins = Rs2Bank.count(ItemID.COINS);
-        if (bankCoins < missing)
-        {
-            return false;
-        }
-
-        Rs2Bank.setWithdrawAsItem();
-        Rs2Bank.withdrawX(ItemID.COINS, missing);
-        return sleepUntil(() -> Rs2Inventory.count(ItemID.COINS) >= required, INVENTORY_TIMEOUT_MS);
+        return Rs2Inventory.count(ItemID.COINS) >= required;
     }
 
     private int calculateAffordableRestockBars(
