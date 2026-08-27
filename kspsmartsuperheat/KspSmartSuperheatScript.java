@@ -759,7 +759,10 @@ public class KspSmartSuperheatScript extends Script
             return;
         }
 
-        Rs2ItemModel outputRow = Rs2Bank.findBankItem(saleRecipe.getOutputId());
+        Rs2ItemModel outputRow = Rs2Bank.bankItems().stream()
+            .filter(item -> item != null && item.getId() == saleRecipe.getOutputId())
+            .findFirst()
+            .orElse(null);
         if (outputRow == null)
         {
             status = "Waiting for bar bank widget";
@@ -1120,7 +1123,10 @@ public class KspSmartSuperheatScript extends Script
             }
 
             int banked = Math.max(0, Rs2Bank.count(itemId));
-            Rs2ItemModel bankRow = Rs2Bank.findBankItem(itemId);
+            Rs2ItemModel bankRow = Rs2Bank.bankItems().stream()
+                .filter(item -> item != null && item.getId() == itemId)
+                .findFirst()
+                .orElse(null);
             if (banked <= 0 || bankRow == null)
             {
                 log.debug(
@@ -1243,7 +1249,10 @@ public class KspSmartSuperheatScript extends Script
                 return false;
             }
 
-            Rs2ItemModel coinRow = Rs2Bank.findBankItem(ItemID.COINS);
+            Rs2ItemModel coinRow = Rs2Bank.bankItems().stream()
+                .filter(item -> item != null && item.getId() == ItemID.COINS)
+                .findFirst()
+                .orElse(null);
             if (coinRow == null || (inventoryCoins <= 0 && Rs2Inventory.emptySlotCount() <= 0))
             {
                 status = "Waiting for coin bank widget";
