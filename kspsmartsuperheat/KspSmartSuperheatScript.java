@@ -298,8 +298,8 @@ public class KspSmartSuperheatScript extends Script
         {
             int stackSlotsNeeded = 1 + (freeFireRunes ? 0 : 1);
             int occupiedWorkStacks = 0;
-            if (Rs2Inventory.count(ItemID.NATURERUNE) > 0) occupiedWorkStacks++;
-            if (!freeFireRunes && Rs2Inventory.count(ItemID.FIRERUNE) > 0) occupiedWorkStacks++;
+            if (Rs2Inventory.itemQuantity(ItemID.NATURERUNE) > 0) occupiedWorkStacks++;
+            if (!freeFireRunes && Rs2Inventory.itemQuantity(ItemID.FIRERUNE) > 0) occupiedWorkStacks++;
             int availableSlots = Rs2Inventory.emptySlotCount() + occupiedWorkStacks;
             int materialSlots = Math.max(1, activeRecipe.getMaterialSlotsPerBar());
             maxBatch = Math.min(maxBatch, Math.max(0, (availableSlots - stackSlotsNeeded) / materialSlots));
@@ -349,14 +349,14 @@ public class KspSmartSuperheatScript extends Script
         }
 
         int outputBefore = inventoryCountByName(activeRecipe.getOutputName());
-        int primaryBefore = Rs2Inventory.count(activeRecipe.getPrimaryOreId());
+        int primaryBefore = Rs2Inventory.itemQuantity(activeRecipe.getPrimaryOreId());
 
         status = "Casting on " + activeRecipe.getPrimaryOreName();
         Rs2Magic.superHeat(activeRecipe.getPrimaryOreId(), config.castDelayMinMs(), config.castDelayMaxMs());
 
         boolean success = sleepUntil(() ->
             inventoryCountByName(activeRecipe.getOutputName()) > outputBefore
-                || Rs2Inventory.count(activeRecipe.getPrimaryOreId()) < primaryBefore,
+                || Rs2Inventory.itemQuantity(activeRecipe.getPrimaryOreId()) < primaryBefore,
             CAST_RESULT_TIMEOUT_MS
         );
 
@@ -435,7 +435,7 @@ public class KspSmartSuperheatScript extends Script
             return;
         }
 
-        long coinTotal = (long) Rs2Bank.count(ItemID.COINS) + Rs2Inventory.count(ItemID.COINS);
+        long coinTotal = (long) Rs2Bank.count(ItemID.COINS) + Rs2Inventory.itemQuantity(ItemID.COINS);
         long afterReserve = Math.max(0L, coinTotal - config.cashReserve());
         long budget = afterReserve * config.maxSpendPercent() / 100L;
         long executableBudget = Math.min(budget, Integer.MAX_VALUE);
@@ -466,12 +466,12 @@ public class KspSmartSuperheatScript extends Script
         int plannedCoins = (int) plannedCost;
         if (!ensureCoinsInInventory(plannedCoins))
         {
-            long liquidCoins = (long) Rs2Bank.count(ItemID.COINS) + Rs2Inventory.count(ItemID.COINS);
+            long liquidCoins = (long) Rs2Bank.count(ItemID.COINS) + Rs2Inventory.itemQuantity(ItemID.COINS);
             log.debug(
                 "Restock funding retry: targetBars={}, plannedCost={}, inventory={}, bank={}, liquid={}",
                 targetBars,
                 plannedCost,
-                Rs2Inventory.count(ItemID.COINS),
+                Rs2Inventory.itemQuantity(ItemID.COINS),
                 Rs2Bank.count(ItemID.COINS),
                 liquidCoins
             );
@@ -493,7 +493,7 @@ public class KspSmartSuperheatScript extends Script
             "Atomic restock plan: bars={}, plannedCost={}, inventoryCoins={}, bankCoins={}, reserve={}",
             targetBars,
             plannedCost,
-            Rs2Inventory.count(ItemID.COINS),
+            Rs2Inventory.itemQuantity(ItemID.COINS),
             Rs2Bank.count(ItemID.COINS),
             config.cashReserve()
         );
@@ -615,13 +615,13 @@ public class KspSmartSuperheatScript extends Script
         }
 
         int requiredCoins = (int) requiredCoinsLong;
-        if (Rs2Inventory.count(ItemID.COINS) < requiredCoins && !ensureCoinsInInventory(requiredCoins))
+        if (Rs2Inventory.itemQuantity(ItemID.COINS) < requiredCoins && !ensureCoinsInInventory(requiredCoins))
         {
             log.debug(
                 "Restock cash drift for {}: required={}, inventory={}, bank={}, remainingPlan={}",
                 itemName,
                 requiredCoins,
-                Rs2Inventory.count(ItemID.COINS),
+                Rs2Inventory.itemQuantity(ItemID.COINS),
                 Rs2Bank.count(ItemID.COINS),
                 remainingBudget[0]
             );
@@ -894,7 +894,7 @@ public class KspSmartSuperheatScript extends Script
 
     private void depositIfPresent(int itemId)
     {
-        if (itemId > 0 && Rs2Inventory.count(itemId) > 0)
+        if (itemId > 0 && Rs2Inventory.itemQuantity(itemId) > 0)
         {
             Rs2Bank.depositAll(itemId);
             sleep(100, 180);
@@ -946,7 +946,7 @@ public class KspSmartSuperheatScript extends Script
                 return false;
             }
 
-            int inventoryCoins = Rs2Inventory.count(ItemID.COINS);
+            int inventoryCoins = Rs2Inventory.itemQuantity(ItemID.COINS);
             if (inventoryCoins >= required)
             {
                 return true;
@@ -980,17 +980,17 @@ public class KspSmartSuperheatScript extends Script
             Rs2Bank.withdrawX(ItemID.COINS, missing);
 
             boolean transferObserved = sleepUntil(() ->
-                    Rs2Inventory.count(ItemID.COINS) > inventoryBefore
+                    Rs2Inventory.itemQuantity(ItemID.COINS) > inventoryBefore
                         || (Rs2Bank.isOpen() && Rs2Bank.count(ItemID.COINS) < bankBefore),
                 COIN_WITHDRAW_TIMEOUT_MS);
 
-            if (Rs2Inventory.count(ItemID.COINS) >= required)
+            if (Rs2Inventory.itemQuantity(ItemID.COINS) >= required)
             {
                 return true;
             }
 
             if (transferObserved && sleepUntil(
-                () -> Rs2Inventory.count(ItemID.COINS) >= required,
+                () -> Rs2Inventory.itemQuantity(ItemID.COINS) >= required,
                 COIN_WITHDRAW_SETTLE_TIMEOUT_MS))
             {
                 return true;
@@ -999,7 +999,7 @@ public class KspSmartSuperheatScript extends Script
             sleep(250, 450);
         }
 
-        return Rs2Inventory.count(ItemID.COINS) >= required;
+        return Rs2Inventory.itemQuantity(ItemID.COINS) >= required;
     }
 
     private int calculateAffordableRestockBars(
@@ -1179,13 +1179,13 @@ public class KspSmartSuperheatScript extends Script
 
     private boolean inventoryHasCastSupplies(SuperheatRecipe recipe, boolean freeFire)
     {
-        if (Rs2Inventory.count(recipe.getPrimaryOreId()) < recipe.getPrimaryOrePerBar()) return false;
+        if (Rs2Inventory.itemQuantity(recipe.getPrimaryOreId()) < recipe.getPrimaryOrePerBar()) return false;
         if (recipe.hasSecondaryOre()
-            && Rs2Inventory.count(recipe.getSecondaryOreId()) < recipe.getSecondaryOrePerBar()) return false;
+            && Rs2Inventory.itemQuantity(recipe.getSecondaryOreId()) < recipe.getSecondaryOrePerBar()) return false;
         if (recipe.getCoalPerBar() > 0
-            && Rs2Inventory.count(ItemID.COAL) < recipe.getCoalPerBar()) return false;
-        if (Rs2Inventory.count(ItemID.NATURERUNE) < 1) return false;
-        return freeFire || Rs2Inventory.count(ItemID.FIRERUNE) >= 4;
+            && Rs2Inventory.itemQuantity(ItemID.COAL) < recipe.getCoalPerBar()) return false;
+        if (Rs2Inventory.itemQuantity(ItemID.NATURERUNE) < 1) return false;
+        return freeFire || Rs2Inventory.itemQuantity(ItemID.FIRERUNE) >= 4;
     }
 
     private boolean hasInfiniteFireSource()
