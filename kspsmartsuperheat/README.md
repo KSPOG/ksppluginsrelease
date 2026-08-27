@@ -44,6 +44,8 @@ Projected GP/hour is used to rank otherwise-profitable recipes. It accounts for 
 - `Cash reserve` is never intentionally allocated to a new restock plan.
 - `Max spend %` limits how much spendable cash one restock may commit.
 - Every individual GE buy is capped by both the remaining restock budget and the coins currently available before the offer is placed.
+- Coins already in the inventory are kept there while the plugin remains in `RESTOCKING`, including when `Bank whole inventory` is enabled.
+- Subsequent GE buys top up the existing stackable coin stack only when the next offer requires more coins; restock retries do not intentionally deposit the stack back into the bank first.
 - Restocking uses only free GE slots.
 - The plugin does **not** intentionally cancel unrelated GE offers.
 - Buy/sell offers time out, abort, and collect partial fills rather than waiting forever.
@@ -78,7 +80,9 @@ The overlay shows:
 
 `Bank whole inventory` is enabled by default so the plugin has a predictable 28-slot processing inventory.
 
-Disable it if you want unrelated inventory items left untouched. Doing so may reduce or prevent valid Superheat batches when too few inventory slots remain.
+During normal processing/selling it still banks the configured inventory as before. During `RESTOCKING`, the active coin stack is deliberately preserved so consecutive GE offers can reuse one stackable cash balance without unnecessary bank round-trips.
+
+Disable `Bank whole inventory` if you want unrelated inventory items left untouched. Doing so may reduce or prevent valid Superheat batches when too few inventory slots remain.
 
 The plugin checks profitability again while running. If the active recipe falls below the configured profit gate, it stops initiating new casts for that recipe and rescans instead of deliberately continuing an unprofitable route.
 
