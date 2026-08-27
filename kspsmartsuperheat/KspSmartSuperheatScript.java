@@ -15,7 +15,9 @@ import net.runelite.client.plugins.microbot.util.magic.Rs2Magic;
 import net.runelite.client.plugins.microbot.util.player.Rs2Player;
 import net.runelite.client.plugins.microbot.util.widget.Rs2Widget;
 
+import java.util.ArrayList;
 import java.util.EnumMap;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
@@ -103,6 +105,7 @@ public class KspSmartSuperheatScript extends Script
         this.sellFailures = 0;
         this.unsoldProduced.clear();
         this.protectedOutputBaseline.clear();
+        SmartSuperheatBuyQueue.reset();
 
         mainScheduledFuture = scheduledExecutorService.scheduleWithFixedDelay(() ->
         {
@@ -130,6 +133,7 @@ public class KspSmartSuperheatScript extends Script
     {
         state = SmartSuperheatState.STOPPED;
         status = "Stopped";
+        SmartSuperheatBuyQueue.reset();
         shutdown();
     }
 
@@ -405,7 +409,26 @@ public class KspSmartSuperheatScript extends Script
     {
         if (activeRecipe == null)
         {
+            SmartSuperheatBuyQueue.reset();
             state = SmartSuperheatState.SCANNING_MARKET;
+            return;
+        }
+
+        if (SmartSuperheatBuyQueue.hasActive())
+        {
+            SmartSuperheatBuyQueue.QueueResult queueResult =
+                SmartSuperheatBuyQueue.tick(config.geOfferTimeoutSeconds());
+            status = queueResult.getMessage();
+            if (queueResult.isCompleted())
+            {
+                SmartSuperheatBuyQueue.reset();
+                status = "GE restock collected - verifying bank";
+            }
+            else if (queueResult.isFailed())
+            {
+                SmartSuperheatBuyQueue.reset();
+                status = "GE restock attempt failed - replanning";
+            }
             return;
         }
 
@@ -513,58 +536,63 @@ public class KspSmartSuperheatScript extends Script
             config.cashReserve()
         );
 
-        long[] remainingBudget = {plannedCost};
+        List<SmartSuperheatBuyQueue.OrderSpec> orders = new ArrayList<>();
+        long queuedCost = 0L;
 
-        if (!buyMissing(
-            activeRecipe.getPrimaryOreName(),
+        queuedCost += addRestockOrder(orders, activeRecipe.getPrimaryOreName(),
             activeRecipe.getPrimaryOreId(),
             targetBars * activeRecipe.getPrimaryOrePerBar(),
-            activeQuote.getPrimaryBuyPrice(),
-            remainingBudget))
-        {
-            return;
-        }
+            activeQuote.getPrimaryBuyPrice());
 
-        if (activeRecipe.hasSecondaryOre()
-            && !buyMissing(
-                activeRecipe.getSecondaryOreName(),
+        if (activeRecipe.hasSecondaryOre())
+        {
+            queuedCost += addRestockOrder(orders, activeRecipe.getSecondaryOreName(),
                 activeRecipe.getSecondaryOreId(),
                 targetBars * activeRecipe.getSecondaryOrePerBar(),
-                activeQuote.getSecondaryBuyPrice(),
-                remainingBudget))
-        {
-            return;
+                activeQuote.getSecondaryBuyPrice());
         }
 
-        if (activeRecipe.getCoalPerBar() > 0
-            && !buyMissing(
-                "Coal",
-                ItemID.COAL,
+        if (activeRecipe.getCoalPerBar() > 0)
+        {
+            queuedCost += addRestockOrder(orders, "Coal", ItemID.COAL,
                 targetBars * activeRecipe.getCoalPerBar(),
-                activeQuote.getCoalBuyPrice(),
-                remainingBudget))
+                activeQuote.getCoalBuyPrice());
+        }
+
+        queuedCost += addRestockOrder(orders, "Nature rune", ItemID.NATURERUNE,
+            targetBars, activeQuote.getNatureBuyPrice());
+
+        if (!freeFireRunes)
         {
+            queuedCost += addRestockOrder(orders, "Fire rune", ItemID.FIRERUNE,
+                targetBars * 4, activeQuote.getFireBuyPrice());
+        }
+
+        if (queuedCost < 0L || queuedCost > plannedCost
+            || queuedCost > Rs2Inventory.itemQuantity(ItemID.COINS))
+        {
+            status = "Restock queue cash changed - replanning";
             return;
         }
 
-        if (!buyMissing(
-            "Nature rune",
-            ItemID.NATURERUNE,
-            targetBars,
-            activeQuote.getNatureBuyPrice(),
-            remainingBudget))
+        if (!orders.isEmpty())
         {
-            return;
-        }
+            Rs2Bank.closeBank();
+            if (!sleepUntil(() -> !Rs2Bank.isOpen(), BANK_WIDGET_TIMEOUT_MS))
+            {
+                status = "Closing bank for GE restock";
+                return;
+            }
 
-        if (!freeFireRunes
-            && !buyMissing(
-                "Fire rune",
-                ItemID.FIRERUNE,
-                targetBars * 4,
-                activeQuote.getFireBuyPrice(),
-                remainingBudget))
-        {
+            if (!SmartSuperheatBuyQueue.start(orders))
+            {
+                status = "Could not start GE restock queue";
+                return;
+            }
+
+            SmartSuperheatBuyQueue.QueueResult queueResult =
+                SmartSuperheatBuyQueue.tick(config.geOfferTimeoutSeconds());
+            status = queueResult.getMessage();
             return;
         }
 
@@ -585,103 +613,30 @@ public class KspSmartSuperheatScript extends Script
         }
     }
 
-    private boolean buyMissing(
+    private long addRestockOrder(
+        List<SmartSuperheatBuyQueue.OrderSpec> orders,
         String itemName,
         int itemId,
         int desiredTotal,
-        int offerPrice,
-        long[] remainingBudget)
+        int offerPrice)
     {
-        if (!ensureBankOpen())
-        {
-            return false;
-        }
-
         int available = availableResourceQuantity(itemId);
         int missing = Math.max(0, desiredTotal - available);
         if (missing <= 0)
         {
-            return true;
+            return 0L;
         }
-
-        if (offerPrice <= 0 || remainingBudget == null || remainingBudget.length == 0)
+        if (itemId <= 0 || itemName == null || itemName.isBlank() || offerPrice <= 0)
         {
-            status = "Invalid purchase cost for " + itemName;
-            return false;
+            return Long.MAX_VALUE;
         }
-
-        long requiredCoinsLong = (long) missing * offerPrice;
-        if (requiredCoinsLong <= 0L || requiredCoinsLong > Integer.MAX_VALUE)
+        long cost = (long) missing * offerPrice;
+        if (cost <= 0L || cost > Integer.MAX_VALUE)
         {
-            status = "Invalid purchase cost for " + itemName;
-            return false;
+            return Long.MAX_VALUE;
         }
-
-        if (requiredCoinsLong > remainingBudget[0])
-        {
-            log.debug(
-                "Restock budget drift for {}: required={}, remaining={}",
-                itemName,
-                requiredCoinsLong,
-                remainingBudget[0]
-            );
-            status = "Replanning budget for " + itemName;
-            return false;
-        }
-
-        int requiredCoins = (int) requiredCoinsLong;
-        if (Rs2Inventory.itemQuantity(ItemID.COINS) < requiredCoins && !ensureCoinsInInventory(requiredCoins))
-        {
-            log.debug(
-                "Restock cash drift for {}: required={}, inventory={}, bank={}, remainingPlan={}",
-                itemName,
-                requiredCoins,
-                Rs2Inventory.itemQuantity(ItemID.COINS),
-                Rs2Bank.count(ItemID.COINS),
-                remainingBudget[0]
-            );
-            status = "Replanning cash for " + itemName;
-            return false;
-        }
-
-        Rs2Bank.closeBank();
-        status = "Buying " + formatNumber(missing) + " " + itemName;
-
-        SmartGeTrader.TradeResult result = SmartGeTrader.buyToBank(
-            itemId,
-            itemName,
-            missing,
-            offerPrice,
-            config.geOfferTimeoutSeconds()
-        );
-
-        if (!result.isPlaced())
-        {
-            status = result.getMessage();
-            return false;
-        }
-
-        int filled = Math.min(missing, result.getFilledQuantity());
-        if (filled <= 0)
-        {
-            status = "No fill for " + itemName;
-            return false;
-        }
-
-        long committed = Math.min(remainingBudget[0], (long) filled * offerPrice);
-        remainingBudget[0] = Math.max(0L, remainingBudget[0] - committed);
-        spendableCoins = clampInt(remainingBudget[0]);
-
-        if (filled < missing)
-        {
-            status = "Partial " + itemName + " fill - replanning";
-            sleep(250, 500);
-            return false;
-        }
-
-        status = "Bought " + formatNumber(filled) + " " + itemName;
-        sleep(250, 500);
-        return true;
+        orders.add(new SmartSuperheatBuyQueue.OrderSpec(itemId, itemName, missing, offerPrice));
+        return cost;
     }
 
     private void sellProducedOutput()
