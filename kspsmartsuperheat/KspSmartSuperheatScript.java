@@ -648,6 +648,7 @@ public class KspSmartSuperheatScript extends Script
         status = "Buying " + formatNumber(missing) + " " + itemName;
 
         SmartGeTrader.TradeResult result = SmartGeTrader.buyToBank(
+            itemId,
             itemName,
             missing,
             offerPrice,
@@ -796,6 +797,7 @@ public class KspSmartSuperheatScript extends Script
         status = "Selling " + formatNumber(inventoryQty) + " noted " + saleRecipe.getOutputName();
 
         SmartGeTrader.TradeResult result = SmartGeTrader.sellFromInventory(
+            saleRecipe.getOutputId(),
             saleRecipe.getOutputName(),
             inventoryQty,
             saleQuote.getOutputSellPrice(),
