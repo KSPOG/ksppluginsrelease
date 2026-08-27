@@ -158,6 +158,11 @@ public class KspSmartSmelterScript extends Script {
         state = SmartSmelterState.BANKING;
         Microbot.status = "Preparing " + route.getOutputName();
 
+        if (!Rs2Bank.setWithdrawAsItem()) {
+            Microbot.status = "Setting bank item withdrawal mode";
+            return;
+        }
+
         depositProductionInventory(route);
 
         int availableCycles = bankCycles(route);
@@ -527,27 +532,35 @@ public class KspSmartSmelterScript extends Script {
         int[] quantities = route.getInputQuantities();
 
         for (int i = 0; i < ids.length; i++) {
-            int wanted = targetCycles * quantities[i];
+            int desired = targetCycles * quantities[i];
+            int existing = bankQuantity(ids[i]) + Rs2Inventory.itemQuantity(ids[i]);
+            int wanted = Math.max(0, desired - existing);
+            if (wanted <= 0) {
+                continue;
+            }
+
             String inputName = itemName(ids[i]);
             Microbot.status = "Placing GE buy: " + inputName;
-
-            if (!SmartSmelterGeTrader.placeBuy(inputName, wanted, config.buyPercent())) {
-                Microbot.status = "GE buy widget entry failed: " + inputName;
-                SmartSmelterGeTrader.recoverToOverview();
+            if (!SmartSmelterGeTrader.placeBuy(ids[i], inputName, wanted, config.buyPercent())) {
+                Microbot.status = "GE buy placement/verification failed: " + inputName;
                 lastPriceScan = 0L;
                 return;
             }
-
-            sleep(650, 950);
+            sleep(450, 700);
         }
 
         state = SmartSmelterState.WAITING_FOR_OFFERS;
-        Microbot.status = "Waiting for GE restock offers";
+        Microbot.status = SmartSmelterGeTrader.hasOpenOffers()
+                ? "Waiting for GE restock offers"
+                : "Restock offers completed";
         sleep(Math.max(3, config.offerWaitSeconds()) * 1000);
 
-        Rs2GrandExchange.collectAllToBank();
-        sleep(500, 900);
-        Rs2GrandExchange.closeExchange();
+        if (!SmartSmelterGeTrader.collectCompletedToBank()) {
+            return;
+        }
+        if (Rs2GrandExchange.isOpen()) {
+            Rs2GrandExchange.closeExchange();
+        }
 
         lastPriceScan = 0;
         state = SmartSmelterState.WALKING_TO_BANK;
@@ -561,29 +574,44 @@ public class KspSmartSmelterScript extends Script {
             return;
         }
 
+        String outputName = itemName(route.getOutputId());
         int quantity = bankQuantity(route.getOutputId());
         if (quantity <= 0) {
             Rs2Bank.closeBank();
             return;
         }
 
-        Rs2Bank.withdrawAll(route.getOutputId());
-        sleepUntil(() -> Rs2Inventory.itemQuantity(route.getOutputId()) > 0, 3000);
-        quantity = Rs2Inventory.itemQuantity(route.getOutputId());
+        if (!Rs2Bank.setWithdrawAsNote()) {
+            Microbot.status = "Setting noted output withdrawal";
+            return;
+        }
+
+        Microbot.status = "Withdrawing noted " + outputName;
+        if (!Rs2Bank.withdrawAll(outputName, true)) {
+            Microbot.status = "Failed withdrawing noted " + outputName;
+            return;
+        }
+        if (!sleepUntil(() -> Rs2Inventory.itemQuantity(outputName, true) >= quantity, 5000)) {
+            Microbot.status = "Waiting for noted output stack";
+            return;
+        }
+
+        quantity = Rs2Inventory.itemQuantity(outputName, true);
         Rs2Bank.closeBank();
+        sleepUntil(() -> !Rs2Bank.isOpen(), 3000);
 
         if (quantity <= 0 || !SmartSmelterGeTrader.ensureOverview()) {
             return;
         }
 
-        String outputName = itemName(route.getOutputId());
-        if (SmartSmelterGeTrader.placeSell(outputName, quantity, config.sellPercent())) {
+        if (SmartSmelterGeTrader.placeSell(
+                route.getOutputId(), outputName, quantity, config.sellPercent())) {
             state = SmartSmelterState.WAITING_FOR_OFFERS;
             Microbot.status = "Selling " + route.getOutputName();
             sleep(Math.max(3, config.offerWaitSeconds()) * 1000);
-            Rs2GrandExchange.collectAllToBank();
+            SmartSmelterGeTrader.collectCompletedToBank();
         } else {
-            Microbot.status = "GE sell widget entry failed: " + outputName;
+            Microbot.status = "GE sell placement/verification failed: " + outputName;
             SmartSmelterGeTrader.recoverToOverview();
         }
     }
