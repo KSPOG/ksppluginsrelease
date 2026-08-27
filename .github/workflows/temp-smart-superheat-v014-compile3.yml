@@ -1,0 +1,40 @@
+name: SmartSuperheatV014Compile3
+on:
+  push:
+    branches: [fix/smart-superheat-jewelry-ge-v014]
+    paths: [.github/workflows/temp-smart-superheat-v014-compile3.yml]
+jobs:
+  compile:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/smart-superheat-jewelry-ge-v014
+      - name: Checkout Microbot
+        run: git clone --depth 1 https://github.com/chsami/Microbot.git /tmp/Microbot
+      - name: Copy Smart Superheat and test-only PluginConstants shim
+        run: |
+          mkdir -p /tmp/Microbot/runelite-client/src/main/java/net/runelite/client/plugins/microbot/kspsmartsuperheat
+          cp kspsmartsuperheat/*.java /tmp/Microbot/runelite-client/src/main/java/net/runelite/client/plugins/microbot/kspsmartsuperheat/
+          cat > /tmp/Microbot/runelite-client/src/main/java/net/runelite/client/plugins/microbot/PluginConstants.java <<'EOF'
+          package net.runelite.client.plugins.microbot;
+          public final class PluginConstants {
+              public static final String KSP = "KSP ";
+              public static final boolean DEFAULT_ENABLED = false;
+              public static final boolean IS_EXTERNAL = true;
+              private PluginConstants() {}
+          }
+          EOF
+      - name: Compile Microbot client
+        working-directory: /tmp/Microbot
+        run: ./gradlew :client:compileJava --no-daemon --stacktrace
+      - name: Remove temporary workflow
+        if: always()
+        run: |
+          git rm .github/workflows/temp-smart-superheat-v014-compile3.yml
+          git config user.name "KSPOG"
+          git config user.email "actions@users.noreply.github.com"
+          git commit -m "chore: remove temporary Smart Superheat compile workflow"
+          git push
