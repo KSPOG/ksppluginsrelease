@@ -266,6 +266,7 @@ public class KspSmartSuperheatScript extends Script
         }
 
         normalizeInventoryForBank();
+        ensureAllNatureRunesInInventory();
         captureProtectedOutputBaseline(activeRecipe);
 
         freeFireRunes = hasInfiniteFireSource();
@@ -417,6 +418,7 @@ public class KspSmartSuperheatScript extends Script
         }
 
         normalizeInventoryForRestock();
+        ensureAllNatureRunesInInventory();
         captureProtectedOutputBaseline(activeRecipe);
 
         int alreadyCraftable = calculateCraftableBarsInBank(activeRecipe, freeFireRunes);
@@ -582,8 +584,8 @@ public class KspSmartSuperheatScript extends Script
             return false;
         }
 
-        int banked = Rs2Bank.count(itemId);
-        int missing = Math.max(0, desiredTotal - banked);
+        int available = availableResourceQuantity(itemId);
+        int missing = Math.max(0, desiredTotal - available);
         if (missing <= 0)
         {
             return true;
@@ -706,6 +708,7 @@ public class KspSmartSuperheatScript extends Script
         }
 
         normalizeInventoryForBank();
+        ensureAllNatureRunesInInventory();
 
         captureProtectedOutputBaseline(saleRecipe);
         int banked = Rs2Bank.count(saleRecipe.getOutputId());
@@ -731,18 +734,24 @@ public class KspSmartSuperheatScript extends Script
             return;
         }
 
+        // Give the bank withdraw-mode widget time to settle before touching the bar stack.
+        sleep(500, 750);
+        int inventoryBefore = inventoryCountByName(saleRecipe.getOutputName());
         Rs2Bank.withdrawX(saleRecipe.getOutputId(), toSell);
-        sleepUntil(() -> inventoryCountByName(saleRecipe.getOutputName()) > 0, INVENTORY_TIMEOUT_MS);
+        sleepUntil(
+            () -> inventoryCountByName(saleRecipe.getOutputName()) > inventoryBefore,
+            INVENTORY_TIMEOUT_MS
+        );
 
-        int inventoryQty = inventoryCountByName(saleRecipe.getOutputName());
+        int inventoryQty = inventoryCountByName(saleRecipe.getOutputName()) - inventoryBefore;
         if (inventoryQty <= 0)
         {
-            status = "Could not withdraw " + saleRecipe.getOutputName();
+            status = "Could not withdraw noted " + saleRecipe.getOutputName();
             return;
         }
 
         Rs2Bank.closeBank();
-        status = "Selling " + formatNumber(inventoryQty) + " " + saleRecipe.getOutputName();
+        status = "Selling " + formatNumber(inventoryQty) + " noted " + saleRecipe.getOutputName();
 
         SmartGeTrader.TradeResult result = SmartGeTrader.sellFromInventory(
             saleRecipe.getOutputName(),
@@ -839,39 +848,9 @@ public class KspSmartSuperheatScript extends Script
 
         if (config.bankWholeInventory())
         {
-            if (!Rs2Inventory.isEmpty())
-            {
-                Rs2Bank.depositAll();
-                sleepUntil(Rs2Inventory::isEmpty, INVENTORY_TIMEOUT_MS);
-            }
-            return;
-        }
-
-        for (SuperheatRecipe recipe : SuperheatRecipe.values())
-        {
-            depositIfPresent(recipe.getPrimaryOreId());
-            if (recipe.hasSecondaryOre()) depositIfPresent(recipe.getSecondaryOreId());
-            depositIfPresent(recipe.getOutputId());
-        }
-
-        depositIfPresent(ItemID.COAL);
-        depositIfPresent(ItemID.NATURERUNE);
-        depositIfPresent(ItemID.FIRERUNE);
-        depositIfPresent(ItemID.COINS);
-    }
-
-    private void normalizeInventoryForRestock()
-    {
-        if (!Rs2Bank.isOpen())
-        {
-            return;
-        }
-
-        if (config.bankWholeInventory())
-        {
             for (Rs2ItemModel item : Rs2Inventory.all())
             {
-                if (item == null || item.getId() <= 0 || item.getId() == ItemID.COINS)
+                if (item == null || item.getId() <= 0 || item.getId() == ItemID.NATURERUNE)
                 {
                     continue;
                 }
@@ -888,7 +867,41 @@ public class KspSmartSuperheatScript extends Script
         }
 
         depositIfPresent(ItemID.COAL);
-        depositIfPresent(ItemID.NATURERUNE);
+        depositIfPresent(ItemID.FIRERUNE);
+        depositIfPresent(ItemID.COINS);
+    }
+
+    private void normalizeInventoryForRestock()
+    {
+        if (!Rs2Bank.isOpen())
+        {
+            return;
+        }
+
+        if (config.bankWholeInventory())
+        {
+            for (Rs2ItemModel item : Rs2Inventory.all())
+            {
+                if (item == null
+                    || item.getId() <= 0
+                    || item.getId() == ItemID.COINS
+                    || item.getId() == ItemID.NATURERUNE)
+                {
+                    continue;
+                }
+                depositIfPresent(item.getId());
+            }
+            return;
+        }
+
+        for (SuperheatRecipe recipe : SuperheatRecipe.values())
+        {
+            depositIfPresent(recipe.getPrimaryOreId());
+            if (recipe.hasSecondaryOre()) depositIfPresent(recipe.getSecondaryOreId());
+            depositIfPresent(recipe.getOutputId());
+        }
+
+        depositIfPresent(ItemID.COAL);
         depositIfPresent(ItemID.FIRERUNE);
     }
 
@@ -899,6 +912,33 @@ public class KspSmartSuperheatScript extends Script
             Rs2Bank.depositAll(itemId);
             sleep(100, 180);
         }
+    }
+
+    private void ensureAllNatureRunesInInventory()
+    {
+        if (!Rs2Bank.isOpen())
+        {
+            return;
+        }
+
+        int banked = Math.max(0, Rs2Bank.count(ItemID.NATURERUNE));
+        if (banked <= 0)
+        {
+            return;
+        }
+
+        if (!Rs2Bank.setWithdrawAsItem())
+        {
+            return;
+        }
+
+        int before = Rs2Inventory.itemQuantity(ItemID.NATURERUNE);
+        Rs2Bank.withdrawX(ItemID.NATURERUNE, banked);
+        sleepUntil(
+            () -> Rs2Inventory.itemQuantity(ItemID.NATURERUNE) > before
+                || Rs2Bank.count(ItemID.NATURERUNE) <= 0,
+            INVENTORY_TIMEOUT_MS
+        );
     }
 
     private void withdrawBatch(SuperheatRecipe recipe, int bars, boolean freeFire)
@@ -920,9 +960,7 @@ public class KspSmartSuperheatScript extends Script
             sleep(120, 220);
         }
 
-        Rs2Bank.withdrawX(ItemID.NATURERUNE, bars);
-        sleep(120, 220);
-
+        // Nature runes stay in the persistent inventory stack and are not batch-withdrawn.
         if (!freeFire)
         {
             Rs2Bank.withdrawX(ItemID.FIRERUNE, bars * 4);
@@ -1077,9 +1115,9 @@ public class KspSmartSuperheatScript extends Script
             return 0L;
         }
 
-        long banked = Math.max(0, Rs2Bank.count(itemId));
+        long available = availableResourceQuantity(itemId);
         long purchasable = Math.max(0L, budget) / offerPrice;
-        long capacity = Math.max(0L, (banked + purchasable) / amountPerBar);
+        long capacity = Math.max(0L, (available + purchasable) / amountPerBar);
         long safeCapacity = Integer.MAX_VALUE / (long) amountPerBar;
         return Math.min(capacity, safeCapacity);
     }
@@ -1133,9 +1171,19 @@ public class KspSmartSuperheatScript extends Script
             return 0L;
         }
 
-        long banked = Math.max(0, Rs2Bank.count(itemId));
-        long missing = Math.max(0L, desiredTotal - banked);
+        long available = availableResourceQuantity(itemId);
+        long missing = Math.max(0L, desiredTotal - available);
         return missing * offerPrice;
+    }
+
+    private int availableResourceQuantity(int itemId)
+    {
+        long banked = Math.max(0, Rs2Bank.count(itemId));
+        if (itemId == ItemID.NATURERUNE)
+        {
+            banked += Math.max(0, Rs2Inventory.itemQuantity(ItemID.NATURERUNE));
+        }
+        return clampInt(banked);
     }
 
     private int calculateCraftableBarsInBank(SuperheatRecipe recipe, boolean freeFire)
@@ -1157,7 +1205,7 @@ public class KspSmartSuperheatScript extends Script
             bars = Math.min(bars, Rs2Bank.count(ItemID.COAL) / recipe.getCoalPerBar());
         }
 
-        bars = Math.min(bars, Rs2Bank.count(ItemID.NATURERUNE));
+        bars = Math.min(bars, availableResourceQuantity(ItemID.NATURERUNE));
 
         if (!freeFire)
         {
