@@ -1,0 +1,61 @@
+name: Temporary Smart Smelter Null Fix
+
+on:
+  push:
+    branches:
+      - fix/smart-smelter-null-route-v004
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Patch Smart Smelter route snapshots
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import base64
+
+          path = Path('kspsmartsmelter/KspSmartSmelterScript.java')
+          text = path.read_text()
+
+          replacements = [
+              ('ICAgICAgICAgICAgICAgIGlmIChzZWxlY3RlZFF1b3RlID09IG51bGwpIHsKICAgICAgICAgICAgICAgICAgICBzdGF0ZSA9IFNtYXJ0U21lbHRlclN0YXRlLk5PX1BST0ZJVEFCTEVfUk9VVEU7CiAgICAgICAgICAgICAgICAgICAgTWljcm9ib3Quc3RhdHVzID0gIk5vIHByb2ZpdGFibGUgZWxpZ2libGUgcm91dGUiOwogICAgICAgICAgICAgICAgICAgIHJldHVybjsKICAgICAgICAgICAgICAgIH0KCiAgICAgICAgICAgICAgICBpZiAoaGFzT25lQ3ljbGVJbkludmVudG9yeShzZWxlY3RlZFF1b3RlLmdldFJvdXRlKCkpKSB7CiAgICAgICAgICAgICAgICAgICAgc21lbHRUcmlwKCk7CiAgICAgICAgICAgICAgICAgICAgcmV0dXJuOwogICAgICAgICAgICAgICAgfQoKICAgICAgICAgICAgICAgIHByZXBhcmVOZXh0VHJpcCgpOw==', 'ICAgICAgICAgICAgICAgIFJvdXRlUXVvdGUgcXVvdGVTbmFwc2hvdCA9IHNlbGVjdGVkUXVvdGU7CiAgICAgICAgICAgICAgICBTbWVsdFJvdXRlIHJvdXRlU25hcHNob3QgPSBxdW90ZVNuYXBzaG90ID09IG51bGwgPyBudWxsIDogcXVvdGVTbmFwc2hvdC5nZXRSb3V0ZSgpOwogICAgICAgICAgICAgICAgaWYgKHF1b3RlU25hcHNob3QgPT0gbnVsbCB8fCByb3V0ZVNuYXBzaG90ID09IG51bGwpIHsKICAgICAgICAgICAgICAgICAgICBzdGF0ZSA9IFNtYXJ0U21lbHRlclN0YXRlLk5PX1BST0ZJVEFCTEVfUk9VVEU7CiAgICAgICAgICAgICAgICAgICAgTWljcm9ib3Quc3RhdHVzID0gIk5vIHByb2ZpdGFibGUgZWxpZ2libGUgcm91dGUiOwogICAgICAgICAgICAgICAgICAgIGxhc3RQcmljZVNjYW4gPSAwTDsKICAgICAgICAgICAgICAgICAgICByZXR1cm47CiAgICAgICAgICAgICAgICB9CgogICAgICAgICAgICAgICAgaWYgKGhhc09uZUN5Y2xlSW5JbnZlbnRvcnkocm91dGVTbmFwc2hvdCkpIHsKICAgICAgICAgICAgICAgICAgICBzbWVsdFRyaXAocm91dGVTbmFwc2hvdCwgcXVvdGVTbmFwc2hvdCk7CiAgICAgICAgICAgICAgICAgICAgcmV0dXJuOwogICAgICAgICAgICAgICAgfQoKICAgICAgICAgICAgICAgIHByZXBhcmVOZXh0VHJpcChyb3V0ZVNuYXBzaG90KTs='),
+              ('ICAgICAgICBSb3V0ZVF1b3RlIGJlc3QgPSBxdW90ZXMuZ2V0KDApOwogICAgICAgIGlmIChzZWxlY3RlZFF1b3RlID09IG51bGwgfHwgc2VsZWN0ZWRRdW90ZS5nZXRSb3V0ZSgpID09IGJlc3QuZ2V0Um91dGUoKSkgewogICAgICAgICAgICBzZWxlY3RlZFF1b3RlID0gYmVzdDsKICAgICAgICAgICAgcmV0dXJuOwogICAgICAgIH0KCiAgICAgICAgZG91YmxlIGN1cnJlbnRTY29yZSA9IHNjb3JlKHNlbGVjdGVkUXVvdGUpOwogICAgICAgIGRvdWJsZSBuZXdTY29yZSA9IHNjb3JlKGJlc3QpOwogICAgICAgIGRvdWJsZSByZXF1aXJlZCA9IGN1cnJlbnRTY29yZSAqICgxLjAgKyBNYXRoLm1heCgwLCBjb25maWcuc3dpdGNoQWR2YW50YWdlUGVyY2VudCgpKSAvIDEwMC4wKTsKCiAgICAgICAgaWYgKG5ld1Njb3JlID49IHJlcXVpcmVkICYmICFoYXNPbmVDeWNsZUluSW52ZW50b3J5KHNlbGVjdGVkUXVvdGUuZ2V0Um91dGUoKSkpIHsKICAgICAgICAgICAgc2VsZWN0ZWRRdW90ZSA9IGJlc3Q7CiAgICAgICAgfSBlbHNlIHsKICAgICAgICAgICAgc2VsZWN0ZWRRdW90ZSA9IHF1b3Rlcy5zdHJlYW0oKQogICAgICAgICAgICAgICAgICAgIC5maWx0ZXIocSAtPiBxLmdldFJvdXRlKCkgPT0gc2VsZWN0ZWRRdW90ZS5nZXRSb3V0ZSgpKQogICAgICAgICAgICAgICAgICAgIC5maW5kRmlyc3QoKQogICAgICAgICAgICAgICAgICAgIC5vckVsc2UoYmVzdCk7CiAgICAgICAgfQ==', 'ICAgICAgICBSb3V0ZVF1b3RlIGJlc3QgPSBxdW90ZXMuZ2V0KDApOwogICAgICAgIFJvdXRlUXVvdGUgY3VycmVudCA9IHNlbGVjdGVkUXVvdGU7CiAgICAgICAgU21lbHRSb3V0ZSBjdXJyZW50Um91dGUgPSBjdXJyZW50ID09IG51bGwgPyBudWxsIDogY3VycmVudC5nZXRSb3V0ZSgpOwogICAgICAgIGlmIChjdXJyZW50ID09IG51bGwgfHwgY3VycmVudFJvdXRlID09IG51bGwgfHwgY3VycmVudFJvdXRlID09IGJlc3QuZ2V0Um91dGUoKSkgewogICAgICAgICAgICBzZWxlY3RlZFF1b3RlID0gYmVzdDsKICAgICAgICAgICAgcmV0dXJuOwogICAgICAgIH0KCiAgICAgICAgZG91YmxlIGN1cnJlbnRTY29yZSA9IHNjb3JlKGN1cnJlbnQpOwogICAgICAgIGRvdWJsZSBuZXdTY29yZSA9IHNjb3JlKGJlc3QpOwogICAgICAgIGRvdWJsZSByZXF1aXJlZCA9IGN1cnJlbnRTY29yZSAqICgxLjAgKyBNYXRoLm1heCgwLCBjb25maWcuc3dpdGNoQWR2YW50YWdlUGVyY2VudCgpKSAvIDEwMC4wKTsKCiAgICAgICAgaWYgKG5ld1Njb3JlID49IHJlcXVpcmVkICYmICFoYXNPbmVDeWNsZUluSW52ZW50b3J5KGN1cnJlbnRSb3V0ZSkpIHsKICAgICAgICAgICAgc2VsZWN0ZWRRdW90ZSA9IGJlc3Q7CiAgICAgICAgfSBlbHNlIHsKICAgICAgICAgICAgc2VsZWN0ZWRRdW90ZSA9IHF1b3Rlcy5zdHJlYW0oKQogICAgICAgICAgICAgICAgICAgIC5maWx0ZXIocSAtPiBxICE9IG51bGwgJiYgcS5nZXRSb3V0ZSgpID09IGN1cnJlbnRSb3V0ZSkKICAgICAgICAgICAgICAgICAgICAuZmluZEZpcnN0KCkKICAgICAgICAgICAgICAgICAgICAub3JFbHNlKGJlc3QpOwogICAgICAgIH0='),
+              ('ICAgIHByaXZhdGUgdm9pZCBwcmVwYXJlTmV4dFRyaXAoKSB7CiAgICAgICAgU21lbHRSb3V0ZSByb3V0ZSA9IHNlbGVjdGVkUXVvdGUuZ2V0Um91dGUoKTsK', 'ICAgIHByaXZhdGUgdm9pZCBwcmVwYXJlTmV4dFRyaXAoU21lbHRSb3V0ZSByb3V0ZSkgewogICAgICAgIGlmIChyb3V0ZSA9PSBudWxsKSB7CiAgICAgICAgICAgIHNlbGVjdGVkUXVvdGUgPSBudWxsOwogICAgICAgICAgICBsYXN0UHJpY2VTY2FuID0gMEw7CiAgICAgICAgICAgIHN0YXRlID0gU21hcnRTbWVsdGVyU3RhdGUuTk9fUFJPRklUQUJMRV9ST1VURTsKICAgICAgICAgICAgTWljcm9ib3Quc3RhdHVzID0gIlJvdXRlIGNoYW5nZWQgLSByZXNjYW5uaW5nIjsKICAgICAgICAgICAgcmV0dXJuOwogICAgICAgIH0K'),
+              ('ICAgIHByaXZhdGUgdm9pZCBzbWVsdFRyaXAoKSB7CiAgICAgICAgU21lbHRSb3V0ZSByb3V0ZSA9IHNlbGVjdGVkUXVvdGUuZ2V0Um91dGUoKTsK', 'ICAgIHByaXZhdGUgdm9pZCBzbWVsdFRyaXAoU21lbHRSb3V0ZSByb3V0ZSwgUm91dGVRdW90ZSBxdW90ZVNuYXBzaG90KSB7CiAgICAgICAgaWYgKHJvdXRlID09IG51bGwgfHwgcXVvdGVTbmFwc2hvdCA9PSBudWxsKSB7CiAgICAgICAgICAgIHNlbGVjdGVkUXVvdGUgPSBudWxsOwogICAgICAgICAgICBsYXN0UHJpY2VTY2FuID0gMEw7CiAgICAgICAgICAgIHN0YXRlID0gU21hcnRTbWVsdGVyU3RhdGUuTk9fUFJPRklUQUJMRV9ST1VURTsKICAgICAgICAgICAgTWljcm9ib3Quc3RhdHVzID0gIlJvdXRlIGNoYW5nZWQgLSByZXNjYW5uaW5nIjsKICAgICAgICAgICAgcmV0dXJuOwogICAgICAgIH0K'),
+              ('ICAgICAgICBvdXRwdXRQcm9kdWNlZCArPSBwcm9kdWNlZDsKICAgICAgICBpZiAoc2VsZWN0ZWRRdW90ZSAhPSBudWxsICYmIHNlbGVjdGVkUXVvdGUuZ2V0Um91dGUoKSA9PSByb3V0ZSkgewogICAgICAgICAgICBleHBlY3RlZFNlc3Npb25Qcm9maXQgKz0gcHJvY2Vzc2VkQ3ljbGVzICogc2VsZWN0ZWRRdW90ZS5nZXRQcm9maXRQZXJDeWNsZSgpOwogICAgICAgIH0KICAgICAgICBjb21wbGV0ZWRUcmlwcysrOw==', 'ICAgICAgICBvdXRwdXRQcm9kdWNlZCArPSBwcm9kdWNlZDsKICAgICAgICBleHBlY3RlZFNlc3Npb25Qcm9maXQgKz0gcHJvY2Vzc2VkQ3ljbGVzICogcXVvdGVTbmFwc2hvdC5nZXRQcm9maXRQZXJDeWNsZSgpOwogICAgICAgIGNvbXBsZXRlZFRyaXBzKys7')
+          ]
+
+          for index, (old_b64, new_b64) in enumerate(replacements, 1):
+              old = base64.b64decode(old_b64).decode()
+              new = base64.b64decode(new_b64).decode()
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'Replacement {index}: expected 1 match, found {count}')
+              text = text.replace(old, new, 1)
+
+          path.write_text(text)
+
+          plugin = Path('kspsmartsmelter/KspSmartSmelterPlugin.java')
+          ptext = plugin.read_text()
+          old_version = 'public static final String VERSION = "0.0.3";'
+          new_version = 'public static final String VERSION = "0.0.4";'
+          if ptext.count(old_version) != 1:
+              raise SystemExit('Expected Smart Smelter v0.0.3 version marker exactly once')
+          plugin.write_text(ptext.replace(old_version, new_version, 1))
+
+          Path('.github/workflows/temp-smart-smelter-null-fix.yml').unlink()
+          PY
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Fix Smart Smelter route snapshot race"
+          git push origin HEAD:fix/smart-smelter-null-route-v004
