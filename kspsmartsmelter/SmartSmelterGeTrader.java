@@ -1,36 +1,45 @@
 package net.runelite.client.plugins.microbot.kspsmartsmelter;
 
 import lombok.extern.slf4j.Slf4j;
+import net.runelite.api.GrandExchangeOffer;
+import net.runelite.api.GrandExchangeOfferState;
 import net.runelite.api.gameval.InterfaceID;
-import net.runelite.api.gameval.VarbitID;
-import net.runelite.api.widgets.Widget;
 import net.runelite.client.plugins.microbot.Microbot;
 import net.runelite.client.plugins.microbot.util.bank.Rs2Bank;
+import net.runelite.client.plugins.microbot.util.grandexchange.GrandExchangeAction;
+import net.runelite.client.plugins.microbot.util.grandexchange.GrandExchangeRequest;
 import net.runelite.client.plugins.microbot.util.grandexchange.GrandExchangeSlots;
 import net.runelite.client.plugins.microbot.util.grandexchange.Rs2GrandExchange;
-import net.runelite.client.plugins.microbot.util.inventory.Rs2Inventory;
-import net.runelite.client.plugins.microbot.util.keyboard.Rs2Keyboard;
-import net.runelite.client.plugins.microbot.util.widget.Rs2Widget;
+import net.runelite.client.plugins.microbot.util.grandexchange.models.WikiPrice;
+import net.runelite.client.plugins.microbot.util.world.Rs2WorldUtil;
 
-import java.util.function.IntSupplier;
+import java.util.ArrayList;
+import java.util.List;
 
 import static net.runelite.client.plugins.microbot.util.Global.sleep;
 import static net.runelite.client.plugins.microbot.util.Global.sleepUntil;
 
+/**
+ * Grand Exchange interaction for Smart Smelter.
+ *
+ * <p>This deliberately follows the proven Jewellery Crafter pattern:
+ * initial offers are placed through {@link Rs2GrandExchange#processOffer(GrandExchangeRequest)}
+ * with an explicit BUY slot and exact price/quantity, then verified against the client's
+ * live {@link GrandExchangeOffer} array. We do not guess GE setup child widgets.</p>
+ */
 @Slf4j
 final class SmartSmelterGeTrader
 {
     private static final int UI_TIMEOUT_MS = 5_000;
-    private static final int FIELD_ATTEMPTS = 3;
-    private static final int PRICE_VARBIT = 4398;
+    private static final int OFFER_CONFIRM_TIMEOUT_MS = 3_500;
 
     private SmartSmelterGeTrader()
     {
     }
 
-    static boolean placeBuy(String itemName, int quantity, int percent)
+    static boolean placeBuy(int itemId, String itemName, int quantity, int percent)
     {
-        if (itemName == null || itemName.isBlank() || quantity <= 0)
+        if (itemId <= 0 || itemName == null || itemName.isBlank() || quantity <= 0)
         {
             return false;
         }
@@ -40,65 +49,74 @@ final class SmartSmelterGeTrader
             return false;
         }
 
-        GrandExchangeSlots slot = Rs2GrandExchange.getAvailableSlot();
-        Widget slotWidget = getSlotWidget(slot);
-        Widget buyButton = slotWidget == null ? null : slotWidget.getChild(0);
-        if (slot == null || buyButton == null)
+        GrandExchangeSlots existing = findOfferSlot(itemId, GrandExchangeAction.BUY);
+        if (existing != null)
         {
-            Microbot.status = "No free GE slot for " + itemName;
+            OfferSnapshot snapshot = getOfferSnapshot(existing);
+            if (snapshot != null && snapshot.state == GrandExchangeOfferState.BOUGHT)
+            {
+                return collectCompletedToBank();
+            }
+            Microbot.status = "GE buy already active: " + itemName;
+            return true;
+        }
+
+        List<GrandExchangeSlots> freeSlots = getAvailableGeSlots();
+        if (freeSlots.isEmpty())
+        {
+            Microbot.status = "Waiting for free GE slot";
             return false;
         }
 
-        Microbot.status = "GE buy: opening " + itemName;
-        if (!Rs2Widget.clickWidget(buyButton)
-                || !sleepUntil(Rs2GrandExchange::isOfferScreenOpen, UI_TIMEOUT_MS))
+        int price = offerPrice(itemId, GrandExchangeAction.BUY, percent);
+        if (price <= 0)
         {
+            Microbot.status = "No reliable GE buy price: " + itemName;
+            return false;
+        }
+
+        GrandExchangeSlots slot = freeSlots.get(0);
+        GrandExchangeRequest request = GrandExchangeRequest.builder()
+                .slot(slot)
+                .action(GrandExchangeAction.BUY)
+                .itemName(itemName)
+                .exact(true)
+                .quantity(quantity)
+                .price(price)
+                .closeAfterCompletion(false)
+                .build();
+
+        Microbot.status = "Buying " + quantity + " x " + itemName
+                + " in GE slot " + (slot.ordinal() + 1);
+
+        if (!Rs2GrandExchange.processOffer(request))
+        {
+            Microbot.status = Rs2GrandExchange.isOpen()
+                    ? "GE buy placement failed: " + itemName
+                    : "GE closed during buy placement: " + itemName;
             recoverToOverview();
             return false;
         }
 
-        sleep(650, 900);
-        if (!Rs2Widget.sleepUntilHasWidgetText(
-                "Start typing the name of an item to search for it",
-                162,
-                52,
-                false,
-                UI_TIMEOUT_MS))
+        boolean registered = sleepUntil(() -> offerMatches(slot, itemId, GrandExchangeAction.BUY)
+                        || findOfferSlot(itemId, GrandExchangeAction.BUY) != null
+                        || !Rs2GrandExchange.isOpen(),
+                OFFER_CONFIRM_TIMEOUT_MS);
+
+        if (!registered || !Rs2GrandExchange.isOpen())
         {
-            log.debug("GE item search prompt not ready for {}", itemName);
-            recoverToOverview();
+            Microbot.status = Rs2GrandExchange.isOpen()
+                    ? "Waiting for GE slot confirmation: " + itemName
+                    : "GE closed after placing: " + itemName;
             return false;
         }
 
-        Microbot.status = "GE buy: searching " + itemName;
-        Rs2Keyboard.typeString(itemName);
-        if (!sleepUntil(() -> Rs2GrandExchange.getSearchResultWidget(itemName, true) != null, UI_TIMEOUT_MS))
-        {
-            log.debug("No exact GE search result for {}", itemName);
-            recoverToOverview();
-            return false;
-        }
-
-        var result = Rs2GrandExchange.getSearchResultWidget(itemName, true);
-        if (result == null)
-        {
-            recoverToOverview();
-            return false;
-        }
-
-        Rs2Widget.clickWidgetFast(result.getLeft(), result.getRight(), 1);
-        if (!waitForOfferControls())
-        {
-            recoverToOverview();
-            return false;
-        }
-
-        return completeOffer(itemName, quantity, percent, "buy");
+        return findOfferSlot(itemId, GrandExchangeAction.BUY) != null;
     }
 
-    static boolean placeSell(String itemName, int quantity, int percent)
+    static boolean placeSell(int itemId, String itemName, int quantity, int percent)
     {
-        if (itemName == null || itemName.isBlank() || quantity <= 0)
+        if (itemId <= 0 || itemName == null || itemName.isBlank() || quantity <= 0)
         {
             return false;
         }
@@ -108,33 +126,63 @@ final class SmartSmelterGeTrader
             return false;
         }
 
-        if (Rs2GrandExchange.getAvailableSlot() == null)
+        GrandExchangeSlots existing = findOfferSlot(itemId, GrandExchangeAction.SELL);
+        if (existing != null)
         {
-            Microbot.status = "No free GE slot for " + itemName;
+            OfferSnapshot snapshot = getOfferSnapshot(existing);
+            if (snapshot != null && snapshot.state == GrandExchangeOfferState.SOLD)
+            {
+                return collectCompletedToBank();
+            }
+            Microbot.status = "GE sell already active: " + itemName;
+            return true;
+        }
+
+        if (getAvailableGeSlots().isEmpty())
+        {
+            Microbot.status = "Waiting for free GE slot";
             return false;
         }
 
-        if (!Rs2Inventory.hasItem(itemName, true))
+        int price = offerPrice(itemId, GrandExchangeAction.SELL, percent);
+        if (price <= 0)
         {
-            Microbot.status = "Missing sell item: " + itemName;
+            Microbot.status = "No reliable GE sell price: " + itemName;
             return false;
         }
 
-        Microbot.status = "GE sell: selecting " + itemName;
-        if (!Rs2Inventory.interact(itemName, "Offer", true)
-                || !sleepUntil(Rs2GrandExchange::isOfferScreenOpen, UI_TIMEOUT_MS))
+        GrandExchangeRequest request = GrandExchangeRequest.builder()
+                .action(GrandExchangeAction.SELL)
+                .itemName(itemName)
+                .exact(true)
+                .quantity(quantity)
+                .price(price)
+                .closeAfterCompletion(false)
+                .build();
+
+        Microbot.status = "Selling " + quantity + " x " + itemName;
+        if (!Rs2GrandExchange.processOffer(request))
         {
+            Microbot.status = Rs2GrandExchange.isOpen()
+                    ? "GE sell placement failed: " + itemName
+                    : "GE closed during sell placement: " + itemName;
             recoverToOverview();
             return false;
         }
 
-        if (!waitForOfferControls())
+        boolean registered = sleepUntil(() -> findOfferSlot(itemId, GrandExchangeAction.SELL) != null
+                        || !Rs2GrandExchange.isOpen(),
+                OFFER_CONFIRM_TIMEOUT_MS);
+
+        if (!registered || !Rs2GrandExchange.isOpen())
         {
-            recoverToOverview();
+            Microbot.status = Rs2GrandExchange.isOpen()
+                    ? "Waiting for GE sell confirmation: " + itemName
+                    : "GE closed after sell placement: " + itemName;
             return false;
         }
 
-        return completeOffer(itemName, quantity, percent, "sell");
+        return true;
     }
 
     static boolean ensureOverview()
@@ -142,199 +190,322 @@ final class SmartSmelterGeTrader
         if (Rs2Bank.isOpen())
         {
             Rs2Bank.closeBank();
-            sleepUntil(() -> !Rs2Bank.isOpen(), UI_TIMEOUT_MS);
-            sleep(350, 550);
+            if (!sleepUntil(() -> !Rs2Bank.isOpen(), UI_TIMEOUT_MS))
+            {
+                return false;
+            }
+            sleep(250, 450);
         }
 
-        if (Rs2GrandExchange.isOfferScreenOpen())
+        if (!openVerifiedGe())
         {
-            recoverToOverview();
+            return false;
         }
 
-        if (Rs2GrandExchange.isOpen())
+        if (!geSubScreenOpen())
         {
-            sleep(450, 700);
             return true;
         }
 
-        if (!Rs2GrandExchange.openExchange())
+        Microbot.status = "Returning to GE overview";
+        Rs2GrandExchange.backToOverview();
+        if (sleepUntil(() -> Rs2GrandExchange.isOpen() && !geSubScreenOpen(), 4_000))
         {
-            return false;
+            return true;
         }
 
-        if (!sleepUntil(Rs2GrandExchange::isOpen, UI_TIMEOUT_MS))
-        {
-            return false;
-        }
-
-        sleep(650, 900);
-        return true;
+        Microbot.status = Rs2GrandExchange.isOpen()
+                ? "Waiting for GE overview"
+                : "GE closed - recovering";
+        return false;
     }
 
     static void recoverToOverview()
     {
-        if (Rs2GrandExchange.isOfferScreenOpen())
+        if (!Rs2GrandExchange.isOpen())
+        {
+            return;
+        }
+
+        if (geSubScreenOpen())
         {
             Rs2GrandExchange.backToOverview();
-            sleepUntil(() -> !Rs2GrandExchange.isOfferScreenOpen(), UI_TIMEOUT_MS);
-            sleep(400, 650);
+            sleepUntil(() -> Rs2GrandExchange.isOpen() && !geSubScreenOpen(), 4_000);
+            sleep(250, 450);
         }
     }
 
-    private static boolean waitForOfferControls()
+    static boolean collectCompletedToBank()
     {
-        boolean ready = sleepUntil(() ->
-                Rs2GrandExchange.isOfferScreenOpen()
-                        && getOfferChild(12) != null
-                        && getOfferChild(7) != null,
-                UI_TIMEOUT_MS);
-        if (ready)
-        {
-            sleep(650, 900);
-        }
-        return ready;
-    }
-
-    private static boolean completeOffer(String itemName, int quantity, int percent, String action)
-    {
-        if (!sleepUntil(() -> Microbot.getVarbitValue(PRICE_VARBIT) > 0, UI_TIMEOUT_MS))
-        {
-            log.debug("GE {} price baseline did not become available for {}", action, itemName);
-            recoverToOverview();
-            return false;
-        }
-
-        int baseline = Math.max(1, Microbot.getVarbitValue(PRICE_VARBIT));
-        int targetPrice = adjustedPrice(baseline, percent);
-
-        Microbot.status = "GE " + action + ": setting price";
-        if (!setOfferField("price", 12, targetPrice, () -> Microbot.getVarbitValue(PRICE_VARBIT)))
-        {
-            recoverToOverview();
-            return false;
-        }
-
-        sleep(450, 700);
-        Microbot.status = "GE " + action + ": setting quantity";
-        if (!setOfferField(
-                "quantity",
-                7,
-                quantity,
-                () -> Microbot.getVarbitValue(VarbitID.GE_NEWOFFER_QUANTITY)))
-        {
-            recoverToOverview();
-            return false;
-        }
-
-        sleep(550, 800);
-        Widget confirm = Rs2Widget.findWidget("Confirm", true);
-        if (confirm == null)
-        {
-            log.debug("GE Confirm widget missing for {} {} x {} @ {}", action, itemName, quantity, targetPrice);
-            recoverToOverview();
-            return false;
-        }
-
-        // Final guard: never confirm unless both GE values still match exactly.
-        if (Microbot.getVarbitValue(PRICE_VARBIT) != targetPrice
-                || Microbot.getVarbitValue(VarbitID.GE_NEWOFFER_QUANTITY) != quantity)
-        {
-            log.debug(
-                    "GE {} values changed before confirm for {}: price {}/{}, quantity {}/{}",
-                    action,
-                    itemName,
-                    Microbot.getVarbitValue(PRICE_VARBIT),
-                    targetPrice,
-                    Microbot.getVarbitValue(VarbitID.GE_NEWOFFER_QUANTITY),
-                    quantity);
-            recoverToOverview();
-            return false;
-        }
-
-        Microbot.status = "GE " + action + ": confirming " + itemName;
-        if (!Rs2Widget.clickWidget(confirm))
-        {
-            recoverToOverview();
-            return false;
-        }
-
-        return sleepUntil(() -> !Rs2GrandExchange.isOfferScreenOpen(), UI_TIMEOUT_MS);
-    }
-
-    private static boolean setOfferField(
-            String fieldName,
-            int childIndex,
-            int target,
-            IntSupplier observedValue)
-    {
-        if (target <= 0)
-        {
-            return false;
-        }
-
-        if (observedValue.getAsInt() == target)
+        if (!hasCompletedOffers())
         {
             return true;
         }
 
-        for (int attempt = 1; attempt <= FIELD_ATTEMPTS; attempt++)
+        if (!ensureOverview())
         {
-            Widget xButton = getOfferChild(childIndex);
-            if (xButton == null || !Rs2Widget.clickWidget(xButton))
-            {
-                sleep(300, 500);
-                continue;
-            }
-
-            if (!sleepUntil(() -> Rs2Widget.getWidget(InterfaceID.Chatbox.MES_TEXT2) != null, UI_TIMEOUT_MS))
-            {
-                log.debug("GE {} amount prompt did not open on attempt {}", fieldName, attempt);
-                continue;
-            }
-
-            sleep(600, 900);
-            Rs2GrandExchange.setChatboxValue(target);
-            sleep(500, 750);
-            Rs2Keyboard.enter();
-
-            if (sleepUntil(() -> observedValue.getAsInt() == target, 3_000))
-            {
-                sleep(450, 700);
-                return true;
-            }
-
-            log.debug(
-                    "GE {} entry attempt {}/{} failed: target={}, observed={}",
-                    fieldName,
-                    attempt,
-                    FIELD_ATTEMPTS,
-                    target,
-                    observedValue.getAsInt());
-            sleep(450, 700);
+            return false;
         }
 
+        Microbot.status = "Collecting completed GE offers";
+        if (!Rs2GrandExchange.collectAllToBank())
+        {
+            Microbot.status = Rs2GrandExchange.isOpen()
+                    ? "Collect all failed - retrying"
+                    : "GE closed during Collect all";
+            return false;
+        }
+
+        if (sleepUntil(() -> !hasCompletedOffers(), UI_TIMEOUT_MS))
+        {
+            return true;
+        }
+
+        Microbot.status = "Waiting for GE Collect all";
         return false;
     }
 
-    private static int adjustedPrice(int baseline, int percent)
+    static boolean hasOpenOffers()
     {
-        double multiplier = (100.0 + percent) / 100.0;
-        long adjusted = Math.round(baseline * multiplier);
-        return (int) Math.max(1L, Math.min(Integer.MAX_VALUE, adjusted));
+        return Microbot.getClientThread().runOnClientThreadOptional(() ->
+        {
+            GrandExchangeOffer[] offers = Microbot.getClient().getGrandExchangeOffers();
+            if (offers == null)
+            {
+                return false;
+            }
+            for (GrandExchangeOffer offer : offers)
+            {
+                if (offer == null)
+                {
+                    continue;
+                }
+                GrandExchangeOfferState state = offer.getState();
+                if (state == GrandExchangeOfferState.BUYING
+                        || state == GrandExchangeOfferState.SELLING)
+                {
+                    return true;
+                }
+            }
+            return false;
+        }).orElse(false);
     }
 
-    private static Widget getSlotWidget(GrandExchangeSlots slot)
+    private static boolean openVerifiedGe()
+    {
+        if (Rs2GrandExchange.isOpen())
+        {
+            return true;
+        }
+
+        Microbot.status = "Opening Grand Exchange";
+        if (!Rs2GrandExchange.openExchange())
+        {
+            Microbot.status = "GE widget closed - reopening";
+            return false;
+        }
+
+        if (sleepUntil(Rs2GrandExchange::isOpen, UI_TIMEOUT_MS))
+        {
+            return true;
+        }
+
+        Microbot.status = "Waiting for Grand Exchange widget";
+        return false;
+    }
+
+    private static boolean geSetupOpen()
+    {
+        return Rs2WidgetVisible.setup();
+    }
+
+    private static boolean geSubScreenOpen()
+    {
+        return Rs2GrandExchange.isOfferScreenOpen() || geSetupOpen();
+    }
+
+    private static List<GrandExchangeSlots> getAvailableGeSlots()
+    {
+        return Microbot.getClientThread().runOnClientThreadOptional(() ->
+        {
+            List<GrandExchangeSlots> free = new ArrayList<>();
+            GrandExchangeOffer[] offers = Microbot.getClient().getGrandExchangeOffers();
+            int max = Math.min(
+                    Rs2WorldUtil.isMemberAccount() ? 8 : 3,
+                    GrandExchangeSlots.values().length);
+
+            for (int i = 0; i < max; i++)
+            {
+                GrandExchangeOffer offer = offers != null && i < offers.length ? offers[i] : null;
+                if (offer == null || offer.getState() == GrandExchangeOfferState.EMPTY)
+                {
+                    free.add(GrandExchangeSlots.values()[i]);
+                }
+            }
+            return free;
+        }).orElse(new ArrayList<>());
+    }
+
+    private static GrandExchangeSlots findOfferSlot(int itemId, GrandExchangeAction action)
+    {
+        if (itemId <= 0)
+        {
+            return null;
+        }
+
+        return Microbot.getClientThread().runOnClientThreadOptional(() ->
+        {
+            GrandExchangeOffer[] offers = Microbot.getClient().getGrandExchangeOffers();
+            if (offers == null)
+            {
+                return null;
+            }
+
+            int max = Math.min(offers.length, GrandExchangeSlots.values().length);
+            for (int i = 0; i < max; i++)
+            {
+                GrandExchangeOffer offer = offers[i];
+                if (offer == null || offer.getItemId() != itemId)
+                {
+                    continue;
+                }
+
+                GrandExchangeOfferState state = offer.getState();
+                if (action == GrandExchangeAction.BUY
+                        && (state == GrandExchangeOfferState.BUYING
+                        || state == GrandExchangeOfferState.BOUGHT))
+                {
+                    return GrandExchangeSlots.values()[i];
+                }
+                if (action == GrandExchangeAction.SELL
+                        && (state == GrandExchangeOfferState.SELLING
+                        || state == GrandExchangeOfferState.SOLD))
+                {
+                    return GrandExchangeSlots.values()[i];
+                }
+            }
+            return null;
+        }).orElse(null);
+    }
+
+    private static OfferSnapshot getOfferSnapshot(GrandExchangeSlots slot)
     {
         if (slot == null)
         {
             return null;
         }
-        return Rs2Widget.getWidget(InterfaceID.GE_OFFERS, 7 + slot.ordinal());
+
+        return Microbot.getClientThread().runOnClientThreadOptional(() ->
+        {
+            GrandExchangeOffer[] offers = Microbot.getClient().getGrandExchangeOffers();
+            int index = slot.ordinal();
+            if (offers == null || index >= offers.length || offers[index] == null)
+            {
+                return new OfferSnapshot(0, GrandExchangeOfferState.EMPTY, 0);
+            }
+            GrandExchangeOffer offer = offers[index];
+            return new OfferSnapshot(offer.getItemId(), offer.getState(), offer.getPrice());
+        }).orElse(null);
     }
 
-    private static Widget getOfferChild(int childIndex)
+    private static boolean offerMatches(
+            GrandExchangeSlots slot,
+            int itemId,
+            GrandExchangeAction action)
     {
-        Widget offerContainer = Rs2Widget.getWidget(InterfaceID.GE_OFFERS, 26);
-        return offerContainer == null ? null : offerContainer.getChild(childIndex);
+        OfferSnapshot snapshot = getOfferSnapshot(slot);
+        if (snapshot == null || snapshot.itemId != itemId)
+        {
+            return false;
+        }
+        return action == GrandExchangeAction.BUY
+                ? snapshot.state == GrandExchangeOfferState.BUYING
+                    || snapshot.state == GrandExchangeOfferState.BOUGHT
+                : snapshot.state == GrandExchangeOfferState.SELLING
+                    || snapshot.state == GrandExchangeOfferState.SOLD;
+    }
+
+    private static boolean hasCompletedOffers()
+    {
+        return Microbot.getClientThread().runOnClientThreadOptional(() ->
+        {
+            GrandExchangeOffer[] offers = Microbot.getClient().getGrandExchangeOffers();
+            if (offers == null)
+            {
+                return false;
+            }
+            for (GrandExchangeOffer offer : offers)
+            {
+                if (offer == null)
+                {
+                    continue;
+                }
+                GrandExchangeOfferState state = offer.getState();
+                if (state == GrandExchangeOfferState.BOUGHT
+                        || state == GrandExchangeOfferState.SOLD)
+                {
+                    return true;
+                }
+            }
+            return false;
+        }).orElse(false);
+    }
+
+    private static int offerPrice(int itemId, GrandExchangeAction action, int percent)
+    {
+        try
+        {
+            WikiPrice market = Rs2GrandExchange.getRealTimePrices(itemId);
+            if (market == null)
+            {
+                return 0;
+            }
+            int baseline = action == GrandExchangeAction.BUY
+                    ? market.buyPrice
+                    : market.sellPrice;
+            if (baseline <= 0)
+            {
+                return 0;
+            }
+            long adjusted = Math.round(baseline * ((100.0 + percent) / 100.0));
+            return (int) Math.max(1L, Math.min(Integer.MAX_VALUE, adjusted));
+        }
+        catch (RuntimeException ex)
+        {
+            log.debug("Unable to price GE item {}: {}", itemId, ex.getMessage());
+            return 0;
+        }
+    }
+
+    private static final class OfferSnapshot
+    {
+        private final int itemId;
+        private final GrandExchangeOfferState state;
+        @SuppressWarnings("unused")
+        private final int price;
+
+        private OfferSnapshot(int itemId, GrandExchangeOfferState state, int price)
+        {
+            this.itemId = itemId;
+            this.state = state;
+            this.price = price;
+        }
+    }
+
+    /**
+     * Keeps the generated InterfaceID access in one place so the overview logic mirrors
+     * Jewellery Crafter without tying the rest of the trader to widget child arithmetic.
+     */
+    private static final class Rs2WidgetVisible
+    {
+        private Rs2WidgetVisible()
+        {
+        }
+
+        private static boolean setup()
+        {
+            return net.runelite.client.plugins.microbot.util.widget.Rs2Widget
+                    .isWidgetVisible(InterfaceID.GeOffers.SETUP);
+        }
     }
 }
