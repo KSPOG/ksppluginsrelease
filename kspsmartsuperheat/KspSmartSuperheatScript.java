@@ -20,6 +20,7 @@ import net.runelite.client.plugins.microbot.util.player.Rs2Player;
 import net.runelite.client.plugins.microbot.util.widget.Rs2Widget;
 
 import java.util.ArrayDeque;
+import java.util.Collections;
 import java.util.Deque;
 import java.util.EnumMap;
 import java.util.Map;
@@ -303,10 +304,21 @@ public class KspSmartSuperheatScript extends Script
 
     private void cancelOrder(GeOrder o, int filled)
     {
+        if (o.slot == null) { o.placedAt = 0; return; }
         status = "GE timeout - cancelling " + o.itemName;
-        Rs2GrandExchange.cancelSpecificOffers(o.slot);
-        sleepUntil(() -> !offerActive(offer(o.slot), o.action), 4000);
-        Rs2GrandExchange.collectOffer(o.slot, true);
+
+        // Current Microbot requires a list of slots plus the collection destination.
+        // The helper also collects the cancelled offer, so do not collect the same slot twice.
+        Rs2GrandExchange.cancelSpecificOffers(Collections.singletonList(o.slot), true);
+        if (!sleepUntil(() -> {
+            OfferSnapshot snapshot = offer(o.slot);
+            return snapshot == null || snapshot.state == GrandExchangeOfferState.EMPTY;
+        }, 5000))
+        {
+            status = "Waiting for GE cancellation: " + o.itemName;
+            return;
+        }
+
         sleep(300, 500);
         finishOrder(o, Math.max(0, filled), true);
     }
