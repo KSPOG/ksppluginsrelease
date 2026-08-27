@@ -416,7 +416,7 @@ public class KspSmartSuperheatScript extends Script
             return;
         }
 
-        normalizeInventoryForBank();
+        normalizeInventoryForRestock();
         captureProtectedOutputBaseline(activeRecipe);
 
         int alreadyCraftable = calculateCraftableBarsInBank(activeRecipe, freeFireRunes);
@@ -439,6 +439,14 @@ public class KspSmartSuperheatScript extends Script
         long afterReserve = Math.max(0L, coinTotal - config.cashReserve());
         long budget = afterReserve * config.maxSpendPercent() / 100L;
         spendableCoins = clampInt(budget);
+
+        log.debug(
+            "Restock liquid cash: inventory={}, bank={}, reserve={}, budget={}",
+            Rs2Inventory.count(ItemID.COINS),
+            Rs2Bank.count(ItemID.COINS),
+            config.cashReserve(),
+            budget
+        );
 
         int targetBars = calculateAffordableRestockBars(activeRecipe, activeQuote, freeFireRunes, budget);
         if (targetBars <= 0)
@@ -810,6 +818,38 @@ public class KspSmartSuperheatScript extends Script
         depositIfPresent(ItemID.COINS);
     }
 
+    private void normalizeInventoryForRestock()
+    {
+        if (!Rs2Bank.isOpen())
+        {
+            return;
+        }
+
+        if (config.bankWholeInventory())
+        {
+            for (Rs2ItemModel item : Rs2Inventory.all())
+            {
+                if (item == null || item.getId() <= 0 || item.getId() == ItemID.COINS)
+                {
+                    continue;
+                }
+                depositIfPresent(item.getId());
+            }
+            return;
+        }
+
+        for (SuperheatRecipe recipe : SuperheatRecipe.values())
+        {
+            depositIfPresent(recipe.getPrimaryOreId());
+            if (recipe.hasSecondaryOre()) depositIfPresent(recipe.getSecondaryOreId());
+            depositIfPresent(recipe.getOutputId());
+        }
+
+        depositIfPresent(ItemID.COAL);
+        depositIfPresent(ItemID.NATURERUNE);
+        depositIfPresent(ItemID.FIRERUNE);
+    }
+
     private void depositIfPresent(int itemId)
     {
         if (itemId > 0 && Rs2Inventory.count(itemId) > 0)
@@ -884,8 +924,9 @@ public class KspSmartSuperheatScript extends Script
             }
 
             int bankBefore = bankCoins;
+            int inventoryBefore = inventoryCoins;
             log.debug(
-                "Coin withdrawal attempt {}/{}: required={}, inventory={}, bank={}, missing={}",
+                "Coin stack top-up {}/{}: required={}, inventory={}, bank={}, missing={}",
                 attempt,
                 MAX_COIN_WITHDRAW_ATTEMPTS,
                 required,
@@ -897,7 +938,7 @@ public class KspSmartSuperheatScript extends Script
             Rs2Bank.withdrawX(ItemID.COINS, missing);
 
             boolean transferObserved = sleepUntil(() ->
-                    Rs2Inventory.count(ItemID.COINS) >= required
+                    Rs2Inventory.count(ItemID.COINS) > inventoryBefore
                         || (Rs2Bank.isOpen() && Rs2Bank.count(ItemID.COINS) < bankBefore),
                 COIN_WITHDRAW_TIMEOUT_MS);
 
