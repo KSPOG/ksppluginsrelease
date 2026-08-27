@@ -13,8 +13,6 @@ import net.runelite.client.plugins.microbot.kspsmartsmelter.model.RouteQuote;
 import net.runelite.client.plugins.microbot.kspsmartsmelter.model.SmartSmelterState;
 import net.runelite.client.plugins.microbot.kspsmartsmelter.model.SmeltRoute;
 import net.runelite.client.plugins.microbot.util.bank.Rs2Bank;
-import net.runelite.client.plugins.microbot.util.grandexchange.GrandExchangeAction;
-import net.runelite.client.plugins.microbot.util.grandexchange.GrandExchangeRequest;
 import net.runelite.client.plugins.microbot.util.grandexchange.Rs2GrandExchange;
 import net.runelite.client.plugins.microbot.util.inventory.Rs2Inventory;
 import net.runelite.client.plugins.microbot.util.walker.Rs2Walker;
@@ -519,7 +517,7 @@ public class KspSmartSmelterScript extends Script {
         }
 
         state = SmartSmelterState.RESTOCKING;
-        if (!Rs2GrandExchange.isOpen() && !Rs2GrandExchange.openExchange()) {
+        if (!SmartSmelterGeTrader.ensureOverview()) {
             Microbot.status = "Could not open Grand Exchange";
             return;
         }
@@ -530,17 +528,17 @@ public class KspSmartSmelterScript extends Script {
 
         for (int i = 0; i < ids.length; i++) {
             int wanted = targetCycles * quantities[i];
-            GrandExchangeRequest request = GrandExchangeRequest.builder()
-                    .action(GrandExchangeAction.BUY)
-                    .itemName(itemName(ids[i]))
-                    .quantity(wanted)
-                    .percent(config.buyPercent())
-                    .build();
+            String inputName = itemName(ids[i]);
+            Microbot.status = "Placing GE buy: " + inputName;
 
-            if (!Rs2GrandExchange.processOffer(request)) {
-                Microbot.status = "Failed placing buy: " + itemName(ids[i]);
-                Rs2GrandExchange.backToOverview();
+            if (!SmartSmelterGeTrader.placeBuy(inputName, wanted, config.buyPercent())) {
+                Microbot.status = "GE buy widget entry failed: " + inputName;
+                SmartSmelterGeTrader.recoverToOverview();
+                lastPriceScan = 0L;
+                return;
             }
+
+            sleep(650, 950);
         }
 
         state = SmartSmelterState.WAITING_FOR_OFFERS;
@@ -574,24 +572,19 @@ public class KspSmartSmelterScript extends Script {
         quantity = Rs2Inventory.itemQuantity(route.getOutputId());
         Rs2Bank.closeBank();
 
-        if (quantity <= 0 || !Rs2GrandExchange.openExchange()) {
+        if (quantity <= 0 || !SmartSmelterGeTrader.ensureOverview()) {
             return;
         }
 
-        GrandExchangeRequest sell = GrandExchangeRequest.builder()
-                .action(GrandExchangeAction.SELL)
-                .itemName(itemName(route.getOutputId()))
-                .quantity(quantity)
-                .percent(config.sellPercent())
-                .build();
-
-        if (Rs2GrandExchange.processOffer(sell)) {
+        String outputName = itemName(route.getOutputId());
+        if (SmartSmelterGeTrader.placeSell(outputName, quantity, config.sellPercent())) {
             state = SmartSmelterState.WAITING_FOR_OFFERS;
             Microbot.status = "Selling " + route.getOutputName();
             sleep(Math.max(3, config.offerWaitSeconds()) * 1000);
             Rs2GrandExchange.collectAllToBank();
         } else {
-            Rs2GrandExchange.backToOverview();
+            Microbot.status = "GE sell widget entry failed: " + outputName;
+            SmartSmelterGeTrader.recoverToOverview();
         }
     }
 
