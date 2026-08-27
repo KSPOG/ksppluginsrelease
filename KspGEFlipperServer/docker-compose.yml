@@ -1,0 +1,36 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ksp_ge_flipper
+      POSTGRES_USER: ksp
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
+    volumes:
+      - ksp_ge_postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ksp -d ksp_ge_flipper"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  server:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      KSP_BIND_HOST: 0.0.0.0
+      KSP_PORT: 8181
+      KSP_API_KEY: ${KSP_API_KEY:-}
+      KSP_DB_URL: jdbc:postgresql://postgres:5432/ksp_ge_flipper
+      KSP_DB_USER: ksp
+      KSP_DB_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
+      KSP_WIKI_POLL_SECONDS: 30
+      KSP_DUMP_POLL_SECONDS: 15
+    ports:
+      - "8181:8181"
+
+volumes:
+  ksp_ge_postgres:
