@@ -1224,59 +1224,71 @@ public class KspSmartSuperheatScript extends Script
 
     private boolean ensureCoinsInInventory(int required)
     {
-        if (required <= 0 || !ensureBankWidgetsReady())
+        if (required <= 0)
+        {
+            return false;
+        }
+
+        // Always trust an already-funded inventory stack before requiring bank widgets.
+        // This prevents a transient bank/widget close from sending the state machine back
+        // to "Funding restock plan" when the required cash is already present.
+        int inventoryCoins = Rs2Inventory.itemQuantity(ItemID.COINS);
+        if (inventoryCoins >= required)
+        {
+            return true;
+        }
+
+        if (!ensureBankWidgetsReady() || !ensureBankItemMode() || !waitForBankAmountPromptClosed())
         {
             return false;
         }
 
         for (int attempt = 1; attempt <= MAX_COIN_WITHDRAW_ATTEMPTS; attempt++)
         {
-            if (!ensureBankWidgetsReady() || !ensureBankItemMode() || !waitForBankAmountPromptClosed())
-            {
-                sleep(250, 450);
-                continue;
-            }
-
-            int inventoryCoins = Rs2Inventory.itemQuantity(ItemID.COINS);
+            inventoryCoins = Rs2Inventory.itemQuantity(ItemID.COINS);
             if (inventoryCoins >= required)
             {
                 return true;
             }
 
             int bankCoins = Rs2Bank.count(ItemID.COINS);
-            if ((long) inventoryCoins + bankCoins < required)
+            long liquidCoins = (long) inventoryCoins + bankCoins;
+            if (liquidCoins < required)
             {
                 return false;
             }
 
-            Rs2ItemModel coinRow = Rs2Bank.bankItems().stream()
-                .filter(item -> item != null && item.getId() == ItemID.COINS)
-                .findFirst()
-                .orElse(null);
-            if (coinRow == null || (inventoryCoins <= 0 && Rs2Inventory.emptySlotCount() <= 0))
+            if (bankCoins <= 0)
             {
-                status = "Waiting for coin bank widget";
+                return inventoryCoins >= required;
+            }
+
+            // Withdraw-All deliberately avoids the bank X-amount selector/prompt for
+            // stackable coins. The configured reserve remains protected because the
+            // atomic GE plan is still capped by executableBudget/plannedCost.
+            if (Rs2Inventory.isFull())
+            {
+                status = "Waiting for inventory space for coins";
                 return false;
             }
 
-            int missing = required - inventoryCoins;
-            int bankBefore = bankCoins;
             int inventoryBefore = inventoryCoins;
+            int bankBefore = bankCoins;
             int epochBefore = Rs2Bank.getBankLiveEpoch();
+            status = "Withdrawing available coins";
 
             log.debug(
-                "Coin stack top-up {}/{}: required={}, inventory={}, bank={}, missing={}",
+                "Coin stack funding {}/{}: required={}, inventory={}, bank={}, liquid={}",
                 attempt,
                 MAX_COIN_WITHDRAW_ATTEMPTS,
                 required,
                 inventoryCoins,
                 bankCoins,
-                missing
+                liquidCoins
             );
 
-            if (!Rs2Bank.withdrawX(ItemID.COINS, missing))
+            if (!Rs2Bank.withdrawAll(ItemID.COINS))
             {
-                waitForBankAmountPromptClosed();
                 sleep(300, 500);
                 continue;
             }
@@ -1287,9 +1299,9 @@ public class KspSmartSuperheatScript extends Script
                 COIN_WITHDRAW_TIMEOUT_MS);
 
             Rs2Bank.syncBankInventoryAfterChange(epochBefore);
-            waitForBankAmountPromptClosed();
 
-            if (Rs2Inventory.itemQuantity(ItemID.COINS) >= required)
+            int fundedCoins = Rs2Inventory.itemQuantity(ItemID.COINS);
+            if (fundedCoins >= required)
             {
                 return true;
             }
@@ -1301,6 +1313,12 @@ public class KspSmartSuperheatScript extends Script
                 return true;
             }
 
+            log.debug(
+                "Coin funding not yet complete: required={}, inventory={}, bank={}",
+                required,
+                Rs2Inventory.itemQuantity(ItemID.COINS),
+                Rs2Bank.isOpen() ? Rs2Bank.count(ItemID.COINS) : -1
+            );
             sleep(300, 500);
         }
 
