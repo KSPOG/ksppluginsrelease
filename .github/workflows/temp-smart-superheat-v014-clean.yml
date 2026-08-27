@@ -1,0 +1,33 @@
+name: SmartSuperheatV014Clean
+on:
+  push:
+    branches: [fix/smart-superheat-jewelry-ge-v014]
+    paths: [.github/workflows/temp-smart-superheat-v014-clean.yml]
+jobs:
+  clean:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/smart-superheat-jewelry-ge-v014
+      - name: Remove obsolete synchronous buy method
+        shell: python
+        run: |
+          from pathlib import Path
+          p = Path('kspsmartsuperheat/KspSmartSuperheatScript.java')
+          s = p.read_text()
+          start = s.index('    private boolean buyMissing(')
+          end = s.index('    private void sellProducedOutput()', start)
+          s = s[:start] + s[end:]
+          p.write_text(s)
+      - name: Remove temporary workflow
+        run: git rm .github/workflows/temp-smart-superheat-v014-clean.yml
+      - name: Commit
+        run: |
+          git config user.name "KSPOG"
+          git config user.email "actions@users.noreply.github.com"
+          git add kspsmartsuperheat/KspSmartSuperheatScript.java
+          git commit -m "Remove obsolete synchronous Smart Superheat GE buy path"
+          git push
