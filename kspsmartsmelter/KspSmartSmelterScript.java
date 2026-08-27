@@ -591,7 +591,8 @@ public class KspSmartSmelterScript extends Script {
             Microbot.status = "Failed withdrawing noted " + outputName;
             return;
         }
-        if (!sleepUntil(() -> Rs2Inventory.itemQuantity(outputName, true) >= quantity, 5000)) {
+        final int expectedQuantity = quantity;
+        if (!sleepUntil(() -> Rs2Inventory.itemQuantity(outputName, true) >= expectedQuantity, 5000)) {
             Microbot.status = "Waiting for noted output stack";
             return;
         }
