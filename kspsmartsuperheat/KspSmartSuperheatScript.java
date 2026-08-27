@@ -1,6 +1,8 @@
 package net.runelite.client.plugins.microbot.kspsmartsuperheat;
 
 import lombok.extern.slf4j.Slf4j;
+import net.runelite.api.GrandExchangeOffer;
+import net.runelite.api.GrandExchangeOfferState;
 import net.runelite.api.Skill;
 import net.runelite.api.gameval.InterfaceID;
 import net.runelite.api.gameval.ItemID;
@@ -8,17 +10,18 @@ import net.runelite.client.plugins.microbot.Microbot;
 import net.runelite.client.plugins.microbot.Script;
 import net.runelite.client.plugins.microbot.util.bank.Rs2Bank;
 import net.runelite.client.plugins.microbot.util.equipment.Rs2Equipment;
+import net.runelite.client.plugins.microbot.util.grandexchange.GrandExchangeAction;
+import net.runelite.client.plugins.microbot.util.grandexchange.GrandExchangeRequest;
+import net.runelite.client.plugins.microbot.util.grandexchange.GrandExchangeSlots;
 import net.runelite.client.plugins.microbot.util.grandexchange.Rs2GrandExchange;
 import net.runelite.client.plugins.microbot.util.inventory.Rs2Inventory;
-import net.runelite.client.plugins.microbot.util.inventory.Rs2ItemModel;
 import net.runelite.client.plugins.microbot.util.magic.Rs2Magic;
 import net.runelite.client.plugins.microbot.util.player.Rs2Player;
 import net.runelite.client.plugins.microbot.util.widget.Rs2Widget;
 
-import java.util.ArrayList;
+import java.util.ArrayDeque;
+import java.util.Deque;
 import java.util.EnumMap;
-import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
@@ -28,1508 +31,493 @@ import static net.runelite.client.plugins.microbot.util.Global.sleepUntil;
 @Slf4j
 public class KspSmartSuperheatScript extends Script
 {
-    private static final int LOOP_DELAY_MS = 500;
-    private static final int BANK_TIMEOUT_MS = 6_000;
-    private static final int BANK_WIDGET_TIMEOUT_MS = 4_000;
-    private static final int INVENTORY_TIMEOUT_MS = 4_000;
-    private static final int BATCH_WITHDRAW_TIMEOUT_MS = 3_500;
-    private static final int MAX_BATCH_WITHDRAW_ATTEMPTS = 3;
-    private static final int COIN_WITHDRAW_TIMEOUT_MS = 8_000;
-    private static final int COIN_WITHDRAW_SETTLE_TIMEOUT_MS = 4_000;
-    private static final int MAX_COIN_WITHDRAW_ATTEMPTS = 2;
-    private static final int CAST_RESULT_TIMEOUT_MS = 4_500;
-    private static final int MAX_CAST_FAILURES = 3;
-
-    private static final int BANK_GROUP = 12;
-    private static final int BANK_ROOT_CHILD = 1;
-    private static final int BANK_AMOUNT_PROMPT_GROUP = 162;
-    private static final int BANK_AMOUNT_PROMPT_CHILD = 43;
-
-    private static final String[] FIRE_RUNE_STAVES = {
-        "Staff of fire",
-        "Fire battlestaff",
-        "Mystic fire staff",
-        "Lava battlestaff",
-        "Mystic lava staff",
-        "Steam battlestaff",
-        "Mystic steam staff",
-        "Smoke battlestaff",
-        "Mystic smoke staff"
-    };
+    private static final int LOOP_MS = 650, BANK_GROUP = 12, BANK_ROOT = 1, MAX_GE_ATTEMPTS = 5;
+    private static final String[] FIRE_STAVES = {"Staff of fire", "Fire battlestaff", "Mystic fire staff", "Lava battlestaff", "Mystic lava staff", "Steam battlestaff", "Mystic steam staff", "Smoke battlestaff", "Mystic smoke staff"};
 
     private KspSmartSuperheatConfig config;
-    private SuperheatPriceService priceService;
-
+    private final SuperheatPriceService prices = new SuperheatPriceService();
     private volatile SmartSuperheatState state = SmartSuperheatState.STOPPED;
     private volatile String status = "Stopped";
     private volatile SuperheatRecipe activeRecipe;
     private volatile SuperheatQuote activeQuote;
     private volatile boolean freeFireRunes;
-    private volatile long nextMarketCheckAt;
-    private volatile long nextNoProfitScanAt;
-    private volatile long startTime;
-
-    private volatile long barsMade;
-    private volatile long estimatedProfit;
-    private volatile long magicXp;
+    private volatile long startedAt, nextScanAt, barsMade, estimatedProfit, magicXp;
     private volatile double smithingXp;
-    private volatile int currentBatchTarget;
-    private volatile int craftableBarsInBank;
-    private volatile int spendableCoins;
-
+    private volatile int currentBatchTarget, craftableBarsInBank, spendableCoins;
+    private final Map<SuperheatRecipe, Integer> unsold = new EnumMap<>(SuperheatRecipe.class);
+    private final Deque<GeOrder> buyQueue = new ArrayDeque<>();
+    private GeOrder geOrder;
     private int castFailures;
-    private int sellFailures;
-    private final Map<SuperheatRecipe, Integer> unsoldProduced = new EnumMap<>(SuperheatRecipe.class);
-    private final Map<SuperheatRecipe, Integer> protectedOutputBaseline = new EnumMap<>(SuperheatRecipe.class);
 
     public boolean run(KspSmartSuperheatConfig config)
     {
         this.config = config;
-        this.priceService = new SuperheatPriceService();
-        this.state = SmartSuperheatState.STARTING;
-        this.status = "Starting";
-        this.activeRecipe = null;
-        this.activeQuote = null;
-        this.freeFireRunes = false;
-        this.nextMarketCheckAt = 0L;
-        this.nextNoProfitScanAt = 0L;
-        this.startTime = System.currentTimeMillis();
-        this.barsMade = 0L;
-        this.estimatedProfit = 0L;
-        this.magicXp = 0L;
-        this.smithingXp = 0.0;
-        this.currentBatchTarget = 0;
-        this.craftableBarsInBank = 0;
-        this.spendableCoins = 0;
-        this.castFailures = 0;
-        this.sellFailures = 0;
-        this.unsoldProduced.clear();
-        this.protectedOutputBaseline.clear();
-        SmartSuperheatBuyQueue.reset();
-
-        mainScheduledFuture = scheduledExecutorService.scheduleWithFixedDelay(() ->
-        {
-            try
-            {
-                if (!super.run() || !Microbot.isLoggedIn())
-                {
-                    return;
-                }
-                tick();
-            }
-            catch (Exception ex)
-            {
-                state = SmartSuperheatState.ERROR;
-                status = "Error - check client log";
-                log.error("KSP Smart Superheat loop error", ex);
-                sleep(1_000);
-            }
-        }, 0, LOOP_DELAY_MS, TimeUnit.MILLISECONDS);
-
+        state = SmartSuperheatState.STARTING;
+        status = "Starting";
+        activeRecipe = null;
+        activeQuote = null;
+        freeFireRunes = false;
+        startedAt = System.currentTimeMillis();
+        nextScanAt = barsMade = estimatedProfit = magicXp = 0L;
+        smithingXp = 0D;
+        currentBatchTarget = craftableBarsInBank = spendableCoins = castFailures = 0;
+        unsold.clear();
+        buyQueue.clear();
+        geOrder = null;
+        mainScheduledFuture = scheduledExecutorService.scheduleWithFixedDelay(() -> {
+            try { if (super.run() && Microbot.isLoggedIn()) tick(); }
+            catch (Exception e) { state = SmartSuperheatState.ERROR; status = "Error - check log"; log.error("Smart Superheat tick failed", e); }
+        }, 0, LOOP_MS, TimeUnit.MILLISECONDS);
         return true;
     }
 
-    public void stopScript()
-    {
-        state = SmartSuperheatState.STOPPED;
-        status = "Stopped";
-        SmartSuperheatBuyQueue.reset();
-        shutdown();
-    }
+    public void stopScript() { state = SmartSuperheatState.STOPPED; status = "Stopped"; buyQueue.clear(); geOrder = null; shutdown(); }
 
     private void tick()
     {
         switch (state)
         {
-            case STARTING:
-                startSession();
-                break;
-            case SCANNING_MARKET:
-                scanMarket();
-                break;
-            case PREPARING_BATCH:
-                prepareBatch();
-                break;
-            case CASTING:
-                castOne();
-                break;
-            case SELLING_OUTPUT:
-                sellProducedOutput();
-                break;
-            case RESTOCKING:
-                restock();
-                break;
-            case WAITING_FOR_PROFIT:
-                waitForProfit();
-                break;
-            case ERROR:
-            case STOPPED:
-            default:
-                break;
+            case STARTING: start(); break;
+            case SCANNING_MARKET: scan(); break;
+            case PREPARING_BATCH: prepare(); break;
+            case CASTING: cast(); break;
+            case SELLING_OUTPUT: sell(); break;
+            case RESTOCKING: restock(); break;
+            case WAITING_FOR_PROFIT: if (System.currentTimeMillis() >= nextScanAt) state = SmartSuperheatState.SCANNING_MARKET; break;
+            default: break;
         }
     }
 
-    private void startSession()
+    private void start()
     {
-        if (getRealLevel(Skill.MAGIC) < 43)
-        {
-            state = SmartSuperheatState.ERROR;
-            status = "43 Magic required";
-            return;
-        }
-
-        if (getRealLevel(Skill.SMITHING) < 1)
-        {
-            state = SmartSuperheatState.ERROR;
-            status = "Smithing level unavailable";
-            return;
-        }
-
+        if (level(Skill.MAGIC) < 43) { state = SmartSuperheatState.ERROR; status = "43 Magic required"; return; }
         state = SmartSuperheatState.SCANNING_MARKET;
-        status = "Scanning live prices";
+        status = "Scanning profitable recipes";
     }
 
-    private void scanMarket()
+    private void scan()
     {
-        int smithing = getRealLevel(Skill.SMITHING);
-        freeFireRunes = hasInfiniteFireSource();
-
+        int smithing = level(Skill.SMITHING);
+        freeFireRunes = freeFire();
         SuperheatQuote best = null;
-        SuperheatQuote bestRejected = null;
-
-        for (SuperheatRecipe recipe : SuperheatRecipe.values())
+        for (SuperheatRecipe r : SuperheatRecipe.values())
         {
-            if (recipe.getSmithingLevel() > smithing)
-            {
-                continue;
-            }
-
-            if (recipe.isMembersOnly() && (!Rs2Player.isMember() || !Rs2Player.isInMemberWorld()))
-            {
-                continue;
-            }
-
-            SuperheatQuote quote = priceService.quote(recipe, config, freeFireRunes);
-            if (!quote.isValid())
-            {
-                continue;
-            }
-
-            if (bestRejected == null || quote.getProjectedGpHour() > bestRejected.getProjectedGpHour())
-            {
-                bestRejected = quote;
-            }
-
-            if (!quote.meets(config))
-            {
-                continue;
-            }
-
-            if (best == null
-                || quote.getProjectedGpHour() > best.getProjectedGpHour()
-                || (quote.getProjectedGpHour() == best.getProjectedGpHour()
-                    && quote.getProfitPerBar() > best.getProfitPerBar()))
-            {
-                best = quote;
-            }
+            if (r.getSmithingLevel() > smithing || (r.isMembersOnly() && !members())) continue;
+            SuperheatQuote q = prices.quote(r, config, freeFireRunes);
+            if (q.meets(config) && (best == null || q.getProjectedGpHour() > best.getProjectedGpHour())) best = q;
         }
-
         if (best == null)
         {
-            activeRecipe = bestRejected == null ? null : bestRejected.getRecipe();
-            activeQuote = bestRejected;
+            activeRecipe = null;
+            activeQuote = null;
             state = SmartSuperheatState.WAITING_FOR_PROFIT;
-            nextNoProfitScanAt = System.currentTimeMillis() + config.priceRefreshSeconds() * 1000L;
-            status = bestRejected == null
-                ? "No usable live market quote"
-                : "No recipe meets profit gate";
+            status = "No profitable recipe";
+            nextScanAt = System.currentTimeMillis() + Math.max(15, config.priceRefreshSeconds()) * 1000L;
             return;
         }
-
-        activeRecipe = best.getRecipe();
         activeQuote = best;
-        nextMarketCheckAt = System.currentTimeMillis() + config.priceRefreshSeconds() * 1000L;
+        activeRecipe = best.getRecipe();
+        nextScanAt = System.currentTimeMillis() + Math.max(15, config.priceRefreshSeconds()) * 1000L;
         state = SmartSuperheatState.PREPARING_BATCH;
         status = "Selected " + activeRecipe.getOutputName();
     }
 
-    private void prepareBatch()
+    private void prepare()
     {
-        if (activeRecipe == null || activeQuote == null)
-        {
-            state = SmartSuperheatState.SCANNING_MARKET;
-            return;
-        }
+        if (!recipeReady()) return;
+        if (System.currentTimeMillis() >= nextScanAt) { state = SmartSuperheatState.SCANNING_MARKET; return; }
+        freeFireRunes = freeFire();
+        activeQuote = prices.quote(activeRecipe, config, freeFireRunes);
+        if (!activeQuote.meets(config)) { state = SmartSuperheatState.SCANNING_MARKET; status = "Margin changed"; return; }
+        if (!ensureBank() || !bankMode(true)) return;
+        cleanInventory();
+        if (!allNatureRunes()) { state = SmartSuperheatState.RESTOCKING; status = "Need Nature runes"; return; }
 
-        if (!refreshActiveQuoteIfDue())
-        {
-            return;
-        }
+        craftableBarsInBank = craftable(activeRecipe);
+        if (craftableBarsInBank <= 0) { state = SmartSuperheatState.RESTOCKING; status = "Restocking ingredients"; return; }
 
-        if (!ensureBankOpen())
-        {
-            status = "Opening GE bank";
-            return;
-        }
+        int reservedFireSlot = !freeFireRunes && Rs2Inventory.itemQuantity(ItemID.FIRERUNE) == 0 ? 1 : 0;
+        int bySlots = Math.max(0, Rs2Inventory.emptySlotCount() - reservedFireSlot) / Math.max(1, activeRecipe.getMaterialSlotsPerBar());
+        int batch = Math.min(Math.min(activeQuote.getBatchSize(), craftableBarsInBank), bySlots);
+        if (batch <= 0) { status = "Not enough inventory space"; return; }
+        currentBatchTarget = batch;
 
-        if (!ensureBankItemMode())
-        {
-            status = "Waiting for bank item mode";
-            return;
-        }
-
-        normalizeInventoryForBank();
-        ensureAllNatureRunesInInventory();
-        captureProtectedOutputBaseline(activeRecipe);
-
-        freeFireRunes = hasInfiniteFireSource();
-        activeQuote = priceService.quote(activeRecipe, config, freeFireRunes);
-        if (!activeQuote.meets(config))
-        {
-            state = SmartSuperheatState.SCANNING_MARKET;
-            status = "Margin changed - rescanning";
-            return;
-        }
-
-        craftableBarsInBank = calculateCraftableBarsInBank(activeRecipe, freeFireRunes);
-        if (craftableBarsInBank <= 0)
-        {
-            if (config.autoSellOutput() && totalUnsoldProduced() > 0)
-            {
-                state = SmartSuperheatState.SELLING_OUTPUT;
-                status = "Selling produced bars";
-            }
-            else
-            {
-                state = SmartSuperheatState.RESTOCKING;
-                status = "Restocking ingredients";
-            }
-            return;
-        }
-
-        int maxBatch = Math.min(activeQuote.getBatchSize(), craftableBarsInBank);
-        if (!config.bankWholeInventory())
-        {
-            int stackSlotsNeeded = 1 + (freeFireRunes ? 0 : 1);
-            int occupiedWorkStacks = 0;
-            if (Rs2Inventory.itemQuantity(ItemID.NATURERUNE) > 0) occupiedWorkStacks++;
-            if (!freeFireRunes && Rs2Inventory.itemQuantity(ItemID.FIRERUNE) > 0) occupiedWorkStacks++;
-            int availableSlots = Rs2Inventory.emptySlotCount() + occupiedWorkStacks;
-            int materialSlots = Math.max(1, activeRecipe.getMaterialSlotsPerBar());
-            maxBatch = Math.min(maxBatch, Math.max(0, (availableSlots - stackSlotsNeeded) / materialSlots));
-        }
-
-        if (maxBatch <= 0)
-        {
-            status = "Not enough free inventory space";
-            return;
-        }
-
-        currentBatchTarget = maxBatch;
-        if (!withdrawBatch(activeRecipe, maxBatch, freeFireRunes))
-        {
-            status = "Waiting for complete batch withdrawal";
-            return;
-        }
-
-        if (!inventoryHasBatchSupplies(activeRecipe, maxBatch, freeFireRunes))
-        {
-            status = "Batch ratio incomplete - retrying";
-            return;
-        }
+        if (!ensureQty(activeRecipe.getPrimaryOreId(), batch * activeRecipe.getPrimaryOrePerBar(), activeRecipe.getPrimaryOreName())) return;
+        if (activeRecipe.hasSecondaryOre() && !ensureQty(activeRecipe.getSecondaryOreId(), batch * activeRecipe.getSecondaryOrePerBar(), activeRecipe.getSecondaryOreName())) return;
+        if (activeRecipe.getCoalPerBar() > 0 && !ensureQty(ItemID.COAL, batch * activeRecipe.getCoalPerBar(), "Coal")) return;
+        if (!freeFireRunes && !ensureQty(ItemID.FIRERUNE, batch * 4, "Fire rune")) return;
+        if (!batchReady(batch)) { status = "Batch verification failed"; return; }
 
         Rs2Bank.closeBank();
-        sleepUntil(() -> !Rs2Bank.isOpen(), 3_000);
+        if (!sleepUntil(() -> !Rs2Bank.isOpen(), 3000)) return;
         castFailures = 0;
         state = SmartSuperheatState.CASTING;
         status = "Superheating " + activeRecipe.getOutputName();
     }
 
-    private void castOne()
+    private void cast()
     {
-        if (activeRecipe == null)
-        {
-            state = SmartSuperheatState.SCANNING_MARKET;
-            return;
-        }
-
-        if (!refreshActiveQuoteIfDue())
-        {
-            return;
-        }
-
-        freeFireRunes = hasInfiniteFireSource();
-        if (!inventoryHasCastSupplies(activeRecipe, freeFireRunes))
-        {
-            state = SmartSuperheatState.PREPARING_BATCH;
-            status = "Batch complete";
-            return;
-        }
-
-        int outputBefore = inventoryCountByName(activeRecipe.getOutputName());
-        int primaryBefore = Rs2Inventory.itemQuantity(activeRecipe.getPrimaryOreId());
-
+        if (!recipeReady()) return;
+        freeFireRunes = freeFire();
+        if (!castReady()) { state = SmartSuperheatState.PREPARING_BATCH; status = "Banking batch"; return; }
+        int beforeBar = Rs2Inventory.itemQuantity(activeRecipe.getOutputId());
+        int beforeOre = Rs2Inventory.itemQuantity(activeRecipe.getPrimaryOreId());
         status = "Casting on " + activeRecipe.getPrimaryOreName();
         Rs2Magic.superHeat(activeRecipe.getPrimaryOreId(), config.castDelayMinMs(), config.castDelayMaxMs());
-
-        boolean success = sleepUntil(() ->
-            inventoryCountByName(activeRecipe.getOutputName()) > outputBefore
-                || Rs2Inventory.itemQuantity(activeRecipe.getPrimaryOreId()) < primaryBefore,
-            CAST_RESULT_TIMEOUT_MS
-        );
-
-        if (!success)
+        if (!sleepUntil(() -> Rs2Inventory.itemQuantity(activeRecipe.getOutputId()) > beforeBar || Rs2Inventory.itemQuantity(activeRecipe.getPrimaryOreId()) < beforeOre, 4500))
         {
-            castFailures++;
-            status = "Cast did not register (" + castFailures + "/" + MAX_CAST_FAILURES + ")";
-            if (castFailures >= MAX_CAST_FAILURES)
-            {
-                state = SmartSuperheatState.PREPARING_BATCH;
-                castFailures = 0;
-                status = "Recovering through bank";
-            }
+            if (++castFailures >= 3) { castFailures = 0; state = SmartSuperheatState.PREPARING_BATCH; status = "Recovering through bank"; }
+            else status = "Cast did not register (" + castFailures + "/3)";
             return;
         }
-
         castFailures = 0;
         barsMade++;
-        magicXp += 53L;
+        magicXp += 53;
         smithingXp += activeRecipe.getSmithingXp();
-        estimatedProfit += activeQuote == null ? 0 : activeQuote.getProfitPerBar();
-        unsoldProduced.merge(activeRecipe, 1, Integer::sum);
-
-        if (!inventoryHasCastSupplies(activeRecipe, freeFireRunes))
-        {
-            state = SmartSuperheatState.PREPARING_BATCH;
-            status = "Banking completed batch";
-        }
+        estimatedProfit += activeQuote.getProfitPerBar();
+        unsold.merge(activeRecipe, 1, Integer::sum);
+        if (!castReady()) { state = SmartSuperheatState.PREPARING_BATCH; status = "Batch complete"; }
     }
 
     private void restock()
     {
-        if (activeRecipe == null)
+        if (!recipeReady()) return;
+        if (geOrder != null || !buyQueue.isEmpty()) { tickBuyQueue(); return; }
+        freeFireRunes = freeFire();
+        activeQuote = prices.quote(activeRecipe, config, freeFireRunes);
+        if (!activeQuote.meets(config)) { state = SmartSuperheatState.SCANNING_MARKET; status = "Recipe no longer profitable"; return; }
+        if (!ensureBank() || !bankMode(true)) return;
+        cleanInventory();
+        allNatureRunes();
+        craftableBarsInBank = craftable(activeRecipe);
+        if (craftableBarsInBank > 0) { state = SmartSuperheatState.PREPARING_BATCH; status = "Using banked ingredients"; return; }
+
+        long coins = total(ItemID.COINS);
+        long spendable = Math.max(0L, coins - config.cashReserve());
+        spendableCoins = (int) Math.min(Integer.MAX_VALUE, spendable);
+        long budget = spendable * config.maxSpendPercent() / 100L;
+        if (budget < activeQuote.getInputCostPerBar())
         {
-            SmartSuperheatBuyQueue.reset();
-            state = SmartSuperheatState.SCANNING_MARKET;
+            if (config.autoSellOutput() && getUnsoldProduced() > 0) { state = SmartSuperheatState.SELLING_OUTPUT; status = "Selling bars to fund restock"; }
+            else waitForCash();
             return;
         }
 
-        if (SmartSuperheatBuyQueue.hasActive())
+        if (Rs2Bank.count(ItemID.COINS) > 0)
         {
-            SmartSuperheatBuyQueue.QueueResult queueResult =
-                SmartSuperheatBuyQueue.tick(config.geOfferTimeoutSeconds());
-            status = queueResult.getMessage();
-            if (queueResult.isCompleted())
-            {
-                SmartSuperheatBuyQueue.reset();
-                status = "GE restock collected - verifying bank";
-            }
-            else if (queueResult.isFailed())
-            {
-                SmartSuperheatBuyQueue.reset();
-                status = "GE restock attempt failed - replanning";
-            }
-            return;
+            int before = Rs2Inventory.itemQuantity(ItemID.COINS);
+            status = "Withdrawing coins";
+            if (!Rs2Bank.withdrawAll(ItemID.COINS) || !sleepUntil(() -> Rs2Inventory.itemQuantity(ItemID.COINS) > before, 5000)) return;
         }
 
-        freeFireRunes = hasInfiniteFireSource();
-        activeQuote = priceService.quote(activeRecipe, config, freeFireRunes);
-        if (!activeQuote.meets(config))
-        {
-            state = SmartSuperheatState.SCANNING_MARKET;
-            status = "Recipe no longer profitable";
-            return;
-        }
-
-        if (!ensureBankOpen())
-        {
-            status = "Opening bank for restock";
-            return;
-        }
-
-        if (!ensureBankItemMode())
-        {
-            status = "Waiting for bank item mode";
-            return;
-        }
-
-        normalizeInventoryForRestock();
-        ensureAllNatureRunesInInventory();
-        captureProtectedOutputBaseline(activeRecipe);
-
-        int alreadyCraftable = calculateCraftableBarsInBank(activeRecipe, freeFireRunes);
-        craftableBarsInBank = alreadyCraftable;
-        if (alreadyCraftable > 0)
-        {
-            state = SmartSuperheatState.PREPARING_BATCH;
-            status = "Using banked ingredients";
-            return;
-        }
-
-        if (config.autoSellOutput() && totalUnsoldProduced() > 0)
-        {
-            state = SmartSuperheatState.SELLING_OUTPUT;
-            status = "Selling output to fund restock";
-            return;
-        }
-
-        long coinTotal = (long) Rs2Bank.count(ItemID.COINS) + Rs2Inventory.itemQuantity(ItemID.COINS);
-        long afterReserve = Math.max(0L, coinTotal - config.cashReserve());
-        long budget = afterReserve * config.maxSpendPercent() / 100L;
-        long executableBudget = Math.min(budget, Integer.MAX_VALUE);
-        spendableCoins = clampInt(executableBudget);
-
-        int targetBars = calculateAffordableRestockBars(
-            activeRecipe,
-            activeQuote,
-            freeFireRunes,
-            executableBudget
-        );
-
-        if (targetBars <= 0)
-        {
-            state = SmartSuperheatState.WAITING_FOR_PROFIT;
-            nextNoProfitScanAt = System.currentTimeMillis() + config.priceRefreshSeconds() * 1000L;
-            status = "Not enough spendable cash";
-            return;
-        }
-
-        long plannedCost = calculateRestockCost(activeRecipe, activeQuote, freeFireRunes, targetBars);
-        if (plannedCost <= 0L || plannedCost > executableBudget || plannedCost > Integer.MAX_VALUE)
-        {
-            status = "Replanning restock budget";
-            return;
-        }
-
-        int plannedCoins = (int) plannedCost;
-        if (!ensureCoinsInInventory(plannedCoins))
-        {
-            long liquidCoins = (long) Rs2Bank.count(ItemID.COINS) + Rs2Inventory.itemQuantity(ItemID.COINS);
-            log.debug(
-                "Restock funding retry: targetBars={}, plannedCost={}, inventory={}, bank={}, liquid={}",
-                targetBars,
-                plannedCost,
-                Rs2Inventory.itemQuantity(ItemID.COINS),
-                Rs2Bank.count(ItemID.COINS),
-                liquidCoins
-            );
-
-            if (Math.max(0L, liquidCoins - config.cashReserve()) <= 0L)
-            {
-                state = SmartSuperheatState.WAITING_FOR_PROFIT;
-                nextNoProfitScanAt = System.currentTimeMillis() + config.priceRefreshSeconds() * 1000L;
-                status = "Not enough spendable cash";
-            }
-            else
-            {
-                status = "Funding restock plan";
-            }
-            return;
-        }
-
-        log.debug(
-            "Atomic restock plan: bars={}, plannedCost={}, inventoryCoins={}, bankCoins={}, reserve={}",
-            targetBars,
-            plannedCost,
-            Rs2Inventory.itemQuantity(ItemID.COINS),
-            Rs2Bank.count(ItemID.COINS),
-            config.cashReserve()
-        );
-
-        List<SmartSuperheatBuyQueue.OrderSpec> orders = new ArrayList<>();
-        long queuedCost = 0L;
-
-        queuedCost += addRestockOrder(orders, activeRecipe.getPrimaryOreName(),
-            activeRecipe.getPrimaryOreId(),
-            targetBars * activeRecipe.getPrimaryOrePerBar(),
-            activeQuote.getPrimaryBuyPrice());
-
-        if (activeRecipe.hasSecondaryOre())
-        {
-            queuedCost += addRestockOrder(orders, activeRecipe.getSecondaryOreName(),
-                activeRecipe.getSecondaryOreId(),
-                targetBars * activeRecipe.getSecondaryOrePerBar(),
-                activeQuote.getSecondaryBuyPrice());
-        }
-
-        if (activeRecipe.getCoalPerBar() > 0)
-        {
-            queuedCost += addRestockOrder(orders, "Coal", ItemID.COAL,
-                targetBars * activeRecipe.getCoalPerBar(),
-                activeQuote.getCoalBuyPrice());
-        }
-
-        queuedCost += addRestockOrder(orders, "Nature rune", ItemID.NATURERUNE,
-            targetBars, activeQuote.getNatureBuyPrice());
-
-        if (!freeFireRunes)
-        {
-            queuedCost += addRestockOrder(orders, "Fire rune", ItemID.FIRERUNE,
-                targetBars * 4, activeQuote.getFireBuyPrice());
-        }
-
-        if (queuedCost < 0L || queuedCost > plannedCost
-            || queuedCost > Rs2Inventory.itemQuantity(ItemID.COINS))
-        {
-            status = "Restock queue cash changed - replanning";
-            return;
-        }
-
-        if (!orders.isEmpty())
-        {
-            Rs2Bank.closeBank();
-            if (!sleepUntil(() -> !Rs2Bank.isOpen(), BANK_WIDGET_TIMEOUT_MS))
-            {
-                status = "Closing bank for GE restock";
-                return;
-            }
-
-            if (!SmartSuperheatBuyQueue.start(orders))
-            {
-                status = "Could not start GE restock queue";
-                return;
-            }
-
-            SmartSuperheatBuyQueue.QueueResult queueResult =
-                SmartSuperheatBuyQueue.tick(config.geOfferTimeoutSeconds());
-            status = queueResult.getMessage();
-            return;
-        }
-
-        if (!ensureBankOpen())
-        {
-            return;
-        }
-
-        craftableBarsInBank = calculateCraftableBarsInBank(activeRecipe, freeFireRunes);
-        if (craftableBarsInBank > 0)
-        {
-            state = SmartSuperheatState.PREPARING_BATCH;
-            status = "Restock ready";
-        }
-        else
-        {
-            status = "Verifying restock";
-        }
-    }
-
-    private long addRestockOrder(
-        List<SmartSuperheatBuyQueue.OrderSpec> orders,
-        String itemName,
-        int itemId,
-        int desiredTotal,
-        int offerPrice)
-    {
-        int available = availableResourceQuantity(itemId);
-        int missing = Math.max(0, desiredTotal - available);
-        if (missing <= 0)
-        {
-            return 0L;
-        }
-        if (itemId <= 0 || itemName == null || itemName.isBlank() || offerPrice <= 0)
-        {
-            return Long.MAX_VALUE;
-        }
-        long cost = (long) missing * offerPrice;
-        if (cost <= 0L || cost > Integer.MAX_VALUE)
-        {
-            return Long.MAX_VALUE;
-        }
-        orders.add(new SmartSuperheatBuyQueue.OrderSpec(itemId, itemName, missing, offerPrice));
-        return cost;
-    }
-
-    private void sellProducedOutput()
-    {
-        if (!config.autoSellOutput())
-        {
-            state = SmartSuperheatState.RESTOCKING;
-            return;
-        }
-
-        SuperheatRecipe recipeToSell = null;
-        int trackedAmount = 0;
-
-        for (Map.Entry<SuperheatRecipe, Integer> entry : unsoldProduced.entrySet())
-        {
-            if (entry.getValue() != null && entry.getValue() > 0)
-            {
-                recipeToSell = entry.getKey();
-                trackedAmount = entry.getValue();
-                break;
-            }
-        }
-
-        if (recipeToSell == null || trackedAmount <= 0)
-        {
-            sellFailures = 0;
-            state = SmartSuperheatState.RESTOCKING;
-            status = "Output sales complete";
-            return;
-        }
-
-        final SuperheatRecipe saleRecipe = recipeToSell;
-
-        if (!ensureBankOpen())
-        {
-            status = "Opening bank for sale";
-            return;
-        }
-
-        if (!ensureBankItemMode())
-        {
-            status = "Waiting for bank item mode";
-            return;
-        }
-
-        normalizeInventoryForBank();
-        ensureAllNatureRunesInInventory();
-
-        captureProtectedOutputBaseline(saleRecipe);
-        int banked = Rs2Bank.count(saleRecipe.getOutputId());
-        int protectedAmount = protectedOutputBaseline.getOrDefault(saleRecipe, banked);
-        int sessionOwnedInBank = Math.max(0, banked - protectedAmount);
-        int toSell = Math.min(trackedAmount, sessionOwnedInBank);
-        if (toSell <= 0)
-        {
-            unsoldProduced.put(saleRecipe, 0);
-            return;
-        }
-
-        SuperheatQuote saleQuote = priceService.quote(saleRecipe, config, hasInfiniteFireSource());
-        if (!saleQuote.isValid() || saleQuote.getOutputSellPrice() <= 0)
-        {
-            status = "No current sell price for " + saleRecipe.getOutputName();
-            return;
-        }
-
-        if (!ensureBankNoteMode())
-        {
-            status = "Waiting for bank note mode";
-            return;
-        }
-
-        if (!waitForBankAmountPromptClosed())
-        {
-            status = "Waiting for bank amount prompt";
-            return;
-        }
-
-        Rs2ItemModel outputRow = Rs2Bank.bankItems().stream()
-            .filter(item -> item != null && item.getId() == saleRecipe.getOutputId())
-            .findFirst()
-            .orElse(null);
-        if (outputRow == null)
-        {
-            status = "Waiting for bar bank widget";
-            return;
-        }
-
-        sleep(400, 650);
-        int inventoryBefore = inventoryCountByName(saleRecipe.getOutputName());
-        int epochBefore = Rs2Bank.getBankLiveEpoch();
-        if (!Rs2Bank.withdrawX(saleRecipe.getOutputId(), toSell))
-        {
-            status = "Could not request noted " + saleRecipe.getOutputName();
-            return;
-        }
-
-        sleepUntil(
-            () -> inventoryCountByName(saleRecipe.getOutputName()) > inventoryBefore,
-            INVENTORY_TIMEOUT_MS
-        );
-        Rs2Bank.syncBankInventoryAfterChange(epochBefore);
-        waitForBankAmountPromptClosed();
-
-        int inventoryQty = inventoryCountByName(saleRecipe.getOutputName()) - inventoryBefore;
-        if (inventoryQty <= 0)
-        {
-            status = "Could not withdraw noted " + saleRecipe.getOutputName();
-            return;
-        }
-
+        int target = (int) Math.min(1000L, budget / Math.max(1, activeQuote.getInputCostPerBar()));
+        buildBuyQueue(Math.max(1, target));
+        if (buyQueue.isEmpty()) { state = SmartSuperheatState.PREPARING_BATCH; return; }
         Rs2Bank.closeBank();
-        status = "Selling " + formatNumber(inventoryQty) + " noted " + saleRecipe.getOutputName();
+        sleepUntil(() -> !Rs2Bank.isOpen(), 3000);
+        status = "Restocking " + buyQueue.size() + " input(s)";
+    }
 
-        SmartGeTrader.TradeResult result = SmartGeTrader.sellFromInventory(
-            saleRecipe.getOutputId(),
-            saleRecipe.getOutputName(),
-            inventoryQty,
-            saleQuote.getOutputSellPrice(),
-            config.geOfferTimeoutSeconds()
-        );
-
-        int sold = Math.min(trackedAmount, result.getFilledQuantity());
-        if (sold > 0)
+    private void sell()
+    {
+        if (!recipeReady()) return;
+        if (geOrder != null) { tickGeOrder(); return; }
+        int wanted = unsold.getOrDefault(activeRecipe, 0);
+        if (wanted <= 0) { state = SmartSuperheatState.RESTOCKING; return; }
+        if (!ensureBank()) return;
+        if (Rs2Inventory.itemQuantity(activeRecipe.getOutputId()) > 0)
         {
-            unsoldProduced.put(saleRecipe, Math.max(0, trackedAmount - sold));
-            sellFailures = 0;
-            status = "Sold " + formatNumber(sold) + " " + saleRecipe.getOutputName();
+            Rs2Bank.depositAll(activeRecipe.getOutputName(), true);
+            if (!sleepUntil(() -> Rs2Inventory.itemQuantity(activeRecipe.getOutputId()) == 0, 3000)) return;
+        }
+        if (!bankMode(false)) return;
+        int qty = Math.min(wanted, Rs2Bank.count(activeRecipe.getOutputId()));
+        if (qty <= 0) { unsold.put(activeRecipe, 0); state = SmartSuperheatState.RESTOCKING; return; }
+        status = "Withdrawing noted " + activeRecipe.getOutputName();
+        if (!Rs2Bank.withdrawX(activeRecipe.getOutputName(), qty, true) || !sleepUntil(() -> Rs2Inventory.itemQuantity(activeRecipe.getOutputName(), true) >= qty, 5000)) return;
+        Rs2Bank.closeBank();
+        if (!sleepUntil(() -> !Rs2Bank.isOpen(), 3000)) return;
+        activeQuote = prices.quote(activeRecipe, config, freeFireRunes);
+        int price = activeQuote.isValid() ? activeQuote.getOutputSellPrice() : 0;
+        if (price <= 0) { status = "No sell price"; return; }
+        geOrder = new GeOrder(GrandExchangeAction.SELL, activeRecipe.getOutputId(), activeRecipe.getOutputName(), qty, price);
+        tickGeOrder();
+    }
+
+    private void tickBuyQueue()
+    {
+        if (geOrder == null) geOrder = buyQueue.peekFirst();
+        if (geOrder == null) { state = SmartSuperheatState.PREPARING_BATCH; return; }
+        tickGeOrder();
+    }
+
+    private void tickGeOrder()
+    {
+        GeOrder o = geOrder;
+        if (o == null || !ensureGeOverview()) return;
+        GrandExchangeSlots recovered = findOffer(o.itemId, o.action);
+        if (recovered != null) { o.slot = recovered; if (o.placedAt == 0) o.placedAt = System.currentTimeMillis(); }
+        if (o.slot == null) { placeOrder(o); return; }
+
+        OfferSnapshot s = offer(o.slot);
+        if (s == null || s.itemId != o.itemId) { o.slot = null; o.placedAt = 0; return; }
+        boolean done = (o.action == GrandExchangeAction.BUY && s.state == GrandExchangeOfferState.BOUGHT)
+            || (o.action == GrandExchangeAction.SELL && s.state == GrandExchangeOfferState.SOLD);
+        if (done)
+        {
+            int filled = s.filled > 0 ? s.filled : o.quantity;
+            if (!collectCompleted()) return;
+            finishOrder(o, filled, false);
             return;
         }
-
-        sellFailures++;
-        status = result.getMessage().isEmpty() ? "No output sale fill" : result.getMessage();
-        if (sellFailures >= 3)
-        {
-            sellFailures = 0;
-            state = SmartSuperheatState.WAITING_FOR_PROFIT;
-            nextNoProfitScanAt = System.currentTimeMillis() + config.priceRefreshSeconds() * 1000L;
-            status = "Output not selling - pausing";
-        }
+        if (s.state == GrandExchangeOfferState.EMPTY) { o.slot = null; o.placedAt = 0; return; }
+        status = (o.action == GrandExchangeAction.BUY ? "Buying " : "Selling ") + o.itemName + " (slot " + (o.slot.ordinal() + 1) + ")";
+        if (o.placedAt > 0 && System.currentTimeMillis() - o.placedAt >= config.geOfferTimeoutSeconds() * 1000L) cancelOrder(o, s.filled);
     }
 
-    private void waitForProfit()
+    private void placeOrder(GeOrder o)
     {
-        if (System.currentTimeMillis() >= nextNoProfitScanAt)
+        if (++o.attempts > MAX_GE_ATTEMPTS) { o.attempts = 1; status = "GE retrying cleanly: " + o.itemName; sleep(1500); }
+        GrandExchangeRequest request;
+        if (o.action == GrandExchangeAction.BUY)
         {
-            state = SmartSuperheatState.SCANNING_MARKET;
-            status = "Rechecking market";
+            o.slot = freeSlot();
+            if (o.slot == null) { status = "Waiting for free GE slot"; return; }
+            request = GrandExchangeRequest.builder().slot(o.slot).action(o.action).itemName(o.itemName).exact(true).quantity(o.quantity).price(o.price).closeAfterCompletion(false).build();
         }
-    }
+        else request = GrandExchangeRequest.builder().action(o.action).itemName(o.itemName).exact(true).quantity(o.quantity).price(o.price).closeAfterCompletion(false).build();
 
-    private boolean refreshActiveQuoteIfDue()
-    {
-        if (System.currentTimeMillis() < nextMarketCheckAt)
+        status = (o.action == GrandExchangeAction.BUY ? "Placing buy: " : "Placing sell: ") + o.itemName;
+        o.placedAt = System.currentTimeMillis();
+        if (!Rs2GrandExchange.processOffer(request))
         {
-            return true;
-        }
-
-        freeFireRunes = hasInfiniteFireSource();
-        activeQuote = priceService.quote(activeRecipe, config, freeFireRunes);
-        nextMarketCheckAt = System.currentTimeMillis() + config.priceRefreshSeconds() * 1000L;
-
-        if (!activeQuote.meets(config))
-        {
-            state = SmartSuperheatState.SCANNING_MARKET;
-            status = "Profit gate failed - rescanning";
-            return false;
-        }
-
-        return true;
-    }
-
-    private boolean ensureBankOpen()
-    {
-        if (Rs2GrandExchange.isOpen())
-        {
-            Rs2GrandExchange.closeExchange();
-            sleepUntil(() -> !Rs2GrandExchange.isOpen(), BANK_WIDGET_TIMEOUT_MS);
-        }
-
-        if (Rs2Bank.isOpen())
-        {
-            return ensureBankWidgetsReady();
-        }
-
-        if (Rs2Bank.openBank())
-        {
-            if (!sleepUntil(Rs2Bank::isOpen, BANK_TIMEOUT_MS))
-            {
-                return false;
-            }
-            return ensureBankWidgetsReady();
-        }
-
-        Rs2GrandExchange.walkToGrandExchange();
-        sleepUntil(() -> !Rs2Player.isMoving(), 20_000);
-
-        if (!Rs2Bank.openBank() || !sleepUntil(Rs2Bank::isOpen, BANK_TIMEOUT_MS))
-        {
-            return false;
-        }
-
-        return ensureBankWidgetsReady();
-    }
-
-    private boolean bankWidgetsReady()
-    {
-        return Rs2Bank.isOpen()
-            && Rs2Widget.isWidgetVisible(BANK_GROUP, BANK_ROOT_CHILD)
-            && Rs2Widget.getWidget(InterfaceID.Bankmain.NOTE) != null
-            && Rs2Widget.getWidget(InterfaceID.Bankmain.QUANTITY1_TEXT) != null;
-    }
-
-    private boolean ensureBankWidgetsReady()
-    {
-        return bankWidgetsReady() || sleepUntil(this::bankWidgetsReady, BANK_WIDGET_TIMEOUT_MS);
-    }
-
-    private boolean ensureBankItemMode()
-    {
-        if (!ensureBankWidgetsReady())
-        {
-            return false;
-        }
-
-        if (Rs2Bank.hasWithdrawAsItem())
-        {
-            return true;
-        }
-
-        // Do not use Rs2Bank.setWithdrawAsItem(). In the current Microbot helper,
-        // the item-mode branch clicks Bankmain.QUANTITY1_TEXT, which changes the
-        // default withdrawal quantity instead of toggling note/item mode.
-        if (!Rs2Widget.clickWidget(InterfaceID.Bankmain.NOTE))
-        {
-            return false;
-        }
-
-        return sleepUntil(
-            () -> bankWidgetsReady() && Rs2Bank.hasWithdrawAsItem(),
-            BANK_WIDGET_TIMEOUT_MS
-        );
-    }
-
-    private boolean ensureBankNoteMode()
-    {
-        if (!ensureBankWidgetsReady())
-        {
-            return false;
-        }
-
-        if (!Rs2Bank.hasWithdrawAsItem())
-        {
-            return true;
-        }
-
-        if (!Rs2Widget.clickWidget(InterfaceID.Bankmain.NOTE))
-        {
-            return false;
-        }
-
-        return sleepUntil(
-            () -> bankWidgetsReady() && !Rs2Bank.hasWithdrawAsItem(),
-            BANK_WIDGET_TIMEOUT_MS
-        );
-    }
-
-    private boolean bankAmountPromptOpen()
-    {
-        var prompt = Rs2Widget.getWidget(BANK_AMOUNT_PROMPT_GROUP, BANK_AMOUNT_PROMPT_CHILD);
-        return prompt != null
-            && prompt.getText() != null
-            && prompt.getText().equalsIgnoreCase("Enter amount:");
-    }
-
-    private boolean waitForBankAmountPromptClosed()
-    {
-        return !bankAmountPromptOpen()
-            || sleepUntil(() -> !bankAmountPromptOpen(), BANK_WIDGET_TIMEOUT_MS);
-    }
-
-    private void normalizeInventoryForBank()
-    {
-        if (!ensureBankWidgetsReady())
-        {
+            o.slot = null;
+            o.placedAt = 0;
+            status = "GE placement failed - recovering " + o.itemName;
             return;
         }
+        sleepUntil(() -> findOffer(o.itemId, o.action) != null || !Rs2GrandExchange.isOpen(), 3000);
+        o.slot = findOffer(o.itemId, o.action);
+        if (o.slot == null) status = "Waiting for GE slot confirmation: " + o.itemName;
+    }
 
+    private void cancelOrder(GeOrder o, int filled)
+    {
+        status = "GE timeout - cancelling " + o.itemName;
+        Rs2GrandExchange.cancelSpecificOffers(o.slot);
+        sleepUntil(() -> !offerActive(offer(o.slot), o.action), 4000);
+        Rs2GrandExchange.collectOffer(o.slot, true);
+        sleep(300, 500);
+        finishOrder(o, Math.max(0, filled), true);
+    }
+
+    private void finishOrder(GeOrder o, int filled, boolean partial)
+    {
+        geOrder = null;
+        if (o.action == GrandExchangeAction.SELL)
+        {
+            unsold.put(activeRecipe, Math.max(0, unsold.getOrDefault(activeRecipe, 0) - filled));
+            state = getUnsoldProduced() > 0 ? SmartSuperheatState.SELLING_OUTPUT : SmartSuperheatState.RESTOCKING;
+            status = partial ? "Partial sale collected" : "Bars sold";
+            return;
+        }
+        if (partial) buyQueue.clear();
+        else buyQueue.pollFirst();
+        state = buyQueue.isEmpty() ? SmartSuperheatState.PREPARING_BATCH : SmartSuperheatState.RESTOCKING;
+        status = partial ? "Partial buy collected - replanning" : "Buy collected";
+    }
+
+    private void buildBuyQueue(int bars)
+    {
+        buyQueue.clear();
+        addBuy(activeRecipe.getPrimaryOreId(), activeRecipe.getPrimaryOreName(), bars * activeRecipe.getPrimaryOrePerBar(), activeQuote.getPrimaryBuyPrice());
+        if (activeRecipe.hasSecondaryOre()) addBuy(activeRecipe.getSecondaryOreId(), activeRecipe.getSecondaryOreName(), bars * activeRecipe.getSecondaryOrePerBar(), activeQuote.getSecondaryBuyPrice());
+        if (activeRecipe.getCoalPerBar() > 0) addBuy(ItemID.COAL, "Coal", bars * activeRecipe.getCoalPerBar(), activeQuote.getCoalBuyPrice());
+        addBuy(ItemID.NATURERUNE, "Nature rune", bars, activeQuote.getNatureBuyPrice());
+        if (!freeFireRunes) addBuy(ItemID.FIRERUNE, "Fire rune", bars * 4, activeQuote.getFireBuyPrice());
+    }
+
+    private void addBuy(int id, String name, int target, int price)
+    {
+        int missing = Math.max(0, target - (int) Math.min(Integer.MAX_VALUE, total(id)));
+        if (missing > 0 && price > 0) buyQueue.addLast(new GeOrder(GrandExchangeAction.BUY, id, name, missing, price));
+    }
+
+    private boolean ensureBank()
+    {
+        if (bankOpen()) return true;
+        if (Rs2GrandExchange.isOpen()) { Rs2GrandExchange.closeExchange(); return false; }
+        status = "Opening bank";
+        if (!Rs2Bank.openBank()) return false;
+        return sleepUntil(this::bankOpen, 5000);
+    }
+
+    private boolean bankOpen()
+    {
+        return Rs2Bank.isOpen() && Rs2Widget.isWidgetVisible(BANK_GROUP, BANK_ROOT) && Rs2Widget.getWidget(InterfaceID.Bankmain.NOTE) != null;
+    }
+
+    private boolean bankMode(boolean itemMode)
+    {
+        if (!bankOpen()) return false;
+        if (Rs2Bank.hasWithdrawAsItem() == itemMode) return true;
+        status = itemMode ? "Setting item withdrawal" : "Setting noted withdrawal";
+        if (!Rs2Widget.clickWidget(InterfaceID.Bankmain.NOTE)) return false;
+        return sleepUntil(() -> Rs2Bank.hasWithdrawAsItem() == itemMode, 3000);
+    }
+
+    private void cleanInventory()
+    {
         if (config.bankWholeInventory())
         {
-            for (Rs2ItemModel item : Rs2Inventory.all())
-            {
-                if (item == null || item.getId() <= 0 || item.getId() == ItemID.NATURERUNE)
-                {
-                    continue;
-                }
-                depositIfPresent(item.getId());
-            }
+            if (freeFireRunes) Rs2Bank.depositAllExcept(true, "Nature rune");
+            else Rs2Bank.depositAllExcept(true, "Nature rune", "Fire rune");
+            sleep(180, 300);
             return;
         }
-
-        for (SuperheatRecipe recipe : SuperheatRecipe.values())
-        {
-            depositIfPresent(recipe.getPrimaryOreId());
-            if (recipe.hasSecondaryOre()) depositIfPresent(recipe.getSecondaryOreId());
-            depositIfPresent(recipe.getOutputId());
-        }
-
-        depositIfPresent(ItemID.COAL);
-        depositIfPresent(ItemID.FIRERUNE);
-        depositIfPresent(ItemID.COINS);
+        deposit(activeRecipe.getOutputName());
+        deposit(activeRecipe.getPrimaryOreName());
+        if (activeRecipe.hasSecondaryOre()) deposit(activeRecipe.getSecondaryOreName());
+        if (activeRecipe.getCoalPerBar() > 0) deposit("Coal");
+        deposit("Coins");
+        if (freeFireRunes) deposit("Fire rune");
     }
 
-    private void normalizeInventoryForRestock()
+    private void deposit(String name)
     {
-        if (!ensureBankWidgetsReady())
-        {
-            return;
-        }
+        if (name != null && Rs2Inventory.itemQuantity(name, true) > 0) { Rs2Bank.depositAll(name, true); sleep(80, 140); }
+    }
 
-        if (config.bankWholeInventory())
+    private boolean allNatureRunes()
+    {
+        int bank = Rs2Bank.count(ItemID.NATURERUNE), inventory = Rs2Inventory.itemQuantity(ItemID.NATURERUNE), total = bank + inventory;
+        if (total <= 0) return false;
+        if (bank <= 0) return true;
+        status = "Withdrawing all Nature runes";
+        return Rs2Bank.withdrawAll(ItemID.NATURERUNE) && sleepUntil(() -> Rs2Inventory.itemQuantity(ItemID.NATURERUNE) >= total, 5000);
+    }
+
+    private boolean ensureQty(int id, int target, String name)
+    {
+        int have = Rs2Inventory.itemQuantity(id);
+        if (have >= target) return true;
+        int need = target - have;
+        if (Rs2Bank.count(id) < need) { status = "Not enough " + name; return false; }
+        status = "Withdrawing " + need + " x " + name;
+        return Rs2Bank.withdrawX(id, need) && sleepUntil(() -> Rs2Inventory.itemQuantity(id) >= target, 4500);
+    }
+
+    private boolean batchReady(int bars)
+    {
+        return Rs2Inventory.itemQuantity(activeRecipe.getPrimaryOreId()) >= bars * activeRecipe.getPrimaryOrePerBar()
+            && (!activeRecipe.hasSecondaryOre() || Rs2Inventory.itemQuantity(activeRecipe.getSecondaryOreId()) >= bars * activeRecipe.getSecondaryOrePerBar())
+            && (activeRecipe.getCoalPerBar() == 0 || Rs2Inventory.itemQuantity(ItemID.COAL) >= bars * activeRecipe.getCoalPerBar())
+            && Rs2Inventory.itemQuantity(ItemID.NATURERUNE) >= bars
+            && (freeFireRunes || Rs2Inventory.itemQuantity(ItemID.FIRERUNE) >= bars * 4);
+    }
+
+    private boolean castReady()
+    {
+        return activeRecipe != null
+            && Rs2Inventory.itemQuantity(activeRecipe.getPrimaryOreId()) >= activeRecipe.getPrimaryOrePerBar()
+            && (!activeRecipe.hasSecondaryOre() || Rs2Inventory.itemQuantity(activeRecipe.getSecondaryOreId()) >= activeRecipe.getSecondaryOrePerBar())
+            && (activeRecipe.getCoalPerBar() == 0 || Rs2Inventory.itemQuantity(ItemID.COAL) >= activeRecipe.getCoalPerBar())
+            && Rs2Inventory.itemQuantity(ItemID.NATURERUNE) > 0
+            && (freeFireRunes || Rs2Inventory.itemQuantity(ItemID.FIRERUNE) >= 4);
+    }
+
+    private int craftable(SuperheatRecipe r)
+    {
+        if (r == null) return 0;
+        long n = total(r.getPrimaryOreId()) / r.getPrimaryOrePerBar();
+        if (r.hasSecondaryOre()) n = Math.min(n, total(r.getSecondaryOreId()) / r.getSecondaryOrePerBar());
+        if (r.getCoalPerBar() > 0) n = Math.min(n, total(ItemID.COAL) / r.getCoalPerBar());
+        n = Math.min(n, total(ItemID.NATURERUNE));
+        if (!freeFireRunes) n = Math.min(n, total(ItemID.FIRERUNE) / 4);
+        return (int) Math.min(Integer.MAX_VALUE, Math.max(0, n));
+    }
+
+    private long total(int id) { return Math.max(0, Rs2Bank.count(id)) + (long) Rs2Inventory.itemQuantity(id); }
+    private boolean recipeReady() { if (activeRecipe != null && activeQuote != null) return true; state = SmartSuperheatState.SCANNING_MARKET; return false; }
+    private void waitForCash() { state = SmartSuperheatState.WAITING_FOR_PROFIT; status = "Insufficient spendable cash"; nextScanAt = System.currentTimeMillis() + 10_000L; }
+    private int level(Skill s) { return Microbot.getClientThread().runOnClientThreadOptional(() -> Microbot.getClient().getRealSkillLevel(s)).orElse(0); }
+    private boolean members() { try { return Rs2Player.isMember() && Rs2Player.isInMemberWorld(); } catch (Exception e) { return false; } }
+    private boolean freeFire() { try { return Rs2Equipment.isWearing(FIRE_STAVES); } catch (Exception e) { return false; } }
+
+    private boolean ensureGeOverview()
+    {
+        if (!Rs2GrandExchange.isOpen())
         {
-            for (Rs2ItemModel item : Rs2Inventory.all())
+            status = "Opening Grand Exchange";
+            if (!Rs2GrandExchange.openExchange() || !sleepUntil(Rs2GrandExchange::isOpen, 5000)) return false;
+        }
+        if (!geSubScreen()) return true;
+        status = "Returning to GE overview";
+        Rs2GrandExchange.backToOverview();
+        return sleepUntil(() -> Rs2GrandExchange.isOpen() && !geSubScreen(), 4000);
+    }
+
+    private boolean geSubScreen() { return Rs2GrandExchange.isOfferScreenOpen() || Rs2Widget.isWidgetVisible(InterfaceID.GeOffers.SETUP); }
+
+    private GrandExchangeSlots freeSlot()
+    {
+        return Microbot.getClientThread().runOnClientThreadOptional(() -> {
+            GrandExchangeOffer[] offers = Microbot.getClient().getGrandExchangeOffers();
+            int max = Math.min(members() ? 8 : 3, GrandExchangeSlots.values().length);
+            for (int i = 0; i < max; i++) if (offers == null || i >= offers.length || offers[i] == null || offers[i].getState() == GrandExchangeOfferState.EMPTY) return GrandExchangeSlots.values()[i];
+            return null;
+        }).orElse(null);
+    }
+
+    private GrandExchangeSlots findOffer(int itemId, GrandExchangeAction action)
+    {
+        return Microbot.getClientThread().runOnClientThreadOptional(() -> {
+            GrandExchangeOffer[] offers = Microbot.getClient().getGrandExchangeOffers();
+            if (offers == null) return null;
+            int max = Math.min(offers.length, GrandExchangeSlots.values().length);
+            for (int i = 0; i < max; i++)
             {
-                if (item == null
-                    || item.getId() <= 0
-                    || item.getId() == ItemID.COINS
-                    || item.getId() == ItemID.NATURERUNE)
-                {
-                    continue;
-                }
-                depositIfPresent(item.getId());
+                GrandExchangeOffer o = offers[i];
+                if (o == null || o.getItemId() != itemId) continue;
+                GrandExchangeOfferState s = o.getState();
+                if (action == GrandExchangeAction.BUY && (s == GrandExchangeOfferState.BUYING || s == GrandExchangeOfferState.BOUGHT)) return GrandExchangeSlots.values()[i];
+                if (action == GrandExchangeAction.SELL && (s == GrandExchangeOfferState.SELLING || s == GrandExchangeOfferState.SOLD)) return GrandExchangeSlots.values()[i];
             }
-            return;
-        }
-
-        for (SuperheatRecipe recipe : SuperheatRecipe.values())
-        {
-            depositIfPresent(recipe.getPrimaryOreId());
-            if (recipe.hasSecondaryOre()) depositIfPresent(recipe.getSecondaryOreId());
-            depositIfPresent(recipe.getOutputId());
-        }
-
-        depositIfPresent(ItemID.COAL);
-        depositIfPresent(ItemID.FIRERUNE);
+            return null;
+        }).orElse(null);
     }
 
-    private void depositIfPresent(int itemId)
+    private OfferSnapshot offer(GrandExchangeSlots slot)
     {
-        if (itemId <= 0 || Rs2Inventory.itemQuantity(itemId) <= 0 || !ensureBankWidgetsReady())
-        {
-            return;
-        }
-
-        int epochBefore = Rs2Bank.getBankLiveEpoch();
-        if (Rs2Bank.depositAll(itemId))
-        {
-            Rs2Bank.syncBankInventoryAfterChange(epochBefore);
-            sleep(120, 220);
-        }
+        if (slot == null) return null;
+        return Microbot.getClientThread().runOnClientThreadOptional(() -> {
+            GrandExchangeOffer[] offers = Microbot.getClient().getGrandExchangeOffers();
+            int i = slot.ordinal();
+            if (offers == null || i >= offers.length || offers[i] == null) return new OfferSnapshot(0, GrandExchangeOfferState.EMPTY, 0);
+            GrandExchangeOffer o = offers[i];
+            return new OfferSnapshot(o.getItemId(), o.getState(), o.getQuantitySold());
+        }).orElse(null);
     }
 
-    private void ensureAllNatureRunesInInventory()
+    private boolean offerActive(OfferSnapshot s, GrandExchangeAction a)
     {
-        if (!ensureBankWidgetsReady() || !ensureBankItemMode())
-        {
-            return;
-        }
-
-        int totalNatureRunes = Rs2Inventory.itemQuantity(ItemID.NATURERUNE)
-            + Math.max(0, Rs2Bank.count(ItemID.NATURERUNE));
-        if (totalNatureRunes > 0)
-        {
-            ensureInventoryAmount(ItemID.NATURERUNE, totalNatureRunes, "Nature rune");
-        }
+        return s != null && ((a == GrandExchangeAction.BUY && s.state == GrandExchangeOfferState.BUYING) || (a == GrandExchangeAction.SELL && s.state == GrandExchangeOfferState.SELLING));
     }
 
-    private boolean withdrawBatch(SuperheatRecipe recipe, int bars, boolean freeFire)
+    private boolean hasCompleted()
     {
-        if (recipe == null || bars <= 0 || !ensureBankWidgetsReady() || !ensureBankItemMode())
-        {
+        return Microbot.getClientThread().runOnClientThreadOptional(() -> {
+            GrandExchangeOffer[] offers = Microbot.getClient().getGrandExchangeOffers();
+            if (offers != null) for (GrandExchangeOffer o : offers) if (o != null && (o.getState() == GrandExchangeOfferState.BOUGHT || o.getState() == GrandExchangeOfferState.SOLD)) return true;
             return false;
-        }
-
-        if (!ensureInventoryAmount(
-            recipe.getPrimaryOreId(),
-            bars * recipe.getPrimaryOrePerBar(),
-            recipe.getPrimaryOreName()))
-        {
-            return false;
-        }
-
-        if (recipe.hasSecondaryOre()
-            && !ensureInventoryAmount(
-                recipe.getSecondaryOreId(),
-                bars * recipe.getSecondaryOrePerBar(),
-                recipe.getSecondaryOreName()))
-        {
-            return false;
-        }
-
-        if (recipe.getCoalPerBar() > 0
-            && !ensureInventoryAmount(ItemID.COAL, bars * recipe.getCoalPerBar(), "Coal"))
-        {
-            return false;
-        }
-
-        ensureAllNatureRunesInInventory();
-        if (Rs2Inventory.itemQuantity(ItemID.NATURERUNE) < bars)
-        {
-            return false;
-        }
-
-        if (!freeFire && !ensureInventoryAmount(ItemID.FIRERUNE, bars * 4, "Fire rune"))
-        {
-            return false;
-        }
-
-        return inventoryHasBatchSupplies(recipe, bars, freeFire);
+        }).orElse(false);
     }
 
-    private boolean ensureInventoryAmount(int itemId, int requiredTotal, String itemName)
+    private boolean collectCompleted()
     {
-        if (itemId <= 0 || requiredTotal <= 0)
-        {
-            return true;
-        }
-
-        for (int attempt = 1; attempt <= MAX_BATCH_WITHDRAW_ATTEMPTS; attempt++)
-        {
-            if (!ensureBankWidgetsReady() || !ensureBankItemMode() || !waitForBankAmountPromptClosed())
-            {
-                sleep(250, 450);
-                continue;
-            }
-
-            int current = Rs2Inventory.itemQuantity(itemId);
-            if (current >= requiredTotal)
-            {
-                return true;
-            }
-
-            int banked = Math.max(0, Rs2Bank.count(itemId));
-            Rs2ItemModel bankRow = Rs2Bank.bankItems().stream()
-                .filter(item -> item != null && item.getId() == itemId)
-                .findFirst()
-                .orElse(null);
-            if (banked <= 0 || bankRow == null)
-            {
-                log.debug(
-                    "Batch withdrawal shortfall for {}: required={}, inventory={}, bank={}",
-                    itemName,
-                    requiredTotal,
-                    current,
-                    banked
-                );
-                return false;
-            }
-
-            int deficit = requiredTotal - current;
-            int request = Math.min(deficit, banked);
-            int emptySlots = Rs2Inventory.emptySlotCount();
-            if ((!bankRow.isStackable() && emptySlots < request)
-                || (bankRow.isStackable() && current <= 0 && emptySlots <= 0))
-            {
-                status = "Waiting for inventory space for " + itemName;
-                return false;
-            }
-
-            int before = current;
-            int epochBefore = Rs2Bank.getBankLiveEpoch();
-            status = "Withdrawing " + formatNumber(request) + " " + itemName;
-
-            log.debug(
-                "Batch withdrawal {}/{} for {}: required={}, inventory={}, bank={}, request={}",
-                attempt,
-                MAX_BATCH_WITHDRAW_ATTEMPTS,
-                itemName,
-                requiredTotal,
-                current,
-                banked,
-                request
-            );
-
-            if (!Rs2Bank.withdrawX(itemId, request))
-            {
-                waitForBankAmountPromptClosed();
-                sleep(300, 500);
-                continue;
-            }
-
-            boolean changed = sleepUntil(
-                () -> Rs2Inventory.itemQuantity(itemId) > before,
-                BATCH_WITHDRAW_TIMEOUT_MS
-            );
-
-            Rs2Bank.syncBankInventoryAfterChange(epochBefore);
-            waitForBankAmountPromptClosed();
-            sleep(changed ? 300 : 450, changed ? 500 : 700);
-        }
-
-        int actual = Rs2Inventory.itemQuantity(itemId);
-        if (actual < requiredTotal)
-        {
-            log.debug(
-                "Batch withdrawal incomplete for {}: required={}, actual={}",
-                itemName,
-                requiredTotal,
-                actual
-            );
-        }
-        return actual >= requiredTotal;
-    }
-
-    private boolean inventoryHasBatchSupplies(SuperheatRecipe recipe, int bars, boolean freeFire)
-    {
-        if (recipe == null || bars <= 0)
-        {
-            return false;
-        }
-
-        if (Rs2Inventory.itemQuantity(recipe.getPrimaryOreId()) < bars * recipe.getPrimaryOrePerBar())
-        {
-            return false;
-        }
-        if (recipe.hasSecondaryOre()
-            && Rs2Inventory.itemQuantity(recipe.getSecondaryOreId()) < bars * recipe.getSecondaryOrePerBar())
-        {
-            return false;
-        }
-        if (recipe.getCoalPerBar() > 0
-            && Rs2Inventory.itemQuantity(ItemID.COAL) < bars * recipe.getCoalPerBar())
-        {
-            return false;
-        }
-        if (Rs2Inventory.itemQuantity(ItemID.NATURERUNE) < bars)
-        {
-            return false;
-        }
-        return freeFire || Rs2Inventory.itemQuantity(ItemID.FIRERUNE) >= bars * 4;
-    }
-
-    private boolean ensureCoinsInInventory(int required)
-    {
-        if (required <= 0)
-        {
-            return false;
-        }
-
-        // Always trust an already-funded inventory stack before requiring bank widgets.
-        // This prevents a transient bank/widget close from sending the state machine back
-        // to "Funding restock plan" when the required cash is already present.
-        int inventoryCoins = Rs2Inventory.itemQuantity(ItemID.COINS);
-        if (inventoryCoins >= required)
-        {
-            return true;
-        }
-
-        if (!ensureBankWidgetsReady() || !ensureBankItemMode() || !waitForBankAmountPromptClosed())
-        {
-            return false;
-        }
-
-        for (int attempt = 1; attempt <= MAX_COIN_WITHDRAW_ATTEMPTS; attempt++)
-        {
-            inventoryCoins = Rs2Inventory.itemQuantity(ItemID.COINS);
-            if (inventoryCoins >= required)
-            {
-                return true;
-            }
-
-            int bankCoins = Rs2Bank.count(ItemID.COINS);
-            long liquidCoins = (long) inventoryCoins + bankCoins;
-            if (liquidCoins < required)
-            {
-                return false;
-            }
-
-            if (bankCoins <= 0)
-            {
-                return inventoryCoins >= required;
-            }
-
-            // Withdraw-All deliberately avoids the bank X-amount selector/prompt for
-            // stackable coins. The configured reserve remains protected because the
-            // atomic GE plan is still capped by executableBudget/plannedCost.
-            if (Rs2Inventory.isFull())
-            {
-                status = "Waiting for inventory space for coins";
-                return false;
-            }
-
-            int inventoryBefore = inventoryCoins;
-            int bankBefore = bankCoins;
-            int epochBefore = Rs2Bank.getBankLiveEpoch();
-            status = "Withdrawing available coins";
-
-            log.debug(
-                "Coin stack funding {}/{}: required={}, inventory={}, bank={}, liquid={}",
-                attempt,
-                MAX_COIN_WITHDRAW_ATTEMPTS,
-                required,
-                inventoryCoins,
-                bankCoins,
-                liquidCoins
-            );
-
-            if (!Rs2Bank.withdrawAll(ItemID.COINS))
-            {
-                sleep(300, 500);
-                continue;
-            }
-
-            boolean transferObserved = sleepUntil(() ->
-                    Rs2Inventory.itemQuantity(ItemID.COINS) > inventoryBefore
-                        || (Rs2Bank.isOpen() && Rs2Bank.count(ItemID.COINS) < bankBefore),
-                COIN_WITHDRAW_TIMEOUT_MS);
-
-            Rs2Bank.syncBankInventoryAfterChange(epochBefore);
-
-            int fundedCoins = Rs2Inventory.itemQuantity(ItemID.COINS);
-            if (fundedCoins >= required)
-            {
-                return true;
-            }
-
-            if (transferObserved && sleepUntil(
-                () -> Rs2Inventory.itemQuantity(ItemID.COINS) >= required,
-                COIN_WITHDRAW_SETTLE_TIMEOUT_MS))
-            {
-                return true;
-            }
-
-            log.debug(
-                "Coin funding not yet complete: required={}, inventory={}, bank={}",
-                required,
-                Rs2Inventory.itemQuantity(ItemID.COINS),
-                Rs2Bank.isOpen() ? Rs2Bank.count(ItemID.COINS) : -1
-            );
-            sleep(300, 500);
-        }
-
-        return Rs2Inventory.itemQuantity(ItemID.COINS) >= required;
-    }
-
-    private int calculateAffordableRestockBars(
-        SuperheatRecipe recipe,
-        SuperheatQuote quote,
-        boolean freeFire,
-        long budget)
-    {
-        if (!Rs2Bank.isOpen() || recipe == null || quote == null || budget <= 0L)
-        {
-            return 0;
-        }
-
-        long upperBound = resourceBarCapacity(
-            recipe.getPrimaryOreId(),
-            recipe.getPrimaryOrePerBar(),
-            quote.getPrimaryBuyPrice(),
-            budget);
-
-        if (recipe.hasSecondaryOre())
-        {
-            upperBound = Math.min(upperBound, resourceBarCapacity(
-                recipe.getSecondaryOreId(),
-                recipe.getSecondaryOrePerBar(),
-                quote.getSecondaryBuyPrice(),
-                budget));
-        }
-
-        if (recipe.getCoalPerBar() > 0)
-        {
-            upperBound = Math.min(upperBound, resourceBarCapacity(
-                ItemID.COAL,
-                recipe.getCoalPerBar(),
-                quote.getCoalBuyPrice(),
-                budget));
-        }
-
-        upperBound = Math.min(upperBound, resourceBarCapacity(
-            ItemID.NATURERUNE,
-            1,
-            quote.getNatureBuyPrice(),
-            budget));
-
-        if (!freeFire)
-        {
-            upperBound = Math.min(upperBound, resourceBarCapacity(
-                ItemID.FIRERUNE,
-                4,
-                quote.getFireBuyPrice(),
-                budget));
-        }
-
-        int low = 0;
-        int high = clampInt(upperBound);
-        while (low < high)
-        {
-            int mid = low + (int) (((long) high - low + 1L) / 2L);
-            if (calculateRestockCost(recipe, quote, freeFire, mid) <= budget)
-            {
-                low = mid;
-            }
-            else
-            {
-                high = mid - 1;
-            }
-        }
-
-        return low;
-    }
-
-    private long resourceBarCapacity(int itemId, int amountPerBar, int offerPrice, long budget)
-    {
-        if (itemId <= 0 || amountPerBar <= 0 || offerPrice <= 0)
-        {
-            return 0L;
-        }
-
-        long available = availableResourceQuantity(itemId);
-        long purchasable = Math.max(0L, budget) / offerPrice;
-        long capacity = Math.max(0L, (available + purchasable) / amountPerBar);
-        long safeCapacity = Integer.MAX_VALUE / (long) amountPerBar;
-        return Math.min(capacity, safeCapacity);
-    }
-
-    private long calculateRestockCost(
-        SuperheatRecipe recipe,
-        SuperheatQuote quote,
-        boolean freeFire,
-        int bars)
-    {
-        if (bars <= 0)
-        {
-            return 0L;
-        }
-
-        long total = missingPurchaseCost(
-            recipe.getPrimaryOreId(),
-            (long) bars * recipe.getPrimaryOrePerBar(),
-            quote.getPrimaryBuyPrice());
-
-        if (recipe.hasSecondaryOre())
-        {
-            total += missingPurchaseCost(
-                recipe.getSecondaryOreId(),
-                (long) bars * recipe.getSecondaryOrePerBar(),
-                quote.getSecondaryBuyPrice());
-        }
-
-        if (recipe.getCoalPerBar() > 0)
-        {
-            total += missingPurchaseCost(
-                ItemID.COAL,
-                (long) bars * recipe.getCoalPerBar(),
-                quote.getCoalBuyPrice());
-        }
-
-        total += missingPurchaseCost(ItemID.NATURERUNE, bars, quote.getNatureBuyPrice());
-
-        if (!freeFire)
-        {
-            total += missingPurchaseCost(ItemID.FIRERUNE, (long) bars * 4L, quote.getFireBuyPrice());
-        }
-
-        return total;
-    }
-
-    private long missingPurchaseCost(int itemId, long desiredTotal, int offerPrice)
-    {
-        if (itemId <= 0 || desiredTotal <= 0L || offerPrice <= 0)
-        {
-            return 0L;
-        }
-
-        long available = availableResourceQuantity(itemId);
-        long missing = Math.max(0L, desiredTotal - available);
-        return missing * offerPrice;
-    }
-
-    private int availableResourceQuantity(int itemId)
-    {
-        long banked = Math.max(0, Rs2Bank.count(itemId));
-        if (itemId == ItemID.NATURERUNE)
-        {
-            banked += Math.max(0, Rs2Inventory.itemQuantity(ItemID.NATURERUNE));
-        }
-        return clampInt(banked);
-    }
-
-    private int calculateCraftableBarsInBank(SuperheatRecipe recipe, boolean freeFire)
-    {
-        if (!Rs2Bank.isOpen())
-        {
-            return 0;
-        }
-
-        int bars = Rs2Bank.count(recipe.getPrimaryOreId()) / recipe.getPrimaryOrePerBar();
-
-        if (recipe.hasSecondaryOre())
-        {
-            bars = Math.min(bars, Rs2Bank.count(recipe.getSecondaryOreId()) / recipe.getSecondaryOrePerBar());
-        }
-
-        if (recipe.getCoalPerBar() > 0)
-        {
-            bars = Math.min(bars, Rs2Bank.count(ItemID.COAL) / recipe.getCoalPerBar());
-        }
-
-        bars = Math.min(bars, availableResourceQuantity(ItemID.NATURERUNE));
-
-        if (!freeFire)
-        {
-            bars = Math.min(bars, Rs2Bank.count(ItemID.FIRERUNE) / 4);
-        }
-
-        return Math.max(0, bars);
-    }
-
-    private void captureProtectedOutputBaseline(SuperheatRecipe recipe)
-    {
-        if (recipe == null || protectedOutputBaseline.containsKey(recipe) || !Rs2Bank.isOpen())
-        {
-            return;
-        }
-
-        protectedOutputBaseline.put(recipe, Math.max(0, Rs2Bank.count(recipe.getOutputId())));
-    }
-
-    private boolean inventoryHasCastSupplies(SuperheatRecipe recipe, boolean freeFire)
-    {
-        if (Rs2Inventory.itemQuantity(recipe.getPrimaryOreId()) < recipe.getPrimaryOrePerBar()) return false;
-        if (recipe.hasSecondaryOre()
-            && Rs2Inventory.itemQuantity(recipe.getSecondaryOreId()) < recipe.getSecondaryOrePerBar()) return false;
-        if (recipe.getCoalPerBar() > 0
-            && Rs2Inventory.itemQuantity(ItemID.COAL) < recipe.getCoalPerBar()) return false;
-        if (Rs2Inventory.itemQuantity(ItemID.NATURERUNE) < 1) return false;
-        return freeFire || Rs2Inventory.itemQuantity(ItemID.FIRERUNE) >= 4;
-    }
-
-    private boolean hasInfiniteFireSource()
-    {
-        try
-        {
-            return Rs2Equipment.isWearing(FIRE_RUNE_STAVES);
-        }
-        catch (RuntimeException ex)
-        {
-            log.debug("Unable to read equipped fire source: {}", ex.getMessage());
-            return false;
-        }
-    }
-
-    private int inventoryCountByName(String name)
-    {
-        if (name == null) return 0;
-        return Rs2Inventory.all().stream()
-            .filter(item -> item != null
-                && item.getName() != null
-                && item.getName().equalsIgnoreCase(name))
-            .mapToInt(item -> Math.max(0, item.getQuantity()))
-            .sum();
-    }
-
-    private int totalUnsoldProduced()
-    {
-        int total = 0;
-        for (Integer value : unsoldProduced.values())
-        {
-            if (value != null && value > 0)
-            {
-                total += value;
-            }
-        }
-        return total;
-    }
-
-    private int getRealLevel(Skill skill)
-    {
-        return Microbot.getClientThread().runOnClientThreadOptional(
-            () -> Microbot.getClient().getRealSkillLevel(skill)
-        ).orElse(0);
-    }
-
-    private int clampInt(long value)
-    {
-        return value > Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) Math.max(0L, value);
-    }
-
-    private String formatNumber(long value)
-    {
-        return String.format(Locale.ROOT, "%,d", value);
+        if (!hasCompleted()) return true;
+        if (!ensureGeOverview() || !Rs2GrandExchange.collectAllToBank()) return false;
+        return sleepUntil(() -> !hasCompleted(), 5000);
     }
 
     public SmartSuperheatState getState() { return state; }
@@ -1538,29 +526,27 @@ public class KspSmartSuperheatScript extends Script
     public SuperheatQuote getActiveQuote() { return activeQuote; }
     public boolean hasFreeFireRunes() { return freeFireRunes; }
     public long getBarsMade() { return barsMade; }
+    public long getBarsPerHour() { long r = getRuntimeMillis(); return r <= 0 ? 0 : barsMade * 3_600_000L / r; }
     public long getEstimatedProfit() { return estimatedProfit; }
+    public long getEstimatedProfitPerHour() { long r = getRuntimeMillis(); return r <= 0 ? 0 : estimatedProfit * 3_600_000L / r; }
+    public int getUnsoldProduced() { int n = 0; for (int v : unsold.values()) n += v; return n; }
+    public int getCraftableBarsInBank() { return craftableBarsInBank; }
+    public int getCurrentBatchTarget() { return currentBatchTarget; }
+    public int getSpendableCoins() { return spendableCoins; }
     public long getMagicXp() { return magicXp; }
     public double getSmithingXp() { return smithingXp; }
-    public int getCurrentBatchTarget() { return currentBatchTarget; }
-    public int getCraftableBarsInBank() { return craftableBarsInBank; }
-    public int getSpendableCoins() { return spendableCoins; }
-    public int getUnsoldProduced() { return totalUnsoldProduced(); }
-    public long getStartTime() { return startTime; }
+    public long getRuntimeMillis() { return startedAt <= 0 ? 0 : System.currentTimeMillis() - startedAt; }
 
-    public long getBarsPerHour()
+    private static final class GeOrder
     {
-        long elapsed = Math.max(1L, System.currentTimeMillis() - startTime);
-        return Math.round(barsMade * 3_600_000.0 / elapsed);
+        final GrandExchangeAction action; final int itemId, quantity, price; final String itemName;
+        GrandExchangeSlots slot; long placedAt; int attempts;
+        GeOrder(GrandExchangeAction action, int itemId, String itemName, int quantity, int price) { this.action = action; this.itemId = itemId; this.itemName = itemName; this.quantity = quantity; this.price = price; }
     }
 
-    public long getEstimatedProfitPerHour()
+    private static final class OfferSnapshot
     {
-        long elapsed = Math.max(1L, System.currentTimeMillis() - startTime);
-        return Math.round(estimatedProfit * 3_600_000.0 / elapsed);
-    }
-
-    public long getRuntimeMillis()
-    {
-        return startTime <= 0 ? 0L : Math.max(0L, System.currentTimeMillis() - startTime);
+        final int itemId, filled; final GrandExchangeOfferState state;
+        OfferSnapshot(int itemId, GrandExchangeOfferState state, int filled) { this.itemId = itemId; this.state = state; this.filled = filled; }
     }
 }
