@@ -1,0 +1,46 @@
+name: BondGoalClientThreadV101
+
+on:
+  push:
+    branches:
+      - fix/bond-goal-client-thread
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/bond-goal-client-thread
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '11'
+
+      - uses: actions/checkout@v4
+        with:
+          repository: chsami/Microbot
+          path: microbot
+
+      - name: Compile Bond Goal against Microbot
+        shell: bash
+        run: |
+          rm -rf microbot/runelite-client/src/main/java/net/runelite/client/plugins/microbot/kspbondgoal
+          cp -R kspbondgoal microbot/runelite-client/src/main/java/net/runelite/client/plugins/microbot/kspbondgoal
+          cd microbot
+          chmod +x gradlew
+          ./gradlew :client:compileJava --no-daemon
+
+      - name: Remove temporary workflow
+        shell: bash
+        run: |
+          rm .github/workflows/temp-bond-goal-client-thread.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .github/workflows/temp-bond-goal-client-thread.yml
+          git commit -m "Remove temporary Bond Goal validation workflow"
+          git push origin HEAD:fix/bond-goal-client-thread
