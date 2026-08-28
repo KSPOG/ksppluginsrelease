@@ -1,12 +1,9 @@
-name: Patch Smart Superheat Withdraw All v0.1.2
-on:
-  push:
-    branches:
-      - 'fix/smart-superheat-withdraw-all-output-v012'
+name: SmartSuperheatV012
+on: [push]
 permissions:
   contents: write
 jobs:
-  patch-and-validate:
+  validate:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -14,36 +11,8 @@ jobs:
           path: ksp
           ref: fix/smart-superheat-withdraw-all-output-v012
           fetch-depth: 0
-      - name: Patch output sale
-        shell: bash
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
-
-          script = Path('ksp/kspsmartsuperheat/KspSmartSuperheatScript.java')
-          text = script.read_text()
-          old = '''        int qty = Math.min(wanted, Rs2Bank.count(activeRecipe.getOutputId()));
-        if (qty <= 0) { unsold.put(activeRecipe, 0); state = SmartSuperheatState.RESTOCKING; return; }
-        status = "Withdrawing noted " + activeRecipe.getOutputName();
-        if (!Rs2Bank.withdrawX(activeRecipe.getOutputName(), qty, true) || !sleepUntil(() -> Rs2Inventory.itemQuantity(activeRecipe.getOutputName(), true) >= qty, 5000)) return;
-'''
-          new = '''        int bankQty = Rs2Bank.count(activeRecipe.getOutputId());
-        if (bankQty <= 0) { unsold.put(activeRecipe, 0); state = SmartSuperheatState.RESTOCKING; return; }
-        status = "Withdrawing all noted " + activeRecipe.getOutputName();
-        if (!Rs2Bank.withdrawAll(activeRecipe.getOutputName(), true) || !sleepUntil(() -> Rs2Inventory.itemQuantity(activeRecipe.getOutputName(), true) >= bankQty, 5000)) return;
-        int qty = Rs2Inventory.itemQuantity(activeRecipe.getOutputName(), true);
-        if (qty <= 0) { status = "Noted output withdrawal failed"; return; }
-'''
-          if old not in text:
-              raise SystemExit('Smart Superheat sell block did not match expected source')
-          script.write_text(text.replace(old, new, 1))
-
-          plugin = Path('ksp/kspsmartsuperheat/KspSmartSuperheatPlugin.java')
-          p = plugin.read_text()
-          if 'VERSION = "0.1.1"' not in p:
-              raise SystemExit('Expected Smart Superheat v0.1.1')
-          plugin.write_text(p.replace('VERSION = "0.1.1"', 'VERSION = "0.1.2"', 1))
-          PY
+      - name: Apply patch
+        run: python3 ksp/.github/patch-smart-superheat-v012.py
       - uses: actions/checkout@v4
         with:
           repository: chsami/Microbot
@@ -52,28 +21,22 @@ jobs:
         with:
           distribution: temurin
           java-version: '11'
-      - name: Compile Smart Superheat against Microbot
-        shell: bash
+      - name: Compile
         run: |
-          set -euo pipefail
-          pkg=microbot/client/src/main/java/net/runelite/client/plugins/microbot/kspsmartsuperheat
-          mkdir -p "$pkg"
-          cp ksp/kspsmartsuperheat/*.java "$pkg/"
-          constants=microbot/client/src/main/java/net/runelite/client/plugins/microbot/PluginConstants.java
-          if [ ! -f "$constants" ]; then
-            printf '%s\n' 'package net.runelite.client.plugins.microbot;' 'public final class PluginConstants {' '  public static final String KSP = "KSP ";' '  public static final boolean DEFAULT_ENABLED = false;' '  public static final boolean IS_EXTERNAL = true;' '}' > "$constants"
+          mkdir -p microbot/client/src/main/java/net/runelite/client/plugins/microbot/kspsmartsuperheat
+          cp ksp/kspsmartsuperheat/*.java microbot/client/src/main/java/net/runelite/client/plugins/microbot/kspsmartsuperheat/
+          if [ ! -f microbot/client/src/main/java/net/runelite/client/plugins/microbot/PluginConstants.java ]; then
+            printf '%s\n' 'package net.runelite.client.plugins.microbot;' 'public final class PluginConstants {' 'public static final String KSP = "KSP ";' 'public static final boolean DEFAULT_ENABLED = false;' 'public static final boolean IS_EXTERNAL = true;' '}' > microbot/client/src/main/java/net/runelite/client/plugins/microbot/PluginConstants.java
           fi
           cd microbot
           chmod +x gradlew
           ./gradlew :client:compileJava --no-daemon
-      - name: Commit patch and remove temporary workflow
-        shell: bash
+      - name: Commit
         run: |
-          set -euo pipefail
           cd ksp
-          rm -f .github/workflows/patch-smart-superheat-withdraw-all-v012.yml
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add kspsmartsuperheat/KspSmartSuperheatScript.java kspsmartsuperheat/KspSmartSuperheatPlugin.java .github/workflows/patch-smart-superheat-withdraw-all-v012.yml
-          git commit -m 'fix: withdraw all noted Smart Superheat outputs'
+          rm -f .github/workflows/patch-smart-superheat-withdraw-all-v012.yml .github/patch-smart-superheat-v012.py
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git commit -m 'fix: use Withdraw-All and modify Smart Superheat GE offers'
           git push origin HEAD:fix/smart-superheat-withdraw-all-output-v012
