@@ -23,7 +23,7 @@ import javax.inject.Inject;
 )
 public class KspF2PHighAlchTraderPlugin extends Plugin
 {
-    public static final String VERSION = "0.2.9";
+    public static final String VERSION = "0.2.10";
 
     @Inject
     private KspF2PHighAlchTraderConfig config;
@@ -44,6 +44,7 @@ public class KspF2PHighAlchTraderPlugin extends Plugin
     private ClientThread clientThread;
 
     private KspHighAlchMarketCache marketCache;
+    private KspRuneLiteMarketBackup runeLiteBackup;
 
     @Provides
     KspF2PHighAlchTraderConfig provideConfig(ConfigManager configManager)
@@ -54,20 +55,31 @@ public class KspF2PHighAlchTraderPlugin extends Plugin
     @Override
     protected void startUp()
     {
-        // Source-loaded plugins start on Swing/EDT. RuneLite ItemManager price reads reach
-        // client item definitions, so prime the fallback on ClientThread before the trader
-        // begins scanning and can fall through to Microbot's per-item network path.
+        // Source-loaded plugins start on Swing/EDT. Prime both fallback layers on
+        // RuneLite's client thread before allowing the trader loop to begin:
+        // 1) local RuneLite guide prices -> Microbot price cache
+        // 2) local ItemComposition/ItemStats -> Microbot mapping/GE-limit cache
         KspHighAlchMarketCache cache = new KspHighAlchMarketCache(itemManager, clientThread);
+        KspRuneLiteMarketBackup backup = new KspRuneLiteMarketBackup(itemManager, clientThread);
         marketCache = cache;
+        runeLiteBackup = backup;
         overlayManager.add(overlay);
 
         cache.start(config, () ->
         {
-            // Ignore a delayed callback from a cache that was already shut down/replaced.
-            if (marketCache == cache)
+            if (marketCache != cache || runeLiteBackup != backup)
             {
-                script.run(config);
+                return;
             }
+
+            backup.start(config, () ->
+            {
+                // Ignore delayed callbacks from a cache that was already shut down/replaced.
+                if (marketCache == cache && runeLiteBackup == backup)
+                {
+                    script.run(config);
+                }
+            });
         });
     }
 
@@ -79,6 +91,13 @@ public class KspF2PHighAlchTraderPlugin extends Plugin
         if (cache != null)
         {
             cache.close();
+        }
+
+        KspRuneLiteMarketBackup backup = runeLiteBackup;
+        runeLiteBackup = null;
+        if (backup != null)
+        {
+            backup.close();
         }
 
         script.shutdown();
