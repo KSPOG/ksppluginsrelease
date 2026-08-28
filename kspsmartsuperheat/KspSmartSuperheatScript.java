@@ -335,43 +335,111 @@ public class KspSmartSuperheatScript extends Script
 
     private boolean modifyGeOffer(GrandExchangeSlots slot, int newPrice)
     {
-        if (slot == null || newPrice <= 0 || !ensureGeOverview()) return false;
+        if (slot == null || newPrice <= 0) return false;
         OfferSnapshot current = offer(slot);
         if (current != null && current.price == newPrice) return true;
+        if (!ensureGeOverview()) return false;
 
         Widget slotWidget = Rs2Widget.getWidget(InterfaceID.GeOffers.INDEX_0 + slot.ordinal());
-        if (slotWidget == null) { status = "Waiting for GE slot widget"; return false; }
+        if (slotWidget == null)
+        {
+            status = "Waiting for GE slot widget";
+            return false;
+        }
+
         status = "Opening GE Modify offer";
         Rs2Widget.clickWidgetFast(slotWidget, 2, 3);
-        if (!sleepUntil(() -> geSubScreen() || !Rs2GrandExchange.isOpen(), 3500) || !Rs2GrandExchange.isOpen()) return false;
+        if (!sleepUntil(() -> geSetupOpen() || Rs2GrandExchange.isOfferScreenOpen() || !Rs2GrandExchange.isOpen(), 3500))
+        {
+            status = "Waiting for GE Modify offer";
+            return false;
+        }
+        if (!Rs2GrandExchange.isOpen())
+        {
+            status = "GE closed while opening Modify offer - recovering";
+            return false;
+        }
 
-        if (!Rs2Widget.isWidgetVisible(InterfaceID.GeOffers.SETUP))
+        if (!geSetupOpen())
         {
             Widget modify = Rs2Widget.getWidget(InterfaceID.GeOffers.DETAILS_MODIFY);
-            if (modify == null || !Rs2Widget.clickWidget(modify)
-                || !sleepUntil(() -> Rs2Widget.isWidgetVisible(InterfaceID.GeOffers.SETUP) || !Rs2GrandExchange.isOpen(), 3000)) return false;
+            if (modify == null || !Rs2Widget.clickWidget(modify))
+            {
+                status = "Waiting for GE Modify button";
+                return false;
+            }
+            if (!sleepUntil(() -> geSetupOpen() || !Rs2GrandExchange.isOpen(), 3000))
+            {
+                status = "Waiting for GE offer setup";
+                return false;
+            }
+        }
+        if (!Rs2GrandExchange.isOpen())
+        {
+            status = "GE closed before price edit - recovering";
+            return false;
         }
 
         Widget setup = Rs2Widget.getWidget(InterfaceID.GeOffers.SETUP);
         Widget priceX = setup == null ? null : setup.getChild(GE_PRICE_X_CHILD);
-        if (priceX == null || !Rs2Widget.clickWidget(priceX)
-            || !sleepUntil(() -> gePriceInputOpen() || !Rs2GrandExchange.isOpen(), 2500)) return false;
+        if (priceX == null || !Rs2Widget.clickWidget(priceX))
+        {
+            status = "Unable to open GE price input";
+            return false;
+        }
+        if (!sleepUntil(() -> gePriceInputOpen() || !Rs2GrandExchange.isOpen(), 2500))
+        {
+            status = "Waiting for GE price input";
+            return false;
+        }
+        if (!Rs2GrandExchange.isOpen())
+        {
+            status = "GE closed during price input - recovering";
+            return false;
+        }
 
+        // Same chatbox-value flow as Jewellery Crafter, with the settle delays
+        // Microbot's own GE setPrice() uses so the new value is not submitted too early.
+        sleep(600, 1000);
         Rs2GrandExchange.setChatboxValue(newPrice);
-        sleep(120, 220);
+        sleep(500, 750);
         Rs2Keyboard.enter();
-        if (!sleepUntil(() -> !gePriceInputOpen() || !Rs2GrandExchange.isOpen(), 2500) || !Rs2GrandExchange.isOpen()) return false;
+        sleep(800, 1100);
+        if (!sleepUntil(() -> !gePriceInputOpen() || !Rs2GrandExchange.isOpen(), 2500))
+        {
+            status = "Waiting for GE price entry";
+            return false;
+        }
+        if (!Rs2GrandExchange.isOpen())
+        {
+            status = "GE closed after price entry - recovering";
+            return false;
+        }
 
         status = "Confirming modified GE price";
-        if (!Rs2Widget.clickWidget(InterfaceID.GeOffers.SETUP_CONFIRM)) return false;
-        sleepUntil(() -> !Rs2Widget.isWidgetVisible(InterfaceID.GeOffers.SETUP) || Rs2Widget.hasWidget("Your offer is much") || !Rs2GrandExchange.isOpen(), 3000);
+        if (!Rs2Widget.clickWidget(InterfaceID.GeOffers.SETUP_CONFIRM))
+        {
+            status = "Unable to confirm modified GE price";
+            return false;
+        }
+        sleepUntil(() -> !geSetupOpen() || Rs2Widget.hasWidget("Your offer is much") || !Rs2GrandExchange.isOpen(), 3000);
         if (Rs2Widget.hasWidget("Your offer is much"))
         {
             Rs2Widget.clickWidget("Yes");
-            sleepUntil(() -> !Rs2Widget.isWidgetVisible(InterfaceID.GeOffers.SETUP) || !Rs2GrandExchange.isOpen(), 3000);
+            sleepUntil(() -> !geSetupOpen() || !Rs2GrandExchange.isOpen(), 3000);
         }
-        return sleepUntil(() -> { OfferSnapshot snapshot = offer(slot); return snapshot != null && snapshot.price == newPrice; }, 3000);
+
+        if (sleepUntil(() ->
+        {
+            OfferSnapshot snapshot = offer(slot);
+            return snapshot != null && snapshot.price == newPrice;
+        }, 3000)) return true;
+
+        status = Rs2GrandExchange.isOpen() ? "Waiting for modified GE price" : "GE closed after price modify - recovering";
+        return false;
     }
+
+    private boolean geSetupOpen() { return Rs2Widget.isWidgetVisible(InterfaceID.GeOffers.SETUP); }
 
     private boolean gePriceInputOpen() { return Rs2Widget.getWidget(InterfaceID.Chatbox.MES_TEXT2) != null; }
 
