@@ -1,6 +1,7 @@
 package net.runelite.client.plugins.microbot.kspf2phighalchtrader;
 
 import com.google.inject.Provides;
+import net.runelite.client.callback.ClientThread;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.game.ItemManager;
 import net.runelite.client.plugins.Plugin;
@@ -22,7 +23,7 @@ import javax.inject.Inject;
 )
 public class KspF2PHighAlchTraderPlugin extends Plugin
 {
-    public static final String VERSION = "0.2.8";
+    public static final String VERSION = "0.2.9";
 
     @Inject
     private KspF2PHighAlchTraderConfig config;
@@ -39,6 +40,9 @@ public class KspF2PHighAlchTraderPlugin extends Plugin
     @Inject
     private ItemManager itemManager;
 
+    @Inject
+    private ClientThread clientThread;
+
     private KspHighAlchMarketCache marketCache;
 
     @Provides
@@ -50,13 +54,21 @@ public class KspF2PHighAlchTraderPlugin extends Plugin
     @Override
     protected void startUp()
     {
-        // Warm Microbot's one-minute GE cache before the script starts. The helper
-        // then refreshes it with one bulk Wiki request instead of one request/item.
-        marketCache = new KspHighAlchMarketCache(itemManager);
-        marketCache.start(config);
-
+        // Source-loaded plugins start on Swing/EDT. RuneLite ItemManager price reads reach
+        // client item definitions, so prime the fallback on ClientThread before the trader
+        // begins scanning and can fall through to Microbot's per-item network path.
+        KspHighAlchMarketCache cache = new KspHighAlchMarketCache(itemManager, clientThread);
+        marketCache = cache;
         overlayManager.add(overlay);
-        script.run(config);
+
+        cache.start(config, () ->
+        {
+            // Ignore a delayed callback from a cache that was already shut down/replaced.
+            if (marketCache == cache)
+            {
+                script.run(config);
+            }
+        });
     }
 
     @Override

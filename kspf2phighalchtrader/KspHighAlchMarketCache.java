@@ -4,6 +4,7 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import lombok.extern.slf4j.Slf4j;
+import net.runelite.client.callback.ClientThread;
 import net.runelite.client.game.ItemManager;
 import net.runelite.client.plugins.microbot.util.grandexchange.Rs2GrandExchange;
 import net.runelite.client.plugins.microbot.util.grandexchange.models.WikiPrice;
@@ -21,11 +22,12 @@ import java.util.Set;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * Keeps Microbot's GE price cache warm from one bulk OSRS Wiki request instead of
- * making one HTTP request per High Alch candidate. This prevents transient Wiki
- * timeouts from stalling a full market scan.
+ * making one HTTP request per High Alch candidate. Any RuneLite ItemManager fallback
+ * reads are explicitly routed through the client thread.
  */
 @Slf4j
 final class KspHighAlchMarketCache implements AutoCloseable
@@ -38,6 +40,7 @@ final class KspHighAlchMarketCache implements AutoCloseable
     private static final double FALLBACK_BUY_PREMIUM = 1.02;
 
     private final ItemManager itemManager;
+    private final ClientThread clientThread;
     private final ScheduledExecutorService executor = Executors.newSingleThreadScheduledExecutor(r ->
     {
         Thread thread = new Thread(r, "ksp-high-alch-market-cache");
@@ -50,27 +53,42 @@ final class KspHighAlchMarketCache implements AutoCloseable
         .build();
 
     private final Map<Integer, WikiPrice> targetCache;
+    private final AtomicBoolean fallbackQueued = new AtomicBoolean(false);
     private volatile Map<Integer, PricePoint> lastLiveSnapshot = Collections.emptyMap();
     private volatile long lastLiveAt;
     private volatile boolean closed;
     private volatile boolean outageLogged;
     private KspF2PHighAlchTraderConfig config;
 
-    KspHighAlchMarketCache(ItemManager itemManager)
+    KspHighAlchMarketCache(ItemManager itemManager, ClientThread clientThread)
     {
         this.itemManager = itemManager;
+        this.clientThread = clientThread;
         this.targetCache = resolveMicrobotPriceCache();
     }
 
-    void start(KspF2PHighAlchTraderConfig config)
+    /**
+     * Prime the local fallback on RuneLite's client thread before starting the trader.
+     * The bulk HTTP refresher remains completely off the client thread.
+     */
+    void start(KspF2PHighAlchTraderConfig config, Runnable onPrimed)
     {
         this.config = config;
-
-        // Prime immediately from RuneLite's local price cache so the trader never has
-        // to fall through to Microbot's per-item HTTP path during startup.
-        publishFallback();
-
         executor.scheduleWithFixedDelay(this::refreshSafely, 0L, REFRESH_SECONDS, TimeUnit.SECONDS);
+
+        runOnClientThread(() ->
+        {
+            if (closed)
+            {
+                return;
+            }
+
+            publishFallbackOnClientThread();
+            if (!closed && onPrimed != null)
+            {
+                onPrimed.run();
+            }
+        });
     }
 
     boolean isAvailable()
@@ -121,7 +139,9 @@ final class KspHighAlchMarketCache implements AutoCloseable
             }
             else
             {
-                publishFallback();
+                // ItemManager.getItemPrice() reaches client item definitions and must never
+                // execute on this background HTTP worker.
+                requestFallbackPublish();
             }
         }
     }
@@ -130,7 +150,7 @@ final class KspHighAlchMarketCache implements AutoCloseable
     {
         HttpRequest request = HttpRequest.newBuilder()
             .uri(URI.create(LATEST_URL))
-            .header("User-Agent", "KSP-High-Alch-Trader/0.2.8 (github.com/KSPOG/ksppluginsrelease)")
+            .header("User-Agent", "KSP-High-Alch-Trader/0.2.9 (github.com/KSPOG/ksppluginsrelease)")
             .timeout(Duration.ofSeconds(8))
             .GET()
             .build();
@@ -186,7 +206,57 @@ final class KspHighAlchMarketCache implements AutoCloseable
         return result;
     }
 
-    private void publishFallback()
+    /**
+     * Coalesce fallback requests and execute the complete fallback build on the client
+     * thread. F2PAlchCatalog may also resolve item names through RuneLite/Microbot item
+     * definitions, so the whole block belongs on the client thread, not just getItemPrice().
+     */
+    private void requestFallbackPublish()
+    {
+        if (closed || targetCache == null || itemManager == null)
+        {
+            return;
+        }
+
+        if (clientThread != null && clientThread.isClientThread())
+        {
+            publishFallbackOnClientThread();
+            return;
+        }
+
+        if (!fallbackQueued.compareAndSet(false, true))
+        {
+            return;
+        }
+
+        try
+        {
+            runOnClientThread(() ->
+            {
+                try
+                {
+                    if (!closed)
+                    {
+                        publishFallbackOnClientThread();
+                    }
+                }
+                finally
+                {
+                    fallbackQueued.set(false);
+                }
+            });
+        }
+        catch (RuntimeException ex)
+        {
+            fallbackQueued.set(false);
+            if (!closed)
+            {
+                log.warn("KSP High Alch Trader could not queue client-thread fallback: {}", ex.getMessage());
+            }
+        }
+    }
+
+    private void publishFallbackOnClientThread()
     {
         if (closed || targetCache == null || itemManager == null)
         {
@@ -241,6 +311,28 @@ final class KspHighAlchMarketCache implements AutoCloseable
         }
     }
 
+    private void runOnClientThread(Runnable task)
+    {
+        if (task == null || closed)
+        {
+            return;
+        }
+
+        if (clientThread == null || clientThread.isClientThread())
+        {
+            task.run();
+            return;
+        }
+
+        clientThread.invokeLater(() ->
+        {
+            if (!closed)
+            {
+                task.run();
+            }
+        });
+    }
+
     @SuppressWarnings("unchecked")
     private static Map<Integer, WikiPrice> resolveMicrobotPriceCache()
     {
@@ -281,6 +373,7 @@ final class KspHighAlchMarketCache implements AutoCloseable
     public void close()
     {
         closed = true;
+        fallbackQueued.set(false);
         executor.shutdownNow();
     }
 
