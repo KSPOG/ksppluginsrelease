@@ -18,7 +18,7 @@ import javax.inject.Inject;
 @Slf4j
 public class KspSmartSuperheatPlugin extends Plugin
 {
-    public static final String VERSION = "0.1.1";
+    public static final String VERSION = "0.1.2";
     @Inject private KspSmartSuperheatConfig config;
     @Inject private KspSmartSuperheatScript script;
     @Inject private KspSmartSuperheatOverlay overlay;

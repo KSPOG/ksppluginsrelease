@@ -4,6 +4,7 @@ import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.GrandExchangeOffer;
 import net.runelite.api.GrandExchangeOfferState;
 import net.runelite.api.Skill;
+import net.runelite.api.widgets.Widget;
 import net.runelite.api.gameval.InterfaceID;
 import net.runelite.api.gameval.ItemID;
 import net.runelite.client.plugins.microbot.Microbot;
@@ -16,6 +17,7 @@ import net.runelite.client.plugins.microbot.util.grandexchange.GrandExchangeSlot
 import net.runelite.client.plugins.microbot.util.grandexchange.Rs2GrandExchange;
 import net.runelite.client.plugins.microbot.util.inventory.Rs2Inventory;
 import net.runelite.client.plugins.microbot.util.magic.Rs2Magic;
+import net.runelite.client.plugins.microbot.util.keyboard.Rs2Keyboard;
 import net.runelite.client.plugins.microbot.util.player.Rs2Player;
 import net.runelite.client.plugins.microbot.util.widget.Rs2Widget;
 
@@ -32,7 +34,7 @@ import static net.runelite.client.plugins.microbot.util.Global.sleepUntil;
 @Slf4j
 public class KspSmartSuperheatScript extends Script
 {
-    private static final int LOOP_MS = 650, BANK_GROUP = 12, BANK_ROOT = 1, MAX_GE_ATTEMPTS = 5;
+    private static final int LOOP_MS = 650, BANK_GROUP = 12, BANK_ROOT = 1, GE_PRICE_X_CHILD = 12, MAX_GE_ATTEMPTS = 5;
     private static final String[] FIRE_STAVES = {"Staff of fire", "Fire battlestaff", "Mystic fire staff", "Lava battlestaff", "Mystic lava staff", "Steam battlestaff", "Mystic steam staff", "Smoke battlestaff", "Mystic smoke staff"};
 
     private KspSmartSuperheatConfig config;
@@ -232,10 +234,13 @@ public class KspSmartSuperheatScript extends Script
             if (!sleepUntil(() -> Rs2Inventory.itemQuantity(activeRecipe.getOutputId()) == 0, 3000)) return;
         }
         if (!bankMode(false)) return;
-        int qty = Math.min(wanted, Rs2Bank.count(activeRecipe.getOutputId()));
-        if (qty <= 0) { unsold.put(activeRecipe, 0); state = SmartSuperheatState.RESTOCKING; return; }
-        status = "Withdrawing noted " + activeRecipe.getOutputName();
-        if (!Rs2Bank.withdrawX(activeRecipe.getOutputName(), qty, true) || !sleepUntil(() -> Rs2Inventory.itemQuantity(activeRecipe.getOutputName(), true) >= qty, 5000)) return;
+        int bankQty = Rs2Bank.count(activeRecipe.getOutputId());
+        if (bankQty <= 0) { unsold.put(activeRecipe, 0); state = SmartSuperheatState.RESTOCKING; return; }
+        status = "Withdrawing all noted " + activeRecipe.getOutputName();
+        if (!Rs2Bank.withdrawAll(activeRecipe.getOutputName(), true)
+            || !sleepUntil(() -> Rs2Inventory.itemQuantity(activeRecipe.getOutputName(), true) >= bankQty, 5000)) return;
+        int qty = Rs2Inventory.itemQuantity(activeRecipe.getOutputName(), true);
+        if (qty <= 0) { status = "Noted output withdrawal failed"; return; }
         Rs2Bank.closeBank();
         if (!sleepUntil(() -> !Rs2Bank.isOpen(), 3000)) return;
         activeQuote = prices.quote(activeRecipe, config, freeFireRunes);
@@ -273,7 +278,7 @@ public class KspSmartSuperheatScript extends Script
         }
         if (s.state == GrandExchangeOfferState.EMPTY) { o.slot = null; o.placedAt = 0; return; }
         status = (o.action == GrandExchangeAction.BUY ? "Buying " : "Selling ") + o.itemName + " (slot " + (o.slot.ordinal() + 1) + ")";
-        if (o.placedAt > 0 && System.currentTimeMillis() - o.placedAt >= config.geOfferTimeoutSeconds() * 1000L) cancelOrder(o, s.filled);
+        if (o.placedAt > 0 && System.currentTimeMillis() - o.placedAt >= config.geOfferTimeoutSeconds() * 1000L) modifyOrder(o);
     }
 
     private void placeOrder(GeOrder o)
@@ -302,26 +307,73 @@ public class KspSmartSuperheatScript extends Script
         if (o.slot == null) status = "Waiting for GE slot confirmation: " + o.itemName;
     }
 
-    private void cancelOrder(GeOrder o, int filled)
+    private void modifyOrder(GeOrder o)
     {
         if (o.slot == null) { o.placedAt = 0; return; }
-        status = "GE timeout - cancelling " + o.itemName;
-
-        // Current Microbot requires a list of slots plus the collection destination.
-        // The helper also collects the cancelled offer, so do not collect the same slot twice.
-        Rs2GrandExchange.cancelSpecificOffers(Collections.singletonList(o.slot), true);
-        if (!sleepUntil(() -> {
-            OfferSnapshot snapshot = offer(o.slot);
-            return snapshot == null || snapshot.state == GrandExchangeOfferState.EMPTY;
-        }, 5000))
+        if (o.retry >= MAX_GE_ATTEMPTS)
         {
-            status = "Waiting for GE cancellation: " + o.itemName;
+            o.placedAt = System.currentTimeMillis();
+            status = "Waiting at final " + (o.action == GrandExchangeAction.BUY ? "buy" : "sell") + " price: " + o.itemName;
             return;
         }
-
-        sleep(300, 500);
-        finishOrder(o, Math.max(0, filled), true);
+        int next = o.retry + 1;
+        int price = o.action == GrandExchangeAction.BUY
+            ? prices.buyOfferPrice(o.itemId, config.buyMarkupPercent(), next)
+            : prices.sellOfferPrice(o.itemId, config.sellDiscountPercent(), next);
+        if (price <= 0 || price == o.price)
+        {
+            o.placedAt = System.currentTimeMillis();
+            status = "No updated GE price - keeping offer: " + o.itemName;
+            return;
+        }
+        if (!modifyGeOffer(o.slot, price)) return;
+        o.retry = next;
+        o.price = price;
+        o.placedAt = System.currentTimeMillis();
+        status = "Modified " + (o.action == GrandExchangeAction.BUY ? "buy" : "sell") + " price: " + o.itemName + " (retry " + o.retry + ")";
     }
+
+    private boolean modifyGeOffer(GrandExchangeSlots slot, int newPrice)
+    {
+        if (slot == null || newPrice <= 0 || !ensureGeOverview()) return false;
+        OfferSnapshot current = offer(slot);
+        if (current != null && current.price == newPrice) return true;
+
+        Widget slotWidget = Rs2Widget.getWidget(InterfaceID.GeOffers.INDEX_0 + slot.ordinal());
+        if (slotWidget == null) { status = "Waiting for GE slot widget"; return false; }
+        status = "Opening GE Modify offer";
+        Rs2Widget.clickWidgetFast(slotWidget, 2, 3);
+        if (!sleepUntil(() -> geSubScreen() || !Rs2GrandExchange.isOpen(), 3500) || !Rs2GrandExchange.isOpen()) return false;
+
+        if (!Rs2Widget.isWidgetVisible(InterfaceID.GeOffers.SETUP))
+        {
+            Widget modify = Rs2Widget.getWidget(InterfaceID.GeOffers.DETAILS_MODIFY);
+            if (modify == null || !Rs2Widget.clickWidget(modify)
+                || !sleepUntil(() -> Rs2Widget.isWidgetVisible(InterfaceID.GeOffers.SETUP) || !Rs2GrandExchange.isOpen(), 3000)) return false;
+        }
+
+        Widget setup = Rs2Widget.getWidget(InterfaceID.GeOffers.SETUP);
+        Widget priceX = setup == null ? null : setup.getChild(GE_PRICE_X_CHILD);
+        if (priceX == null || !Rs2Widget.clickWidget(priceX)
+            || !sleepUntil(() -> gePriceInputOpen() || !Rs2GrandExchange.isOpen(), 2500)) return false;
+
+        Rs2GrandExchange.setChatboxValue(newPrice);
+        sleep(120, 220);
+        Rs2Keyboard.enter();
+        if (!sleepUntil(() -> !gePriceInputOpen() || !Rs2GrandExchange.isOpen(), 2500) || !Rs2GrandExchange.isOpen()) return false;
+
+        status = "Confirming modified GE price";
+        if (!Rs2Widget.clickWidget(InterfaceID.GeOffers.SETUP_CONFIRM)) return false;
+        sleepUntil(() -> !Rs2Widget.isWidgetVisible(InterfaceID.GeOffers.SETUP) || Rs2Widget.hasWidget("Your offer is much") || !Rs2GrandExchange.isOpen(), 3000);
+        if (Rs2Widget.hasWidget("Your offer is much"))
+        {
+            Rs2Widget.clickWidget("Yes");
+            sleepUntil(() -> !Rs2Widget.isWidgetVisible(InterfaceID.GeOffers.SETUP) || !Rs2GrandExchange.isOpen(), 3000);
+        }
+        return sleepUntil(() -> { OfferSnapshot snapshot = offer(slot); return snapshot != null && snapshot.price == newPrice; }, 3000);
+    }
+
+    private boolean gePriceInputOpen() { return Rs2Widget.getWidget(InterfaceID.Chatbox.MES_TEXT2) != null; }
 
     private void finishOrder(GeOrder o, int filled, boolean partial)
     {
@@ -505,9 +557,9 @@ public class KspSmartSuperheatScript extends Script
         return Microbot.getClientThread().runOnClientThreadOptional(() -> {
             GrandExchangeOffer[] offers = Microbot.getClient().getGrandExchangeOffers();
             int i = slot.ordinal();
-            if (offers == null || i >= offers.length || offers[i] == null) return new OfferSnapshot(0, GrandExchangeOfferState.EMPTY, 0);
+            if (offers == null || i >= offers.length || offers[i] == null) return new OfferSnapshot(0, GrandExchangeOfferState.EMPTY, 0, 0);
             GrandExchangeOffer o = offers[i];
-            return new OfferSnapshot(o.getItemId(), o.getState(), o.getQuantitySold());
+            return new OfferSnapshot(o.getItemId(), o.getState(), o.getQuantitySold(), o.getPrice());
         }).orElse(null);
     }
 
@@ -551,14 +603,14 @@ public class KspSmartSuperheatScript extends Script
 
     private static final class GeOrder
     {
-        final GrandExchangeAction action; final int itemId, quantity, price; final String itemName;
-        GrandExchangeSlots slot; long placedAt; int attempts;
+        final GrandExchangeAction action; final int itemId, quantity; final String itemName; int price;
+        GrandExchangeSlots slot; long placedAt; int attempts, retry;
         GeOrder(GrandExchangeAction action, int itemId, String itemName, int quantity, int price) { this.action = action; this.itemId = itemId; this.itemName = itemName; this.quantity = quantity; this.price = price; }
     }
 
     private static final class OfferSnapshot
     {
-        final int itemId, filled; final GrandExchangeOfferState state;
-        OfferSnapshot(int itemId, GrandExchangeOfferState state, int filled) { this.itemId = itemId; this.state = state; this.filled = filled; }
+        final int itemId, filled, price; final GrandExchangeOfferState state;
+        OfferSnapshot(int itemId, GrandExchangeOfferState state, int filled, int price) { this.itemId = itemId; this.state = state; this.filled = filled; this.price = price; }
     }
 }
