@@ -118,7 +118,7 @@ final class BondTradeLimitService implements AutoCloseable
             throw new IllegalStateException("OSRS Wiki mapping HTTP " + response.statusCode());
         }
 
-        JsonElement root = JsonParser.parseString(response.body());
+        JsonElement root = new JsonParser().parse(response.body());
         if (!root.isJsonArray())
         {
             throw new IllegalStateException("Unexpected OSRS Wiki mapping response");
