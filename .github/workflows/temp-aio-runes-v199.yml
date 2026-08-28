@@ -1,0 +1,68 @@
+name: AioRunePreserveV199
+
+on:
+  push:
+    branches:
+      - fix/aio-fighter-preserve-spell-runes
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/aio-fighter-preserve-spell-runes
+
+      - name: Patch AIO Fighter rune preservation
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          script = Path('kspaiofighter/KspAioFighterScript.java')
+          text = script.read_text()
+          old = '''\tprivate void depositAllExceptProtectedRunes()\n\t{\n\t\tif (config.highAlchLoot())\n\t\t{\n\t\t\tRs2Bank.depositAllExcept(Runes.NATURE.getItemId(), Runes.FIRE.getItemId());\n\t\t\treturn;\n\t\t}\n\n\t\tRs2Bank.depositAll();\n\t}\n'''
+          new = '''\tprivate void depositAllExceptProtectedRunes()\n\t{\n\t\tSet<Integer> protectedRunes = new HashSet<>();\n\n\t\t// Combat runes are stackable. Keep every rune stack used by the configured spell\n\t\t// instead of depositing and immediately withdrawing it again on each bank trip.\n\t\t// Preserve the stack even when equipment currently supplies that element.\n\t\tif (config.trainMagic() && getLevel(Skill.MAGIC) < config.magicTarget())\n\t\t{\n\t\t\tgetSpellRuneRequirements(config.magicSpell()).keySet().stream()\n\t\t\t\t\t.map(Runes::getItemId)\n\t\t\t\t\t.forEach(protectedRunes::add);\n\t\t}\n\n\t\tif (config.highAlchLoot())\n\t\t{\n\t\t\tprotectedRunes.add(Runes.NATURE.getItemId());\n\t\t\tprotectedRunes.add(Runes.FIRE.getItemId());\n\t\t}\n\n\t\tif (protectedRunes.isEmpty())\n\t\t{\n\t\t\tRs2Bank.depositAll();\n\t\t\treturn;\n\t\t}\n\n\t\tRs2Bank.depositAllExcept(protectedRunes.toArray(new Integer[0]));\n\t}\n'''
+          if old not in text:
+              raise SystemExit('depositAllExceptProtectedRunes block not found')
+          script.write_text(text.replace(old, new, 1))
+
+          plugin = Path('kspaiofighter/KspAioFighterPlugin.java')
+          ptext = plugin.read_text()
+          old_version = 'static final String version = "1.9.8";'
+          if old_version not in ptext:
+              raise SystemExit('expected AIO Fighter version not found')
+          plugin.write_text(ptext.replace(old_version, 'static final String version = "1.9.9";', 1))
+          PY
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '11'
+
+      - uses: actions/checkout@v4
+        with:
+          repository: chsami/Microbot
+          path: microbot
+
+      - name: Compile AIO Fighter against Microbot
+        shell: bash
+        run: |
+          rm -rf microbot/runelite-client/src/main/java/net/runelite/client/plugins/microbot/kspaiofighter
+          cp -R kspaiofighter microbot/runelite-client/src/main/java/net/runelite/client/plugins/microbot/kspaiofighter
+          cd microbot
+          chmod +x gradlew
+          ./gradlew :client:compileJava --no-daemon
+
+      - name: Commit fix and remove temporary workflow
+        shell: bash
+        run: |
+          rm .github/workflows/temp-aio-runes-v199.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add kspaiofighter .github/workflows/temp-aio-runes-v199.yml
+          git commit -m "Preserve configured spell rune stacks while banking"
+          git push origin HEAD:fix/aio-fighter-preserve-spell-runes
