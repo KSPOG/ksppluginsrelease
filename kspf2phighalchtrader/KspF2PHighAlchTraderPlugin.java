@@ -2,6 +2,7 @@ package net.runelite.client.plugins.microbot.kspf2phighalchtrader;
 
 import com.google.inject.Provides;
 import net.runelite.client.config.ConfigManager;
+import net.runelite.client.game.ItemManager;
 import net.runelite.client.plugins.Plugin;
 import net.runelite.client.plugins.PluginDescriptor;
 import net.runelite.client.plugins.microbot.PluginConstants;
@@ -21,7 +22,7 @@ import javax.inject.Inject;
 )
 public class KspF2PHighAlchTraderPlugin extends Plugin
 {
-    public static final String VERSION = "0.2.7";
+    public static final String VERSION = "0.2.8";
 
     @Inject
     private KspF2PHighAlchTraderConfig config;
@@ -35,6 +36,11 @@ public class KspF2PHighAlchTraderPlugin extends Plugin
     @Inject
     private OverlayManager overlayManager;
 
+    @Inject
+    private ItemManager itemManager;
+
+    private KspHighAlchMarketCache marketCache;
+
     @Provides
     KspF2PHighAlchTraderConfig provideConfig(ConfigManager configManager)
     {
@@ -44,6 +50,11 @@ public class KspF2PHighAlchTraderPlugin extends Plugin
     @Override
     protected void startUp()
     {
+        // Warm Microbot's one-minute GE cache before the script starts. The helper
+        // then refreshes it with one bulk Wiki request instead of one request/item.
+        marketCache = new KspHighAlchMarketCache(itemManager);
+        marketCache.start(config);
+
         overlayManager.add(overlay);
         script.run(config);
     }
@@ -51,6 +62,13 @@ public class KspF2PHighAlchTraderPlugin extends Plugin
     @Override
     protected void shutDown()
     {
+        KspHighAlchMarketCache cache = marketCache;
+        marketCache = null;
+        if (cache != null)
+        {
+            cache.close();
+        }
+
         script.shutdown();
         overlayManager.remove(overlay);
     }
