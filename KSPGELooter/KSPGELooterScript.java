@@ -16,6 +16,7 @@ import net.runelite.client.plugins.microbot.util.inventory.Rs2Inventory;
 import net.runelite.client.plugins.microbot.util.inventory.Rs2ItemModel;
 import net.runelite.client.plugins.microbot.util.magic.Rs2Magic;
 import net.runelite.client.plugins.microbot.util.player.Rs2Player;
+import net.runelite.client.plugins.microbot.util.walker.Rs2Walker;
 
 import java.time.Duration;
 import java.util.Comparator;
@@ -98,12 +99,20 @@ public class KSPGELooterScript extends Script
                 updateOverlayState();
                 if (!insideArea)
                 {
+                    Rs2Walker.clearWalkingRoute("ge-looter-outside-area");
                     releasePriorityPause("Outside GE area");
                     status = "OUTSIDE AREA - PAUSED";
                     groundItemsSeen = eligibleGroundItems = 0;
                     clearTarget();
                     if (Rs2Bank.isOpen()) Rs2Bank.closeBank();
                     return;
+                }
+
+                WorldPoint walkerTarget = Rs2Walker.getCurrentTarget();
+                if (walkerTarget != null && !KSPGELooterArea.contains(walkerTarget))
+                {
+                    Rs2Walker.clearWalkingRoute("ge-looter-hard-area-guard");
+                    status = "AREA GUARD - blocked outbound walk";
                 }
 
                 refreshRunePricesIfNeeded();
@@ -194,6 +203,10 @@ public class KSPGELooterScript extends Script
     private void beginPriorityTakeover()
     {
         priorityTakeoverActive = true;
+
+        // pauseAllScripts is cooperative, so also cancel any in-flight shared walker route now.
+        Rs2Walker.clearWalkingRoute("ge-looter-priority-takeover");
+
         if (ownsPriorityPause)
         {
             priorityPauseOwned = true;
@@ -203,7 +216,7 @@ public class KSPGELooterScript extends Script
         if (Microbot.pauseAllScripts.compareAndSet(false, true))
         {
             ownsPriorityPause = priorityPauseOwned = true;
-            Microbot.log("KSP GE Looter Priority Mode: paused other scripts for loot");
+            Microbot.log("KSP GE Looter Priority Mode: paused other scripts and cancelled active walk for loot");
         }
         else
         {
