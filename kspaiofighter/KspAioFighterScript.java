@@ -44,6 +44,8 @@ import net.runelite.client.plugins.microbot.util.keyboard.Rs2Keyboard;
 import net.runelite.client.plugins.microbot.util.magic.Rs2Magic;
 import net.runelite.client.plugins.microbot.util.magic.Rs2CombatSpells;
 import net.runelite.client.plugins.microbot.util.magic.Runes;
+import net.runelite.client.plugins.microbot.util.magic.Rs2Staff;
+import net.runelite.client.plugins.microbot.util.magic.Rs2Tome;
 import net.runelite.client.plugins.microbot.util.magic.Rs2Spells;
 import net.runelite.client.plugins.microbot.util.misc.Rs2Food;
 import net.runelite.client.plugins.microbot.util.npc.Rs2NpcManager;
@@ -731,7 +733,7 @@ public class KspAioFighterScript extends Script
 		}
 
 		List<String> missingRunes = new ArrayList<>();
-		int natureDeficit = HIGH_ALCH_NATURE_RUNES_PER_CAST - Rs2Inventory.count(Runes.NATURE.getItemId());
+		int natureDeficit = HIGH_ALCH_NATURE_RUNES_PER_CAST - runeQuantity(Runes.NATURE);
 		if (natureDeficit > 0 && !Rs2Bank.hasItem(Runes.NATURE.getItemId()))
 		{
 			missingRunes.add(formatRuneName(Runes.NATURE) + " x" + natureDeficit);
@@ -739,7 +741,7 @@ public class KspAioFighterScript extends Script
 
 		if (!isRuneCoveredByEquipment(Runes.FIRE))
 		{
-			int fireDeficit = HIGH_ALCH_FIRE_RUNES_PER_CAST - Rs2Inventory.count(Runes.FIRE.getItemId());
+			int fireDeficit = HIGH_ALCH_FIRE_RUNES_PER_CAST - runeQuantity(Runes.FIRE);
 			if (fireDeficit > 0 && !Rs2Bank.hasItem(Runes.FIRE.getItemId()))
 			{
 				missingRunes.add(formatRuneName(Runes.FIRE) + " x" + fireDeficit);
@@ -750,9 +752,9 @@ public class KspAioFighterScript extends Script
 
 	private boolean hasHighAlchRunes(int casts)
 	{
-		boolean hasNatureRunes = Rs2Inventory.count(Runes.NATURE.getItemId()) >= HIGH_ALCH_NATURE_RUNES_PER_CAST * casts;
+		boolean hasNatureRunes = runeQuantity(Runes.NATURE) >= HIGH_ALCH_NATURE_RUNES_PER_CAST * casts;
 		boolean hasFireRunes = isRuneCoveredByEquipment(Runes.FIRE)
-				|| Rs2Inventory.count(Runes.FIRE.getItemId()) >= HIGH_ALCH_FIRE_RUNES_PER_CAST * casts;
+				|| runeQuantity(Runes.FIRE) >= HIGH_ALCH_FIRE_RUNES_PER_CAST * casts;
 		return hasNatureRunes && hasFireRunes;
 	}
 
@@ -835,7 +837,7 @@ public class KspAioFighterScript extends Script
 			}
 
 			int requiredAmount = runeRequirement.getValue();
-			int deficit = requiredAmount - Rs2Inventory.count(rune.getItemId());
+			int deficit = requiredAmount - runeQuantity(rune);
 			if (deficit > 0 && !Rs2Bank.hasItem(rune.getItemId()))
 			{
 				missingRunes.add(formatRuneName(rune) + " x" + deficit);
@@ -851,23 +853,23 @@ public class KspAioFighterScript extends Script
 			return;
 		}
 
-		int before = Rs2Inventory.count(rune.getItemId());
+		int before = runeQuantity(rune);
 		setStatus("withdrawing all " + formatRuneName(rune));
 		boolean withdrawn = invokeBankWithdrawAll(rune.getItemId()) || invokeBankWithdrawAll(formatRuneName(rune));
 		if (!withdrawn)
 		{
 			Rs2Bank.withdrawX(rune.getItemId(), Integer.MAX_VALUE);
 		}
-		sleepUntil(() -> Rs2Inventory.count(rune.getItemId()) > before || !Rs2Bank.hasItem(rune.getItemId()), 2_500);
+		sleepUntil(() -> runeQuantity(rune) > before || !Rs2Bank.hasItem(rune.getItemId()), 2_500);
 	}
 
 	private void withdrawRuneDeficit(Runes rune, int requiredAmount)
 	{
-		int deficit = requiredAmount - Rs2Inventory.count(rune.getItemId());
+		int deficit = requiredAmount - runeQuantity(rune);
 		if (deficit > 0 && Rs2Bank.hasItem(rune.getItemId()))
 		{
 			Rs2Bank.withdrawX(rune.getItemId(), deficit);
-			sleepUntil(() -> Rs2Inventory.count(rune.getItemId()) >= requiredAmount, 2_000);
+			sleepUntil(() -> runeQuantity(rune) >= requiredAmount, 2_000);
 		}
 	}
 
@@ -909,20 +911,35 @@ public class KspAioFighterScript extends Script
 	{
 		return getSpellRuneRequirements(config.magicSpell()).entrySet().stream()
 				.allMatch(runeRequirement -> isRuneCoveredByEquipment(runeRequirement.getKey())
-						|| Rs2Inventory.count(runeRequirement.getKey().getItemId()) >= runeRequirement.getValue() * casts);
+						|| runeQuantity(runeRequirement.getKey()) >= runeRequirement.getValue() * casts);
+	}
+
+	private int runeQuantity(Runes rune)
+	{
+		return rune == null ? 0 : Rs2Inventory.itemQuantity(rune.getItemId());
 	}
 
 	private boolean isRuneCoveredByEquipment(Runes rune)
 	{
-		String[] staffNames = ELEMENTAL_STAFF_NAMES.get(rune);
-		if (staffNames == null)
+		if (rune == null) return false;
+
+		// Prefer Microbot's canonical item-ID mappings. This avoids staff-name/cache
+		// mismatches and automatically covers combination staves such as Twinflame.
+		for (Rs2Staff staff : Rs2Staff.values())
 		{
-			return false;
+			if (staff != Rs2Staff.NONE && staff.getRunes().contains(rune)
+					&& Rs2Equipment.isWearing(staff.getItemID())) return true;
+		}
+		for (Rs2Tome tome : Rs2Tome.values())
+		{
+			if (tome != Rs2Tome.NONE && tome.getRunes().contains(rune)
+					&& Rs2Equipment.isWearing(tome.getItemID())) return true;
 		}
 
-		return Rs2Equipment.items().stream()
-				.map(item -> item.getName().toLowerCase(Locale.ENGLISH))
-				.anyMatch(equippedName -> Arrays.stream(staffNames).anyMatch(equippedName::contains));
+		// Keep the old name fallback for valid rune sources not yet present in the
+		// Microbot enum (for example Kodai wand in the water list).
+		String[] staffNames = ELEMENTAL_STAFF_NAMES.get(rune);
+		return staffNames != null && Rs2Equipment.isWearing(staffNames);
 	}
 
 	private void healIfNeeded()
