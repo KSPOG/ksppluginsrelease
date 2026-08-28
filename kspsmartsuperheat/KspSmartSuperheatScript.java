@@ -69,7 +69,13 @@ public class KspSmartSuperheatScript extends Script
         geOrder = null;
         mainScheduledFuture = scheduledExecutorService.scheduleWithFixedDelay(() -> {
             try { if (super.run() && Microbot.isLoggedIn()) tick(); }
-            catch (Exception e) { state = SmartSuperheatState.ERROR; status = "Error - check log"; log.error("Smart Superheat tick failed", e); }
+            catch (Exception e)
+            {
+                // Priority plugins pause cooperatively; an already-running bank call may lose its widget mid-action.
+                // Treat that as a transient handoff and retry the same state after the pause is released.
+                if (Microbot.pauseAllScripts.get()) { status = "Paused for priority plugin"; return; }
+                state = SmartSuperheatState.ERROR; status = "Error - check log"; log.error("Smart Superheat tick failed", e);
+            }
         }, 0, LOOP_MS, TimeUnit.MILLISECONDS);
         return true;
     }
@@ -522,21 +528,48 @@ public class KspSmartSuperheatScript extends Script
 
     private boolean allNatureRunes()
     {
+        if (!bankActionReady()) return false;
         int bank = Rs2Bank.count(ItemID.NATURERUNE), inventory = Rs2Inventory.itemQuantity(ItemID.NATURERUNE), total = bank + inventory;
         if (total <= 0) return false;
         if (bank <= 0) return true;
         status = "Withdrawing all Nature runes";
-        return Rs2Bank.withdrawAll(ItemID.NATURERUNE) && sleepUntil(() -> Rs2Inventory.itemQuantity(ItemID.NATURERUNE) >= total, 5000);
+        try
+        {
+            return bankActionReady() && Rs2Bank.withdrawAll(ItemID.NATURERUNE)
+                    && sleepUntil(() -> Rs2Inventory.itemQuantity(ItemID.NATURERUNE) >= total, 5000);
+        }
+        catch (RuntimeException e)
+        {
+            if (Microbot.pauseAllScripts.get() || !Rs2Bank.isOpen()) { status = "Bank handoff interrupted - recovering"; return false; }
+            throw e;
+        }
     }
 
     private boolean ensureQty(int id, int target, String name)
     {
+        if (!bankActionReady()) return false;
         int have = Rs2Inventory.itemQuantity(id);
         if (have >= target) return true;
         int need = target - have;
         if (Rs2Bank.count(id) < need) { status = "Not enough " + name; return false; }
         status = "Withdrawing " + need + " x " + name;
-        return Rs2Bank.withdrawX(id, need) && sleepUntil(() -> Rs2Inventory.itemQuantity(id) >= target, 4500);
+        try
+        {
+            return bankActionReady() && Rs2Bank.withdrawX(id, need)
+                    && sleepUntil(() -> Rs2Inventory.itemQuantity(id) >= target, 4500);
+        }
+        catch (RuntimeException e)
+        {
+            if (Microbot.pauseAllScripts.get() || !Rs2Bank.isOpen()) { status = "Bank handoff interrupted - recovering"; return false; }
+            throw e;
+        }
+    }
+
+    private boolean bankActionReady()
+    {
+        if (Microbot.pauseAllScripts.get()) { status = "Paused for priority plugin"; return false; }
+        if (!Rs2Bank.isOpen()) { status = "Bank closed - recovering"; return false; }
+        return true;
     }
 
     private boolean batchReady(int bars)

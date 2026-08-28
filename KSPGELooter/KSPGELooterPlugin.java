@@ -20,7 +20,7 @@ import javax.inject.Inject;
 )
 public class KSPGELooterPlugin extends Plugin
 {
-    public static final String VERSION = "0.1.6";
+    public static final String VERSION = "0.1.7";
 
     @Inject private KSPGELooterConfig config;
     @Inject private KSPGELooterScript script;

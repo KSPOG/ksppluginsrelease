@@ -38,6 +38,7 @@ public class KSPGELooterScript extends Script
     private static final long RUNE_PRICE_REFRESH_MS = 30_000L;
     private static final long HIGH_ALCH_COOLDOWN_MS = 3_000L;
     private static final long PRIORITY_RELEASE_GRACE_MS = 1_200L;
+    private static final long PRIORITY_HANDOFF_SETTLE_MS = 1_500L;
     private static final String STAFF_OF_FIRE = "Staff of fire";
 
     public static volatile String status = "Idle";
@@ -67,6 +68,8 @@ public class KSPGELooterScript extends Script
     private long lastRunePriceRefresh;
     private long lastAlchAt;
     private long priorityReleaseAt;
+    private long priorityHandoffReadyAt;
+    private volatile boolean stopping;
     private boolean ownsPriorityPause;
 
     public boolean run(KSPGELooterConfig config)
@@ -76,6 +79,7 @@ public class KSPGELooterScript extends Script
         mainScheduledFuture = scheduledExecutorService.scheduleWithFixedDelay(() -> {
             try
             {
+                if (stopping) return;
                 boolean baseCanRun = super.run();
                 boolean sharedPause = Microbot.pauseAllScripts.get();
 
@@ -106,7 +110,6 @@ public class KSPGELooterScript extends Script
                     status = "OUTSIDE AREA - PAUSED";
                     groundItemsSeen = eligibleGroundItems = 0;
                     clearTarget();
-                    if (Rs2Bank.isOpen()) Rs2Bank.closeBank();
                     return;
                 }
 
@@ -136,6 +139,15 @@ public class KSPGELooterScript extends Script
                         }
                         releasePriorityPause("No eligible loot remains");
                     }
+                }
+
+                // Pause first, then let an already-running bank/GE call finish before closing its UI.
+                if (priorityTakeoverActive
+                        && System.currentTimeMillis() < priorityHandoffReadyAt
+                        && (Rs2Bank.isOpen() || Rs2GrandExchange.isOpen()))
+                {
+                    status = "Priority handoff - waiting for active bank/GE action";
+                    return;
                 }
 
                 // Respect an external/global pause unless Priority Mode has an eligible target.
@@ -180,13 +192,15 @@ public class KSPGELooterScript extends Script
         itemsLooted = itemsAlched = groundItemsSeen = eligibleGroundItems = 0;
         natureRuneGePrice = fireRuneGePrice = natureRunes = fireRunes = 0;
         inventorySlotsUsed = inventoryItemCount();
-        priorityReleaseAt = lastAlchAt = lastRunePriceRefresh = 0L;
+        priorityReleaseAt = lastAlchAt = lastRunePriceRefresh = priorityHandoffReadyAt = 0L;
+        stopping = false;
         staffOfFireEquipped = insideArea = priorityTakeoverActive = priorityPauseOwned = ownsPriorityPause = false;
     }
 
     @Override
     public void shutdown()
     {
+        stopping = true;
         releasePriorityPause("Looter stopped");
         super.shutdown();
         status = "Stopped";
@@ -204,10 +218,16 @@ public class KSPGELooterScript extends Script
 
     private void beginPriorityTakeover()
     {
+        if (stopping) return;
+        boolean firstTakeover = !priorityTakeoverActive;
         priorityTakeoverActive = true;
 
-        // pauseAllScripts is cooperative, so also cancel any in-flight shared walker route now.
-        Rs2Walker.clearWalkingRoute("ge-looter-priority-takeover");
+        // Cancel walking once, then give any in-flight bank/GE call time to complete cooperatively.
+        if (firstTakeover)
+        {
+            Rs2Walker.clearWalkingRoute("ge-looter-priority-takeover");
+            priorityHandoffReadyAt = System.currentTimeMillis() + PRIORITY_HANDOFF_SETTLE_MS;
+        }
 
         if (ownsPriorityPause)
         {
@@ -218,12 +238,11 @@ public class KSPGELooterScript extends Script
         if (Microbot.pauseAllScripts.compareAndSet(false, true))
         {
             ownsPriorityPause = priorityPauseOwned = true;
-            Microbot.log("KSP GE Looter Priority Mode: paused other scripts and cancelled active walk for loot");
+            Microbot.log("KSP GE Looter Priority Mode: paused other scripts; waiting for safe UI handoff");
         }
         else
         {
-            // Another component already owns the shared pause. Looting may still proceed, but this
-            // plugin must never release a pause it did not acquire.
+            // Another component already owns the shared pause. Never release a pause we did not acquire.
             priorityPauseOwned = false;
         }
     }
@@ -232,7 +251,7 @@ public class KSPGELooterScript extends Script
     {
         priorityTakeoverActive = false;
         priorityPauseOwned = false;
-        priorityReleaseAt = 0L;
+        priorityReleaseAt = priorityHandoffReadyAt = 0L;
         if (!ownsPriorityPause) return;
 
         Microbot.pauseAllScripts.compareAndSet(true, false);
