@@ -119,14 +119,31 @@ public final class SuperheatPriceService
         return (int) Math.min(5_000_000L, tax);
     }
 
-    private static int buyPrice(int marketHigh, int markupPercent)
+    public int buyOfferPrice(int itemId, int markupPercent, int retry)
     {
-        return Math.max(1, (int) Math.ceil(marketHigh * (1.0 + Math.max(0, markupPercent) / 100.0)));
+        MarketPrice p = get(itemId);
+        return p == null ? -1 : adjustedBuy(p.high, markupPercent, retry);
     }
 
-    private static int sellPrice(int marketLow, int discountPercent)
+    public int sellOfferPrice(int itemId, int discountPercent, int retry)
     {
-        return Math.max(1, (int) Math.floor(marketLow * Math.max(0.01, 1.0 - Math.max(0, discountPercent) / 100.0)));
+        MarketPrice p = get(itemId);
+        return p == null ? -1 : adjustedSell(p.low, discountPercent, retry);
+    }
+
+    private static int buyPrice(int marketHigh, int markupPercent) { return adjustedBuy(marketHigh, markupPercent, 0); }
+    private static int sellPrice(int marketLow, int discountPercent) { return adjustedSell(marketLow, discountPercent, 0); }
+    private static int adjustedBuy(int market, int basePercent, int retry)
+    {
+        if (market <= 0) return -1;
+        double pct = Math.max(0, basePercent) + Math.max(0, retry) * 2.0;
+        return Math.max(1, (int) Math.ceil(market * (1.0 + pct / 100.0)));
+    }
+    private static int adjustedSell(int market, int basePercent, int retry)
+    {
+        if (market <= 0) return -1;
+        double pct = Math.max(0, basePercent) + Math.max(0, retry) * 2.0;
+        return Math.max(1, (int) Math.floor(market * Math.max(0.01, 1.0 - pct / 100.0)));
     }
 
     private static MarketPrice get(int itemId)
