@@ -1,0 +1,108 @@
+name: SafeLooterHandoff
+on:
+  push:
+    branches: [fix/ge-looter-safe-priority-handoff]
+permissions:
+  contents: write
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/ge-looter-safe-priority-handoff
+          fetch-depth: 0
+      - name: Patch cooperative handoff
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          p = Path('KSPGELooter/KSPGELooterScript.java')
+          s = p.read_text()
+          s = s.replace(
+              '    private static final long PRIORITY_RELEASE_GRACE_MS = 1_200L;\n',
+              '    private static final long PRIORITY_RELEASE_GRACE_MS = 1_200L;\n    private static final long PRIORITY_HANDOFF_SETTLE_MS = 1_500L;\n')
+          s = s.replace(
+              '    private long priorityReleaseAt;\n    private boolean ownsPriorityPause;\n',
+              '    private long priorityReleaseAt;\n    private long priorityHandoffReadyAt;\n    private volatile boolean stopping;\n    private boolean ownsPriorityPause;\n')
+          s = s.replace(
+              '            try\n            {\n                boolean baseCanRun = super.run();\n',
+              '            try\n            {\n                if (stopping) return;\n                boolean baseCanRun = super.run();\n')
+          s = s.replace(
+              '                    clearTarget();\n                    if (Rs2Bank.isOpen()) Rs2Bank.closeBank();\n                    return;\n',
+              '                    clearTarget();\n                    return;\n')
+          marker = '''                // Respect an external/global pause unless Priority Mode has an eligible target.\n                if (!baseCanRun && !priorityTakeoverActive) return;\n'''
+          replacement = '''                // Pause first, then let an already-running bank/GE call finish before closing its UI.\n                if (priorityTakeoverActive\n                        && System.currentTimeMillis() < priorityHandoffReadyAt\n                        && (Rs2Bank.isOpen() || Rs2GrandExchange.isOpen()))\n                {\n                    status = "Priority handoff - waiting for active bank/GE action";\n                    return;\n                }\n\n                // Respect an external/global pause unless Priority Mode has an eligible target.\n                if (!baseCanRun && !priorityTakeoverActive) return;\n'''
+          if marker not in s: raise SystemExit('priority insertion marker not found')
+          s = s.replace(marker, replacement)
+          s = s.replace(
+              '        priorityReleaseAt = lastAlchAt = lastRunePriceRefresh = 0L;\n        staffOfFireEquipped = insideArea = priorityTakeoverActive = priorityPauseOwned = ownsPriorityPause = false;\n',
+              '        priorityReleaseAt = lastAlchAt = lastRunePriceRefresh = priorityHandoffReadyAt = 0L;\n        stopping = false;\n        staffOfFireEquipped = insideArea = priorityTakeoverActive = priorityPauseOwned = ownsPriorityPause = false;\n')
+          s = s.replace(
+              '    public void shutdown()\n    {\n        releasePriorityPause("Looter stopped");\n',
+              '    public void shutdown()\n    {\n        stopping = true;\n        releasePriorityPause("Looter stopped");\n')
+          old_begin = '''    private void beginPriorityTakeover()\n    {\n        priorityTakeoverActive = true;\n\n        // pauseAllScripts is cooperative, so also cancel any in-flight shared walker route now.\n        Rs2Walker.clearWalkingRoute("ge-looter-priority-takeover");\n\n        if (ownsPriorityPause)\n        {\n            priorityPauseOwned = true;\n            return;\n        }\n\n        if (Microbot.pauseAllScripts.compareAndSet(false, true))\n        {\n            ownsPriorityPause = priorityPauseOwned = true;\n            Microbot.log("KSP GE Looter Priority Mode: paused other scripts and cancelled active walk for loot");\n        }\n        else\n        {\n            // Another component already owns the shared pause. Looting may still proceed, but this\n            // plugin must never release a pause it did not acquire.\n            priorityPauseOwned = false;\n        }\n    }\n'''
+          new_begin = '''    private void beginPriorityTakeover()\n    {\n        if (stopping) return;\n        boolean firstTakeover = !priorityTakeoverActive;\n        priorityTakeoverActive = true;\n\n        // Cancel walking once, then give any in-flight bank/GE call time to complete cooperatively.\n        if (firstTakeover)\n        {\n            Rs2Walker.clearWalkingRoute("ge-looter-priority-takeover");\n            priorityHandoffReadyAt = System.currentTimeMillis() + PRIORITY_HANDOFF_SETTLE_MS;\n        }\n\n        if (ownsPriorityPause)\n        {\n            priorityPauseOwned = true;\n            return;\n        }\n\n        if (Microbot.pauseAllScripts.compareAndSet(false, true))\n        {\n            ownsPriorityPause = priorityPauseOwned = true;\n            Microbot.log("KSP GE Looter Priority Mode: paused other scripts; waiting for safe UI handoff");\n        }\n        else\n        {\n            // Another component already owns the shared pause. Never release a pause we did not acquire.\n            priorityPauseOwned = false;\n        }\n    }\n'''
+          if old_begin not in s: raise SystemExit('beginPriorityTakeover block not found')
+          s = s.replace(old_begin, new_begin)
+          s = s.replace(
+              '        priorityReleaseAt = 0L;\n        if (!ownsPriorityPause) return;\n',
+              '        priorityReleaseAt = priorityHandoffReadyAt = 0L;\n        if (!ownsPriorityPause) return;\n')
+          p.write_text(s)
+
+          p = Path('KSPGELooter/KSPGELooterPlugin.java')
+          s = p.read_text().replace('public static final String VERSION = "0.1.6";', 'public static final String VERSION = "0.1.7";')
+          p.write_text(s)
+
+          p = Path('kspsmartsuperheat/KspSmartSuperheatScript.java')
+          s = p.read_text()
+          old_catch = '''            try { if (super.run() && Microbot.isLoggedIn()) tick(); }\n            catch (Exception e) { state = SmartSuperheatState.ERROR; status = "Error - check log"; log.error("Smart Superheat tick failed", e); }\n'''
+          new_catch = '''            try { if (super.run() && Microbot.isLoggedIn()) tick(); }\n            catch (Exception e)\n            {\n                // Priority plugins pause cooperatively; an already-running bank call may lose its widget mid-action.\n                // Treat that as a transient handoff and retry the same state after the pause is released.\n                if (Microbot.pauseAllScripts.get()) { status = "Paused for priority plugin"; return; }\n                state = SmartSuperheatState.ERROR; status = "Error - check log"; log.error("Smart Superheat tick failed", e);\n            }\n'''
+          if old_catch not in s: raise SystemExit('Smart Superheat catch block not found')
+          s = s.replace(old_catch, new_catch)
+          old_nat = '''    private boolean allNatureRunes()\n    {\n        int bank = Rs2Bank.count(ItemID.NATURERUNE), inventory = Rs2Inventory.itemQuantity(ItemID.NATURERUNE), total = bank + inventory;\n        if (total <= 0) return false;\n        if (bank <= 0) return true;\n        status = "Withdrawing all Nature runes";\n        return Rs2Bank.withdrawAll(ItemID.NATURERUNE) && sleepUntil(() -> Rs2Inventory.itemQuantity(ItemID.NATURERUNE) >= total, 5000);\n    }\n\n    private boolean ensureQty(int id, int target, String name)\n    {\n        int have = Rs2Inventory.itemQuantity(id);\n        if (have >= target) return true;\n        int need = target - have;\n        if (Rs2Bank.count(id) < need) { status = "Not enough " + name; return false; }\n        status = "Withdrawing " + need + " x " + name;\n        return Rs2Bank.withdrawX(id, need) && sleepUntil(() -> Rs2Inventory.itemQuantity(id) >= target, 4500);\n    }\n'''
+          new_nat = '''    private boolean allNatureRunes()\n    {\n        if (!bankActionReady()) return false;\n        int bank = Rs2Bank.count(ItemID.NATURERUNE), inventory = Rs2Inventory.itemQuantity(ItemID.NATURERUNE), total = bank + inventory;\n        if (total <= 0) return false;\n        if (bank <= 0) return true;\n        status = "Withdrawing all Nature runes";\n        try\n        {\n            return bankActionReady() && Rs2Bank.withdrawAll(ItemID.NATURERUNE)\n                    && sleepUntil(() -> Rs2Inventory.itemQuantity(ItemID.NATURERUNE) >= total, 5000);\n        }\n        catch (RuntimeException e)\n        {\n            if (Microbot.pauseAllScripts.get() || !Rs2Bank.isOpen()) { status = "Bank handoff interrupted - recovering"; return false; }\n            throw e;\n        }\n    }\n\n    private boolean ensureQty(int id, int target, String name)\n    {\n        if (!bankActionReady()) return false;\n        int have = Rs2Inventory.itemQuantity(id);\n        if (have >= target) return true;\n        int need = target - have;\n        if (Rs2Bank.count(id) < need) { status = "Not enough " + name; return false; }\n        status = "Withdrawing " + need + " x " + name;\n        try\n        {\n            return bankActionReady() && Rs2Bank.withdrawX(id, need)\n                    && sleepUntil(() -> Rs2Inventory.itemQuantity(id) >= target, 4500);\n        }\n        catch (RuntimeException e)\n        {\n            if (Microbot.pauseAllScripts.get() || !Rs2Bank.isOpen()) { status = "Bank handoff interrupted - recovering"; return false; }\n            throw e;\n        }\n    }\n\n    private boolean bankActionReady()\n    {\n        if (Microbot.pauseAllScripts.get()) { status = "Paused for priority plugin"; return false; }\n        if (!Rs2Bank.isOpen()) { status = "Bank closed - recovering"; return false; }\n        return true;\n    }\n'''
+          if old_nat not in s: raise SystemExit('Smart Superheat withdraw block not found')
+          s = s.replace(old_nat, new_nat)
+          p.write_text(s)
+
+          p = Path('kspsmartsuperheat/KspSmartSuperheatPlugin.java')
+          s = p.read_text().replace('public static final String VERSION = "0.1.3";', 'public static final String VERSION = "0.1.4";')
+          p.write_text(s)
+          PY
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '11'
+      - name: Compile both plugins against Microbot
+        shell: bash
+        run: |
+          git clone --depth 1 https://github.com/chsami/Microbot.git /tmp/microbot
+          mkdir -p /tmp/microbot/runelite-client/src/main/java/net/runelite/client/plugins/microbot/KSPGELooter
+          mkdir -p /tmp/microbot/runelite-client/src/main/java/net/runelite/client/plugins/microbot/kspsmartsuperheat
+          cp KSPGELooter/*.java /tmp/microbot/runelite-client/src/main/java/net/runelite/client/plugins/microbot/KSPGELooter/
+          cp kspsmartsuperheat/*.java /tmp/microbot/runelite-client/src/main/java/net/runelite/client/plugins/microbot/kspsmartsuperheat/
+          if [ ! -f /tmp/microbot/runelite-client/src/main/java/net/runelite/client/plugins/microbot/PluginConstants.java ]; then
+            cat > /tmp/microbot/runelite-client/src/main/java/net/runelite/client/plugins/microbot/PluginConstants.java <<'JAVA'
+          package net.runelite.client.plugins.microbot;
+          public final class PluginConstants {
+              public static final String KSP = "KSP ";
+              public static final boolean DEFAULT_ENABLED = false;
+              public static final boolean IS_EXTERNAL = true;
+              private PluginConstants() {}
+          }
+          JAVA
+          fi
+          cd /tmp/microbot
+          ./gradlew :client:compileJava --no-daemon
+      - name: Commit fix and remove temporary workflow
+        if: success()
+        shell: bash
+        run: |
+          rm -f .github/workflows/temp-safe-looter-handoff.yml
+          git config user.name KSPOG
+          git config user.email kratosmaximusosrs@gmail.com
+          git add KSPGELooter kspsmartsuperheat .github/workflows/temp-safe-looter-handoff.yml
+          git commit -m "Coordinate GE Looter priority with active bank operations"
+          git push origin HEAD:fix/ge-looter-safe-priority-handoff
