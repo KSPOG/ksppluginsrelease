@@ -33,7 +33,7 @@ import net.runelite.client.ui.overlay.OverlayManager;
 )
 public class KspAioFighterPlugin extends Plugin implements KeyListener
 {
-	static final String version = "1.9.8";
+	static final String version = "1.9.9";
 	private static final String WALK_HERE = "Walk here";
 	private static final String SET_SAFE_SPOT = "Set Safe Spot";
 	private static final String SET_AREA_TILE_1 = "Set Area Tile 1";

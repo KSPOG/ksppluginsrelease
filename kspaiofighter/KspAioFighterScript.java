@@ -694,13 +694,31 @@ public class KspAioFighterScript extends Script
 
 	private void depositAllExceptProtectedRunes()
 	{
+		Set<Integer> protectedRunes = new HashSet<>();
+
+		// Combat runes are stackable. Keep every rune stack used by the configured spell
+		// instead of depositing and immediately withdrawing it again on each bank trip.
+		// Preserve the stack even when equipment currently supplies that element.
+		if (config.trainMagic() && getLevel(Skill.MAGIC) < config.magicTarget())
+		{
+			getSpellRuneRequirements(config.magicSpell()).keySet().stream()
+					.map(Runes::getItemId)
+					.forEach(protectedRunes::add);
+		}
+
 		if (config.highAlchLoot())
 		{
-			Rs2Bank.depositAllExcept(Runes.NATURE.getItemId(), Runes.FIRE.getItemId());
+			protectedRunes.add(Runes.NATURE.getItemId());
+			protectedRunes.add(Runes.FIRE.getItemId());
+		}
+
+		if (protectedRunes.isEmpty())
+		{
+			Rs2Bank.depositAll();
 			return;
 		}
 
-		Rs2Bank.depositAll();
+		Rs2Bank.depositAllExcept(protectedRunes.toArray(new Integer[0]));
 	}
 
 	private boolean withdrawRunesForHighAlch()
