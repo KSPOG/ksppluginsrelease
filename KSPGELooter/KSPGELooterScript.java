@@ -14,10 +14,12 @@ import net.runelite.client.plugins.microbot.util.equipment.Rs2Equipment;
 import net.runelite.client.plugins.microbot.util.grandexchange.Rs2GrandExchange;
 import net.runelite.client.plugins.microbot.util.inventory.Rs2Inventory;
 import net.runelite.client.plugins.microbot.util.inventory.Rs2ItemModel;
+import net.runelite.client.plugins.microbot.util.keyboard.Rs2Keyboard;
 import net.runelite.client.plugins.microbot.util.magic.Rs2Magic;
 import net.runelite.client.plugins.microbot.util.player.Rs2Player;
 import net.runelite.client.plugins.microbot.util.walker.Rs2Walker;
 
+import java.awt.event.KeyEvent;
 import java.time.Duration;
 import java.util.Comparator;
 import java.util.List;
@@ -270,12 +272,12 @@ public class KSPGELooterScript extends Script
 
     private void spamLoot(Rs2TileItemModel item, KSPGELooterConfig config)
     {
-        if (item == null || !KSPGELooterArea.contains(item.getWorldLocation())) return;
-        if (!prepareLootUi()) return;
+        if (item == null || !KSPGELooterArea.contains(item.getWorldLocation()) || !prepareLootUi()) return;
 
-        int clicks = clamp(config.spamClicks(), 1, 12);
+        int attempts = clamp(config.spamClicks(), 1, 12);
         int delay = clamp(config.spamDelayMs(), 30, 250);
         int itemId = item.getId();
+        WorldPoint tile = item.getWorldLocation();
         int beforeQuantity = Rs2Inventory.itemQuantity(itemId);
         int unitGePrice = getGePrice(itemId);
 
@@ -283,9 +285,8 @@ public class KSPGELooterScript extends Script
         targetGeValue = getGroundStackGeValue(item);
         status = "Looting " + targetName;
 
-        for (int i = 0; i < clicks; i++)
+        for (int i = 0; i < attempts && Microbot.isLoggedIn(); i++)
         {
-            if (!Microbot.isLoggedIn()) return;
             WorldPoint player = Rs2Player.getWorldLocation();
             if (!KSPGELooterArea.contains(player))
             {
@@ -293,13 +294,28 @@ public class KSPGELooterScript extends Script
                 insideArea = false;
                 return;
             }
-            if (!KSPGELooterArea.contains(item.getWorldLocation())) return;
 
-            item.pickup();
-            if (i + 1 < clicks) sleep(delay);
+            Rs2TileItemModel live = findLiveGroundItem(itemId, tile);
+            if (live == null || Rs2Inventory.itemQuantity(itemId) > beforeQuantity) break;
+            if (!clearSelectedWidget()) return;
+
+            boolean dispatched = live.pickup();
+            if (!dispatched)
+            {
+                status = "Retrying Take " + targetName;
+                sleep(delay);
+                continue;
+            }
+
+            int distance = distance(player, tile);
+            int wait = Math.min(2_500, Math.max(350, 350 + distance * 220));
+            if (sleepUntil(() -> Rs2Inventory.itemQuantity(itemId) > beforeQuantity
+                    || findLiveGroundItem(itemId, tile) == null, wait)) break;
+            if (i + 1 < attempts) sleep(delay);
         }
 
-        sleepUntil(() -> Rs2Inventory.itemQuantity(itemId) > beforeQuantity, 900);
+        sleepUntil(() -> Rs2Inventory.itemQuantity(itemId) > beforeQuantity
+                || findLiveGroundItem(itemId, tile) == null, 1_200);
         int gained = Math.max(0, Rs2Inventory.itemQuantity(itemId) - beforeQuantity);
         if (gained > 0)
         {
@@ -307,7 +323,28 @@ public class KSPGELooterScript extends Script
             totalLootGeValue += (long) unitGePrice * gained;
             priorityReleaseAt = System.currentTimeMillis() + PRIORITY_RELEASE_GRACE_MS;
         }
+        else if (findLiveGroundItem(itemId, tile) != null)
+        {
+            status = "Take not confirmed - retrying " + targetName;
+            priorityReleaseAt = System.currentTimeMillis() + PRIORITY_RELEASE_GRACE_MS;
+        }
         updateOverlayState();
+    }
+
+    private Rs2TileItemModel findLiveGroundItem(int itemId, WorldPoint tile)
+    {
+        return Microbot.getRs2TileItemCache().getStream()
+                .filter(i -> i != null && !i.isDespawned() && i.getId() == itemId)
+                .filter(i -> tile.equals(i.getWorldLocation()) && KSPGELooterArea.contains(i.getWorldLocation()))
+                .findFirst().orElse(null);
+    }
+
+    private boolean clearSelectedWidget()
+    {
+        if (!Microbot.getClient().isWidgetSelected()) return true;
+        status = "Clearing stale selection for Take";
+        Rs2Keyboard.keyPress(KeyEvent.VK_ESCAPE);
+        return sleepUntil(() -> !Microbot.getClient().isWidgetSelected(), 600);
     }
 
     private boolean prepareLootUi()
