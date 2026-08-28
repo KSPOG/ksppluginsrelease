@@ -92,6 +92,18 @@ public class KspBondGoalOverlay extends OverlayPanel
                 .build()
         );
 
+        boolean tradeLimitsReady = plugin.areTradeLimitsReady();
+        addLine("Trade limits", plugin.getTradeLimitStatus(), tradeLimitsReady ? GOOD : WARN);
+        if (!tradeLimitsReady)
+        {
+            panelComponent.getChildren().add(
+                LineComponent.builder()
+                    .left("GE-input methods are hidden until 4h limits load.")
+                    .leftColor(MUTED)
+                    .build()
+            );
+        }
+
         if (state.getRemainingCoins() == 0)
         {
             addLine("Status", "Goal reached", GOOD);
@@ -139,7 +151,7 @@ public class KspBondGoalOverlay extends OverlayPanel
 
         panelComponent.getChildren().add(
             LineComponent.builder()
-                .left("Advisor values are planning estimates, not guaranteed profit.")
+                .left("Advisor uses published 4h buy limits; prior limit usage is not visible.")
                 .leftColor(MUTED)
                 .build()
         );

@@ -28,7 +28,7 @@ import net.runelite.client.ui.overlay.OverlayManager;
 )
 public class KspBondGoalPlugin extends Plugin
 {
-    static final String VERSION = "1.0.1";
+    static final String VERSION = "1.0.2";
 
     private static final int COINS = 995;
     private static final int OLD_SCHOOL_BOND = 13190;
@@ -53,6 +53,7 @@ public class KspBondGoalPlugin extends Plugin
     private OverlayManager overlayManager;
 
     private BondActivityAdvisor advisor;
+    private BondTradeLimitService tradeLimits;
     private volatile BondGoalSnapshot snapshot = BondGoalSnapshot.empty();
     private volatile boolean running;
 
@@ -70,7 +71,8 @@ public class KspBondGoalPlugin extends Plugin
     @Override
     protected void startUp()
     {
-        advisor = new BondActivityAdvisor(client, itemManager, config);
+        tradeLimits = new BondTradeLimitService();
+        advisor = new BondActivityAdvisor(client, itemManager, config, tradeLimits);
         cachedBankCoins = 0;
         bankKnown = false;
         tickCounter = 0;
@@ -78,6 +80,7 @@ public class KspBondGoalPlugin extends Plugin
         running = true;
 
         overlayManager.add(overlay);
+        tradeLimits.ensureLoaded(this::refreshSnapshot);
 
         // Source-loaded plugins may be started from the Swing/AWT thread. Client container
         // access is client-thread-only, so initialise the live account state there.
@@ -106,6 +109,14 @@ public class KspBondGoalPlugin extends Plugin
         overlayManager.remove(overlay);
         snapshot = BondGoalSnapshot.empty();
         advisor = null;
+
+        BondTradeLimitService limitService = tradeLimits;
+        tradeLimits = null;
+        if (limitService != null)
+        {
+            limitService.close();
+        }
+
         cachedBankCoins = 0;
         bankKnown = false;
     }
@@ -177,6 +188,18 @@ public class KspBondGoalPlugin extends Plugin
         return config;
     }
 
+    boolean areTradeLimitsReady()
+    {
+        BondTradeLimitService service = tradeLimits;
+        return service != null && service.isLoaded();
+    }
+
+    String getTradeLimitStatus()
+    {
+        BondTradeLimitService service = tradeLimits;
+        return service == null ? "Unavailable" : service.getStatus();
+    }
+
     /**
      * Refreshes the snapshot immediately on the client thread, or safely schedules it
      * when invoked from AWT/config/plugin lifecycle code.
@@ -208,6 +231,13 @@ public class KspBondGoalPlugin extends Plugin
         if (!running)
         {
             return;
+        }
+
+        BondTradeLimitService service = tradeLimits;
+        if (service != null)
+        {
+            // Non-blocking; retries at most once per minute if the Wiki request failed.
+            service.ensureLoaded(this::refreshSnapshot);
         }
 
         if (client.getGameState() != GameState.LOGGED_IN)
