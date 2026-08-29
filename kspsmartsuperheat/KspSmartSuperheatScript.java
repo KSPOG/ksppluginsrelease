@@ -50,6 +50,7 @@ public class KspSmartSuperheatScript extends Script
     private final Map<SuperheatRecipe, Integer> unsold = new EnumMap<>(SuperheatRecipe.class);
     private final Deque<GeOrder> buyQueue = new ArrayDeque<>();
     private GeOrder geOrder;
+    private SuperheatRecipe saleRecipe;
     private int castFailures;
 
     public boolean run(KspSmartSuperheatConfig config)
@@ -59,6 +60,7 @@ public class KspSmartSuperheatScript extends Script
         status = "Starting";
         activeRecipe = null;
         activeQuote = null;
+        saleRecipe = null;
         freeFireRunes = false;
         startedAt = System.currentTimeMillis();
         nextScanAt = barsMade = estimatedProfit = magicXp = 0L;
@@ -80,7 +82,15 @@ public class KspSmartSuperheatScript extends Script
         return true;
     }
 
-    public void stopScript() { state = SmartSuperheatState.STOPPED; status = "Stopped"; buyQueue.clear(); geOrder = null; shutdown(); }
+    public void stopScript()
+    {
+        state = SmartSuperheatState.STOPPED;
+        status = "Stopped";
+        buyQueue.clear();
+        geOrder = null;
+        saleRecipe = null;
+        shutdown();
+    }
 
     private void tick()
     {
@@ -101,31 +111,89 @@ public class KspSmartSuperheatScript extends Script
     {
         if (level(Skill.MAGIC) < 43) { state = SmartSuperheatState.ERROR; status = "43 Magic required"; return; }
         state = SmartSuperheatState.SCANNING_MARKET;
-        status = "Scanning profitable recipes";
+        status = "Checking bank and market";
     }
 
     private void scan()
     {
+        // Bank state is part of route selection. Opening it first prevents a cold-start scan from
+        // declaring "No profitable recipe" before Rs2Bank has a current view of existing inputs.
+        if (!ensureBank()) return;
+
         int smithing = level(Skill.SMITHING);
         freeFireRunes = freeFire();
-        SuperheatQuote best = null;
+        refreshOutputStock();
+
+        SuperheatQuote bestMarket = null;
+        SuperheatQuote bestBanked = null;
+        int bestBankedCount = 0;
+        String firstInvalidReason = null;
+
         for (SuperheatRecipe r : SuperheatRecipe.values())
         {
             if (r.getSmithingLevel() > smithing || (r.isMembersOnly() && !members())) continue;
+
             SuperheatQuote q = prices.quote(r, config, freeFireRunes);
-            if (q.meets(config) && (best == null || q.getProjectedGpHour() > best.getProjectedGpHour())) best = q;
+            if (!q.isValid())
+            {
+                if (firstInvalidReason == null || firstInvalidReason.isEmpty()) firstInvalidReason = q.getReason();
+                continue;
+            }
+
+            int banked = craftable(r);
+            if (banked > 0 && (bestBanked == null || q.getProjectedGpHour() > bestBanked.getProjectedGpHour()))
+            {
+                bestBanked = q;
+                bestBankedCount = banked;
+            }
+
+            if (q.meets(config) && (bestMarket == null || q.getProjectedGpHour() > bestMarket.getProjectedGpHour()))
+            {
+                bestMarket = q;
+            }
         }
-        if (best == null)
+
+        // Existing complete batches are consumed before the plugin considers buying a different
+        // recipe. The profit gate remains the gate for NEW purchases, not for stock already owned.
+        if (bestBanked != null)
         {
+            activeQuote = bestBanked;
+            activeRecipe = bestBanked.getRecipe();
+            craftableBarsInBank = bestBankedCount;
+            nextScanAt = System.currentTimeMillis() + Math.max(15, config.priceRefreshSeconds()) * 1000L;
+            state = SmartSuperheatState.PREPARING_BATCH;
+            status = bestBanked.meets(config)
+                ? "Using banked inputs: " + activeRecipe.getOutputName()
+                : "Using existing bank stock: " + activeRecipe.getOutputName();
+            return;
+        }
+
+        if (bestMarket == null)
+        {
+            // Even with no recipe currently worth restocking, existing output is still capital.
+            // Liquidate it first when auto-selling is enabled rather than leaving it stranded.
+            saleRecipe = pickSaleRecipe();
+            if (saleRecipe != null)
+            {
+                activeRecipe = saleRecipe;
+                activeQuote = prices.quote(activeRecipe, config, freeFireRunes);
+                state = SmartSuperheatState.SELLING_OUTPUT;
+                status = "Selling existing " + saleRecipe.getOutputName() + " stock";
+                return;
+            }
+
             activeRecipe = null;
             activeQuote = null;
             state = SmartSuperheatState.WAITING_FOR_PROFIT;
-            status = "No profitable recipe";
+            status = firstInvalidReason == null
+                ? "No profitable recipe"
+                : "Price data unavailable: " + firstInvalidReason;
             nextScanAt = System.currentTimeMillis() + Math.max(15, config.priceRefreshSeconds()) * 1000L;
             return;
         }
-        activeQuote = best;
-        activeRecipe = best.getRecipe();
+
+        activeQuote = bestMarket;
+        activeRecipe = bestMarket.getRecipe();
         nextScanAt = System.currentTimeMillis() + Math.max(15, config.priceRefreshSeconds()) * 1000L;
         state = SmartSuperheatState.PREPARING_BATCH;
         status = "Selected " + activeRecipe.getOutputName();
@@ -134,16 +202,19 @@ public class KspSmartSuperheatScript extends Script
     private void prepare()
     {
         if (!recipeReady()) return;
-        if (System.currentTimeMillis() >= nextScanAt) { state = SmartSuperheatState.SCANNING_MARKET; return; }
         freeFireRunes = freeFire();
         activeQuote = prices.quote(activeRecipe, config, freeFireRunes);
-        if (!activeQuote.meets(config)) { state = SmartSuperheatState.SCANNING_MARKET; status = "Margin changed"; return; }
+        if (!activeQuote.isValid()) { state = SmartSuperheatState.SCANNING_MARKET; status = activeQuote.getReason(); return; }
         if (!ensureBank() || !bankMode(true)) return;
         cleanInventory();
         if (!allNatureRunes()) { state = SmartSuperheatState.RESTOCKING; status = "Need Nature runes"; return; }
 
         craftableBarsInBank = craftable(activeRecipe);
         if (craftableBarsInBank <= 0) { state = SmartSuperheatState.RESTOCKING; status = "Restocking ingredients"; return; }
+
+        // A below-gate quote is allowed only while consuming complete inputs that are already owned.
+        // Once that stock is exhausted, RESTOCKING applies the normal profitability gate before buying.
+        if (!activeQuote.meets(config)) status = "Using banked stock; restock margin below gate";
 
         int reservedFireSlot = !freeFireRunes && Rs2Inventory.itemQuantity(ItemID.FIRERUNE) == 0 ? 1 : 0;
         int bySlots = Math.max(0, Rs2Inventory.emptySlotCount() - reservedFireSlot) / Math.max(1, activeRecipe.getMaterialSlotsPerBar());
@@ -192,14 +263,39 @@ public class KspSmartSuperheatScript extends Script
     {
         if (!recipeReady()) return;
         if (geOrder != null || !buyQueue.isEmpty()) { tickBuyQueue(); return; }
+
         freeFireRunes = freeFire();
-        activeQuote = prices.quote(activeRecipe, config, freeFireRunes);
-        if (!activeQuote.meets(config)) { state = SmartSuperheatState.SCANNING_MARKET; status = "Recipe no longer profitable"; return; }
         if (!ensureBank() || !bankMode(true)) return;
         cleanInventory();
         allNatureRunes();
+        refreshOutputStock();
+
         craftableBarsInBank = craftable(activeRecipe);
-        if (craftableBarsInBank > 0) { state = SmartSuperheatState.PREPARING_BATCH; status = "Using banked ingredients"; return; }
+        if (craftableBarsInBank > 0)
+        {
+            state = SmartSuperheatState.PREPARING_BATCH;
+            status = "Using banked ingredients";
+            return;
+        }
+
+        // Do not commit fresh cash while supported bars are already sitting in the bank.
+        // This includes stock that existed before the plugin started and stock made this session.
+        saleRecipe = pickSaleRecipe();
+        if (saleRecipe != null)
+        {
+            state = SmartSuperheatState.SELLING_OUTPUT;
+            status = "Selling " + saleRecipe.getOutputName() + " before restock";
+            return;
+        }
+
+        // Only NEW purchases must satisfy the configured profit/ROI/GP-h gates.
+        activeQuote = prices.quote(activeRecipe, config, freeFireRunes);
+        if (!activeQuote.meets(config))
+        {
+            state = SmartSuperheatState.SCANNING_MARKET;
+            status = activeQuote.isValid() ? "Recipe no longer profitable to restock" : activeQuote.getReason();
+            return;
+        }
 
         long coins = total(ItemID.COINS);
         long spendable = Math.max(0L, coins - config.cashReserve());
@@ -207,8 +303,7 @@ public class KspSmartSuperheatScript extends Script
         long budget = spendable * config.maxSpendPercent() / 100L;
         if (budget < activeQuote.getInputCostPerBar())
         {
-            if (config.autoSellOutput() && getUnsoldProduced() > 0) { state = SmartSuperheatState.SELLING_OUTPUT; status = "Selling bars to fund restock"; }
-            else waitForCash();
+            waitForCash();
             return;
         }
 
@@ -231,28 +326,60 @@ public class KspSmartSuperheatScript extends Script
     {
         if (!recipeReady()) return;
         if (geOrder != null) { tickGeOrder(); return; }
-        int wanted = unsold.getOrDefault(activeRecipe, 0);
-        if (wanted <= 0) { state = SmartSuperheatState.RESTOCKING; return; }
-        if (!ensureBank()) return;
-        if (Rs2Inventory.itemQuantity(activeRecipe.getOutputId()) > 0)
+
+        if (saleRecipe == null) saleRecipe = pickSaleRecipe();
+        if (saleRecipe == null) { state = SmartSuperheatState.RESTOCKING; return; }
+
+        SuperheatRecipe selling = saleRecipe;
+        int wanted = unsold.getOrDefault(selling, 0);
+        if (wanted <= 0)
         {
-            Rs2Bank.depositAll(activeRecipe.getOutputName(), true);
-            if (!sleepUntil(() -> Rs2Inventory.itemQuantity(activeRecipe.getOutputId()) == 0, 3000)) return;
+            saleRecipe = null;
+            state = SmartSuperheatState.RESTOCKING;
+            return;
+        }
+
+        if (!ensureBank()) return;
+        if (Rs2Inventory.itemQuantity(selling.getOutputId()) > 0)
+        {
+            Rs2Bank.depositAll(selling.getOutputName(), true);
+            if (!sleepUntil(() -> Rs2Inventory.itemQuantity(selling.getOutputId()) == 0, 3000)) return;
         }
         if (!bankMode(false)) return;
-        int bankQty = Rs2Bank.count(activeRecipe.getOutputId());
-        if (bankQty <= 0) { unsold.put(activeRecipe, 0); state = SmartSuperheatState.RESTOCKING; return; }
-        status = "Withdrawing all noted " + activeRecipe.getOutputName();
-        if (!Rs2Bank.withdrawAll(activeRecipe.getOutputName(), true)
-            || !sleepUntil(() -> Rs2Inventory.itemQuantity(activeRecipe.getOutputName(), true) >= bankQty, 5000)) return;
-        int qty = Rs2Inventory.itemQuantity(activeRecipe.getOutputName(), true);
+
+        int bankQty = Rs2Bank.count(selling.getOutputId());
+        if (bankQty <= 0)
+        {
+            unsold.put(selling, 0);
+            saleRecipe = null;
+            SuperheatRecipe next = pickSaleRecipe();
+            if (next != null)
+            {
+                saleRecipe = next;
+                status = "Selling existing " + next.getOutputName() + " stock";
+            }
+            else state = SmartSuperheatState.RESTOCKING;
+            return;
+        }
+
+        // Use the observed bank quantity as the authoritative saleable amount. This deliberately
+        // includes pre-existing output stock instead of limiting sales to this session's production.
+        unsold.put(selling, bankQty);
+        status = "Withdrawing all noted " + selling.getOutputName();
+        if (!Rs2Bank.withdrawAll(selling.getOutputName(), true)
+            || !sleepUntil(() -> Rs2Inventory.itemQuantity(selling.getOutputName(), true) >= bankQty, 5000)) return;
+
+        int qty = Rs2Inventory.itemQuantity(selling.getOutputName(), true);
         if (qty <= 0) { status = "Noted output withdrawal failed"; return; }
         Rs2Bank.closeBank();
         if (!sleepUntil(() -> !Rs2Bank.isOpen(), 3000)) return;
-        activeQuote = prices.quote(activeRecipe, config, freeFireRunes);
-        int price = activeQuote.isValid() ? activeQuote.getOutputSellPrice() : 0;
-        if (price <= 0) { status = "No sell price"; return; }
-        geOrder = new GeOrder(GrandExchangeAction.SELL, activeRecipe.getOutputId(), activeRecipe.getOutputName(), qty, price);
+
+        // Selling an existing bar only requires that bar's live sell price; do not block liquidation
+        // because an unrelated ore/rune quote needed for a full recipe is unavailable.
+        int price = prices.sellOfferPrice(selling.getOutputId(), config.sellDiscountPercent(), 0);
+        if (price <= 0) { status = "No live sell price for " + selling.getOutputName(); return; }
+
+        geOrder = new GeOrder(GrandExchangeAction.SELL, selling.getOutputId(), selling.getOutputName(), qty, price);
         tickGeOrder();
     }
 
@@ -454,9 +581,25 @@ public class KspSmartSuperheatScript extends Script
         geOrder = null;
         if (o.action == GrandExchangeAction.SELL)
         {
-            unsold.put(activeRecipe, Math.max(0, unsold.getOrDefault(activeRecipe, 0) - filled));
-            state = getUnsoldProduced() > 0 ? SmartSuperheatState.SELLING_OUTPUT : SmartSuperheatState.RESTOCKING;
-            status = partial ? "Partial sale collected" : "Bars sold";
+            SuperheatRecipe soldRecipe = saleRecipe != null ? saleRecipe : activeRecipe;
+            if (soldRecipe != null)
+            {
+                unsold.put(soldRecipe, Math.max(0, unsold.getOrDefault(soldRecipe, 0) - filled));
+            }
+            saleRecipe = null;
+
+            SuperheatRecipe next = pickSaleRecipe();
+            if (next != null)
+            {
+                saleRecipe = next;
+                state = SmartSuperheatState.SELLING_OUTPUT;
+                status = partial ? "Partial sale collected; selling next stock" : "Bars sold; selling next stock";
+            }
+            else
+            {
+                state = SmartSuperheatState.RESTOCKING;
+                status = partial ? "Partial sale collected" : "Bars sold";
+            }
             return;
         }
         if (partial) buyQueue.clear();
@@ -600,6 +743,28 @@ public class KspSmartSuperheatScript extends Script
         n = Math.min(n, total(ItemID.NATURERUNE));
         if (!freeFireRunes) n = Math.min(n, total(ItemID.FIRERUNE) / 4);
         return (int) Math.min(Integer.MAX_VALUE, Math.max(0, n));
+    }
+
+    private void refreshOutputStock()
+    {
+        if (!bankOpen()) return;
+        for (SuperheatRecipe r : SuperheatRecipe.values())
+        {
+            long qty = Math.max(0, Rs2Bank.count(r.getOutputId()))
+                + (long) Math.max(0, Rs2Inventory.itemQuantity(r.getOutputName(), true));
+            unsold.put(r, (int) Math.min(Integer.MAX_VALUE, qty));
+        }
+    }
+
+    private SuperheatRecipe pickSaleRecipe()
+    {
+        if (config == null || !config.autoSellOutput()) return null;
+        if (activeRecipe != null && unsold.getOrDefault(activeRecipe, 0) > 0) return activeRecipe;
+        for (SuperheatRecipe r : SuperheatRecipe.values())
+        {
+            if (unsold.getOrDefault(r, 0) > 0) return r;
+        }
+        return null;
     }
 
     private long total(int id) { return Math.max(0, Rs2Bank.count(id)) + (long) Rs2Inventory.itemQuantity(id); }
