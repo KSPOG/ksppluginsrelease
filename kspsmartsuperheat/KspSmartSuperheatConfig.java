@@ -12,7 +12,7 @@ public interface KspSmartSuperheatConfig extends Config
     @ConfigItem(
         keyName = "minProfitPerBar",
         name = "Minimum profit / bar",
-        description = "A recipe must clear at least this many GP per bar after input costs and GE tax.",
+        description = "A recipe must clear at least this many GP per bar after input costs and GE tax when new inputs need to be bought.",
         position = 0
     )
     default int minProfitPerBar()
@@ -24,7 +24,7 @@ public interface KspSmartSuperheatConfig extends Config
     @ConfigItem(
         keyName = "minRoiPercent",
         name = "Minimum ROI %",
-        description = "Minimum estimated return on the total per-bar input cost.",
+        description = "Minimum estimated return on the total per-bar input cost when selecting a recipe for new restocking.",
         position = 1
     )
     default int minRoiPercent()
@@ -36,7 +36,7 @@ public interface KspSmartSuperheatConfig extends Config
     @ConfigItem(
         keyName = "minProjectedGpHour",
         name = "Minimum projected GP/h",
-        description = "Ignore recipes below this projected hourly profit. Set to 0 to disable.",
+        description = "Ignore newly-restocked recipes below this projected hourly profit. Set to 0 to disable.",
         position = 2
     )
     default int minProjectedGpHour()
@@ -155,7 +155,7 @@ public interface KspSmartSuperheatConfig extends Config
     @ConfigItem(
         keyName = "autoSellOutput",
         name = "Auto-sell output",
-        description = "Sell bars made by this plugin session when more cash is needed for restocking. Existing bars are not intentionally liquidated.",
+        description = "Sell supported bars already in the bank plus bars produced by the plugin before purchasing another input restock.",
         position = 12
     )
     default boolean autoSellOutput()
