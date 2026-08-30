@@ -6,6 +6,7 @@ import net.runelite.client.plugins.Plugin;
 import net.runelite.client.plugins.PluginDescriptor;
 import net.runelite.client.plugins.microbot.Microbot;
 import net.runelite.client.plugins.microbot.PluginConstants;
+import net.runelite.client.plugins.microbot.kspmule.KspMuleWorkerService;
 import net.runelite.client.ui.overlay.OverlayManager;
 
 import javax.inject.Inject;
@@ -22,19 +23,13 @@ import javax.inject.Singleton;
         isExternal = PluginConstants.IS_EXTERNAL
 )
 public class KspSmartSmelterPlugin extends Plugin {
-    public static final String VERSION = "0.0.7";
+    public static final String VERSION = "0.0.8";
 
-    @Inject
-    private KspSmartSmelterConfig config;
-
-    @Inject
-    private KspSmartSmelterScript script;
-
-    @Inject
-    private OverlayManager overlayManager;
-
-    @Inject
-    private KspSmartSmelterOverlay overlay;
+    @Inject private KspSmartSmelterConfig config;
+    @Inject private KspSmartSmelterScript script;
+    @Inject private OverlayManager overlayManager;
+    @Inject private KspSmartSmelterOverlay overlay;
+    private final KspMuleWorkerService muleService = new KspMuleWorkerService("Smart Smelter");
 
     @Provides
     KspSmartSmelterConfig provideConfig(ConfigManager configManager) {
@@ -50,12 +45,14 @@ public class KspSmartSmelterPlugin extends Plugin {
     @Override
     protected void startUp() {
         Microbot.pauseAllScripts.compareAndSet(true, false);
+        muleService.start(config);
         overlayManager.add(overlay);
         script.run();
     }
 
     @Override
     protected void shutDown() {
+        muleService.shutdown();
         script.shutdown();
         overlayManager.remove(overlay);
     }
