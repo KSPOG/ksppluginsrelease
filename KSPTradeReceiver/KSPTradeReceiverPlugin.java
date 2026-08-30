@@ -26,6 +26,7 @@ public class KSPTradeReceiverPlugin extends Plugin
 
     @Inject private KSPTradeReceiverConfig config;
     @Inject private KSPTradeReceiverScript script;
+    @Inject private KspLocalMuleCoordinatorService muleCoordinator;
     @Inject private KSPTradeReceiverOverlay overlay;
     @Inject private OverlayManager overlayManager;
 
@@ -39,20 +40,21 @@ public class KSPTradeReceiverPlugin extends Plugin
     protected void startUp()
     {
         overlayManager.add(overlay);
+        muleCoordinator.start(config);
         script.run(config);
     }
 
     @Override
     protected void shutDown()
     {
+        muleCoordinator.shutdown();
         script.shutdown();
         overlayManager.remove(overlay);
     }
 
     /**
-     * The local ServerSocket must keep running while the mule account is logged out.
-     * Without this RuneLite would suspend the plugin at the login screen and no worker
-     * could wake the mule.
+     * The local ServerSocket must keep running while the mule account is logged out,
+     * otherwise no worker can wake the mule from the login screen.
      */
     @Override
     public boolean isEnabledOnLoginScreen()
