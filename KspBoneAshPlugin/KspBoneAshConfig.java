@@ -5,9 +5,10 @@ import net.runelite.client.config.ConfigGroup;
 import net.runelite.client.config.ConfigItem;
 import net.runelite.client.config.ConfigSection;
 import net.runelite.client.config.Range;
+import net.runelite.client.plugins.microbot.kspmule.KspMuleConfig;
 
 @ConfigGroup(KspBoneAshConfig.GROUP)
-public interface KspBoneAshConfig extends Config
+public interface KspBoneAshConfig extends Config, KspMuleConfig
 {
     String GROUP = "kspboneash";
 
@@ -24,6 +25,13 @@ public interface KspBoneAshConfig extends Config
             position = 1
     )
     String antibanSection = "antibanSection";
+
+    @ConfigSection(
+            name = "Local Mule",
+            description = "Automatic excess-GP transfer to KSP Trade Receiver",
+            position = 90
+    )
+    String muleSection = KspMuleConfig.SECTION;
 
     @ConfigItem(
             keyName = "itemName",
