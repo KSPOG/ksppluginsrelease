@@ -52,16 +52,6 @@ public class KSPTradeReceiverPlugin extends Plugin
         overlayManager.remove(overlay);
     }
 
-    /**
-     * The local ServerSocket must keep running while the mule account is logged out,
-     * otherwise no worker can wake the mule from the login screen.
-     */
-    @Override
-    public boolean isEnabledOnLoginScreen()
-    {
-        return true;
-    }
-
     @Subscribe
     public void onChatMessage(ChatMessage event)
     {
