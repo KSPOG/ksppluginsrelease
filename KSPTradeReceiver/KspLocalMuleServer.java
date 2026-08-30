@@ -35,6 +35,11 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * CANCEL <requestId>
  * PING
  *
+ * The worker account name is supplied automatically by the worker client. The mule
+ * account name is discovered automatically from the receiver's local player and is
+ * returned in ACTIVE responses. A job is never activated until that mule identity is
+ * known, so worker plugins never have to guess which local account to trade.
+ *
  * The server only binds to 127.0.0.1. It is not reachable from the LAN/Internet.
  */
 @Slf4j
@@ -320,6 +325,10 @@ public final class KspLocalMuleServer implements Closeable
 
     /**
      * Activates at most one job. Only the RuneLite script thread calls this.
+     *
+     * Mule identity is authoritative: do not release a worker from QUEUED until the
+     * receiver has discovered its own RuneScape display name. This removes the race
+     * where a just-logged-in receiver could return ACTIVE with an empty player name.
      */
     public MuleJob activateNext()
     {
@@ -328,6 +337,11 @@ public final class KspLocalMuleServer implements Closeable
             if (activeJob != null && activeJob.state == JobState.ACTIVE)
             {
                 return activeJob;
+            }
+
+            if (muleName == null || muleName.isBlank())
+            {
+                return null;
             }
 
             String id;
@@ -347,7 +361,6 @@ public final class KspLocalMuleServer implements Closeable
             return null;
         }
     }
-
 
     public MuleJob peekNextQueuedJob()
     {
@@ -421,9 +434,21 @@ public final class KspLocalMuleServer implements Closeable
         }
     }
 
+    /**
+     * Refresh the receiver's live identity/location. A transient null local-player
+     * snapshot during login/world hops must not erase a previously discovered mule name.
+     */
     public void updateMuleSnapshot(String name, int world, WorldPoint tile)
     {
-        this.muleName = name == null ? "" : name;
+        String discoveredName = name == null ? "" : name.trim();
+        if (!discoveredName.isBlank())
+        {
+            if (!discoveredName.equals(muleName))
+            {
+                log.info("KSP local mule automatically identified receiver account as '{}'", discoveredName);
+            }
+            this.muleName = discoveredName;
+        }
         this.muleWorld = world;
         this.muleTile = tile;
     }
@@ -526,7 +551,6 @@ public final class KspLocalMuleServer implements Closeable
         }
         return cleaned.substring(0, Math.min(96, cleaned.length()));
     }
-
 
     private static int parsePositiveInt(String value)
     {

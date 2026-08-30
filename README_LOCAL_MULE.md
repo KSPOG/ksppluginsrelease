@@ -6,11 +6,37 @@ This test implementation adds localhost-only mule coordination between KSP worke
 
 - Communication is bound to `127.0.0.1` only.
 - Multiple worker jobs are queued by the receiver.
+- Worker account names are detected automatically from each worker client's local RuneScape player.
+- The mule account name is detected automatically from the Trade Receiver client's local RuneScape player; no mule display-name setting is required.
+- A queued job remains `QUEUED` until the receiver has positively discovered its own mule display name, preventing an `ACTIVE` job with an unknown trade target.
+- The receiver preserves its last successfully discovered mule name across transient null-player snapshots during login/world hopping.
 - The mule can remain logged out while idle.
 - A worker `READY` request causes the receiver to log in through Microbot's active profile.
 - The receiver stays online while any worker is queued or active.
 - It logs out only after the final transfer is complete and the configured quiet period expires.
 - A new worker arriving during the quiet period cancels the pending logout.
+
+## Automatic account identity
+
+No RuneScape display names need to be entered for the localhost mule handshake.
+
+```text
+Worker client                           Trade Receiver client
+-------------                           ---------------------
+getLocalPlayer().getName()              getLocalPlayer().getName()
+          |                                      |
+          | READY(worker name)                   | auto-detect mule name
+          +---------------------> localhost <----+
+                                                 |
+                                      ACTIVE(mule name, world, tile)
+          <--------------------------------------+
+          |
+worker trades exactly the returned mule name
+```
+
+If the receiver is logged out when a worker becomes ready, the job remains queued while the receiver logs in. Once RuneLite exposes the receiver's local player name, the job becomes active and that exact display name is returned to the worker.
+
+The receiver still uses Microbot's **active login profile** to perform the automatic login. The saved login/profile name does not need to match the RuneScape display name; the actual display name is discovered after login from the game client.
 
 ## High Alch Trader settings
 
@@ -58,6 +84,8 @@ Worker B READY -----+--> KSP Trade Receiver queue
 Worker C READY ----/            |
                                login mule
                                   |
+                          detect mule name
+                                  |
                            process Worker A
                                   |
                                 bank
@@ -86,7 +114,7 @@ CANCEL  requestId
 PING
 ```
 
-Account names and failure messages are URL-safe Base64 encoded in protocol fields.
+`READY` carries the automatically detected worker display name. `ACTIVE` responses carry the automatically detected mule display name, world, tile and exact expected coin amount. Account names and failure messages are URL-safe Base64 encoded in protocol fields.
 
 ## Notes
 
