@@ -30,6 +30,7 @@ public class KSPTradeReceiverScript extends Script
     private static final long FIRST_ACCEPT_COOLDOWN_MS = 900L;
     private static final long CONFIRM_ACCEPT_COOLDOWN_MS = 900L;
     private static final long REQUEST_RESPONSE_COOLDOWN_MS = 1_000L;
+    private static final String OTHER_PLAYER_ACCEPTED = "other player has accepted";
 
     public static volatile String status = "Idle";
     public static volatile String configuredTrader = "-";
@@ -203,10 +204,16 @@ public class KSPTradeReceiverScript extends Script
             return;
         }
 
+        if (!otherPlayerHasAccepted(InterfaceID.Trademain.WHOLESCREEN))
+        {
+            status = "Waiting for " + displayConfiguredName(currentConfig.traderName()) + " to accept first screen";
+            return;
+        }
+
         long now = System.currentTimeMillis();
         if (now - lastFirstAcceptAt < FIRST_ACCEPT_COOLDOWN_MS)
         {
-            status = "Waiting on first trade screen";
+            status = "Counterparty accepted - waiting on first screen";
             return;
         }
 
@@ -214,7 +221,7 @@ public class KSPTradeReceiverScript extends Script
         {
             lastFirstAcceptAt = now;
             acceptedFirstScreens++;
-            status = "Accepted first screen";
+            status = "Counterparty accepted - accepted first screen";
         }
         else
         {
@@ -241,10 +248,16 @@ public class KSPTradeReceiverScript extends Script
             return;
         }
 
+        if (!otherPlayerHasAccepted(InterfaceID.Tradeconfirm.UNIVERSE))
+        {
+            status = "Waiting for " + displayConfiguredName(currentConfig.traderName()) + " to accept confirmation";
+            return;
+        }
+
         long now = System.currentTimeMillis();
         if (now - lastConfirmAcceptAt < CONFIRM_ACCEPT_COOLDOWN_MS)
         {
-            status = "Waiting on confirmation";
+            status = "Counterparty accepted - waiting on confirmation";
             return;
         }
 
@@ -252,7 +265,7 @@ public class KSPTradeReceiverScript extends Script
         {
             lastConfirmAcceptAt = now;
             acceptedConfirmations++;
-            status = "Accepted trade confirmation";
+            status = "Counterparty accepted - accepted confirmation";
             clearPendingRequest();
         }
         else
@@ -364,6 +377,41 @@ public class KSPTradeReceiverScript extends Script
             Widget root = Microbot.getClient().getWidget(InterfaceID.Trademain.WHOLESCREEN);
             return root != null && !root.isHidden() && widgetTreeMatchesTrader(root, allowed);
         }).orElse(false);
+    }
+
+    private boolean otherPlayerHasAccepted(int rootWidgetId)
+    {
+        return Microbot.getClientThread().runOnClientThreadOptional(() -> {
+            Widget root = Microbot.getClient().getWidget(rootWidgetId);
+            return root != null && !root.isHidden() && widgetTreeContainsOtherPlayerAccepted(root);
+        }).orElse(false);
+    }
+
+    private static boolean widgetTreeContainsOtherPlayerAccepted(Widget widget)
+    {
+        if (widget == null || widget.isHidden()) return false;
+
+        String text = cleanText(widget.getText()).toLowerCase(Locale.ROOT);
+        if (text.endsWith(".")) text = text.substring(0, text.length() - 1).trim();
+        if (OTHER_PLAYER_ACCEPTED.equals(text)) return true;
+
+        Widget[][] groups = {
+                widget.getChildren(),
+                widget.getDynamicChildren(),
+                widget.getNestedChildren(),
+                widget.getStaticChildren()
+        };
+
+        for (Widget[] group : groups)
+        {
+            if (group == null) continue;
+            for (Widget child : group)
+            {
+                if (widgetTreeContainsOtherPlayerAccepted(child)) return true;
+            }
+        }
+
+        return false;
     }
 
     private static boolean widgetTreeMatchesTrader(Widget widget, String allowed)
