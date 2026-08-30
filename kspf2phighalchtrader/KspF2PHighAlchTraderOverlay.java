@@ -17,11 +17,15 @@ import java.util.concurrent.TimeUnit;
 public class KspF2PHighAlchTraderOverlay extends OverlayPanel {
     private static final int WIDTH = 255;
     private final KspF2PHighAlchTraderScript script;
+    private final KspF2PHighAlchTraderConfig config;
 
     @Inject
-    public KspF2PHighAlchTraderOverlay(KspF2PHighAlchTraderPlugin plugin, KspF2PHighAlchTraderScript script) {
+    public KspF2PHighAlchTraderOverlay(KspF2PHighAlchTraderPlugin plugin,
+                                       KspF2PHighAlchTraderScript script,
+                                       KspF2PHighAlchTraderConfig config) {
         super(plugin);
         this.script = script;
+        this.config = config;
         setPosition(OverlayPosition.TOP_LEFT);
         setLayer(OverlayLayer.ABOVE_WIDGETS);
         setPriority(PRIORITY_HIGH);
@@ -44,6 +48,23 @@ public class KspF2PHighAlchTraderOverlay extends OverlayPanel {
         addLine("Market mode", script.isMembersContentEnabled() ? "F2P + P2P" : "F2P only");
         addIfPresent("GE slot", script.getPendingPurchaseSummary(), 28);
         addIfPresent("Slow cooldowns", script.getSlowBuyCooldownSummary(), 28);
+
+        if (config.enableMule()) {
+            addSeparator();
+            addLine("Local mule", shorten(KspHighAlchMuleService.status, 28));
+            addLine("Mule state", formatMuleState(KspHighAlchMuleService.state));
+            addLine("Receiver", KspHighAlchMuleService.receiverOnline ? "Online" : "Offline");
+            addLine("Transfer at", formatGp(config.muleThreshold()));
+            addLine("Keep in bank", formatGp(config.muleKeepInBank()));
+            addLine("Trading capital", formatGp(Math.max(config.muleKeepCoins(), config.reserveCoins())));
+            addLine("Total GP", formatGp(KspHighAlchMuleService.totalCoins));
+            if (KspHighAlchMuleService.transferCoins > 0)
+                addLine("Transfer", formatGp(KspHighAlchMuleService.transferCoins));
+            if (KspHighAlchMuleService.queuePosition > 0)
+                addLine("Queue", "#" + KspHighAlchMuleService.queuePosition);
+            if (!"-".equals(KspHighAlchMuleService.muleName))
+                addLine("Mule", shorten(KspHighAlchMuleService.muleName, 20));
+        }
 
         addSeparator();
         addLine("Coins", formatGp(script.getCoinQuantity()));
@@ -101,6 +122,12 @@ public class KspF2PHighAlchTraderOverlay extends OverlayPanel {
     }
 
     private static String formatState(KspF2PHighAlchTraderScript.State state) {
+        if (state == null) return "-";
+        String value = state.name().toLowerCase(Locale.ROOT).replace('_', ' ');
+        return Character.toUpperCase(value.charAt(0)) + value.substring(1);
+    }
+
+    private static String formatMuleState(KspHighAlchMuleService.MuleState state) {
         if (state == null) return "-";
         String value = state.name().toLowerCase(Locale.ROOT).replace('_', ' ');
         return Character.toUpperCase(value.charAt(0)) + value.substring(1);

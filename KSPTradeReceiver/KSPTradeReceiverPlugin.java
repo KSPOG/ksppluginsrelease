@@ -13,19 +13,20 @@ import javax.inject.Inject;
 
 @PluginDescriptor(
         name = PluginConstants.KSP + "Trade Receiver",
-        description = "Accepts trades from one configured player, banks when full and returns to the saved trade tile",
-        tags = {"trade", "receiver", "bank", "microbot", "ksp"},
+        description = "Localhost-coordinated mule receiver. Wakes for queued worker trades, banks received items and logs out only after the queue is empty.",
+        tags = {"trade", "receiver", "mule", "localhost", "bank", "microbot", "ksp"},
         version = KSPTradeReceiverPlugin.VERSION,
-        minClientVersion = "0.0.3",
+        minClientVersion = "2.6.18",
         enabledByDefault = PluginConstants.DEFAULT_ENABLED,
         isExternal = PluginConstants.IS_EXTERNAL
 )
 public class KSPTradeReceiverPlugin extends Plugin
 {
-    public static final String VERSION = "0.1.1";
+    public static final String VERSION = "0.2.0";
 
     @Inject private KSPTradeReceiverConfig config;
     @Inject private KSPTradeReceiverScript script;
+    @Inject private KspLocalMuleCoordinatorService muleCoordinator;
     @Inject private KSPTradeReceiverOverlay overlay;
     @Inject private OverlayManager overlayManager;
 
@@ -39,12 +40,14 @@ public class KSPTradeReceiverPlugin extends Plugin
     protected void startUp()
     {
         overlayManager.add(overlay);
+        muleCoordinator.start(config);
         script.run(config);
     }
 
     @Override
     protected void shutDown()
     {
+        muleCoordinator.shutdown();
         script.shutdown();
         overlayManager.remove(overlay);
     }

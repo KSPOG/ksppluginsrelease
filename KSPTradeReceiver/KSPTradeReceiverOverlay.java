@@ -25,18 +25,29 @@ public class KSPTradeReceiverOverlay extends OverlayPanel
     @Override
     public Dimension render(java.awt.Graphics2D graphics)
     {
-        if (!config.showOverlay()) return null;
+        if (!config.showOverlay())
+        {
+            return null;
+        }
 
         panelComponent.getChildren().clear();
-        panelComponent.setPreferredSize(new Dimension(285, 245));
+        panelComponent.setPreferredSize(new Dimension(300, 315));
 
         panelComponent.getChildren().add(TitleComponent.builder()
                 .text("KSP Trade Receiver v" + KSPTradeReceiverPlugin.VERSION)
                 .color(Color.ORANGE)
                 .build());
 
-        addLine("Status:", KSPTradeReceiverScript.status);
+        addLine("Status:", KspLocalMuleCoordinatorService.status);
         addLine("Runtime:", formatDuration(KSPTradeReceiverScript.getRuntime()));
+        addLine("Coordinator:", KspLocalMuleCoordinatorService.coordinatorOnline
+                ? "127.0.0.1:" + KspLocalMuleCoordinatorService.localPort
+                : "Offline");
+        addLine("Pending jobs:", Integer.toString(KspLocalMuleCoordinatorService.pendingWorkers));
+        addLine("Queued jobs:", Integer.toString(KspLocalMuleCoordinatorService.queuedWorkers));
+        addLine("Active worker:", KspLocalMuleCoordinatorService.activeWorker);
+        addLine("Expected coins:", formatGp(KspLocalMuleCoordinatorService.activeCoins));
+        addLine("Trade status:", KSPTradeReceiverScript.status);
         addLine("Trader:", KSPTradeReceiverScript.configuredTrader);
         addLine("Pending:", KSPTradeReceiverScript.pendingTrader);
         addLine("Inventory:", KSPTradeReceiverScript.inventorySlots + "/28");
@@ -56,6 +67,15 @@ public class KSPTradeReceiverOverlay extends OverlayPanel
                 .left(left)
                 .right(right == null ? "-" : right)
                 .build());
+    }
+
+    private static String formatGp(long value)
+    {
+        if (value <= 0L) return "-";
+        if (value >= 1_000_000_000L) return String.format("%.2fB", value / 1_000_000_000.0);
+        if (value >= 1_000_000L) return String.format("%.2fM", value / 1_000_000.0);
+        if (value >= 1_000L) return String.format("%.1fK", value / 1_000.0);
+        return Long.toString(value);
     }
 
     private static String formatDuration(Duration duration)
