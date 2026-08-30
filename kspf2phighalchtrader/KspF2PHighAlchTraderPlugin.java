@@ -27,6 +27,7 @@ public class KspF2PHighAlchTraderPlugin extends Plugin
 
     @Inject private KspF2PHighAlchTraderConfig config;
     @Inject private KspF2PHighAlchTraderScript script;
+    @Inject private KspHighAlchBankReserveGuard bankReserveGuard;
     @Inject private KspHighAlchMuleService muleService;
     @Inject private KspF2PHighAlchTraderOverlay overlay;
     @Inject private OverlayManager overlayManager;
@@ -45,9 +46,10 @@ public class KspF2PHighAlchTraderPlugin extends Plugin
     @Override
     protected void startUp()
     {
-        // The mule service is deliberately independent of the trader state machine.
-        // When a transfer is required it pauses Microbot scripts, completes the mule
-        // transaction, restores trading capital, then resumes the existing script.
+        // Protect the configured bank reserve before the mule service can calculate a
+        // transfer. The guard also stops the pre-mule trader's "withdraw all bank coins"
+        // fallback from consuming that protected stack later.
+        bankReserveGuard.start(config);
         muleService.start(config);
 
         // Source-loaded plugins start on Swing/EDT. Prime both fallback layers on
@@ -81,6 +83,7 @@ public class KspF2PHighAlchTraderPlugin extends Plugin
     protected void shutDown()
     {
         muleService.shutdown();
+        bankReserveGuard.shutdown();
 
         KspHighAlchMarketCache cache = marketCache;
         marketCache = null;
