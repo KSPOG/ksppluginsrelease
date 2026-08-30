@@ -88,4 +88,16 @@ public interface KspMuleConfig
     {
         return 180;
     }
+
+    /** Existing plugin-specific bank reserve that muling must never reduce below. */
+    default int muleMinimumBankReserve()
+    {
+        return 0;
+    }
+
+    /** Existing plugin-specific operating-cash floor that muling must preserve. */
+    default int muleMinimumTradingCapital()
+    {
+        return 0;
+    }
 }
