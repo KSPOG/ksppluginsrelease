@@ -224,7 +224,7 @@ public class KspHighAlchMuleService
     private long prepareCoinsForTransfer()
     {
         if (!Rs2Bank.walkToBankAndUseBank()) return -1L;
-        sleep(400L);
+        sleep(400);
 
         long inv = Math.max(0L, Rs2Inventory.itemQuantity(COINS_ID));
         long bank = Math.max(0L, Rs2Bank.count(COINS_ID));
@@ -448,7 +448,7 @@ public class KspHighAlchMuleService
                 .param1(InterfaceID.Tradeside.SIDE_LAYER)
                 .itemId(COINS_ID);
         Microbot.doInvoke(entry, new Rectangle(1, 1));
-        sleep(300L);
+        sleep(300);
         return tradeOfferQuantity(InventoryID.TRADEOFFER, COINS_ID) == preparedTransfer;
     }
 
