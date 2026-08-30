@@ -23,12 +23,13 @@ import javax.inject.Inject;
 )
 public class KspF2PHighAlchTraderPlugin extends Plugin
 {
-    public static final String VERSION = "0.3.1";
+    public static final String VERSION = "0.3.2";
 
     @Inject private KspF2PHighAlchTraderConfig config;
     @Inject private KspF2PHighAlchTraderScript script;
     @Inject private KspHighAlchBankReserveGuard bankReserveGuard;
     @Inject private KspHighAlchMuleService muleService;
+    @Inject private KspHighAlchTradeAcceptGuard tradeAcceptGuard;
     @Inject private KspF2PHighAlchTraderOverlay overlay;
     @Inject private OverlayManager overlayManager;
     @Inject private ItemManager itemManager;
@@ -51,6 +52,7 @@ public class KspF2PHighAlchTraderPlugin extends Plugin
         // fallback from consuming that protected stack later.
         bankReserveGuard.start(config);
         muleService.start(config);
+        tradeAcceptGuard.start(config);
 
         // Source-loaded plugins start on Swing/EDT. Prime both fallback layers on
         // RuneLite's client thread before allowing the trader loop to begin:
@@ -82,6 +84,7 @@ public class KspF2PHighAlchTraderPlugin extends Plugin
     @Override
     protected void shutDown()
     {
+        tradeAcceptGuard.shutdown();
         muleService.shutdown();
         bankReserveGuard.shutdown();
 
