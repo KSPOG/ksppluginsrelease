@@ -13,16 +13,16 @@ import javax.inject.Inject;
 
 @PluginDescriptor(
         name = PluginConstants.KSP + "Trade Receiver",
-        description = "Accepts trades from one configured player, banks when full and returns to the saved trade tile",
-        tags = {"trade", "receiver", "bank", "microbot", "ksp"},
+        description = "Localhost-coordinated mule receiver. Wakes for queued worker trades, banks received items and logs out only after the queue is empty.",
+        tags = {"trade", "receiver", "mule", "localhost", "bank", "microbot", "ksp"},
         version = KSPTradeReceiverPlugin.VERSION,
-        minClientVersion = "0.0.3",
+        minClientVersion = "2.6.18",
         enabledByDefault = PluginConstants.DEFAULT_ENABLED,
         isExternal = PluginConstants.IS_EXTERNAL
 )
 public class KSPTradeReceiverPlugin extends Plugin
 {
-    public static final String VERSION = "0.1.1";
+    public static final String VERSION = "0.2.0";
 
     @Inject private KSPTradeReceiverConfig config;
     @Inject private KSPTradeReceiverScript script;
@@ -47,6 +47,17 @@ public class KSPTradeReceiverPlugin extends Plugin
     {
         script.shutdown();
         overlayManager.remove(overlay);
+    }
+
+    /**
+     * The local ServerSocket must keep running while the mule account is logged out.
+     * Without this RuneLite would suspend the plugin at the login screen and no worker
+     * could wake the mule.
+     */
+    @Override
+    public boolean isEnabledOnLoginScreen()
+    {
+        return true;
     }
 
     @Subscribe
