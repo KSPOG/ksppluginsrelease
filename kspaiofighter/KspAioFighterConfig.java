@@ -6,11 +6,12 @@ import net.runelite.client.config.ConfigInformation;
 import net.runelite.client.config.ConfigItem;
 import net.runelite.client.config.ConfigSection;
 import net.runelite.client.config.Range;
+import net.runelite.client.plugins.microbot.kspmule.KspMuleConfig;
 import net.runelite.client.plugins.microbot.util.magic.Rs2CombatSpells;
 
 @ConfigGroup(KspAioFighterConfig.GROUP)
 @ConfigInformation("Enter NPC names and item names as comma-separated lists. Gear lists are equipped automatically when that skill is selected for training.")
-public interface KspAioFighterConfig extends Config
+public interface KspAioFighterConfig extends Config, KspMuleConfig
 {
 	String GROUP = "kspaiofighter";
 
@@ -34,6 +35,9 @@ public interface KspAioFighterConfig extends Config
 
 	@ConfigSection(name = "Paint", description = "RuneScape-style fighter paint shown over the chatbox", position = 6)
 	String paintSection = "paint";
+
+	@ConfigSection(name = "Local Mule", description = "Automatic excess-GP transfer to KSP Trade Receiver", position = 90)
+	String muleSection = KspMuleConfig.SECTION;
 
 	@ConfigItem(keyName = "showPaint", name = "Show paint", description = "Show the RuneScape-style KSP AIO Fighter paint over the chatbox.", position = 0, section = paintSection)
 	default boolean showPaint()
@@ -93,7 +97,7 @@ public interface KspAioFighterConfig extends Config
 		return false;
 	}
 
-	@ConfigItem(keyName = "resetArea", name = "Reset Area", description = "Clear the saved attack area tiles and allow creating a new area from tile right-click options.", position = 2, section = areaSection)
+	@ConfigItem(keyName = "resetArea", name = "Reset Area", description = "Clear the saved attack area tiles and allow creating a new area from a right-click tile action.", position = 2, section = areaSection)
 	default void resetArea()
 	{
 		KspAioFighterPlugin.requestAreaReset();
@@ -134,7 +138,6 @@ public interface KspAioFighterConfig extends Config
 	{
 		return 0;
 	}
-
 
 	@ConfigItem(keyName = "trainAttack", name = "Train Attack", description = "Train Attack until the target level is reached.", position = 0, section = trainingSection)
 	default boolean trainAttack()
@@ -320,7 +323,3 @@ public interface KspAioFighterConfig extends Config
 		return 1;
 	}
 }
-
-
-
-
