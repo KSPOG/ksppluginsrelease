@@ -25,10 +25,13 @@ public class KSPTradeReceiverOverlay extends OverlayPanel
     @Override
     public Dimension render(java.awt.Graphics2D graphics)
     {
-        if (!config.showOverlay()) return null;
+        if (!config.showOverlay())
+        {
+            return null;
+        }
 
         panelComponent.getChildren().clear();
-        panelComponent.setPreferredSize(new Dimension(285, 245));
+        panelComponent.setPreferredSize(new Dimension(300, 290));
 
         panelComponent.getChildren().add(TitleComponent.builder()
                 .text("KSP Trade Receiver v" + KSPTradeReceiverPlugin.VERSION)
@@ -37,8 +40,13 @@ public class KSPTradeReceiverOverlay extends OverlayPanel
 
         addLine("Status:", KSPTradeReceiverScript.status);
         addLine("Runtime:", formatDuration(KSPTradeReceiverScript.getRuntime()));
-        addLine("Trader:", KSPTradeReceiverScript.configuredTrader);
-        addLine("Pending:", KSPTradeReceiverScript.pendingTrader);
+        addLine("Coordinator:", KSPTradeReceiverScript.coordinatorOnline
+                ? "127.0.0.1:" + KSPTradeReceiverScript.localPort
+                : "Offline");
+        addLine("Pending jobs:", Integer.toString(KSPTradeReceiverScript.pendingWorkers));
+        addLine("Queued jobs:", Integer.toString(KSPTradeReceiverScript.queuedWorkers));
+        addLine("Active trader:", KSPTradeReceiverScript.configuredTrader);
+        addLine("Trade request:", KSPTradeReceiverScript.pendingTrader);
         addLine("Inventory:", KSPTradeReceiverScript.inventorySlots + "/28");
         addLine("Trade tile:", KSPTradeReceiverScript.savedTradeTile);
         addLine("Own offer:", KSPTradeReceiverScript.ownOfferSafe ? "Safe / empty" : "BLOCKED");
