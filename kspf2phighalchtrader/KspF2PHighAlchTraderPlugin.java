@@ -1,7 +1,9 @@
 package net.runelite.client.plugins.microbot.kspf2phighalchtrader;
 
 import com.google.inject.Provides;
+import net.runelite.client.callback.ClientThread;
 import net.runelite.client.config.ConfigManager;
+import net.runelite.client.game.ItemManager;
 import net.runelite.client.plugins.Plugin;
 import net.runelite.client.plugins.PluginDescriptor;
 import net.runelite.client.plugins.microbot.PluginConstants;
@@ -21,7 +23,7 @@ import javax.inject.Inject;
 )
 public class KspF2PHighAlchTraderPlugin extends Plugin
 {
-    public static final String VERSION = "0.2.7";
+    public static final String VERSION = "0.2.10";
 
     @Inject
     private KspF2PHighAlchTraderConfig config;
@@ -35,6 +37,15 @@ public class KspF2PHighAlchTraderPlugin extends Plugin
     @Inject
     private OverlayManager overlayManager;
 
+    @Inject
+    private ItemManager itemManager;
+
+    @Inject
+    private ClientThread clientThread;
+
+    private KspHighAlchMarketCache marketCache;
+    private KspRuneLiteMarketBackup runeLiteBackup;
+
     @Provides
     KspF2PHighAlchTraderConfig provideConfig(ConfigManager configManager)
     {
@@ -44,13 +55,51 @@ public class KspF2PHighAlchTraderPlugin extends Plugin
     @Override
     protected void startUp()
     {
+        // Source-loaded plugins start on Swing/EDT. Prime both fallback layers on
+        // RuneLite's client thread before allowing the trader loop to begin:
+        // 1) local RuneLite guide prices -> Microbot price cache
+        // 2) local ItemComposition/ItemStats -> Microbot mapping/GE-limit cache
+        KspHighAlchMarketCache cache = new KspHighAlchMarketCache(itemManager, clientThread);
+        KspRuneLiteMarketBackup backup = new KspRuneLiteMarketBackup(itemManager, clientThread);
+        marketCache = cache;
+        runeLiteBackup = backup;
         overlayManager.add(overlay);
-        script.run(config);
+
+        cache.start(config, () ->
+        {
+            if (marketCache != cache || runeLiteBackup != backup)
+            {
+                return;
+            }
+
+            backup.start(config, () ->
+            {
+                // Ignore delayed callbacks from a cache that was already shut down/replaced.
+                if (marketCache == cache && runeLiteBackup == backup)
+                {
+                    script.run(config);
+                }
+            });
+        });
     }
 
     @Override
     protected void shutDown()
     {
+        KspHighAlchMarketCache cache = marketCache;
+        marketCache = null;
+        if (cache != null)
+        {
+            cache.close();
+        }
+
+        KspRuneLiteMarketBackup backup = runeLiteBackup;
+        runeLiteBackup = null;
+        if (backup != null)
+        {
+            backup.close();
+        }
+
         script.shutdown();
         overlayManager.remove(overlay);
     }

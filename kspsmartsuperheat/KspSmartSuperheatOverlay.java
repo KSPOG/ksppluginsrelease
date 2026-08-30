@@ -75,7 +75,7 @@ public class KspSmartSuperheatOverlay extends OverlayPanel
         addLine("Bars / h", format(script.getBarsPerHour()));
         addLine("Est. session profit", signedGp(script.getEstimatedProfit()));
         addLine("Est. profit / h", signedGp(script.getEstimatedProfitPerHour()));
-        addLine("Unsold session bars", format(script.getUnsoldProduced()));
+        addLine("Saleable output stock", format(script.getUnsoldProduced()));
         addLine("Craftable in bank", format(script.getCraftableBarsInBank()));
         addLine("Current batch", format(script.getCurrentBatchTarget()));
         addLine("Spendable cash", format(script.getSpendableCoins()) + " gp");

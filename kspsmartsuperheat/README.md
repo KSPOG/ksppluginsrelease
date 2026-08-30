@@ -1,6 +1,6 @@
 # KSP Smart Superheat
 
-A Microbot plugin that automatically chooses a **currently profitable Superheat Item recipe**, processes it, banks the bars, sells bars created by the current plugin session when cash is needed, and auto-restocks the required ores/runes through the Grand Exchange.
+A Microbot plugin that checks the bank before selecting a Superheat Item route, consumes complete input batches you already own, liquidates supported bar stock before committing fresh cash, and auto-restocks profitable recipes through the Grand Exchange.
 
 ## Supported recipes
 
@@ -18,6 +18,14 @@ A Microbot plugin that automatically chooses a **currently profitable Superheat 
 The plugin filters recipes by your real Smithing level and requires 43 Magic.
 Members-only recipes are considered only when the account has membership and is currently on a members world.
 
+## Bank-aware route selection
+
+Smart Superheat opens the bank before its initial market decision so the route selector has a current view of existing ores, runes and bars.
+
+Complete Superheat batches that are already owned are used before the plugin commits cash to a new restock. This avoids the old startup behavior where the plugin could immediately report `No profitable recipe` without first considering usable bank stock.
+
+The configured profitability gates apply to **new input purchases**. If the bank already contains a complete batch, the plugin may consume that stock even when the current replacement-cost quote has moved below the purchase gate. Once the existing inputs are exhausted, the normal profitability checks are applied again before another GE buy is allowed.
+
 ## Profit model
 
 The market scanner uses the OSRS Wiki real-time price endpoint. It includes the
@@ -29,50 +37,46 @@ For every bar it estimates:
 
 If a recognised fire-providing staff is equipped, Fire rune cost is treated as zero.
 
-The configured GE buy markup and sell discount are included **before** a recipe is considered profitable. Recipes must also satisfy:
+The configured GE buy markup and sell discount are included before a recipe is approved for a **new restock**. New purchases must satisfy:
 
 - Minimum GP profit per bar
 - Minimum ROI
 - Optional minimum projected GP/hour
 
-Projected GP/hour is used to rank otherwise-profitable recipes. It accounts for the different ore/coal inventory ratios and the configured banking-overhead estimate.
+Projected GP/hour is used to rank routes. It accounts for the different ore/coal inventory ratios and the configured banking-overhead estimate.
 
 ## Smart restocking
 
-- Restock quantity is calculated from the coins currently available to the plugin rather than a fixed bar target.
-- Existing banked ores/runes are included when calculating how many complete bars can be funded, so the plugin only budgets for missing ingredients.
+- Banked complete input batches are consumed before new inputs are purchased.
+- Existing banked ores/runes are included when calculating how many complete bars can already be processed.
 - `Cash reserve` is never intentionally allocated to a new restock plan.
 - `Max spend %` limits how much spendable cash one restock may commit.
-- Before the first GE ingredient offer is placed, the plugin calculates the **complete missing-input cost** for the selected number of bars and funds that whole plan into the stackable inventory coin balance.
-- A later ingredient such as Coal is no longer independently resized against a newly observed cash snapshot after earlier ingredients have already been purchased.
-- Each ingredient purchase must fit the remaining pre-funded plan. If observed cash/bank state drifts, the plugin stays in `RESTOCKING` and recalculates the plan instead of entering `WAITING_FOR_PROFIT` with a misleading ingredient-level insufficient-coins message.
-- Partial GE fills stop the current purchase chain and trigger a fresh plan using the materials actually collected plus the refunded cash. This prevents buying a full amount of Coal/runes against only a partially filled ore purchase.
-- Coins already in the inventory are kept there while the plugin remains in `RESTOCKING`, including when `Bank whole inventory` is enabled.
-- **All available Nature runes are withdrawn as items and kept in one persistent inventory stack.** Bank and inventory Nature runes are treated as one supply pool for affordability and craftable-bar calculations.
+- Before any new input purchase, the selected recipe must still satisfy the configured profit, ROI and projected-GP/hour gates.
+- If supported output bars already exist, `Auto-sell output` liquidates them before a new input restock is started.
+- Saleable output includes both bars made during the current session and supported bars that were already in the bank when the plugin started.
+- Existing output can still be liquidated when no recipe currently qualifies for a new profitable restock.
+- All available Nature runes are treated as part of the usable supply pool.
 - Restocking uses only free GE slots.
 - The plugin does **not** intentionally cancel unrelated GE offers.
-- Buy/sell offers time out, abort, and collect partial fills rather than waiting forever.
+- Buy/sell offers are repriced by the existing GE retry logic instead of blindly placing unrelated replacement offers.
 
-## Grand Exchange entry pacing
+## Output liquidation
 
-Buy offers are entered as a staged transaction instead of firing the entire GE sequence immediately:
+When `Auto-sell output` is enabled, supported bar stock is treated as working capital rather than protected historical stock.
 
-1. Open and settle the GE interface.
-2. Open a free buy slot and wait for the item-search prompt.
-3. Select the exact item and wait for the offer controls.
-4. Enter the requested buy price and verify the GE price value actually changed.
-5. Enter the requested quantity and verify the GE quantity value actually changed.
-6. Only then press Confirm.
+Before buying another input batch the plugin scans the bank for supported outputs. It sells the selected recipe's bars first when present, then continues through other supported bar types until there is no saleable output stock left. The bank quantity observed at sale time is authoritative, so pre-existing bars are intentionally included.
 
-Price and quantity entry are retried when the GE does not register the requested value, which prevents default-price/default-quantity offers caused by UI timing.
+Bars are withdrawn with the bank in **note mode** and verified in the inventory before the Grand Exchange sale is placed.
 
-## Output safety
+Output liquidation uses the bar's live sell price directly. It does not require a complete ore/rune recipe quote merely to sell bars that are already owned.
 
-The plugin tracks bars it created during the current session. When `Auto-sell output` is enabled, selling is bounded by both the tracked session output and a protected bank baseline captured before that recipe begins processing. This is designed to keep pre-existing banked bars out of automated sales, including after partial GE fills.
+Disable `Auto-sell output` if you do not want existing supported bars liquidated automatically.
 
-Produced bars are explicitly withdrawn with the bank in **note mode** before they are offered on the Grand Exchange. The plugin waits for the note-mode switch to settle and verifies that the bar stack appeared in inventory before beginning the sale.
+## Grand Exchange entry and pricing
 
-Because session tracking and protected baselines reset when the plugin/client restarts, previously produced bars are treated as pre-existing stock on the next run rather than automatically sold.
+Input buy prices use the configured markup over the current market high. Output sell prices use the configured discount from the current market low. The existing timeout/reprice flow can adjust an active offer when it does not fill at the initial price.
+
+Only free GE slots are used for new input buys. Existing unrelated offers are left alone.
 
 ## Overlay
 
@@ -88,7 +92,7 @@ The overlay shows:
 - Batch capacity
 - Bars made / bars per hour
 - Estimated session profit / profit per hour
-- Unsold session bars
+- Saleable output stock
 - Craftable bank stock
 - Spendable cash
 - Magic XP and Smithing XP
@@ -98,11 +102,11 @@ The overlay shows:
 
 `Bank whole inventory` is enabled by default so the plugin has a predictable processing inventory. The persistent Nature-rune stack is exempt from that banking cleanup.
 
-During `RESTOCKING`, the active coin stack is also deliberately preserved so consecutive GE offers can reuse one stackable cash balance without unnecessary bank round-trips. Outside restocking, coins may be returned to the bank while Nature runes remain in inventory.
-
 Disable `Bank whole inventory` if you want unrelated inventory items left untouched. Doing so may reduce or prevent valid Superheat batches when too few inventory slots remain.
 
-The plugin checks profitability again while running. If the active recipe falls below the configured profit gate, it stops initiating new casts for that recipe and rescans instead of deliberately continuing an unprofitable route.
+A falling market margin does not force the plugin to abandon a complete input batch that is already owned. It does prevent the plugin from purchasing another batch once the existing stock is exhausted.
+
+If live market data needed for route selection is unavailable, the status reports the price-data problem instead of presenting it as a confirmed lack of profitable recipes.
 
 ## Install in Microbot-Hub
 
@@ -116,4 +120,4 @@ For a single-plugin build in setups that support `-PpluginList`, use the plugin 
 
 ## Notes
 
-Market profit is an estimate, not a guarantee. Prices can move between the Wiki quote, the GE offer, and the eventual fill. The conservative markup/discount controls are there to give the profit filter a safety buffer.
+Market profit is an estimate, not a guarantee. Prices can move between the Wiki quote, the GE offer, and the eventual fill. The markup/discount controls are there to give the new-purchase profit filter a safety buffer.

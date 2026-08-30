@@ -11,6 +11,7 @@ import net.runelite.api.events.GameStateChanged;
 import net.runelite.api.events.GameTick;
 import net.runelite.api.events.ItemContainerChanged;
 import net.runelite.api.gameval.InventoryID;
+import net.runelite.client.callback.ClientThread;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.eventbus.Subscribe;
 import net.runelite.client.events.ConfigChanged;
@@ -27,7 +28,7 @@ import net.runelite.client.ui.overlay.OverlayManager;
 )
 public class KspBondGoalPlugin extends Plugin
 {
-    static final String VERSION = "1.0.0";
+    static final String VERSION = "1.0.2";
 
     private static final int COINS = 995;
     private static final int OLD_SCHOOL_BOND = 13190;
@@ -35,6 +36,9 @@ public class KspBondGoalPlugin extends Plugin
 
     @Inject
     private Client client;
+
+    @Inject
+    private ClientThread clientThread;
 
     @Inject
     private ItemManager itemManager;
@@ -49,7 +53,9 @@ public class KspBondGoalPlugin extends Plugin
     private OverlayManager overlayManager;
 
     private BondActivityAdvisor advisor;
+    private BondTradeLimitService tradeLimits;
     private volatile BondGoalSnapshot snapshot = BondGoalSnapshot.empty();
+    private volatile boolean running;
 
     private long cachedBankCoins;
     private boolean bankKnown;
@@ -65,32 +71,52 @@ public class KspBondGoalPlugin extends Plugin
     @Override
     protected void startUp()
     {
-        advisor = new BondActivityAdvisor(client, itemManager, config);
+        tradeLimits = new BondTradeLimitService();
+        advisor = new BondActivityAdvisor(client, itemManager, config, tradeLimits);
         cachedBankCoins = 0;
         bankKnown = false;
         tickCounter = 0;
         lastPositiveBondPrice = 0;
+        running = true;
 
         overlayManager.add(overlay);
+        tradeLimits.ensureLoaded(this::refreshSnapshot);
 
-        // If a bank container already exists, use it; otherwise the overlay explicitly
-        // asks the user to open the bank once before banked GP is included.
-        ItemContainer bank = client.getItemContainer(InventoryID.BANK);
-        if (bank != null)
+        // Source-loaded plugins may be started from the Swing/AWT thread. Client container
+        // access is client-thread-only, so initialise the live account state there.
+        clientThread.invokeLater(() ->
         {
-            cachedBankCoins = countItem(bank, COINS);
-            bankKnown = true;
-        }
+            if (!running)
+            {
+                return;
+            }
 
-        refreshSnapshot();
+            ItemContainer bank = client.getItemContainer(InventoryID.BANK);
+            if (bank != null)
+            {
+                cachedBankCoins = countItem(bank, COINS);
+                bankKnown = true;
+            }
+
+            refreshSnapshotOnClientThread();
+        });
     }
 
     @Override
     protected void shutDown()
     {
+        running = false;
         overlayManager.remove(overlay);
         snapshot = BondGoalSnapshot.empty();
         advisor = null;
+
+        BondTradeLimitService limitService = tradeLimits;
+        tradeLimits = null;
+        if (limitService != null)
+        {
+            limitService.close();
+        }
+
         cachedBankCoins = 0;
         bankKnown = false;
     }
@@ -98,6 +124,11 @@ public class KspBondGoalPlugin extends Plugin
     @Subscribe
     public void onGameTick(GameTick event)
     {
+        if (!running)
+        {
+            return;
+        }
+
         if (++tickCounter >= REFRESH_TICKS)
         {
             tickCounter = 0;
@@ -108,6 +139,11 @@ public class KspBondGoalPlugin extends Plugin
     @Subscribe
     public void onItemContainerChanged(ItemContainerChanged event)
     {
+        if (!running)
+        {
+            return;
+        }
+
         if (event.getContainerId() == InventoryID.BANK)
         {
             cachedBankCoins = countItem(event.getItemContainer(), COINS);
@@ -152,8 +188,58 @@ public class KspBondGoalPlugin extends Plugin
         return config;
     }
 
+    boolean areTradeLimitsReady()
+    {
+        BondTradeLimitService service = tradeLimits;
+        return service != null && service.isLoaded();
+    }
+
+    String getTradeLimitStatus()
+    {
+        BondTradeLimitService service = tradeLimits;
+        return service == null ? "Unavailable" : service.getStatus();
+    }
+
+    /**
+     * Refreshes the snapshot immediately on the client thread, or safely schedules it
+     * when invoked from AWT/config/plugin lifecycle code.
+     */
     private void refreshSnapshot()
     {
+        if (!running)
+        {
+            return;
+        }
+
+        if (!clientThread.isClientThread())
+        {
+            clientThread.invokeLater(() ->
+            {
+                if (running)
+                {
+                    refreshSnapshotOnClientThread();
+                }
+            });
+            return;
+        }
+
+        refreshSnapshotOnClientThread();
+    }
+
+    private void refreshSnapshotOnClientThread()
+    {
+        if (!running)
+        {
+            return;
+        }
+
+        BondTradeLimitService service = tradeLimits;
+        if (service != null)
+        {
+            // Non-blocking; retries at most once per minute if the Wiki request failed.
+            service.ensureLoaded(this::refreshSnapshot);
+        }
+
         if (client.getGameState() != GameState.LOGGED_IN)
         {
             snapshot = BondGoalSnapshot.empty();

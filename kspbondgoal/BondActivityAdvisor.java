@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Locale;
 import net.runelite.api.Client;
 import net.runelite.api.ItemComposition;
 import net.runelite.api.Skill;
@@ -12,9 +13,9 @@ import net.runelite.client.game.ItemManager;
 /**
  * Read-only activity advisor.
  *
- * Profit estimates use RuneLite item prices plus explicit throughput assumptions.
- * They are planning estimates, not guarantees. Market buy limits, travel time,
- * banking variance, failed offers and player execution are not modeled individually.
+ * Profit estimates use RuneLite item prices, explicit throughput assumptions and
+ * published OSRS Wiki GE buy limits. Travel time, existing limit usage, failed
+ * offers and player execution are not modeled individually.
  */
 final class BondActivityAdvisor
 {
@@ -53,7 +54,8 @@ final class BondActivityAdvisor
     private static final int RUBY_RING = 1641;
     private static final int DIAMOND_RING = 1643;
 
-    // Common F2P high-alchemy candidates. The advisor selects the best live margin.
+    // Common F2P high-alchemy candidates. The advisor can rotate across them so
+    // one item's 4-hour GE limit does not incorrectly define the whole method.
     private static final int[] HIGH_ALCH_CANDIDATES = {
         1079, // Rune platelegs
         1093, // Rune plateskirt
@@ -71,56 +73,67 @@ final class BondActivityAdvisor
     private final Client client;
     private final ItemManager itemManager;
     private final KspBondGoalConfig config;
+    private final BondTradeLimitService tradeLimits;
 
-    BondActivityAdvisor(Client client, ItemManager itemManager, KspBondGoalConfig config)
+    BondActivityAdvisor(
+        Client client,
+        ItemManager itemManager,
+        KspBondGoalConfig config,
+        BondTradeLimitService tradeLimits)
     {
         this.client = client;
         this.itemManager = itemManager;
         this.config = config;
+        this.tradeLimits = tradeLimits;
     }
 
     List<ActivityEstimate> evaluate()
     {
         List<ActivityEstimate> activities = new ArrayList<>();
 
-        addHighAlchemy(activities);
-        addTelegrabWine(activities);
-
+        // Gathering does not require GE purchases, so it remains available while
+        // the live trade-limit mapping is still loading.
         addGathering(activities, "Mine iron ore", Skill.MINING, 15, IRON_ORE, 500);
         addGathering(activities, "Mine coal", Skill.MINING, 30, COAL, 280);
         addGathering(activities, "Cut yew logs", Skill.WOODCUTTING, 60, YEW_LOGS, 180);
 
-        addConversion(activities, "Smelt steel bars", Skill.SMITHING, 30,
-            STEEL_BAR, 700, new Ingredient(IRON_ORE, 1), new Ingredient(COAL, 2));
-        addConversion(activities, "Smelt silver bars", Skill.SMITHING, 20,
-            SILVER_BAR, 750, new Ingredient(SILVER_ORE, 1));
+        if (tradeLimits != null && tradeLimits.isLoaded())
+        {
+            addHighAlchemy(activities);
+            addTelegrabWine(activities);
 
-        addConversion(activities, "Tan cowhides", null, 0,
-            LEATHER, 1_400, new Ingredient(COWHIDE, 1), new Ingredient(-1, 1));
-        addConversion(activities, "Make soft clay", null, 0,
-            SOFT_CLAY, 1_300, new Ingredient(CLAY, 1));
-        addConversion(activities, "Fill jugs with water", null, 0,
-            JUG_OF_WATER, 1_800, new Ingredient(JUG, 1));
+            addConversion(activities, "Smelt steel bars", Skill.SMITHING, 30,
+                STEEL_BAR, 700, new Ingredient(IRON_ORE, 1), new Ingredient(COAL, 2));
+            addConversion(activities, "Smelt silver bars", Skill.SMITHING, 20,
+                SILVER_BAR, 750, new Ingredient(SILVER_ORE, 1));
 
-        addConversion(activities, "Cut sapphires", Skill.CRAFTING, 20,
-            SAPPHIRE, 2_400, new Ingredient(UNCUT_SAPPHIRE, 1));
-        addConversion(activities, "Cut emeralds", Skill.CRAFTING, 27,
-            EMERALD, 2_400, new Ingredient(UNCUT_EMERALD, 1));
-        addConversion(activities, "Cut rubies", Skill.CRAFTING, 34,
-            RUBY, 2_400, new Ingredient(UNCUT_RUBY, 1));
-        addConversion(activities, "Cut diamonds", Skill.CRAFTING, 43,
-            DIAMOND, 2_400, new Ingredient(UNCUT_DIAMOND, 1));
+            addConversion(activities, "Tan cowhides", null, 0,
+                LEATHER, 1_400, new Ingredient(COWHIDE, 1), new Ingredient(-1, 1));
+            addConversion(activities, "Make soft clay", null, 0,
+                SOFT_CLAY, 1_300, new Ingredient(CLAY, 1));
+            addConversion(activities, "Fill jugs with water", null, 0,
+                JUG_OF_WATER, 1_800, new Ingredient(JUG, 1));
 
-        addConversion(activities, "Craft gold rings", Skill.CRAFTING, 5,
-            GOLD_RING, 850, new Ingredient(GOLD_BAR, 1));
-        addConversion(activities, "Craft sapphire rings", Skill.CRAFTING, 20,
-            SAPPHIRE_RING, 850, new Ingredient(GOLD_BAR, 1), new Ingredient(SAPPHIRE, 1));
-        addConversion(activities, "Craft emerald rings", Skill.CRAFTING, 27,
-            EMERALD_RING, 850, new Ingredient(GOLD_BAR, 1), new Ingredient(EMERALD, 1));
-        addConversion(activities, "Craft ruby rings", Skill.CRAFTING, 34,
-            RUBY_RING, 850, new Ingredient(GOLD_BAR, 1), new Ingredient(RUBY, 1));
-        addConversion(activities, "Craft diamond rings", Skill.CRAFTING, 43,
-            DIAMOND_RING, 850, new Ingredient(GOLD_BAR, 1), new Ingredient(DIAMOND, 1));
+            addConversion(activities, "Cut sapphires", Skill.CRAFTING, 20,
+                SAPPHIRE, 2_400, new Ingredient(UNCUT_SAPPHIRE, 1));
+            addConversion(activities, "Cut emeralds", Skill.CRAFTING, 27,
+                EMERALD, 2_400, new Ingredient(UNCUT_EMERALD, 1));
+            addConversion(activities, "Cut rubies", Skill.CRAFTING, 34,
+                RUBY, 2_400, new Ingredient(UNCUT_RUBY, 1));
+            addConversion(activities, "Cut diamonds", Skill.CRAFTING, 43,
+                DIAMOND, 2_400, new Ingredient(UNCUT_DIAMOND, 1));
+
+            addConversion(activities, "Craft gold rings", Skill.CRAFTING, 5,
+                GOLD_RING, 850, new Ingredient(GOLD_BAR, 1));
+            addConversion(activities, "Craft sapphire rings", Skill.CRAFTING, 20,
+                SAPPHIRE_RING, 850, new Ingredient(GOLD_BAR, 1), new Ingredient(SAPPHIRE, 1));
+            addConversion(activities, "Craft emerald rings", Skill.CRAFTING, 27,
+                EMERALD_RING, 850, new Ingredient(GOLD_BAR, 1), new Ingredient(EMERALD, 1));
+            addConversion(activities, "Craft ruby rings", Skill.CRAFTING, 34,
+                RUBY_RING, 850, new Ingredient(GOLD_BAR, 1), new Ingredient(RUBY, 1));
+            addConversion(activities, "Craft diamond rings", Skill.CRAFTING, 43,
+                DIAMOND_RING, 850, new Ingredient(GOLD_BAR, 1), new Ingredient(DIAMOND, 1));
+        }
 
         activities.removeIf(a -> a.getGpPerHour() <= 0);
         activities.sort(Comparator.comparingLong(ActivityEstimate::getGpPerHour).reversed());
@@ -135,18 +148,18 @@ final class BondActivityAdvisor
         }
 
         int naturePrice = price(NATURE_RUNE);
-        if (naturePrice <= 0)
+        int natureLimit4h = limit4h(NATURE_RUNE);
+        if (naturePrice <= 0 || natureLimit4h <= 0)
         {
             return;
         }
 
-        long bestMargin = Long.MIN_VALUE;
-        String bestItem = null;
-
+        List<AlchOption> options = new ArrayList<>();
         for (int itemId : HIGH_ALCH_CANDIDATES)
         {
             int buyPrice = price(itemId);
-            if (buyPrice <= 0)
+            int itemLimit4h = limit4h(itemId);
+            if (buyPrice <= 0 || itemLimit4h <= 0)
             {
                 continue;
             }
@@ -158,22 +171,50 @@ final class BondActivityAdvisor
             }
 
             long margin = (long) composition.getHaPrice() - buyPrice - naturePrice;
-            if (margin > bestMargin)
+            if (margin > 0)
             {
-                bestMargin = margin;
-                bestItem = composition.getName();
+                options.add(new AlchOption(composition.getName(), margin, itemLimit4h));
             }
         }
 
-        if (bestMargin > 0 && bestItem != null)
+        options.sort(Comparator.comparingLong((AlchOption o) -> o.margin).reversed());
+        long remainingCasts4h = Math.min(scaledThroughput(1_100) * 4L, natureLimit4h);
+        long casts4h = 0;
+        long profit4h = 0;
+        int itemsUsed = 0;
+
+        for (AlchOption option : options)
         {
-            long castsPerHour = scaledThroughput(1_100);
-            activities.add(new ActivityEstimate(
-                "High Alchemy",
-                bestMargin * castsPerHour,
-                bestItem + " ~" + bestMargin + " gp/cast; buy limits not modeled"
-            ));
+            if (remainingCasts4h <= 0)
+            {
+                break;
+            }
+
+            long quantity = Math.min(remainingCasts4h, option.limit4h);
+            if (quantity <= 0)
+            {
+                continue;
+            }
+
+            casts4h += quantity;
+            profit4h += option.margin * quantity;
+            remainingCasts4h -= quantity;
+            itemsUsed++;
         }
+
+        if (casts4h <= 0 || profit4h <= 0)
+        {
+            return;
+        }
+
+        AlchOption best = options.get(0);
+        activities.add(new ActivityEstimate(
+            "High Alchemy",
+            profit4h / 4L,
+            "4h GE limits applied; ~" + formatHourly(casts4h)
+                + " casts/h across " + itemsUsed + " item(s); top " + best.name
+                + " limit " + best.limit4h + "/4h"
+        ));
     }
 
     private void addTelegrabWine(List<ActivityEstimate> activities)
@@ -196,11 +237,18 @@ final class BondActivityAdvisor
             return;
         }
 
-        long units = scaledThroughput(350);
+        long units4h = tradeLimitedUnits4h(
+            scaledThroughput(350), new Ingredient(LAW_RUNE, 1));
+        if (units4h <= 0)
+        {
+            return;
+        }
+
         activities.add(new ActivityEstimate(
             "Telegrab Wine of Zamorak",
-            unitProfit * units,
-            "Magic 33+; ~" + unitProfit + " gp after one law rune per wine"
+            unitProfit * units4h / 4L,
+            "Magic 33+; ~" + unitProfit + " gp/wine; GE limits allow ~"
+                + formatHourly(units4h) + " wines/h"
         ));
     }
 
@@ -228,7 +276,7 @@ final class BondActivityAdvisor
         activities.add(new ActivityEstimate(
             name,
             unitValue * units,
-            skill.getName() + " " + requiredLevel + "+; baseline " + baselineUnitsPerHour + " units/h"
+            skill.getName() + " " + requiredLevel + "+; no GE input buy limit"
         ));
     }
 
@@ -255,7 +303,7 @@ final class BondActivityAdvisor
         long inputCost = 0;
         for (Ingredient input : inputs)
         {
-            // Item id -1 represents a fixed 1 gp processing fee per quantity.
+            // Item id -1 represents a fixed processing fee rather than a GE input.
             if (input.itemId == -1)
             {
                 inputCost += input.quantity;
@@ -276,16 +324,48 @@ final class BondActivityAdvisor
             return;
         }
 
-        long units = scaledThroughput(baselineUnitsPerHour);
+        long units4h = tradeLimitedUnits4h(scaledThroughput(baselineUnitsPerHour), inputs);
+        if (units4h <= 0)
+        {
+            return;
+        }
+
         String requirement = skill == null
             ? "No skill requirement"
             : skill.getName() + " " + requiredLevel + "+";
 
         activities.add(new ActivityEstimate(
             name,
-            unitProfit * units,
-            requirement + "; ~" + unitProfit + " gp/unit at current cached prices"
+            unitProfit * units4h / 4L,
+            requirement + "; ~" + unitProfit + " gp/unit; 4h GE limits => ~"
+                + formatHourly(units4h) + " units/h"
         ));
+    }
+
+    private long tradeLimitedUnits4h(long baselineUnitsPerHour, Ingredient... inputs)
+    {
+        long units4h = baselineUnitsPerHour * 4L;
+        for (Ingredient input : inputs)
+        {
+            if (input.itemId < 0)
+            {
+                continue;
+            }
+
+            int limit = limit4h(input.itemId);
+            if (limit <= 0)
+            {
+                return 0;
+            }
+
+            units4h = Math.min(units4h, limit / Math.max(1, input.quantity));
+        }
+        return Math.max(0, units4h);
+    }
+
+    private int limit4h(int itemId)
+    {
+        return tradeLimits == null ? 0 : tradeLimits.getLimit4Hours(itemId);
     }
 
     private int level(Skill skill)
@@ -306,6 +386,11 @@ final class BondActivityAdvisor
     private long scaledThroughput(int baseline)
     {
         return Math.max(1L, (long) baseline * config.activityEfficiencyPercent() / 100L);
+    }
+
+    private static String formatHourly(long units4h)
+    {
+        return String.format(Locale.US, "%.1f", units4h / 4.0);
     }
 
     static final class ActivityEstimate
@@ -346,6 +431,20 @@ final class BondActivityAdvisor
         {
             this.itemId = itemId;
             this.quantity = quantity;
+        }
+    }
+
+    private static final class AlchOption
+    {
+        private final String name;
+        private final long margin;
+        private final int limit4h;
+
+        private AlchOption(String name, long margin, int limit4h)
+        {
+            this.name = name;
+            this.margin = margin;
+            this.limit4h = limit4h;
         }
     }
 }
