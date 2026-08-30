@@ -485,17 +485,19 @@ public class KSPTradeReceiverScript extends Script
 
     private String confirmationOpponent()
     {
-        Widget widget = Rs2Widget.getWidget(InterfaceID.Tradeconfirm.TRADEOPPONENT);
-        if (widget == null || widget.isHidden()) return "";
+        return Microbot.getClientThread().runOnClientThreadOptional(() -> {
+            Widget widget = Microbot.getClient().getWidget(InterfaceID.Tradeconfirm.TRADEOPPONENT);
+            if (widget == null || widget.isHidden()) return "";
 
-        String text = cleanText(widget.getText());
-        String lower = text.toLowerCase(Locale.ROOT);
-        if (lower.startsWith("trading with"))
-        {
-            int colon = text.indexOf(':');
-            return cleanText(colon >= 0 ? text.substring(colon + 1) : text.substring("trading with".length()));
-        }
-        return text;
+            String text = cleanText(widget.getText());
+            String lower = text.toLowerCase(Locale.ROOT);
+            if (lower.startsWith("trading with"))
+            {
+                int colon = text.indexOf(':');
+                return cleanText(colon >= 0 ? text.substring(colon + 1) : text.substring("trading with".length()));
+            }
+            return text;
+        }).orElse("");
     }
 
     private void bankAndReturn(KSPTradeReceiverConfig currentConfig)
