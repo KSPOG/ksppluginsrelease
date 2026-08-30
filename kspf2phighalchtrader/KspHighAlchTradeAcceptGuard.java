@@ -21,8 +21,8 @@ import java.util.concurrent.TimeUnit;
  *
  * This guard uses the rendered YOUR_OFFER widget as the authoritative signal. It
  * only accepts when the active mule workflow is trading, the opponent matches the
- * automatically-discovered mule name, and the visible coin quantity exactly matches
- * the transfer amount.
+ * automatically-discovered mule name, and a visible coin stack exactly matches the
+ * transfer amount.
  */
 @Slf4j
 public class KspHighAlchTradeAcceptGuard
@@ -75,12 +75,7 @@ public class KspHighAlchTradeAcceptGuard
         String expectedMule = KspHighAlchMuleService.muleName;
         if (expectedMule == null || expectedMule.isBlank() || "-".equals(expectedMule)) return;
         if (!firstScreenMatches(expectedMule)) return;
-
-        long visibleCoins = visibleOwnOfferCoins();
-        if (visibleCoins != expectedCoins)
-        {
-            return;
-        }
+        if (!visibleOwnOfferHasExactCoins(expectedCoins)) return;
 
         long now = System.currentTimeMillis();
         if (now - lastAcceptAt < ACCEPT_RETRY_MS) return;
@@ -94,12 +89,12 @@ public class KspHighAlchTradeAcceptGuard
         }
     }
 
-    private long visibleOwnOfferCoins()
+    private boolean visibleOwnOfferHasExactCoins(long expectedCoins)
     {
         return Microbot.getClientThread().runOnClientThreadOptional(() -> {
             Widget root = Microbot.getClient().getWidget(InterfaceID.Trademain.YOUR_OFFER);
-            return root == null || root.isHidden() ? 0L : sumItem(root, COINS_ID);
-        }).orElse(0L);
+            return root != null && !root.isHidden() && treeHasExactItem(root, COINS_ID, expectedCoins);
+        }).orElse(false);
     }
 
     private boolean firstScreenMatches(String expectedMule)
@@ -113,12 +108,10 @@ public class KspHighAlchTradeAcceptGuard
         }).orElse(false);
     }
 
-    private static long sumItem(Widget widget, int itemId)
+    private static boolean treeHasExactItem(Widget widget, int itemId, long expectedQuantity)
     {
-        if (widget == null || widget.isHidden()) return 0L;
-
-        long amount = widget.getItemId() == itemId && widget.getItemQuantity() > 0
-                ? widget.getItemQuantity() : 0L;
+        if (widget == null || widget.isHidden()) return false;
+        if (widget.getItemId() == itemId && widget.getItemQuantity() == expectedQuantity) return true;
 
         Widget[][] groups = {
                 widget.getChildren(),
@@ -131,10 +124,10 @@ public class KspHighAlchTradeAcceptGuard
             if (group == null) continue;
             for (Widget child : group)
             {
-                amount += sumItem(child, itemId);
+                if (treeHasExactItem(child, itemId, expectedQuantity)) return true;
             }
         }
-        return amount;
+        return false;
     }
 
     private static boolean treeMatchesName(Widget widget, String wanted)
