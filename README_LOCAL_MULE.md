@@ -48,7 +48,7 @@ Enable **Local Mule** in `KSP Trade Receiver` and configure:
 - **Logout When Done**: automatically logout only after all queued/active workers finish.
 - **Bank After Transfer**: deposit received inventory before moving to the next worker.
 
-The receiver plugin is enabled on the RuneLite login screen so the localhost listener remains alive while the mule account is logged out.
+The receiver plugin remains loaded while the game account is at the RuneLite login screen, so its localhost listener can receive a worker request and invoke Microbot's login manager.
 
 ## Queue flow
 
