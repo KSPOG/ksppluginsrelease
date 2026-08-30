@@ -28,39 +28,16 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import static net.runelite.client.plugins.microbot.util.Global.sleep;
 import static net.runelite.client.plugins.microbot.util.Global.sleepUntil;
 
-/**
- * Reusable worker-side localhost mule state machine.
- *
- * It is intentionally independent from any one money-making script. When a threshold is
- * reached it temporarily owns Microbot's global script pause, stages the configured reserves,
- * queues with KSP Trade Receiver, trades the exact excess coin stack, restores operating cash
- * and then releases the script pause. A JVM-wide lock prevents two KSP worker plugins in the
- * same client from trying to mule simultaneously.
- */
+/** Reusable worker-side localhost mule state machine for KSP money-making plugins. */
 @Slf4j
 public final class KspMuleWorkerService
 {
     private static final int COINS_ID = 995;
-    private static final long POLL_MS = 250L;
-    private static final long NETWORK_POLL_MS = 700L;
-    private static final long HOP_RETRY_MS = 4_000L;
-    private static final long TRADE_RETRY_MS = 1_500L;
-    private static final long ACCEPT_RETRY_MS = 800L;
-    private static final long CONFIRM_TRANSITION_TIMEOUT_MS = 6_000L;
+    private static final long POLL_MS = 250L, NETWORK_POLL_MS = 700L, HOP_RETRY_MS = 4_000L,
+            TRADE_RETRY_MS = 1_500L, ACCEPT_RETRY_MS = 800L, CONFIRM_TRANSITION_TIMEOUT_MS = 6_000L;
     private static final AtomicBoolean GLOBAL_TRANSFER_LOCK = new AtomicBoolean(false);
 
-    public enum State
-    {
-        IDLE,
-        PREPARING,
-        QUEUED,
-        TRAVELLING,
-        TRADING,
-        CONFIRMING,
-        WAITING_COMPLETE,
-        RESTORING,
-        FAILED
-    }
+    public enum State { IDLE, PREPARING, QUEUED, TRAVELLING, TRADING, CONFIRMING, WAITING_COMPLETE, RESTORING, FAILED }
 
     private final String ownerName;
     private final KspLocalMuleClient client = new KspLocalMuleClient();
@@ -68,29 +45,17 @@ public final class KspMuleWorkerService
     private KspMuleConfig config;
 
     private volatile State state = State.IDLE;
-    private volatile String status = "Disabled";
-    private volatile String muleName = "-";
-    private volatile long totalCoins;
-    private volatile long transferCoins;
+    private volatile String status = "Disabled", muleName = "-";
+    private volatile long totalCoins, transferCoins;
     private volatile int queuePosition;
     private volatile boolean receiverOnline;
 
-    private String requestId;
-    private long requestStartedAt;
-    private long lastNetworkPollAt;
-    private long lastWorldHopAt;
-    private long lastTradeAttemptAt;
-    private long lastAcceptAt;
-    private long firstAcceptedAt;
-    private long preparedTransfer;
-    private String activeMuleName;
+    private String requestId, activeMuleName;
+    private long requestStartedAt, lastNetworkPollAt, lastWorldHopAt, lastTradeAttemptAt, lastAcceptAt,
+            firstAcceptedAt, preparedTransfer;
     private WorldPoint muleTile;
     private int muleWorld;
-    private boolean offeredCoins;
-    private boolean firstAccepted;
-    private boolean finalAccepted;
-    private boolean pauseOwned;
-    private boolean transferLockOwned;
+    private boolean offeredCoins, firstAccepted, finalAccepted, pauseOwned, transferLockOwned;
     private volatile boolean stopping;
 
     public KspMuleWorkerService(String ownerName)
@@ -102,7 +67,7 @@ public final class KspMuleWorkerService
     {
         if (executor != null) return;
         this.config = config;
-        this.stopping = false;
+        stopping = false;
         resetRuntime();
         executor = Executors.newSingleThreadScheduledExecutor(r -> {
             Thread t = new Thread(r, "ksp-mule-" + ownerName.replaceAll("[^A-Za-z0-9]", "-").toLowerCase(Locale.ROOT));
@@ -114,10 +79,7 @@ public final class KspMuleWorkerService
 
     private void tickSafely()
     {
-        try
-        {
-            tick();
-        }
+        try { tick(); }
         catch (Exception ex)
         {
             log.error("{} mule service failed", ownerName, ex);
@@ -127,73 +89,74 @@ public final class KspMuleWorkerService
 
     private void tick()
     {
-        KspMuleConfig current = config;
-        if (stopping || current == null) return;
-
+        KspMuleConfig c = config;
+        if (stopping || c == null) return;
         refreshCoinSummary();
 
-        if (!current.muleEnabled())
+        if (!c.muleEnabled())
         {
             if (requestId != null) cancelCurrent();
-            status = "Disabled";
             state = State.IDLE;
+            status = "Disabled";
             receiverOnline = false;
             releaseOwnership();
             return;
         }
-
         if (!Microbot.isLoggedIn())
         {
             status = "Waiting for worker login";
             return;
         }
-
         if (requestId == null)
         {
             enforceBankReserveIfOpen();
             maybeStartTransfer();
             return;
         }
-
         if (timedOut())
         {
             cancelCurrent();
             fail("Mule request timed out", true);
             return;
         }
-
         pollJob();
+    }
+
+    private long effectiveBankReserve(KspMuleConfig c)
+    {
+        return Math.max(0L, Math.max((long) c.muleKeepInBank(), (long) c.muleMinimumBankReserve()));
+    }
+
+    private long effectiveTradingCapital(KspMuleConfig c)
+    {
+        return Math.max(0L, Math.max((long) c.muleKeepTradingCapital(), (long) c.muleMinimumTradingCapital()));
     }
 
     private void refreshCoinSummary()
     {
-        totalCoins = Math.max(0L, Rs2Inventory.itemQuantity(COINS_ID))
-                + Math.max(0L, Rs2Bank.count(COINS_ID));
+        totalCoins = Math.max(0L, Rs2Inventory.itemQuantity(COINS_ID)) + Math.max(0L, Rs2Bank.count(COINS_ID));
     }
 
     private void maybeStartTransfer()
     {
-        KspMuleConfig current = config;
-        if (current == null) return;
-
-        long threshold = Math.max(1_000L, current.muleTransferAt());
+        KspMuleConfig c = config;
+        if (c == null) return;
+        long threshold = Math.max(1_000L, c.muleTransferAt());
         if (totalCoins < threshold)
         {
             state = State.IDLE;
             status = "Waiting for " + threshold + " total GP";
-            receiverOnline = client.ping(current.muleReceiverPort());
+            receiverOnline = client.ping(c.muleReceiverPort());
             return;
         }
 
-        long protectedBank = Math.max(0L, current.muleKeepInBank());
-        long tradingCapital = Math.max(0L, current.muleKeepTradingCapital());
-        if (totalCoins <= protectedBank + tradingCapital)
+        long keepBank = effectiveBankReserve(c), keepTrading = effectiveTradingCapital(c);
+        if (totalCoins <= keepBank + keepTrading)
         {
             state = State.IDLE;
             status = "Threshold reached but reserves consume excess GP";
             return;
         }
-
         if (!GLOBAL_TRANSFER_LOCK.compareAndSet(false, true))
         {
             state = State.QUEUED;
@@ -202,18 +165,16 @@ public final class KspMuleWorkerService
         }
         transferLockOwned = true;
         acquirePause();
-
         state = State.PREPARING;
         status = "Preparing mule transfer";
+
         long actualTransfer = prepareCoinsForTransfer();
         if (actualTransfer <= 0L)
         {
             fail("Unable to prepare transfer coins", true);
             return;
         }
-
-        preparedTransfer = actualTransfer;
-        transferCoins = actualTransfer;
+        preparedTransfer = transferCoins = actualTransfer;
         String accountName = localPlayerName();
         if (accountName.isBlank())
         {
@@ -224,31 +185,27 @@ public final class KspMuleWorkerService
         requestId = UUID.randomUUID().toString();
         requestStartedAt = System.currentTimeMillis();
         lastNetworkPollAt = 0L;
-        KspLocalMuleClient.Status reply = client.ready(
-                current.muleReceiverPort(), requestId, accountName, preparedTransfer, Rs2Player.getWorld());
+        KspLocalMuleClient.Status reply = client.ready(c.muleReceiverPort(), requestId, accountName, preparedTransfer, Rs2Player.getWorld());
         receiverOnline = reply.state != KspLocalMuleClient.State.UNKNOWN;
         applyStatus(reply);
     }
 
     private long prepareCoinsForTransfer()
     {
-        KspMuleConfig current = config;
-        if (current == null || !Rs2Bank.walkToBankAndUseBank()) return -1L;
+        KspMuleConfig c = config;
+        if (c == null || !Rs2Bank.walkToBankAndUseBank()) return -1L;
         sleep(400);
 
         long inv = Math.max(0L, Rs2Inventory.itemQuantity(COINS_ID));
         long bank = Math.max(0L, Rs2Bank.count(COINS_ID));
         long total = inv + bank;
-        long threshold = Math.max(1_000L, current.muleTransferAt());
-        if (total < threshold)
+        if (total < Math.max(1_000L, c.muleTransferAt()))
         {
             Rs2Bank.closeBank();
             return 0L;
         }
 
-        long keepBank = Math.max(0L, current.muleKeepInBank());
-        long keepTrading = Math.max(0L, current.muleKeepTradingCapital());
-        long desiredBank = Math.min(total, keepBank + keepTrading);
+        long desiredBank = Math.min(total, effectiveBankReserve(c) + effectiveTradingCapital(c));
         long transfer = total - desiredBank;
         if (transfer <= 0L || transfer > Integer.MAX_VALUE)
         {
@@ -258,8 +215,8 @@ public final class KspMuleWorkerService
 
         if (bank < desiredBank)
         {
-            long deposit = desiredBank - bank;
-            if (deposit > inv || deposit > Integer.MAX_VALUE || !Rs2Bank.depositX(COINS_ID, (int) deposit))
+            long amount = desiredBank - bank;
+            if (amount > inv || amount > Integer.MAX_VALUE || !Rs2Bank.depositX(COINS_ID, (int) amount))
             {
                 Rs2Bank.closeBank();
                 return -1L;
@@ -268,8 +225,8 @@ public final class KspMuleWorkerService
         }
         else if (bank > desiredBank)
         {
-            long withdraw = bank - desiredBank;
-            if (withdraw > Integer.MAX_VALUE || !Rs2Bank.withdrawX(COINS_ID, (int) withdraw))
+            long amount = bank - desiredBank;
+            if (amount > Integer.MAX_VALUE || !Rs2Bank.withdrawX(COINS_ID, (int) amount))
             {
                 Rs2Bank.closeBank();
                 return -1L;
@@ -277,16 +234,13 @@ public final class KspMuleWorkerService
             sleepUntil(() -> Math.max(0L, Rs2Inventory.itemQuantity(COINS_ID)) >= transfer, 5_000);
         }
 
-        long stagedBank = Math.max(0L, Rs2Bank.count(COINS_ID));
-        if (stagedBank != desiredBank)
+        if (Math.max(0L, Rs2Bank.count(COINS_ID)) != desiredBank)
         {
             Rs2Bank.closeBank();
             return -1L;
         }
-
         Rs2Bank.closeBank();
-        long inventoryTransfer = Math.max(0L, Rs2Inventory.itemQuantity(COINS_ID));
-        return inventoryTransfer == transfer ? transfer : -1L;
+        return Math.max(0L, Rs2Inventory.itemQuantity(COINS_ID)) == transfer ? transfer : -1L;
     }
 
     private void pollJob()
@@ -294,9 +248,9 @@ public final class KspMuleWorkerService
         long now = System.currentTimeMillis();
         if (now - lastNetworkPollAt < NETWORK_POLL_MS) return;
         lastNetworkPollAt = now;
-        KspMuleConfig current = config;
-        if (current == null) return;
-        KspLocalMuleClient.Status reply = client.status(current.muleReceiverPort(), requestId);
+        KspMuleConfig c = config;
+        if (c == null) return;
+        KspLocalMuleClient.Status reply = client.status(c.muleReceiverPort(), requestId);
         receiverOnline = reply.state != KspLocalMuleClient.State.UNKNOWN;
         applyStatus(reply);
     }
@@ -396,10 +350,7 @@ public final class KspMuleWorkerService
                 finalAccepted = Rs2Widget.clickWidget(InterfaceID.Tradeconfirm.TRADE2ACCEPT);
                 status = finalAccepted ? "Accepted confirmation" : "Waiting for confirmation Accept";
             }
-            else if (finalAccepted)
-            {
-                status = "Waiting for receiver completion";
-            }
+            else if (finalAccepted) status = "Waiting for receiver completion";
             return;
         }
 
@@ -411,7 +362,6 @@ public final class KspMuleWorkerService
                 status = "Trade opponent mismatch";
                 return;
             }
-
             if (!visibleOwnOfferHasExactCoins(preparedTransfer))
             {
                 if (!offeredCoins || System.currentTimeMillis() - lastTradeAttemptAt >= TRADE_RETRY_MS)
@@ -436,16 +386,10 @@ public final class KspMuleWorkerService
                         firstAcceptedAt = now;
                         status = "Accepted first trade screen";
                     }
-                    else
-                    {
-                        status = "Waiting for first-screen Accept";
-                    }
+                    else status = "Waiting for first-screen Accept";
                 }
             }
-            else
-            {
-                status = "Waiting for receiver first-screen Accept";
-            }
+            else status = "Waiting for receiver first-screen Accept";
             return;
         }
 
@@ -455,7 +399,6 @@ public final class KspMuleWorkerService
             status = "Waiting for receiver completion";
             return;
         }
-
         if (firstAccepted)
         {
             state = State.CONFIRMING;
@@ -485,14 +428,8 @@ public final class KspMuleWorkerService
     {
         Rs2ItemModel coins = Rs2Inventory.get(COINS_ID);
         if (coins == null || coins.getQuantity() != preparedTransfer) return false;
-        NewMenuEntry entry = new NewMenuEntry()
-                .option("Offer-All")
-                .target(coins.getName())
-                .identifier(4)
-                .opcode(MenuAction.CC_OP.getId())
-                .param0(coins.getSlot())
-                .param1(InterfaceID.Tradeside.SIDE_LAYER)
-                .itemId(COINS_ID);
+        NewMenuEntry entry = new NewMenuEntry().option("Offer-All").target(coins.getName()).identifier(4)
+                .opcode(MenuAction.CC_OP.getId()).param0(coins.getSlot()).param1(InterfaceID.Tradeside.SIDE_LAYER).itemId(COINS_ID);
         Microbot.doInvoke(entry, new Rectangle(1, 1));
         sleep(300);
         return visibleOwnOfferHasExactCoins(preparedTransfer);
@@ -504,20 +441,13 @@ public final class KspMuleWorkerService
         if (wanted.isEmpty()) return false;
         Rs2PlayerModel model = Microbot.getRs2PlayerCache().getStream()
                 .filter(p -> p != null && p.getPlayer() != null)
-                .filter(p -> normaliseName(p.getPlayer().getName()).equals(wanted))
-                .findFirst().orElse(null);
+                .filter(p -> normaliseName(p.getPlayer().getName()).equals(wanted)).findFirst().orElse(null);
         if (model == null) return false;
         Player player = model.getPlayer();
         Integer action = nativeTradeAction();
         if (action == null) return false;
-        NewMenuEntry entry = new NewMenuEntry()
-                .option("Trade with")
-                .target(player.getName())
-                .identifier(player.getId())
-                .opcode(action)
-                .param0(0)
-                .param1(0)
-                .actor(player);
+        NewMenuEntry entry = new NewMenuEntry().option("Trade with").target(player.getName()).identifier(player.getId())
+                .opcode(action).param0(0).param1(0).actor(player);
         Microbot.doInvoke(entry, new Rectangle(1, 1));
         return true;
     }
@@ -531,15 +461,13 @@ public final class KspMuleWorkerService
             for (int i = 0; i < Math.min(options.length, menuTypes.length); i++)
             {
                 if (!"Trade with".equalsIgnoreCase(cleanText(options[i]))) continue;
-                int actionId = menuTypes[i];
-                if (actionId >= MenuAction.MENU_ACTION_DEPRIORITIZE_OFFSET)
-                    actionId -= MenuAction.MENU_ACTION_DEPRIORITIZE_OFFSET;
-                MenuAction action = MenuAction.of(actionId);
+                int id = menuTypes[i];
+                if (id >= MenuAction.MENU_ACTION_DEPRIORITIZE_OFFSET) id -= MenuAction.MENU_ACTION_DEPRIORITIZE_OFFSET;
+                MenuAction action = MenuAction.of(id);
                 if (action == MenuAction.PLAYER_FIRST_OPTION || action == MenuAction.PLAYER_SECOND_OPTION
                         || action == MenuAction.PLAYER_THIRD_OPTION || action == MenuAction.PLAYER_FOURTH_OPTION
                         || action == MenuAction.PLAYER_FIFTH_OPTION || action == MenuAction.PLAYER_SIXTH_OPTION
-                        || action == MenuAction.PLAYER_SEVENTH_OPTION || action == MenuAction.PLAYER_EIGHTH_OPTION)
-                    return actionId;
+                        || action == MenuAction.PLAYER_SEVENTH_OPTION || action == MenuAction.PLAYER_EIGHTH_OPTION) return id;
             }
             return null;
         }).orElse(null);
@@ -566,15 +494,13 @@ public final class KspMuleWorkerService
     private boolean confirmationMatchesMule()
     {
         String opponent = Microbot.getClientThread().runOnClientThreadOptional(() -> {
-            Widget widget = Microbot.getClient().getWidget(InterfaceID.Tradeconfirm.TRADEOPPONENT);
-            return widget == null || widget.isHidden() ? "" : cleanText(widget.getText());
+            Widget w = Microbot.getClient().getWidget(InterfaceID.Tradeconfirm.TRADEOPPONENT);
+            return w == null || w.isHidden() ? "" : cleanText(w.getText());
         }).orElse("");
-        String lower = opponent.toLowerCase(Locale.ROOT);
-        if (lower.startsWith("trading with"))
+        if (opponent.toLowerCase(Locale.ROOT).startsWith("trading with"))
         {
             int colon = opponent.indexOf(':');
-            opponent = cleanText(colon >= 0 ? opponent.substring(colon + 1)
-                    : opponent.substring("trading with".length()));
+            opponent = cleanText(colon >= 0 ? opponent.substring(colon + 1) : opponent.substring("trading with".length()));
         }
         return normaliseName(opponent).equals(normaliseName(activeMuleName));
     }
@@ -584,11 +510,7 @@ public final class KspMuleWorkerService
         if (widget == null || widget.isHidden()) return false;
         if (widget.getItemId() == itemId && widget.getItemQuantity() == expected) return true;
         Widget[][] groups = {widget.getChildren(), widget.getDynamicChildren(), widget.getNestedChildren(), widget.getStaticChildren()};
-        for (Widget[] group : groups)
-        {
-            if (group == null) continue;
-            for (Widget child : group) if (treeHasExactItem(child, itemId, expected)) return true;
-        }
+        for (Widget[] group : groups) if (group != null) for (Widget child : group) if (treeHasExactItem(child, itemId, expected)) return true;
         return false;
     }
 
@@ -598,8 +520,7 @@ public final class KspMuleWorkerService
         String text = cleanText(widget.getText());
         if (!text.isEmpty())
         {
-            String lower = text.toLowerCase(Locale.ROOT);
-            if (lower.startsWith("trading with"))
+            if (text.toLowerCase(Locale.ROOT).startsWith("trading with"))
             {
                 int colon = text.indexOf(':');
                 String value = colon >= 0 ? text.substring(colon + 1) : text.substring("trading with".length());
@@ -608,26 +529,22 @@ public final class KspMuleWorkerService
             if (normaliseName(text).equals(wanted)) return true;
         }
         Widget[][] groups = {widget.getChildren(), widget.getDynamicChildren(), widget.getNestedChildren(), widget.getStaticChildren()};
-        for (Widget[] group : groups)
-        {
-            if (group == null) continue;
-            for (Widget child : group) if (treeMatchesName(child, wanted)) return true;
-        }
+        for (Widget[] group : groups) if (group != null) for (Widget child : group) if (treeMatchesName(child, wanted)) return true;
         return false;
     }
 
     private void restoreTradingCapital()
     {
-        KspMuleConfig current = config;
-        if (current == null || !Microbot.isLoggedIn()) return;
+        KspMuleConfig c = config;
+        if (c == null || !Microbot.isLoggedIn()) return;
         if (!Rs2Bank.walkToBankAndUseBank())
         {
             status = "Transfer done - could not restore trading capital";
             return;
         }
-        long keepBank = Math.max(0L, current.muleKeepInBank());
+        long keepBank = effectiveBankReserve(c);
         long bank = Math.max(0L, Rs2Bank.count(COINS_ID));
-        long withdraw = Math.min(Math.max(0L, current.muleKeepTradingCapital()), Math.max(0L, bank - keepBank));
+        long withdraw = Math.min(effectiveTradingCapital(c), Math.max(0L, bank - keepBank));
         if (withdraw > 0L && withdraw <= Integer.MAX_VALUE)
         {
             Rs2Bank.withdrawX(COINS_ID, (int) withdraw);
@@ -638,15 +555,14 @@ public final class KspMuleWorkerService
 
     private void enforceBankReserveIfOpen()
     {
-        KspMuleConfig current = config;
-        if (current == null || !Rs2Bank.isOpen()) return;
-        long keep = Math.max(0L, current.muleKeepInBank());
+        KspMuleConfig c = config;
+        if (c == null || !Rs2Bank.isOpen()) return;
+        long keep = effectiveBankReserve(c);
         if (keep <= 0L) return;
         long bank = Math.max(0L, Rs2Bank.count(COINS_ID));
         long missing = keep - bank;
         long inv = Math.max(0L, Rs2Inventory.itemQuantity(COINS_ID));
-        if (missing > 0L && missing <= inv && missing <= Integer.MAX_VALUE)
-            Rs2Bank.depositX(COINS_ID, (int) missing);
+        if (missing > 0L && missing <= inv && missing <= Integer.MAX_VALUE) Rs2Bank.depositX(COINS_ID, (int) missing);
     }
 
     private void finishSuccess()
@@ -662,44 +578,33 @@ public final class KspMuleWorkerService
     {
         state = State.FAILED;
         status = reason == null || reason.isBlank() ? "Mule failed" : reason;
-        if (recoverCapital && pauseOwned && Microbot.isLoggedIn()
-                && !isFirstTradeOpen() && !isConfirmationOpen())
-        {
+        if (recoverCapital && pauseOwned && Microbot.isLoggedIn() && !isFirstTradeOpen() && !isConfirmationOpen())
             try { restoreTradingCapital(); } catch (Exception ex) { log.debug("Unable to restore capital after mule failure", ex); }
-        }
         clearTransferState();
         releaseOwnership();
     }
 
     private void clearTransferState()
     {
-        requestId = null;
-        requestStartedAt = 0L;
-        preparedTransfer = 0L;
-        transferCoins = 0L;
-        activeMuleName = null;
+        requestId = activeMuleName = null;
+        requestStartedAt = preparedTransfer = transferCoins = firstAcceptedAt = 0L;
         muleName = "-";
         muleTile = null;
-        muleWorld = 0;
-        queuePosition = 0;
-        offeredCoins = false;
-        firstAccepted = false;
-        finalAccepted = false;
-        firstAcceptedAt = 0L;
+        muleWorld = queuePosition = 0;
+        offeredCoins = firstAccepted = finalAccepted = false;
     }
 
     private boolean timedOut()
     {
-        KspMuleConfig current = config;
-        return current != null && requestStartedAt > 0L
-                && System.currentTimeMillis() - requestStartedAt
-                > TimeUnit.SECONDS.toMillis(Math.max(30, current.muleTimeoutSeconds()));
+        KspMuleConfig c = config;
+        return c != null && requestStartedAt > 0L && System.currentTimeMillis() - requestStartedAt
+                > TimeUnit.SECONDS.toMillis(Math.max(30, c.muleTimeoutSeconds()));
     }
 
     private void cancelCurrent()
     {
-        KspMuleConfig current = config;
-        if (current != null && requestId != null) client.cancel(current.muleReceiverPort(), requestId);
+        KspMuleConfig c = config;
+        if (c != null && requestId != null) client.cancel(c.muleReceiverPort(), requestId);
         requestId = null;
     }
 
@@ -734,25 +639,12 @@ public final class KspMuleWorkerService
         }).orElse("");
     }
 
-    private static boolean isFirstTradeOpen()
-    {
-        return Rs2Widget.isWidgetVisible(InterfaceID.Trademain.ACCEPT);
-    }
-
-    private static boolean isConfirmationOpen()
-    {
-        return Rs2Widget.isWidgetVisible(InterfaceID.Tradeconfirm.TRADE2ACCEPT);
-    }
-
-    private static String cleanText(String value)
-    {
-        return value == null ? "" : Text.removeTags(Text.unescapeJagex(value)).trim();
-    }
-
+    private static boolean isFirstTradeOpen() { return Rs2Widget.isWidgetVisible(InterfaceID.Trademain.ACCEPT); }
+    private static boolean isConfirmationOpen() { return Rs2Widget.isWidgetVisible(InterfaceID.Tradeconfirm.TRADE2ACCEPT); }
+    private static String cleanText(String value) { return value == null ? "" : Text.removeTags(Text.unescapeJagex(value)).trim(); }
     private static String normaliseName(String value)
     {
-        return cleanText(value).replace('_', ' ').replace('\u00A0', ' ')
-                .trim().replaceAll("\\s+", " ").toLowerCase(Locale.ROOT);
+        return cleanText(value).replace('_', ' ').replace('\u00A0', ' ').trim().replaceAll("\\s+", " ").toLowerCase(Locale.ROOT);
     }
 
     private void resetRuntime()
@@ -760,15 +652,12 @@ public final class KspMuleWorkerService
         state = State.IDLE;
         status = config != null && config.muleEnabled() ? "Waiting for threshold" : "Disabled";
         muleName = "-";
-        totalCoins = transferCoins = 0L;
-        queuePosition = 0;
+        totalCoins = transferCoins = requestStartedAt = lastNetworkPollAt = lastWorldHopAt = lastTradeAttemptAt = lastAcceptAt
+                = firstAcceptedAt = preparedTransfer = 0L;
+        queuePosition = muleWorld = 0;
         receiverOnline = false;
-        requestId = null;
-        requestStartedAt = lastNetworkPollAt = lastWorldHopAt = lastTradeAttemptAt = lastAcceptAt = firstAcceptedAt = 0L;
-        preparedTransfer = 0L;
-        activeMuleName = null;
+        requestId = activeMuleName = null;
         muleTile = null;
-        muleWorld = 0;
         offeredCoins = firstAccepted = finalAccepted = pauseOwned = transferLockOwned = false;
     }
 
