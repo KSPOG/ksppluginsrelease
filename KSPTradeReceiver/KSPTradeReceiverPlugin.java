@@ -13,7 +13,7 @@ import javax.inject.Inject;
 
 @PluginDescriptor(
         name = PluginConstants.KSP + "Trade Receiver",
-        description = "Localhost-coordinated mule receiver. Wakes for queued worker trades, banks received items and logs out only after the queue is empty.",
+        description = "Localhost-coordinated mule receiver with automatic account-name discovery, queued worker trades, banking and idle logout.",
         tags = {"trade", "receiver", "mule", "localhost", "bank", "microbot", "ksp"},
         version = KSPTradeReceiverPlugin.VERSION,
         minClientVersion = "2.6.18",
@@ -22,7 +22,7 @@ import javax.inject.Inject;
 )
 public class KSPTradeReceiverPlugin extends Plugin
 {
-    public static final String VERSION = "0.2.0";
+    public static final String VERSION = "0.2.1";
 
     @Inject private KSPTradeReceiverConfig config;
     @Inject private KSPTradeReceiverScript script;
