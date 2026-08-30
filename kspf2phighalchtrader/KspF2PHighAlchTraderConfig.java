@@ -4,6 +4,7 @@ import net.runelite.client.config.Config;
 import net.runelite.client.config.ConfigGroup;
 import net.runelite.client.config.ConfigInformation;
 import net.runelite.client.config.ConfigItem;
+import net.runelite.client.config.ConfigSection;
 import net.runelite.client.config.Range;
 
 @ConfigGroup(KspF2PHighAlchTraderConfig.GROUP)
@@ -17,6 +18,14 @@ import net.runelite.client.config.Range;
 )
 public interface KspF2PHighAlchTraderConfig extends Config {
     String GROUP = "ksp-f2p-high-alch-trader";
+
+
+    @ConfigSection(
+            name = "Local Mule",
+            description = "Localhost communication with KSP Trade Receiver.",
+            position = 100
+    )
+    String muleSection = "localMule";
 
     @ConfigItem(
             keyName = "minimumProfitPerCast",
@@ -285,6 +294,77 @@ public interface KspF2PHighAlchTraderConfig extends Config {
     )
     default KspHighAlchAntibanProfile antibanProfile() {
         return KspHighAlchAntibanProfile.BALANCED;
+    }
+
+    @ConfigItem(
+            keyName = "enableMule",
+            name = "Enable Local Mule",
+            description = "Queue a coin transfer with KSP Trade Receiver on localhost when the configured total-GP threshold is reached.",
+            position = 0,
+            section = muleSection
+    )
+    default boolean enableMule() {
+        return false;
+    }
+
+    @ConfigItem(
+            keyName = "muleThreshold",
+            name = "Start Transfer At",
+            description = "Begin a mule transfer when total coins across inventory and cached bank reach at least this amount.",
+            position = 1,
+            section = muleSection
+    )
+    @Range(min = 1_000, max = 2_000_000_000)
+    default int muleThreshold() {
+        return 2_000_000;
+    }
+
+    @ConfigItem(
+            keyName = "muleKeepCoins",
+            name = "Keep Trading Capital",
+            description = "Spendable coins restored to the worker after the mule transfer so the trader can continue. The normal Coin reserve is also respected.",
+            position = 2,
+            section = muleSection
+    )
+    @Range(min = 0, max = 2_000_000_000)
+    default int muleKeepCoins() {
+        return 500_000;
+    }
+
+    @ConfigItem(
+            keyName = "muleKeepInBank",
+            name = "Keep In Bank",
+            description = "Protected coin reserve that remains in the bank and is excluded from the transfer amount.",
+            position = 3,
+            section = muleSection
+    )
+    @Range(min = 0, max = 2_000_000_000)
+    default int muleKeepInBank() {
+        return 0;
+    }
+
+    @ConfigItem(
+            keyName = "mulePort",
+            name = "Receiver Port",
+            description = "Local TCP port used by KSP Trade Receiver. Both plugins must use the same port.",
+            position = 4,
+            section = muleSection
+    )
+    @Range(min = 1024, max = 65535)
+    default int mulePort() {
+        return 17841;
+    }
+
+    @ConfigItem(
+            keyName = "muleRequestTimeoutSeconds",
+            name = "Mule Timeout",
+            description = "Maximum time to wait for queueing, mule login, travel and trade completion before cancelling and resuming.",
+            position = 5,
+            section = muleSection
+    )
+    @Range(min = 30, max = 600)
+    default int muleRequestTimeoutSeconds() {
+        return 180;
     }
 
 }
