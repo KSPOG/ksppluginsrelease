@@ -43,6 +43,8 @@ public class KspJewelryCrafterScript extends Script
     private static final int GE_PRICE_X_CHILD = 12;
     private static final int GE_SEARCH_GROUP = 162;
     private static final int GE_SEARCH_PROMPT_CHILD = 52;
+    private static final int GE_PRICE_CLICK_DELAY_MIN_MS = 650;
+    private static final int GE_PRICE_CLICK_DELAY_MAX_MS = 950;
     private static final long TARGET_INTERACTION_TIMEOUT_MS = 8_000L;
     private static final WorldPoint EDGEVILLE_BANK = new WorldPoint(3096, 3494, 0);
     private static final WorldPoint EDGEVILLE_FURNACE = new WorldPoint(3109, 3499, 0);
@@ -931,6 +933,8 @@ public class KspJewelryCrafterScript extends Script
         }
 
         status = "Setting GE " + label + ": " + value;
+        if (child == GE_PRICE_X_CHILD)
+            sleep(GE_PRICE_CLICK_DELAY_MIN_MS, GE_PRICE_CLICK_DELAY_MAX_MS);
         if (!clickGeSetupChildSafely(child)) return false;
         if (!sleepUntil(this::gePriceInputOpen, 2_500)) return false;
 
@@ -1372,6 +1376,7 @@ public class KspJewelryCrafterScript extends Script
             return false;
         }
 
+        sleep(GE_PRICE_CLICK_DELAY_MIN_MS, GE_PRICE_CLICK_DELAY_MAX_MS);
         if (!clickGeSetupChildSafely(GE_PRICE_X_CHILD))
         {
             status = "Unable to open GE price input";
