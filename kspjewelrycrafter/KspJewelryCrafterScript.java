@@ -781,8 +781,8 @@ public class KspJewelryCrafterScript extends Script
         if (!ensureGeOverview("Opening Grand Exchange")) return false;
 
         status = "Opening GE buy offer: " + itemName;
-    if (!clickGeSlotChildSafely(slot, 0))
-        return recoverGrandExchange("GE buy slot is not ready");
+        if (!clickGeSlotChildSafely(slot, 0))
+            return recoverGrandExchange("GE buy slot is not ready");
         if (!sleepUntil(() -> Rs2GrandExchange.isOfferScreenOpen() || geSetupOpen(), 3_500))
             return recoverGrandExchange("GE buy editor did not open");
 
@@ -949,7 +949,7 @@ public class KspJewelryCrafterScript extends Script
 
         status = "Confirming GE " + kind + " offer";
         if (!clickGeComponentSafely(InterfaceID.GeOffers.SETUP_CONFIRM))
-        return recoverGrandExchange("Unable to confirm GE " + kind + " offer");
+            return recoverGrandExchange("Unable to confirm GE " + kind + " offer");
 
         sleepUntil(() -> !geSetupOpen() || Rs2Widget.hasWidget("Your offer is much")
             || !Rs2GrandExchange.isOpen(), 3_000);
