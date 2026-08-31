@@ -1,0 +1,10 @@
+name: Jewelry Workflow Smoke Test
+on:
+  push:
+    branches:
+      - fix/jewelry-ge-value-entry-v0121
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo ok
