@@ -1,0 +1,64 @@
+name: Validate Jewelry Crafter v0.1.19
+
+on:
+  push:
+    branches:
+      - fix/jewelry-ge-recovery
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/jewelry-ge-recovery
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '11'
+
+      - uses: actions/checkout@v4
+        with:
+          repository: chsami/Microbot
+          path: microbot
+
+      - name: Compile Jewelry Crafter against Microbot
+        shell: bash
+        run: |
+          set -euo pipefail
+          JEWELRY="microbot/runelite-client/src/main/java/net/runelite/client/plugins/microbot/kspjewelrycrafter"
+          MULE="microbot/runelite-client/src/main/java/net/runelite/client/plugins/microbot/kspmule"
+          rm -rf "$JEWELRY" "$MULE"
+          mkdir -p "$JEWELRY" "$MULE"
+          cp kspjewelrycrafter/*.java "$JEWELRY/"
+          cp kspmule/*.java "$MULE/"
+
+          cat > microbot/runelite-client/src/main/java/net/runelite/client/plugins/microbot/PluginConstants.java <<'EOF'
+          package net.runelite.client.plugins.microbot;
+          public final class PluginConstants {
+              public static final String KSP = "KSP ";
+              public static final boolean DEFAULT_ENABLED = false;
+              public static final boolean IS_EXTERNAL = true;
+              private PluginConstants() {}
+          }
+          EOF
+
+          cd microbot
+          chmod +x gradlew
+          ./gradlew :client:compileJava --no-daemon
+
+      - name: Remove temporary workflow
+        if: always()
+        shell: bash
+        run: |
+          rm -f .github/workflows/temp-validate-jewelry-v019.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --quiet || git commit -m "Remove temporary Jewelry Crafter v0.1.19 validation"
+          git push origin HEAD:fix/jewelry-ge-recovery
