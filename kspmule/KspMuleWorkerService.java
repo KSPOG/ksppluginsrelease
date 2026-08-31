@@ -33,7 +33,7 @@ import static net.runelite.client.plugins.microbot.util.Global.sleepUntil;
 public final class KspMuleWorkerService
 {
     private static final int COINS_ID = 995;
-    private static final long POLL_MS = 250L, NETWORK_POLL_MS = 700L, HOP_RETRY_MS = 4_000L,
+    private static final long POLL_MS = 1_000L, NETWORK_POLL_MS = 1_000L, HOP_RETRY_MS = 4_000L,
             TRADE_RETRY_MS = 1_500L, ACCEPT_RETRY_MS = 800L, CONFIRM_TRANSITION_TIMEOUT_MS = 6_000L;
     private static final AtomicBoolean GLOBAL_TRANSFER_LOCK = new AtomicBoolean(false);
 
@@ -91,8 +91,6 @@ public final class KspMuleWorkerService
     {
         KspMuleConfig c = config;
         if (stopping || c == null) return;
-        refreshCoinSummary();
-
         if (!c.muleEnabled())
         {
             if (requestId != null) cancelCurrent();
@@ -107,6 +105,7 @@ public final class KspMuleWorkerService
             status = "Waiting for worker login";
             return;
         }
+        refreshCoinSummary();
         if (requestId == null)
         {
             enforceBankReserveIfOpen();
@@ -146,7 +145,6 @@ public final class KspMuleWorkerService
         {
             state = State.IDLE;
             status = "Waiting for " + threshold + " total GP";
-            receiverOnline = client.ping(c.muleReceiverPort());
             return;
         }
 
@@ -326,7 +324,7 @@ public final class KspMuleWorkerService
         {
             state = State.TRAVELLING;
             status = "Walking to mule";
-            Rs2Walker.walkTo(muleTile, 2);
+            if (!Rs2Player.isMoving()) Rs2Walker.walkTo(muleTile, 2);
             return;
         }
         handleTrade();

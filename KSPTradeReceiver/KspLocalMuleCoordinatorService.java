@@ -88,7 +88,7 @@ public class KspLocalMuleCoordinatorService
             t.setDaemon(true);
             return t;
         });
-        executor.scheduleWithFixedDelay(this::tickSafely, 0L, 250L, TimeUnit.MILLISECONDS);
+        executor.scheduleWithFixedDelay(this::tickSafely, 0L, 500L, TimeUnit.MILLISECONDS);
     }
 
     private void startServer()

@@ -114,7 +114,7 @@ public class KSPTradeReceiverScript extends Script
                 Microbot.log("KSP Trade Receiver error: " + ex.getMessage());
                 log.error("KSP Trade Receiver loop error", ex);
             }
-        }, 0, 150, TimeUnit.MILLISECONDS);
+        }, 0, 300, TimeUnit.MILLISECONDS);
 
         return true;
     }
