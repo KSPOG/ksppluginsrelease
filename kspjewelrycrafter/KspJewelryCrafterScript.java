@@ -7,6 +7,7 @@ import net.runelite.api.Skill;
 import net.runelite.api.TileObject;
 import net.runelite.api.coords.WorldPoint;
 import net.runelite.api.gameval.InterfaceID;
+import net.runelite.api.gameval.VarbitID;
 import net.runelite.api.widgets.Widget;
 import net.runelite.client.plugins.microbot.Microbot;
 import net.runelite.client.plugins.microbot.Script;
@@ -44,6 +45,8 @@ public class KspJewelryCrafterScript extends Script
     private static final int GE_SEARCH_GROUP = 162;
     private static final int GE_SEARCH_PROMPT_CHILD = 52;
     private static final int GE_SELECTED_PRICE_CHILD = 41;
+    private static final int GE_OFFER_PRICE_VARBIT = 4398;
+    private static final int GE_VALUE_ENTRY_ATTEMPTS = 3;
     private static final int GE_PRICE_CLICK_DELAY_MIN_MS = 650;
     private static final int GE_PRICE_CLICK_DELAY_MAX_MS = 950;
     private static final long TARGET_INTERACTION_TIMEOUT_MS = 8_000L;
@@ -972,24 +975,74 @@ public class KspJewelryCrafterScript extends Script
 
     private boolean setGeOfferValue(int child, int value, String label)
     {
-        if (!geSetupChildVisible(child))
+        if (value <= 0) return false;
+        if (geOfferValueMatches(child, value)) return true;
+
+        for (int attempt = 1; attempt <= GE_VALUE_ENTRY_ATTEMPTS; attempt++)
         {
-            status = "Waiting for GE " + label + " control";
-            return false;
+            if (!Rs2GrandExchange.isOpen() || !geSetupOpen())
+            {
+                status = "GE closed before setting " + label;
+                return false;
+            }
+            if (!geSetupChildVisible(child))
+            {
+                status = "Waiting for GE " + label + " control";
+                sleep(250, 450);
+                continue;
+            }
+
+            status = attempt == 1
+                ? "Setting GE " + label + ": " + value
+                : "Retrying GE " + label + " (" + attempt + "/" + GE_VALUE_ENTRY_ATTEMPTS + "): " + value;
+
+            if (child == GE_PRICE_X_CHILD)
+                sleep(GE_PRICE_CLICK_DELAY_MIN_MS, GE_PRICE_CLICK_DELAY_MAX_MS);
+            else
+                sleep(300, 500);
+
+            if (!clickGeSetupChildSafely(child))
+            {
+                sleep(250, 450);
+                continue;
+            }
+            if (!sleepUntil(() -> gePriceInputOpen() || !Rs2GrandExchange.isOpen(), 3_000))
+            {
+                status = "Waiting for GE " + label + " input";
+                sleep(250, 450);
+                continue;
+            }
+            if (!Rs2GrandExchange.isOpen()) return false;
+
+            // Give the chatbox input the same settling time used by Microbot's GE utilities.
+            sleep(600, 1_000);
+            Rs2GrandExchange.setChatboxValue(value);
+            sleep(500, 750);
+            Rs2Keyboard.enter();
+
+            if (!sleepUntil(() -> !gePriceInputOpen() || !Rs2GrandExchange.isOpen(), 3_000))
+            {
+                status = "Waiting for GE " + label + " entry";
+                sleep(300, 500);
+                continue;
+            }
+            if (!Rs2GrandExchange.isOpen()) return false;
+
+            sleep(800, 1_100);
+            if (sleepUntil(() -> geOfferValueMatches(child, value), 2_000)) return true;
         }
 
-        status = "Setting GE " + label + ": " + value;
-        if (child == GE_PRICE_X_CHILD)
-            sleep(GE_PRICE_CLICK_DELAY_MIN_MS, GE_PRICE_CLICK_DELAY_MAX_MS);
-        if (!clickGeSetupChildSafely(child)) return false;
-        if (!sleepUntil(this::gePriceInputOpen, 2_500)) return false;
+        status = "GE " + label + " did not update to " + value;
+        return false;
+    }
 
-        sleep(250, 450);
-        Rs2GrandExchange.setChatboxValue(value);
-        sleep(150, 250);
-        Rs2Keyboard.enter();
-        if (!sleepUntil(() -> !gePriceInputOpen() || !Rs2GrandExchange.isOpen(), 2_500)) return false;
-        return Rs2GrandExchange.isOpen() && geSetupOpen();
+    private boolean geOfferValueMatches(int child, int value)
+    {
+        if (child == GE_PRICE_X_CHILD)
+            return Microbot.getVarbitValue(GE_OFFER_PRICE_VARBIT) == value;
+        if (child == GE_QUANTITY_X_CHILD)
+            return Microbot.getVarbitValue(VarbitID.GE_NEWOFFER_QUANTITY) == value;
+        return false;
     }
 
     private boolean submitGeOfferSafely(String kind)
@@ -1422,37 +1475,13 @@ public class KspJewelryCrafterScript extends Script
             return false;
         }
 
-        sleep(GE_PRICE_CLICK_DELAY_MIN_MS, GE_PRICE_CLICK_DELAY_MAX_MS);
-        if (!clickGeSetupChildSafely(GE_PRICE_X_CHILD))
+        if (!setGeOfferValue(GE_PRICE_X_CHILD, newPrice, "modified price"))
         {
-            status = "Unable to open GE price input";
+            status = Rs2GrandExchange.isOpen()
+                ? "Unable to set modified GE price"
+                : "GE closed during modified price entry - recovering";
             return false;
         }
-        if (!sleepUntil(() -> gePriceInputOpen() || !Rs2GrandExchange.isOpen(), 2_500))
-        {
-            status = "Waiting for GE price input";
-            return false;
-        }
-        if (!Rs2GrandExchange.isOpen())
-        {
-            status = "GE closed during price input - recovering";
-            return false;
-        }
-
-        Rs2GrandExchange.setChatboxValue(newPrice);
-        sleep(120, 220);
-        Rs2Keyboard.enter();
-        if (!sleepUntil(() -> !gePriceInputOpen() || !Rs2GrandExchange.isOpen(), 2_500))
-        {
-            status = "Waiting for GE price entry";
-            return false;
-        }
-        if (!Rs2GrandExchange.isOpen())
-        {
-            status = "GE closed after price entry - recovering";
-            return false;
-        }
-
         status = "Confirming modified GE price";
         if (!clickGeComponentSafely(InterfaceID.GeOffers.SETUP_CONFIRM))
         {
