@@ -340,10 +340,10 @@ public class KspSmartSuperheatScript extends Script
         }
 
         if (!ensureBank()) return;
-        if (Rs2Inventory.itemQuantity(selling.getOutputId()) > 0)
+        if (Rs2Inventory.itemQuantity(selling.getOutputName(), true) > 0)
         {
             Rs2Bank.depositAll(selling.getOutputName(), true);
-            if (!sleepUntil(() -> Rs2Inventory.itemQuantity(selling.getOutputId()) == 0, 3000)) return;
+            if (!sleepUntil(() -> Rs2Inventory.itemQuantity(selling.getOutputName(), true) == 0, 3000)) return;
         }
         if (!bankMode(false)) return;
 
@@ -428,16 +428,69 @@ public class KspSmartSuperheatScript extends Script
 
         status = (o.action == GrandExchangeAction.BUY ? "Placing buy: " : "Placing sell: ") + o.itemName;
         o.placedAt = System.currentTimeMillis();
-        if (!Rs2GrandExchange.processOffer(request))
+
+        boolean placed = false;
+        try
+        {
+            placed = Rs2GrandExchange.processOffer(request);
+        }
+        catch (NullPointerException e)
+        {
+            // Microbot's GE confirm helper currently dereferences its offer container without a
+            // null guard. If the setup widget is rebuilt between quantity/price entry and confirm,
+            // processOffer() throws instead of returning false. Recover locally and keep the script alive.
+            log.warn("Microbot GE confirm widget unavailable while placing {} for {}; attempting direct confirm recovery", o.action, o.itemName);
+        }
+
+        if (!placed && geSubScreen()) placed = recoverGeConfirm(o);
+        if (!placed)
         {
             o.slot = null;
             o.placedAt = 0;
             status = "GE placement failed - recovering " + o.itemName;
+            if (geSubScreen())
+            {
+                Rs2GrandExchange.backToOverview();
+                sleepUntil(() -> Rs2GrandExchange.isOpen() && !geSubScreen(), 2500);
+            }
             return;
         }
+
         sleepUntil(() -> findOffer(o.itemId, o.action) != null || !Rs2GrandExchange.isOpen(), 3000);
         o.slot = findOffer(o.itemId, o.action);
         if (o.slot == null) status = "Waiting for GE slot confirmation: " + o.itemName;
+    }
+
+    private boolean recoverGeConfirm(GeOrder o)
+    {
+        if (o == null || !Rs2GrandExchange.isOpen()) return false;
+
+        GrandExchangeSlots existing = findOffer(o.itemId, o.action);
+        if (existing != null)
+        {
+            o.slot = existing;
+            return true;
+        }
+        if (!geSubScreen()) return false;
+
+        status = "Recovering GE confirm: " + o.itemName;
+        boolean clicked = Rs2Widget.clickWidget(InterfaceID.GeOffers.SETUP_CONFIRM);
+        if (!clicked) clicked = Rs2Widget.clickWidget("Confirm");
+        if (!clicked) return false;
+
+        sleepUntil(() -> findOffer(o.itemId, o.action) != null || Rs2Widget.hasWidget("Your offer is much") || !geSubScreen(), 3000);
+        if (Rs2Widget.hasWidget("Your offer is much"))
+        {
+            Rs2Widget.clickWidget("Yes");
+            sleepUntil(() -> findOffer(o.itemId, o.action) != null || !geSubScreen(), 3000);
+        }
+
+        existing = findOffer(o.itemId, o.action);
+        if (existing == null) return false;
+        o.slot = existing;
+        o.placedAt = System.currentTimeMillis();
+        status = "GE offer recovered: " + o.itemName;
+        return true;
     }
 
     private void modifyOrder(GeOrder o)
