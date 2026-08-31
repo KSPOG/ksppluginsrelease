@@ -10,273 +10,61 @@ permissions:
 
 jobs:
   patch:
-    if: github.actor != 'github-actions[bot]'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
         with:
           ref: fix/jewelry-ge-recovery
+
       - name: Patch Jewelry Crafter
         shell: bash
         run: |
+          set -euo pipefail
           python3 <<'PY'
           from pathlib import Path
+          import base64
+
+          dec = lambda value: base64.b64decode(value).decode('utf-8')
+          helpers = dec('ICAgIHByaXZhdGUgYm9vbGVhbiBwbGFjZUJ1eU9mZmVyU2FmZWx5KEdyYW5kRXhjaGFuZ2VTbG90cyBzbG90LCBTdHJpbmcgaXRlbU5hbWUsIGludCBxdWFudGl0eSwgaW50IHByaWNlKQogICAgewogICAgICAgIGlmIChzbG90ID09IG51bGwgfHwgaXRlbU5hbWUgPT0gbnVsbCB8fCBpdGVtTmFtZS5pc0JsYW5rKCkgfHwgcXVhbnRpdHkgPD0gMCB8fCBwcmljZSA8PSAwKQogICAgICAgIHsKICAgICAgICAgICAgc3RhdHVzID0gIkludmFsaWQgR0UgYnV5IHJlcXVlc3QiOwogICAgICAgICAgICByZXR1cm4gZmFsc2U7CiAgICAgICAgfQogICAgICAgIGlmICghZW5zdXJlR2VPdmVydmlldygiT3BlbmluZyBHcmFuZCBFeGNoYW5nZSIpKSByZXR1cm4gZmFsc2U7CgogICAgICAgIFdpZGdldCBzbG90V2lkZ2V0ID0gUnMyV2lkZ2V0LmdldFdpZGdldChJbnRlcmZhY2VJRC5HZU9mZmVycy5JTkRFWF8wICsgc2xvdC5vcmRpbmFsKCkpOwogICAgICAgIFdpZGdldCBidXlCdXR0b24gPSBzbG90V2lkZ2V0ID09IG51bGwgPyBudWxsIDogc2xvdFdpZGdldC5nZXRDaGlsZCgwKTsKICAgICAgICBpZiAoYnV5QnV0dG9uID09IG51bGwgfHwgYnV5QnV0dG9uLmlzSGlkZGVuKCkpCiAgICAgICAgICAgIHJldHVybiByZWNvdmVyR3JhbmRFeGNoYW5nZSgiR0UgYnV5IHNsb3QgaXMgbm90IHJlYWR5Iik7CgogICAgICAgIHN0YXR1cyA9ICJPcGVuaW5nIEdFIGJ1eSBvZmZlcjogIiArIGl0ZW1OYW1lOwogICAgICAgIGlmICghUnMyV2lkZ2V0LmNsaWNrV2lkZ2V0KGJ1eUJ1dHRvbikpCiAgICAgICAgICAgIHJldHVybiByZWNvdmVyR3JhbmRFeGNoYW5nZSgiVW5hYmxlIHRvIG9wZW4gR0UgYnV5IG9mZmVyIik7CiAgICAgICAgaWYgKCFzbGVlcFVudGlsKCgpIC0+IFJzMkdyYW5kRXhjaGFuZ2UuaXNPZmZlclNjcmVlbk9wZW4oKSB8fCBnZVNldHVwT3BlbigpLCAzXzUwMCkpCiAgICAgICAgICAgIHJldHVybiByZWNvdmVyR3JhbmRFeGNoYW5nZSgiR0UgYnV5IGVkaXRvciBkaWQgbm90IG9wZW4iKTsKCiAgICAgICAgaWYgKCFzZWxlY3RHZUJ1eUl0ZW0oaXRlbU5hbWUpKQogICAgICAgICAgICByZXR1cm4gcmVjb3ZlckdyYW5kRXhjaGFuZ2UoIkdFIGl0ZW0gc2VhcmNoIGRpZCBub3QgYmVjb21lIHJlYWR5Iik7CiAgICAgICAgaWYgKCFzbGVlcFVudGlsKHRoaXM6OmdlU2V0dXBDb250cm9sc1JlYWR5LCAzXzUwMCkpCiAgICAgICAgICAgIHJldHVybiByZWNvdmVyR3JhbmRFeGNoYW5nZSgiR0Ugb2ZmZXIgY29udHJvbHMgZGlkIG5vdCBsb2FkIik7CiAgICAgICAgaWYgKCFzZXRHZU9mZmVyVmFsdWUoR0VfUFJJQ0VfWF9DSElMRCwgcHJpY2UsICJwcmljZSIpKQogICAgICAgICAgICByZXR1cm4gcmVjb3ZlckdyYW5kRXhjaGFuZ2UoIkdFIHByaWNlIGVudHJ5IGZhaWxlZCIpOwogICAgICAgIGlmICghc2V0R2VPZmZlclZhbHVlKEdFX1FVQU5USVRZX1hfQ0hJTEQsIHF1YW50aXR5LCAicXVhbnRpdHkiKSkKICAgICAgICAgICAgcmV0dXJuIHJlY292ZXJHcmFuZEV4Y2hhbmdlKCJHRSBxdWFudGl0eSBlbnRyeSBmYWlsZWQiKTsKICAgICAgICByZXR1cm4gc3VibWl0R2VPZmZlclNhZmVseSgiYnV5Iik7CiAgICB9CgogICAgcHJpdmF0ZSBib29sZWFuIHBsYWNlU2VsbE9mZmVyU2FmZWx5KFN0cmluZyBpdGVtTmFtZSwgaW50IHF1YW50aXR5LCBpbnQgcHJpY2UpCiAgICB7CiAgICAgICAgaWYgKGl0ZW1OYW1lID09IG51bGwgfHwgaXRlbU5hbWUuaXNCbGFuaygpIHx8IHF1YW50aXR5IDw9IDAgfHwgcHJpY2UgPD0gMCkKICAgICAgICB7CiAgICAgICAgICAgIHN0YXR1cyA9ICJJbnZhbGlkIEdFIHNlbGwgcmVxdWVzdCI7CiAgICAgICAgICAgIHJldHVybiBmYWxzZTsKICAgICAgICB9CiAgICAgICAgaWYgKCFlbnN1cmVHZU92ZXJ2aWV3KCJPcGVuaW5nIEdyYW5kIEV4Y2hhbmdlIikpIHJldHVybiBmYWxzZTsKCiAgICAgICAgc3RhdHVzID0gIk9wZW5pbmcgR0Ugc2VsbCBvZmZlcjogIiArIGl0ZW1OYW1lOwogICAgICAgIGlmICghUnMySW52ZW50b3J5LmludGVyYWN0KGl0ZW1OYW1lLCAiT2ZmZXIiLCB0cnVlKSkKICAgICAgICAgICAgcmV0dXJuIHJlY292ZXJHcmFuZEV4Y2hhbmdlKCJVbmFibGUgdG8gb3BlbiBHRSBzZWxsIG9mZmVyIik7CiAgICAgICAgaWYgKCFzbGVlcFVudGlsKHRoaXM6OmdlU2V0dXBDb250cm9sc1JlYWR5LCAzXzUwMCkpCiAgICAgICAgICAgIHJldHVybiByZWNvdmVyR3JhbmRFeGNoYW5nZSgiR0Ugc2VsbCBjb250cm9scyBkaWQgbm90IGxvYWQiKTsKICAgICAgICBpZiAoIXNldEdlT2ZmZXJWYWx1ZShHRV9QUklDRV9YX0NISUxELCBwcmljZSwgInByaWNlIikpCiAgICAgICAgICAgIHJldHVybiByZWNvdmVyR3JhbmRFeGNoYW5nZSgiR0Ugc2VsbCBwcmljZSBlbnRyeSBmYWlsZWQiKTsKICAgICAgICBpZiAoIXNldEdlT2ZmZXJWYWx1ZShHRV9RVUFOVElUWV9YX0NISUxELCBxdWFudGl0eSwgInF1YW50aXR5IikpCiAgICAgICAgICAgIHJldHVybiByZWNvdmVyR3JhbmRFeGNoYW5nZSgiR0Ugc2VsbCBxdWFudGl0eSBlbnRyeSBmYWlsZWQiKTsKICAgICAgICByZXR1cm4gc3VibWl0R2VPZmZlclNhZmVseSgic2VsbCIpOwogICAgfQoKICAgIHByaXZhdGUgYm9vbGVhbiBzZWxlY3RHZUJ1eUl0ZW0oU3RyaW5nIGl0ZW1OYW1lKQogICAgewogICAgICAgIHZhciByZXN1bHQgPSBSczJHcmFuZEV4Y2hhbmdlLmdldFNlYXJjaFJlc3VsdFdpZGdldChpdGVtTmFtZSwgdHJ1ZSk7CiAgICAgICAgaWYgKHJlc3VsdCA9PSBudWxsKQogICAgICAgIHsKICAgICAgICAgICAgc3RhdHVzID0gIldhaXRpbmcgZm9yIEdFIGl0ZW0gc2VhcmNoIjsKICAgICAgICAgICAgaWYgKCFSczJXaWRnZXQuc2xlZXBVbnRpbEhhc1dpZGdldFRleHQoCiAgICAgICAgICAgICAgICAiU3RhcnQgdHlwaW5nIHRoZSBuYW1lIG9mIGFuIGl0ZW0gdG8gc2VhcmNoIGZvciBpdCIsCiAgICAgICAgICAgICAgICBHRV9TRUFSQ0hfR1JPVVAsIEdFX1NFQVJDSF9QUk9NUFRfQ0hJTEQsIGZhbHNlLCAzXzUwMCkpCiAgICAgICAgICAgICAgICByZXR1cm4gZmFsc2U7CgogICAgICAgICAgICBSczJLZXlib2FyZC50eXBlU3RyaW5nKGl0ZW1OYW1lKTsKICAgICAgICAgICAgaWYgKCFzbGVlcFVudGlsKCgpIC0+IFJzMkdyYW5kRXhjaGFuZ2UuZ2V0U2VhcmNoUmVzdWx0V2lkZ2V0KGl0ZW1OYW1lLCB0cnVlKSAhPSBudWxsLCAzXzUwMCkpCiAgICAgICAgICAgICAgICByZXR1cm4gZmFsc2U7CiAgICAgICAgICAgIHJlc3VsdCA9IFJzMkdyYW5kRXhjaGFuZ2UuZ2V0U2VhcmNoUmVzdWx0V2lkZ2V0KGl0ZW1OYW1lLCB0cnVlKTsKICAgICAgICB9CiAgICAgICAgaWYgKHJlc3VsdCA9PSBudWxsKSByZXR1cm4gZmFsc2U7CgogICAgICAgIHN0YXR1cyA9ICJTZWxlY3RpbmcgR0UgaXRlbTogIiArIGl0ZW1OYW1lOwogICAgICAgIFJzMldpZGdldC5jbGlja1dpZGdldEZhc3QocmVzdWx0LmdldExlZnQoKSwgcmVzdWx0LmdldFJpZ2h0KCksIDEpOwogICAgICAgIHJldHVybiBzbGVlcFVudGlsKHRoaXM6OmdlU2V0dXBDb250cm9sc1JlYWR5LCAzXzUwMCk7CiAgICB9CgogICAgcHJpdmF0ZSBXaWRnZXQgZ2VTZXR1cENoaWxkKGludCBjaGlsZCkKICAgIHsKICAgICAgICBXaWRnZXQgc2V0dXAgPSBSczJXaWRnZXQuZ2V0V2lkZ2V0KEludGVyZmFjZUlELkdlT2ZmZXJzLlNFVFVQKTsKICAgICAgICBpZiAoc2V0dXAgPT0gbnVsbCB8fCBzZXR1cC5pc0hpZGRlbigpKSByZXR1cm4gbnVsbDsKICAgICAgICBXaWRnZXQgY29udHJvbCA9IHNldHVwLmdldENoaWxkKGNoaWxkKTsKICAgICAgICByZXR1cm4gY29udHJvbCA9PSBudWxsIHx8IGNvbnRyb2wuaXNIaWRkZW4oKSA/IG51bGwgOiBjb250cm9sOwogICAgfQoKICAgIHByaXZhdGUgYm9vbGVhbiBnZVNldHVwQ29udHJvbHNSZWFkeSgpCiAgICB7CiAgICAgICAgcmV0dXJuIFJzMkdyYW5kRXhjaGFuZ2UuaXNPcGVuKCkgJiYgZ2VTZXR1cE9wZW4oKQogICAgICAgICAgICAmJiBnZVNldHVwQ2hpbGQoR0VfUFJJQ0VfWF9DSElMRCkgIT0gbnVsbAogICAgICAgICAgICAmJiBnZVNldHVwQ2hpbGQoR0VfUVVBTlRJVFlfWF9DSElMRCkgIT0gbnVsbDsKICAgIH0KCiAgICBwcml2YXRlIGJvb2xlYW4gc2V0R2VPZmZlclZhbHVlKGludCBjaGlsZCwgaW50IHZhbHVlLCBTdHJpbmcgbGFiZWwpCiAgICB7CiAgICAgICAgV2lkZ2V0IGNvbnRyb2wgPSBnZVNldHVwQ2hpbGQoY2hpbGQpOwogICAgICAgIGlmIChjb250cm9sID09IG51bGwpCiAgICAgICAgewogICAgICAgICAgICBzdGF0dXMgPSAiV2FpdGluZyBmb3IgR0UgIiArIGxhYmVsICsgIiBjb250cm9sIjsKICAgICAgICAgICAgcmV0dXJuIGZhbHNlOwogICAgICAgIH0KCiAgICAgICAgc3RhdHVzID0gIlNldHRpbmcgR0UgIiArIGxhYmVsICsgIjogIiArIHZhbHVlOwogICAgICAgIGlmICghUnMyV2lkZ2V0LmNsaWNrV2lkZ2V0KGNvbnRyb2wpKSByZXR1cm4gZmFsc2U7CiAgICAgICAgaWYgKCFzbGVlcFVudGlsKHRoaXM6OmdlUHJpY2VJbnB1dE9wZW4sIDJfNTAwKSkgcmV0dXJuIGZhbHNlOwoKICAgICAgICBzbGVlcCgyNTAsIDQ1MCk7CiAgICAgICAgUnMyR3JhbmRFeGNoYW5nZS5zZXRDaGF0Ym94VmFsdWUodmFsdWUpOwogICAgICAgIHNsZWVwKDE1MCwgMjUwKTsKICAgICAgICBSczJLZXlib2FyZC5lbnRlcigpOwogICAgICAgIGlmICghc2xlZXBVbnRpbCgoKSAtPiAhZ2VQcmljZUlucHV0T3BlbigpIHx8ICFSczJHcmFuZEV4Y2hhbmdlLmlzT3BlbigpLCAyXzUwMCkpIHJldHVybiBmYWxzZTsKICAgICAgICByZXR1cm4gUnMyR3JhbmRFeGNoYW5nZS5pc09wZW4oKSAmJiBnZVNldHVwT3BlbigpOwogICAgfQoKICAgIHByaXZhdGUgYm9vbGVhbiBzdWJtaXRHZU9mZmVyU2FmZWx5KFN0cmluZyBraW5kKQogICAgewogICAgICAgIGlmICghUnMyR3JhbmRFeGNoYW5nZS5pc09wZW4oKSB8fCAhZ2VTZXR1cE9wZW4oKSkKICAgICAgICAgICAgcmV0dXJuIHJlY292ZXJHcmFuZEV4Y2hhbmdlKCJHRSAiICsga2luZCArICIgZWRpdG9yIGNsb3NlZCBiZWZvcmUgY29uZmlybSIpOwoKICAgICAgICBzdGF0dXMgPSAiQ29uZmlybWluZyBHRSAiICsga2luZCArICIgb2ZmZXIiOwogICAgICAgIGlmICghUnMyV2lkZ2V0LmNsaWNrV2lkZ2V0KEludGVyZmFjZUlELkdlT2ZmZXJzLlNFVFVQX0NPTkZJUk0pKQogICAgICAgICAgICByZXR1cm4gcmVjb3ZlckdyYW5kRXhjaGFuZ2UoIlVuYWJsZSB0byBjb25maXJtIEdFICIgKyBraW5kICsgIiBvZmZlciIpOwoKICAgICAgICBzbGVlcFVudGlsKCgpIC0+ICFnZVNldHVwT3BlbigpIHx8IFJzMldpZGdldC5oYXNXaWRnZXQoIllvdXIgb2ZmZXIgaXMgbXVjaCIpCiAgICAgICAgICAgIHx8ICFSczJHcmFuZEV4Y2hhbmdlLmlzT3BlbigpLCAzXzAwMCk7CiAgICAgICAgaWYgKFJzMldpZGdldC5oYXNXaWRnZXQoIllvdXIgb2ZmZXIgaXMgbXVjaCIpKQogICAgICAgIHsKICAgICAgICAgICAgUnMyV2lkZ2V0LmNsaWNrV2lkZ2V0KCJZZXMiKTsKICAgICAgICAgICAgc2xlZXBVbnRpbCgoKSAtPiAhZ2VTZXR1cE9wZW4oKSB8fCAhUnMyR3JhbmRFeGNoYW5nZS5pc09wZW4oKSwgM18wMDApOwogICAgICAgIH0KCiAgICAgICAgaWYgKCFSczJHcmFuZEV4Y2hhbmdlLmlzT3BlbigpKQogICAgICAgICAgICByZXR1cm4gcmVjb3ZlckdyYW5kRXhjaGFuZ2UoIkdFIGNsb3NlZCB3aGlsZSBjb25maXJtaW5nICIgKyBraW5kICsgIiBvZmZlciIpOwogICAgICAgIGlmIChnZVNldHVwT3BlbigpKQogICAgICAgICAgICByZXR1cm4gcmVjb3ZlckdyYW5kRXhjaGFuZ2UoIkdFICIgKyBraW5kICsgIiBvZmZlciBkaWQgbm90IHN1Ym1pdCIpOwogICAgICAgIHNsZWVwKDI1MCwgNDUwKTsKICAgICAgICByZXR1cm4gdHJ1ZTsKICAgIH0KCiAgICBwcml2YXRlIGJvb2xlYW4gcmVjb3ZlckdyYW5kRXhjaGFuZ2UoU3RyaW5nIHJlYXNvbikKICAgIHsKICAgICAgICBzdGF0dXMgPSByZWFzb24gKyAiIC0gcmVzZXR0aW5nIEdyYW5kIEV4Y2hhbmdlIjsKCiAgICAgICAgaWYgKGdlU3ViU2NyZWVuT3BlbigpKQogICAgICAgIHsKICAgICAgICAgICAgUnMyR3JhbmRFeGNoYW5nZS5iYWNrVG9PdmVydmlldygpOwogICAgICAgICAgICBzbGVlcFVudGlsKCgpIC0+ICFnZVN1YlNjcmVlbk9wZW4oKSB8fCAhUnMyR3JhbmRFeGNoYW5nZS5pc09wZW4oKSwgMl8wMDApOwogICAgICAgIH0KICAgICAgICBpZiAoUnMyR3JhbmRFeGNoYW5nZS5pc09wZW4oKSkKICAgICAgICB7CiAgICAgICAgICAgIFJzMkdyYW5kRXhjaGFuZ2UuY2xvc2VFeGNoYW5nZSgpOwogICAgICAgICAgICBzbGVlcFVudGlsKCgpIC0+ICFSczJHcmFuZEV4Y2hhbmdlLmlzT3BlbigpLCAyXzUwMCk7CiAgICAgICAgfQoKICAgICAgICBzbGVlcCg2MDAsIDkwMCk7CiAgICAgICAgc3RhdHVzID0gIlJlb3BlbmluZyBHcmFuZCBFeGNoYW5nZSI7CiAgICAgICAgaWYgKCFSczJHcmFuZEV4Y2hhbmdlLm9wZW5FeGNoYW5nZSgpKQogICAgICAgIHsKICAgICAgICAgICAgc3RhdHVzID0gIkdyYW5kIEV4Y2hhbmdlIHJlb3BlbiBmYWlsZWQgLSByZXRyeWluZyI7CiAgICAgICAgICAgIHJldHVybiBmYWxzZTsKICAgICAgICB9CgogICAgICAgIGlmIChnZVN1YlNjcmVlbk9wZW4oKSkKICAgICAgICB7CiAgICAgICAgICAgIFJzMkdyYW5kRXhjaGFuZ2UuYmFja1RvT3ZlcnZpZXcoKTsKICAgICAgICAgICAgc2xlZXBVbnRpbCgoKSAtPiBSczJHcmFuZEV4Y2hhbmdlLmlzT3BlbigpICYmICFnZVN1YlNjcmVlbk9wZW4oKSwgMl81MDApOwogICAgICAgIH0KICAgICAgICBzdGF0dXMgPSBSczJHcmFuZEV4Y2hhbmdlLmlzT3BlbigpICYmICFnZVN1YlNjcmVlbk9wZW4oKQogICAgICAgICAgICA/ICJHcmFuZCBFeGNoYW5nZSByZWNvdmVyZWQgLSByZXRyeWluZyBvZmZlciIKICAgICAgICAgICAgOiAiR3JhbmQgRXhjaGFuZ2UgcmVjb3ZlcnkgaW5jb21wbGV0ZSAtIHJldHJ5aW5nIjsKICAgICAgICByZXR1cm4gZmFsc2U7CiAgICB9Cgo=')
+          old_sell = dec('ICAgICAgICBHcmFuZEV4Y2hhbmdlUmVxdWVzdCByZXF1ZXN0ID0gR3JhbmRFeGNoYW5nZVJlcXVlc3QuYnVpbGRlcigpCiAgICAgICAgICAgIC5hY3Rpb24oR3JhbmRFeGNoYW5nZUFjdGlvbi5TRUxMKQogICAgICAgICAgICAuaXRlbU5hbWUob3V0cHV0KQogICAgICAgICAgICAuZXhhY3QodHJ1ZSkKICAgICAgICAgICAgLnF1YW50aXR5KHF0eSkKICAgICAgICAgICAgLnByaWNlKHByaWNlKQogICAgICAgICAgICAuY2xvc2VBZnRlckNvbXBsZXRpb24oZmFsc2UpCiAgICAgICAgICAgIC5idWlsZCgpOwogICAgICAgIGlmICghUnMyR3JhbmRFeGNoYW5nZS5wcm9jZXNzT2ZmZXIocmVxdWVzdCkpCiAgICAgICAgewogICAgICAgICAgICBzdGF0dXMgPSBSczJHcmFuZEV4Y2hhbmdlLmlzT3BlbigpID8gIkdFIHNlbGwgcGxhY2VtZW50IGZhaWxlZCIgOiAiR0UgY2xvc2VkIGR1cmluZyBzZWxsIHBsYWNlbWVudCAtIHJlY292ZXJpbmciOwogICAgICAgICAgICByZXR1cm47CiAgICAgICAgfQo=')
+          new_sell = dec('ICAgICAgICBpZiAoIXBsYWNlU2VsbE9mZmVyU2FmZWx5KG91dHB1dCwgcXR5LCBwcmljZSkpIHJldHVybjsK')
+          old_buy = dec('ICAgICAgICAgICAgR3JhbmRFeGNoYW5nZVJlcXVlc3QgcmVxdWVzdCA9IEdyYW5kRXhjaGFuZ2VSZXF1ZXN0LmJ1aWxkZXIoKQogICAgICAgICAgICAgICAgLnNsb3Qoc2xvdCkKICAgICAgICAgICAgICAgIC5hY3Rpb24oR3JhbmRFeGNoYW5nZUFjdGlvbi5CVVkpCiAgICAgICAgICAgICAgICAuaXRlbU5hbWUob3JkZXIuaXRlbU5hbWUpCiAgICAgICAgICAgICAgICAuZXhhY3QodHJ1ZSkKICAgICAgICAgICAgICAgIC5xdWFudGl0eShvcmRlci5yZW1haW5pbmcpCiAgICAgICAgICAgICAgICAucHJpY2UocHJpY2UpCiAgICAgICAgICAgICAgICAuY2xvc2VBZnRlckNvbXBsZXRpb24oZmFsc2UpCiAgICAgICAgICAgICAgICAuYnVpbGQoKTsKICAgICAgICAgICAgc3RhdHVzID0gIkJ1eWluZyAiICsgb3JkZXIucmVtYWluaW5nICsgIiB4ICIgKyBvcmRlci5pdGVtTmFtZSArICIgaW4gR0Ugc2xvdCAiICsgKHNsb3Qub3JkaW5hbCgpICsgMSk7CiAgICAgICAgICAgIGlmICghUnMyR3JhbmRFeGNoYW5nZS5wcm9jZXNzT2ZmZXIocmVxdWVzdCkpCiAgICAgICAgICAgIHsKICAgICAgICAgICAgICAgIGlmIChSczJHcmFuZEV4Y2hhbmdlLmlzT3BlbigpKQogICAgICAgICAgICAgICAgewogICAgICAgICAgICAgICAgICAgIG9yZGVyLnNsb3QgPSBudWxsOwogICAgICAgICAgICAgICAgICAgIG9yZGVyLnBsYWNlZEF0ID0gMEw7CiAgICAgICAgICAgICAgICAgICAgc3RhdHVzID0gIkdFIGJ1eSBwbGFjZW1lbnQgZmFpbGVkOiAiICsgb3JkZXIuaXRlbU5hbWU7CiAgICAgICAgICAgICAgICB9CiAgICAgICAgICAgICAgICBlbHNlIHN0YXR1cyA9ICJHRSBjbG9zZWQgZHVyaW5nIGJ1eSBwbGFjZW1lbnQgLSByZWNvdmVyaW5nICIgKyBvcmRlci5pdGVtTmFtZTsKICAgICAgICAgICAgICAgIHJldHVybjsKICAgICAgICAgICAgfQo=')
+          new_buy = dec('ICAgICAgICAgICAgc3RhdHVzID0gIkJ1eWluZyAiICsgb3JkZXIucmVtYWluaW5nICsgIiB4ICIgKyBvcmRlci5pdGVtTmFtZSArICIgaW4gR0Ugc2xvdCAiICsgKHNsb3Qub3JkaW5hbCgpICsgMSk7CiAgICAgICAgICAgIGlmICghcGxhY2VCdXlPZmZlclNhZmVseShzbG90LCBvcmRlci5pdGVtTmFtZSwgb3JkZXIucmVtYWluaW5nLCBwcmljZSkpCiAgICAgICAgICAgIHsKICAgICAgICAgICAgICAgIG9yZGVyLnNsb3QgPSBudWxsOwogICAgICAgICAgICAgICAgb3JkZXIucGxhY2VkQXQgPSAwTDsKICAgICAgICAgICAgICAgIHJldHVybjsKICAgICAgICAgICAgfQo=')
 
           path = Path('kspjewelrycrafter/KspJewelryCrafterScript.java')
           s = path.read_text(encoding='utf-8')
-
           s = s.replace('import net.runelite.client.plugins.microbot.util.grandexchange.GrandExchangeRequest;\n', '', 1)
-
-          old = '    private static final int GE_PRICE_X_CHILD = 12;\n'
-          new = ('    private static final int GE_QUANTITY_X_CHILD = 7;\n'
-                 '    private static final int GE_PRICE_X_CHILD = 12;\n'
-                 '    private static final int GE_SEARCH_GROUP = 162;\n'
-                 '    private static final int GE_SEARCH_PROMPT_CHILD = 52;\n')
-          assert old in s, 'GE constants marker not found'
-          s = s.replace(old, new, 1)
-
-          marker = '    private void sellOutput()\n'
-          assert marker in s, 'sellOutput marker not found'
-          helpers = r'''    private boolean placeBuyOfferSafely(GrandExchangeSlots slot, String itemName, int quantity, int price)
-    {
-        if (slot == null || itemName == null || itemName.isBlank() || quantity <= 0 || price <= 0)
-        {
-            status = "Invalid GE buy request";
-            return false;
-        }
-        if (!ensureGeOverview("Opening Grand Exchange")) return false;
-
-        Widget slotWidget = Rs2Widget.getWidget(InterfaceID.GeOffers.INDEX_0 + slot.ordinal());
-        Widget buyButton = slotWidget == null ? null : slotWidget.getChild(0);
-        if (buyButton == null || buyButton.isHidden())
-            return recoverGrandExchange("GE buy slot is not ready");
-
-        status = "Opening GE buy offer: " + itemName;
-        if (!Rs2Widget.clickWidget(buyButton))
-            return recoverGrandExchange("Unable to open GE buy offer");
-        if (!sleepUntil(() -> Rs2GrandExchange.isOfferScreenOpen() || geSetupOpen(), 3_500))
-            return recoverGrandExchange("GE buy editor did not open");
-
-        if (!selectGeBuyItem(itemName))
-            return recoverGrandExchange("GE item search did not become ready");
-        if (!sleepUntil(this::geSetupControlsReady, 3_500))
-            return recoverGrandExchange("GE offer controls did not load");
-        if (!setGeOfferValue(GE_PRICE_X_CHILD, price, "price"))
-            return recoverGrandExchange("GE price entry failed");
-        if (!setGeOfferValue(GE_QUANTITY_X_CHILD, quantity, "quantity"))
-            return recoverGrandExchange("GE quantity entry failed");
-        return submitGeOfferSafely("buy");
-    }
-
-    private boolean placeSellOfferSafely(String itemName, int quantity, int price)
-    {
-        if (itemName == null || itemName.isBlank() || quantity <= 0 || price <= 0)
-        {
-            status = "Invalid GE sell request";
-            return false;
-        }
-        if (!ensureGeOverview("Opening Grand Exchange")) return false;
-
-        status = "Opening GE sell offer: " + itemName;
-        if (!Rs2Inventory.interact(itemName, "Offer", true))
-            return recoverGrandExchange("Unable to open GE sell offer");
-        if (!sleepUntil(this::geSetupControlsReady, 3_500))
-            return recoverGrandExchange("GE sell controls did not load");
-        if (!setGeOfferValue(GE_PRICE_X_CHILD, price, "price"))
-            return recoverGrandExchange("GE sell price entry failed");
-        if (!setGeOfferValue(GE_QUANTITY_X_CHILD, quantity, "quantity"))
-            return recoverGrandExchange("GE sell quantity entry failed");
-        return submitGeOfferSafely("sell");
-    }
-
-    private boolean selectGeBuyItem(String itemName)
-    {
-        var result = Rs2GrandExchange.getSearchResultWidget(itemName, true);
-        if (result == null)
-        {
-            status = "Waiting for GE item search";
-            if (!Rs2Widget.sleepUntilHasWidgetText(
-                "Start typing the name of an item to search for it",
-                GE_SEARCH_GROUP, GE_SEARCH_PROMPT_CHILD, false, 3_500))
-                return false;
-
-            Rs2Keyboard.typeString(itemName);
-            if (!sleepUntil(() -> Rs2GrandExchange.getSearchResultWidget(itemName, true) != null, 3_500))
-                return false;
-            result = Rs2GrandExchange.getSearchResultWidget(itemName, true);
-        }
-        if (result == null) return false;
-
-        status = "Selecting GE item: " + itemName;
-        Rs2Widget.clickWidgetFast(result.getLeft(), result.getRight(), 1);
-        return sleepUntil(this::geSetupControlsReady, 3_500);
-    }
-
-    private Widget geSetupChild(int child)
-    {
-        Widget setup = Rs2Widget.getWidget(InterfaceID.GeOffers.SETUP);
-        if (setup == null || setup.isHidden()) return null;
-        Widget control = setup.getChild(child);
-        return control == null || control.isHidden() ? null : control;
-    }
-
-    private boolean geSetupControlsReady()
-    {
-        return Rs2GrandExchange.isOpen() && geSetupOpen()
-            && geSetupChild(GE_PRICE_X_CHILD) != null
-            && geSetupChild(GE_QUANTITY_X_CHILD) != null;
-    }
-
-    private boolean setGeOfferValue(int child, int value, String label)
-    {
-        Widget control = geSetupChild(child);
-        if (control == null)
-        {
-            status = "Waiting for GE " + label + " control";
-            return false;
-        }
-
-        status = "Setting GE " + label + ": " + value;
-        if (!Rs2Widget.clickWidget(control)) return false;
-        if (!sleepUntil(this::gePriceInputOpen, 2_500)) return false;
-
-        sleep(250, 450);
-        Rs2GrandExchange.setChatboxValue(value);
-        sleep(150, 250);
-        Rs2Keyboard.enter();
-        if (!sleepUntil(() -> !gePriceInputOpen() || !Rs2GrandExchange.isOpen(), 2_500)) return false;
-        return Rs2GrandExchange.isOpen() && geSetupOpen();
-    }
-
-    private boolean submitGeOfferSafely(String kind)
-    {
-        if (!Rs2GrandExchange.isOpen() || !geSetupOpen())
-            return recoverGrandExchange("GE " + kind + " editor closed before confirm");
-
-        status = "Confirming GE " + kind + " offer";
-        if (!Rs2Widget.clickWidget(InterfaceID.GeOffers.SETUP_CONFIRM))
-            return recoverGrandExchange("Unable to confirm GE " + kind + " offer");
-
-        sleepUntil(() -> !geSetupOpen() || Rs2Widget.hasWidget("Your offer is much")
-            || !Rs2GrandExchange.isOpen(), 3_000);
-        if (Rs2Widget.hasWidget("Your offer is much"))
-        {
-            Rs2Widget.clickWidget("Yes");
-            sleepUntil(() -> !geSetupOpen() || !Rs2GrandExchange.isOpen(), 3_000);
-        }
-
-        if (!Rs2GrandExchange.isOpen())
-            return recoverGrandExchange("GE closed while confirming " + kind + " offer");
-        if (geSetupOpen())
-            return recoverGrandExchange("GE " + kind + " offer did not submit");
-        sleep(250, 450);
-        return true;
-    }
-
-    private boolean recoverGrandExchange(String reason)
-    {
-        status = reason + " - resetting Grand Exchange";
-
-        if (geSubScreenOpen())
-        {
-            Rs2GrandExchange.backToOverview();
-            sleepUntil(() -> !geSubScreenOpen() || !Rs2GrandExchange.isOpen(), 2_000);
-        }
-        if (Rs2GrandExchange.isOpen())
-        {
-            Rs2GrandExchange.closeExchange();
-            sleepUntil(() -> !Rs2GrandExchange.isOpen(), 2_500);
-        }
-
-        sleep(600, 900);
-        status = "Reopening Grand Exchange";
-        if (!Rs2GrandExchange.openExchange())
-        {
-            status = "Grand Exchange reopen failed - retrying";
-            return false;
-        }
-
-        if (geSubScreenOpen())
-        {
-            Rs2GrandExchange.backToOverview();
-            sleepUntil(() -> Rs2GrandExchange.isOpen() && !geSubScreenOpen(), 2_500);
-        }
-        status = Rs2GrandExchange.isOpen() && !geSubScreenOpen()
-            ? "Grand Exchange recovered - retrying offer"
-            : "Grand Exchange recovery incomplete - retrying";
-        return false;
-    }
-
-'''
-          s = s.replace(marker, helpers + marker, 1)
-
-          old_sell = '''        GrandExchangeRequest request = GrandExchangeRequest.builder()
-            .action(GrandExchangeAction.SELL)
-            .itemName(output)
-            .exact(true)
-            .quantity(qty)
-            .price(price)
-            .closeAfterCompletion(false)
-            .build();
-        if (!Rs2GrandExchange.processOffer(request))
-        {
-            status = Rs2GrandExchange.isOpen() ? "GE sell placement failed" : "GE closed during sell placement - recovering";
-            return;
-        }
-'''
-          new_sell = '''        if (!placeSellOfferSafely(output, qty, price)) return;
-'''
+          marker = '    private static final int GE_PRICE_X_CHILD = 12;\n'
+          replacement = ('    private static final int GE_QUANTITY_X_CHILD = 7;\n'
+                         '    private static final int GE_PRICE_X_CHILD = 12;\n'
+                         '    private static final int GE_SEARCH_GROUP = 162;\n'
+                         '    private static final int GE_SEARCH_PROMPT_CHILD = 52;\n')
+          assert marker in s, 'GE constants marker not found'
+          s = s.replace(marker, replacement, 1)
+          sell_marker = '    private void sellOutput()\n'
+          assert sell_marker in s, 'sellOutput marker not found'
+          s = s.replace(sell_marker, helpers + sell_marker, 1)
           assert old_sell in s, 'native sell block not found'
           s = s.replace(old_sell, new_sell, 1)
-
-          old_buy = '''            GrandExchangeRequest request = GrandExchangeRequest.builder()
-                .slot(slot)
-                .action(GrandExchangeAction.BUY)
-                .itemName(order.itemName)
-                .exact(true)
-                .quantity(order.remaining)
-                .price(price)
-                .closeAfterCompletion(false)
-                .build();
-            status = "Buying " + order.remaining + " x " + order.itemName + " in GE slot " + (slot.ordinal() + 1);
-            if (!Rs2GrandExchange.processOffer(request))
-            {
-                if (Rs2GrandExchange.isOpen())
-                {
-                    order.slot = null;
-                    order.placedAt = 0L;
-                    status = "GE buy placement failed: " + order.itemName;
-                }
-                else status = "GE closed during buy placement - recovering " + order.itemName;
-                return;
-            }
-'''
-          new_buy = '''            status = "Buying " + order.remaining + " x " + order.itemName + " in GE slot " + (slot.ordinal() + 1);
-            if (!placeBuyOfferSafely(slot, order.itemName, order.remaining, price))
-            {
-                order.slot = null;
-                order.placedAt = 0L;
-                return;
-            }
-'''
           assert old_buy in s, 'native buy block not found'
           s = s.replace(old_buy, new_buy, 1)
-
           path.write_text(s, encoding='utf-8')
 
           plugin = Path('kspjewelrycrafter/KspJewelryCrafterPlugin.java')
           p = plugin.read_text(encoding='utf-8')
           assert 'public static final String VERSION = "0.1.18";' in p, 'version marker not found'
-          p = p.replace('public static final String VERSION = "0.1.18";',
-                        'public static final String VERSION = "0.1.19";', 1)
+          p = p.replace('public static final String VERSION = "0.1.18";', 'public static final String VERSION = "0.1.19";', 1)
           plugin.write_text(p, encoding='utf-8')
           PY
-      - name: Commit patch
+
+      - name: Commit patch and remove temporary workflow
         shell: bash
         run: |
+          set -euo pipefail
+          rm -f .github/workflows/patch-jewelry-ge-recovery.yml
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add kspjewelrycrafter/KspJewelryCrafterScript.java kspjewelrycrafter/KspJewelryCrafterPlugin.java
+          git add -A
           git diff --cached --check
           git commit -m "Fix Jewelry Crafter GE offer recovery"
           git push origin HEAD:fix/jewelry-ge-recovery
