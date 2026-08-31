@@ -43,6 +43,7 @@ public class KspJewelryCrafterScript extends Script
     private static final int GE_PRICE_X_CHILD = 12;
     private static final int GE_SEARCH_GROUP = 162;
     private static final int GE_SEARCH_PROMPT_CHILD = 52;
+    private static final int GE_SELECTED_PRICE_CHILD = 41;
     private static final int GE_PRICE_CLICK_DELAY_MIN_MS = 650;
     private static final int GE_PRICE_CLICK_DELAY_MAX_MS = 950;
     private static final long TARGET_INTERACTION_TIMEOUT_MS = 8_000L;
@@ -822,6 +823,8 @@ public class KspJewelryCrafterScript extends Script
 
     private boolean selectGeBuyItem(String itemName)
     {
+        if (geSelectedOfferReady()) return true;
+
         if (!geSearchResultReady(itemName))
         {
             status = "Waiting for GE item search";
@@ -835,15 +838,57 @@ public class KspJewelryCrafterScript extends Script
                 return false;
         }
 
-        status = "Selecting GE item: " + itemName;
-        if (!clickGeSearchResultSafely(itemName)) return false;
-        return sleepUntil(this::geSetupControlsReady, 3_500);
+        for (int attempt = 1; attempt <= 3; attempt++)
+        {
+            if (geSelectedOfferReady()) return true;
+            if (!geSearchResultReady(itemName))
+            {
+                if (sleepUntil(this::geSelectedOfferReady, 900)) return true;
+                status = "Waiting for GE search result: " + itemName;
+                continue;
+            }
+
+            status = attempt == 1
+                ? "Selecting GE item: " + itemName
+                : "Retrying GE item selection (" + attempt + "/3): " + itemName;
+            sleep(250, 450);
+            if (!clickGeSearchResultSafely(itemName))
+            {
+                sleep(250, 400);
+                continue;
+            }
+            if (sleepUntil(this::geSelectedOfferReady, 2_000))
+            {
+                sleep(250, 450);
+                return true;
+            }
+            sleep(300, 500);
+        }
+
+        status = "GE item did not select: " + itemName;
+        return false;
     }
 
     private boolean geSearchResultReady(String itemName)
     {
         return Microbot.getClientThread().runOnClientThreadOptional(
             () -> Rs2GrandExchange.getSearchResultWidget(itemName, true) != null).orElse(false);
+    }
+
+    private boolean geSelectedOfferReady()
+    {
+        return Microbot.getClientThread().runOnClientThreadOptional(() ->
+        {
+            Widget setup = Microbot.getClient().getWidget(InterfaceID.GeOffers.SETUP);
+            if (setup == null || setup.isHidden()) return false;
+            Widget itemPrice = setup.getChild(GE_SELECTED_PRICE_CHILD);
+            if (itemPrice == null || itemPrice.isHidden()) return false;
+            String text = itemPrice.getText();
+            if (text == null || text.isBlank()) return false;
+            for (int i = 0; i < text.length(); i++)
+                if (Character.isDigit(text.charAt(i))) return true;
+            return false;
+        }).orElse(false);
     }
 
     private boolean clickGeSearchResultSafely(String itemName)
@@ -920,6 +965,7 @@ public class KspJewelryCrafterScript extends Script
     private boolean geSetupControlsReady()
     {
         return Rs2GrandExchange.isOpen() && geSetupOpen()
+            && geSelectedOfferReady()
             && geSetupChildVisible(GE_PRICE_X_CHILD)
             && geSetupChildVisible(GE_QUANTITY_X_CHILD);
     }
