@@ -127,7 +127,7 @@ public final class KspLocalMuleServer implements Closeable
             thread.setDaemon(true);
             return thread;
         });
-        this.clientExecutor = Executors.newCachedThreadPool(r -> {
+        this.clientExecutor = Executors.newFixedThreadPool(2, r -> {
             Thread thread = new Thread(r, "ksp-mule-local-client");
             thread.setDaemon(true);
             return thread;
