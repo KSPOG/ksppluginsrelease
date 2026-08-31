@@ -1,0 +1,208 @@
+name: Apply Jewelry GE Value Entry Fix
+
+on:
+  push:
+    branches:
+      - fix/jewelry-ge-value-entry-v0121
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/jewelry-ge-value-entry-v0121
+          fetch-depth: 0
+
+      - name: Patch Jewelry GE price and quantity entry
+        shell: python
+        run: |
+          from pathlib import Path
+
+          path = Path('kspjewelrycrafter/KspJewelryCrafterScript.java')
+          text = path.read_text(encoding='utf-8')
+
+          old = 'import net.runelite.api.gameval.InterfaceID;\n'
+          new = 'import net.runelite.api.gameval.InterfaceID;\nimport net.runelite.api.gameval.VarbitID;\n'
+          assert text.count(old) == 1, 'InterfaceID import anchor changed'
+          text = text.replace(old, new, 1)
+
+          old = '''    private static final int GE_SELECTED_PRICE_CHILD = 41;
+    private static final int GE_PRICE_CLICK_DELAY_MIN_MS = 650;
+    private static final int GE_PRICE_CLICK_DELAY_MAX_MS = 950;'''
+          new = '''    private static final int GE_SELECTED_PRICE_CHILD = 41;
+    private static final int GE_OFFER_PRICE_VARBIT = 4398;
+    private static final int GE_VALUE_ENTRY_ATTEMPTS = 3;
+    private static final int GE_PRICE_CLICK_DELAY_MIN_MS = 650;
+    private static final int GE_PRICE_CLICK_DELAY_MAX_MS = 950;'''
+          assert text.count(old) == 1, 'GE constants anchor changed'
+          text = text.replace(old, new, 1)
+
+          old = '''    private boolean setGeOfferValue(int child, int value, String label)
+    {
+        if (!geSetupChildVisible(child))
+        {
+            status = "Waiting for GE " + label + " control";
+            return false;
+        }
+
+        status = "Setting GE " + label + ": " + value;
+        if (child == GE_PRICE_X_CHILD)
+            sleep(GE_PRICE_CLICK_DELAY_MIN_MS, GE_PRICE_CLICK_DELAY_MAX_MS);
+        if (!clickGeSetupChildSafely(child)) return false;
+        if (!sleepUntil(this::gePriceInputOpen, 2_500)) return false;
+
+        sleep(250, 450);
+        Rs2GrandExchange.setChatboxValue(value);
+        sleep(150, 250);
+        Rs2Keyboard.enter();
+        if (!sleepUntil(() -> !gePriceInputOpen() || !Rs2GrandExchange.isOpen(), 2_500)) return false;
+        return Rs2GrandExchange.isOpen() && geSetupOpen();
+    }
+'''
+          new = '''    private boolean setGeOfferValue(int child, int value, String label)
+    {
+        if (value <= 0) return false;
+        if (geOfferValueMatches(child, value)) return true;
+
+        for (int attempt = 1; attempt <= GE_VALUE_ENTRY_ATTEMPTS; attempt++)
+        {
+            if (!Rs2GrandExchange.isOpen() || !geSetupOpen())
+            {
+                status = "GE closed before setting " + label;
+                return false;
+            }
+            if (!geSetupChildVisible(child))
+            {
+                status = "Waiting for GE " + label + " control";
+                sleep(250, 450);
+                continue;
+            }
+
+            status = attempt == 1
+                ? "Setting GE " + label + ": " + value
+                : "Retrying GE " + label + " (" + attempt + "/" + GE_VALUE_ENTRY_ATTEMPTS + "): " + value;
+
+            if (child == GE_PRICE_X_CHILD)
+                sleep(GE_PRICE_CLICK_DELAY_MIN_MS, GE_PRICE_CLICK_DELAY_MAX_MS);
+            else
+                sleep(300, 500);
+
+            if (!clickGeSetupChildSafely(child))
+            {
+                sleep(250, 450);
+                continue;
+            }
+            if (!sleepUntil(() -> gePriceInputOpen() || !Rs2GrandExchange.isOpen(), 3_000))
+            {
+                status = "Waiting for GE " + label + " input";
+                sleep(250, 450);
+                continue;
+            }
+            if (!Rs2GrandExchange.isOpen()) return false;
+
+            sleep(600, 1_000);
+            Rs2GrandExchange.setChatboxValue(value);
+            sleep(500, 750);
+            Rs2Keyboard.enter();
+
+            if (!sleepUntil(() -> !gePriceInputOpen() || !Rs2GrandExchange.isOpen(), 3_000))
+            {
+                status = "Waiting for GE " + label + " entry";
+                sleep(300, 500);
+                continue;
+            }
+            if (!Rs2GrandExchange.isOpen()) return false;
+
+            sleep(800, 1_100);
+            if (sleepUntil(() -> geOfferValueMatches(child, value), 2_000)) return true;
+        }
+
+        status = "GE " + label + " did not update to " + value;
+        return false;
+    }
+
+    private boolean geOfferValueMatches(int child, int value)
+    {
+        if (child == GE_PRICE_X_CHILD)
+            return Microbot.getVarbitValue(GE_OFFER_PRICE_VARBIT) == value;
+        if (child == GE_QUANTITY_X_CHILD)
+            return Microbot.getVarbitValue(VarbitID.GE_NEWOFFER_QUANTITY) == value;
+        return false;
+    }
+'''
+          assert text.count(old) == 1, 'setGeOfferValue anchor changed'
+          text = text.replace(old, new, 1)
+
+          old = '''        sleep(GE_PRICE_CLICK_DELAY_MIN_MS, GE_PRICE_CLICK_DELAY_MAX_MS);
+        if (!clickGeSetupChildSafely(GE_PRICE_X_CHILD))
+        {
+            status = "Unable to open GE price input";
+            return false;
+        }
+        if (!sleepUntil(() -> gePriceInputOpen() || !Rs2GrandExchange.isOpen(), 2_500))
+        {
+            status = "Waiting for GE price input";
+            return false;
+        }
+        if (!Rs2GrandExchange.isOpen())
+        {
+            status = "GE closed during price input - recovering";
+            return false;
+        }
+
+        Rs2GrandExchange.setChatboxValue(newPrice);
+        sleep(120, 220);
+        Rs2Keyboard.enter();
+        if (!sleepUntil(() -> !gePriceInputOpen() || !Rs2GrandExchange.isOpen(), 2_500))
+        {
+            status = "Waiting for GE price entry";
+            return false;
+        }
+        if (!Rs2GrandExchange.isOpen())
+        {
+            status = "GE closed after price entry - recovering";
+            return false;
+        }
+'''
+          new = '''        if (!setGeOfferValue(GE_PRICE_X_CHILD, newPrice, "modified price"))
+        {
+            status = Rs2GrandExchange.isOpen()
+                ? "Unable to set modified GE price"
+                : "GE closed during modified price entry - recovering";
+            return false;
+        }
+'''
+          assert text.count(old) == 1, 'modifyGeOffer price-entry anchor changed'
+          text = text.replace(old, new, 1)
+
+          path.write_text(text, encoding='utf-8')
+
+      - name: Verify Jewelry GE value entry fix
+        shell: python
+        run: |
+          from pathlib import Path
+          text = Path('kspjewelrycrafter/KspJewelryCrafterScript.java').read_text(encoding='utf-8')
+          assert 'import net.runelite.api.gameval.VarbitID;' in text
+          assert 'GE_OFFER_PRICE_VARBIT = 4398' in text
+          assert 'GE_VALUE_ENTRY_ATTEMPTS = 3' in text
+          assert 'Microbot.getVarbitValue(GE_OFFER_PRICE_VARBIT) == value' in text
+          assert 'Microbot.getVarbitValue(VarbitID.GE_NEWOFFER_QUANTITY) == value' in text
+          assert 'sleep(600, 1_000);' in text
+          assert 'sleep(500, 750);' in text
+          assert 'setGeOfferValue(GE_PRICE_X_CHILD, newPrice, "modified price")' in text
+          assert 'sleep(120, 220);' not in text
+          assert 'sleep(150, 250);' not in text
+
+      - name: Commit source and remove workflow
+        shell: bash
+        run: |
+          rm .github/workflows/apply-jewelry-ge-value-entry-v0121.yml
+          git config user.name "KSPOG"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add kspjewelrycrafter/KspJewelryCrafterScript.java .github/workflows/apply-jewelry-ge-value-entry-v0121.yml
+          git commit -m "Fix Jewelry Crafter GE price and quantity entry"
+          git push origin HEAD:fix/jewelry-ge-value-entry-v0121
