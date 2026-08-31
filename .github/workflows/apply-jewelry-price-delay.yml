@@ -1,0 +1,67 @@
+name: Apply Jewelry Price Click Delay
+
+on:
+  push:
+    branches:
+      - fix/jewelry-price-click-delay
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/jewelry-price-click-delay
+
+      - name: Apply minimal price click delay
+        shell: python
+        run: |
+          from pathlib import Path
+
+          path = Path('kspjewelrycrafter/KspJewelryCrafterScript.java')
+          text = path.read_text(encoding='utf-8')
+
+          replacements = [
+              (
+                  '    private static final int GE_SEARCH_PROMPT_CHILD = 52;\n    private static final long TARGET_INTERACTION_TIMEOUT_MS = 8_000L;',
+                  '    private static final int GE_SEARCH_PROMPT_CHILD = 52;\n    private static final int GE_PRICE_CLICK_DELAY_MIN_MS = 650;\n    private static final int GE_PRICE_CLICK_DELAY_MAX_MS = 950;\n    private static final long TARGET_INTERACTION_TIMEOUT_MS = 8_000L;'
+              ),
+              (
+                  '        status = "Setting GE " + label + ": " + value;\n        if (!clickGeSetupChildSafely(child)) return false;',
+                  '        status = "Setting GE " + label + ": " + value;\n        if (child == GE_PRICE_X_CHILD)\n            sleep(GE_PRICE_CLICK_DELAY_MIN_MS, GE_PRICE_CLICK_DELAY_MAX_MS);\n        if (!clickGeSetupChildSafely(child)) return false;'
+              ),
+              (
+                  '        if (!Rs2GrandExchange.isOpen())\n        {\n            status = "GE closed before price edit - recovering";\n            return false;\n        }\n\n        if (!clickGeSetupChildSafely(GE_PRICE_X_CHILD))',
+                  '        if (!Rs2GrandExchange.isOpen())\n        {\n            status = "GE closed before price edit - recovering";\n            return false;\n        }\n\n        sleep(GE_PRICE_CLICK_DELAY_MIN_MS, GE_PRICE_CLICK_DELAY_MAX_MS);\n        if (!clickGeSetupChildSafely(GE_PRICE_X_CHILD))'
+              ),
+          ]
+
+          for index, (old, new) in enumerate(replacements, 1):
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'replacement {index}: expected exactly 1 match, found {count}')
+              text = text.replace(old, new, 1)
+
+          path.write_text(text, encoding='utf-8')
+
+      - name: Verify pacing change
+        shell: python
+        run: |
+          from pathlib import Path
+          text = Path('kspjewelrycrafter/KspJewelryCrafterScript.java').read_text(encoding='utf-8')
+          assert 'GE_PRICE_CLICK_DELAY_MIN_MS = 650' in text
+          assert 'GE_PRICE_CLICK_DELAY_MAX_MS = 950' in text
+          assert text.count('sleep(GE_PRICE_CLICK_DELAY_MIN_MS, GE_PRICE_CLICK_DELAY_MAX_MS);') == 2
+          assert 'if (child == GE_PRICE_X_CHILD)' in text
+
+      - name: Commit source and remove workflow
+        run: |
+          rm .github/workflows/apply-jewelry-price-delay.yml
+          git config user.name "KSPOG"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add kspjewelrycrafter/KspJewelryCrafterScript.java .github/workflows/apply-jewelry-price-delay.yml
+          git commit -m "Slow Jewelry Crafter GE price click"
+          git push origin HEAD:fix/jewelry-price-click-delay
