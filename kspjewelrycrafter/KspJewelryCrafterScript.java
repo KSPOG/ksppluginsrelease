@@ -13,7 +13,6 @@ import net.runelite.client.plugins.microbot.Script;
 import net.runelite.client.plugins.microbot.util.bank.Rs2Bank;
 import net.runelite.client.plugins.microbot.util.gameobject.Rs2GameObject;
 import net.runelite.client.plugins.microbot.util.grandexchange.GrandExchangeAction;
-import net.runelite.client.plugins.microbot.util.grandexchange.GrandExchangeRequest;
 import net.runelite.client.plugins.microbot.util.grandexchange.GrandExchangeSlots;
 import net.runelite.client.plugins.microbot.util.grandexchange.Rs2GrandExchange;
 import net.runelite.client.plugins.microbot.util.inventory.Rs2Inventory;
@@ -40,7 +39,10 @@ public class KspJewelryCrafterScript extends Script
     private static final int EDGEVILLE_DIRECT_BANK_RADIUS = 20;
     private static final int BANK_WIDGET_GROUP = 12;
     private static final int BANK_WIDGET_CHILD = 1;
+    private static final int GE_QUANTITY_X_CHILD = 7;
     private static final int GE_PRICE_X_CHILD = 12;
+    private static final int GE_SEARCH_GROUP = 162;
+    private static final int GE_SEARCH_PROMPT_CHILD = 52;
     private static final long TARGET_INTERACTION_TIMEOUT_MS = 8_000L;
     private static final WorldPoint EDGEVILLE_BANK = new WorldPoint(3096, 3494, 0);
     private static final WorldPoint EDGEVILLE_FURNACE = new WorldPoint(3109, 3499, 0);
@@ -769,6 +771,176 @@ public class KspJewelryCrafterScript extends Script
         return false;
     }
 
+    private boolean placeBuyOfferSafely(GrandExchangeSlots slot, String itemName, int quantity, int price)
+    {
+        if (slot == null || itemName == null || itemName.isBlank() || quantity <= 0 || price <= 0)
+        {
+            status = "Invalid GE buy request";
+            return false;
+        }
+        if (!ensureGeOverview("Opening Grand Exchange")) return false;
+
+        Widget slotWidget = Rs2Widget.getWidget(InterfaceID.GeOffers.INDEX_0 + slot.ordinal());
+        Widget buyButton = slotWidget == null ? null : slotWidget.getChild(0);
+        if (buyButton == null || buyButton.isHidden())
+            return recoverGrandExchange("GE buy slot is not ready");
+
+        status = "Opening GE buy offer: " + itemName;
+        if (!Rs2Widget.clickWidget(buyButton))
+            return recoverGrandExchange("Unable to open GE buy offer");
+        if (!sleepUntil(() -> Rs2GrandExchange.isOfferScreenOpen() || geSetupOpen(), 3_500))
+            return recoverGrandExchange("GE buy editor did not open");
+
+        if (!selectGeBuyItem(itemName))
+            return recoverGrandExchange("GE item search did not become ready");
+        if (!sleepUntil(this::geSetupControlsReady, 3_500))
+            return recoverGrandExchange("GE offer controls did not load");
+        if (!setGeOfferValue(GE_PRICE_X_CHILD, price, "price"))
+            return recoverGrandExchange("GE price entry failed");
+        if (!setGeOfferValue(GE_QUANTITY_X_CHILD, quantity, "quantity"))
+            return recoverGrandExchange("GE quantity entry failed");
+        return submitGeOfferSafely("buy");
+    }
+
+    private boolean placeSellOfferSafely(String itemName, int quantity, int price)
+    {
+        if (itemName == null || itemName.isBlank() || quantity <= 0 || price <= 0)
+        {
+            status = "Invalid GE sell request";
+            return false;
+        }
+        if (!ensureGeOverview("Opening Grand Exchange")) return false;
+
+        status = "Opening GE sell offer: " + itemName;
+        if (!Rs2Inventory.interact(itemName, "Offer", true))
+            return recoverGrandExchange("Unable to open GE sell offer");
+        if (!sleepUntil(this::geSetupControlsReady, 3_500))
+            return recoverGrandExchange("GE sell controls did not load");
+        if (!setGeOfferValue(GE_PRICE_X_CHILD, price, "price"))
+            return recoverGrandExchange("GE sell price entry failed");
+        if (!setGeOfferValue(GE_QUANTITY_X_CHILD, quantity, "quantity"))
+            return recoverGrandExchange("GE sell quantity entry failed");
+        return submitGeOfferSafely("sell");
+    }
+
+    private boolean selectGeBuyItem(String itemName)
+    {
+        var result = Rs2GrandExchange.getSearchResultWidget(itemName, true);
+        if (result == null)
+        {
+            status = "Waiting for GE item search";
+            if (!Rs2Widget.sleepUntilHasWidgetText(
+                "Start typing the name of an item to search for it",
+                GE_SEARCH_GROUP, GE_SEARCH_PROMPT_CHILD, false, 3_500))
+                return false;
+
+            Rs2Keyboard.typeString(itemName);
+            if (!sleepUntil(() -> Rs2GrandExchange.getSearchResultWidget(itemName, true) != null, 3_500))
+                return false;
+            result = Rs2GrandExchange.getSearchResultWidget(itemName, true);
+        }
+        if (result == null) return false;
+
+        status = "Selecting GE item: " + itemName;
+        Rs2Widget.clickWidgetFast(result.getLeft(), result.getRight(), 1);
+        return sleepUntil(this::geSetupControlsReady, 3_500);
+    }
+
+    private Widget geSetupChild(int child)
+    {
+        Widget setup = Rs2Widget.getWidget(InterfaceID.GeOffers.SETUP);
+        if (setup == null || setup.isHidden()) return null;
+        Widget control = setup.getChild(child);
+        return control == null || control.isHidden() ? null : control;
+    }
+
+    private boolean geSetupControlsReady()
+    {
+        return Rs2GrandExchange.isOpen() && geSetupOpen()
+            && geSetupChild(GE_PRICE_X_CHILD) != null
+            && geSetupChild(GE_QUANTITY_X_CHILD) != null;
+    }
+
+    private boolean setGeOfferValue(int child, int value, String label)
+    {
+        Widget control = geSetupChild(child);
+        if (control == null)
+        {
+            status = "Waiting for GE " + label + " control";
+            return false;
+        }
+
+        status = "Setting GE " + label + ": " + value;
+        if (!Rs2Widget.clickWidget(control)) return false;
+        if (!sleepUntil(this::gePriceInputOpen, 2_500)) return false;
+
+        sleep(250, 450);
+        Rs2GrandExchange.setChatboxValue(value);
+        sleep(150, 250);
+        Rs2Keyboard.enter();
+        if (!sleepUntil(() -> !gePriceInputOpen() || !Rs2GrandExchange.isOpen(), 2_500)) return false;
+        return Rs2GrandExchange.isOpen() && geSetupOpen();
+    }
+
+    private boolean submitGeOfferSafely(String kind)
+    {
+        if (!Rs2GrandExchange.isOpen() || !geSetupOpen())
+            return recoverGrandExchange("GE " + kind + " editor closed before confirm");
+
+        status = "Confirming GE " + kind + " offer";
+        if (!Rs2Widget.clickWidget(InterfaceID.GeOffers.SETUP_CONFIRM))
+            return recoverGrandExchange("Unable to confirm GE " + kind + " offer");
+
+        sleepUntil(() -> !geSetupOpen() || Rs2Widget.hasWidget("Your offer is much")
+            || !Rs2GrandExchange.isOpen(), 3_000);
+        if (Rs2Widget.hasWidget("Your offer is much"))
+        {
+            Rs2Widget.clickWidget("Yes");
+            sleepUntil(() -> !geSetupOpen() || !Rs2GrandExchange.isOpen(), 3_000);
+        }
+
+        if (!Rs2GrandExchange.isOpen())
+            return recoverGrandExchange("GE closed while confirming " + kind + " offer");
+        if (geSetupOpen())
+            return recoverGrandExchange("GE " + kind + " offer did not submit");
+        sleep(250, 450);
+        return true;
+    }
+
+    private boolean recoverGrandExchange(String reason)
+    {
+        status = reason + " - resetting Grand Exchange";
+
+        if (geSubScreenOpen())
+        {
+            Rs2GrandExchange.backToOverview();
+            sleepUntil(() -> !geSubScreenOpen() || !Rs2GrandExchange.isOpen(), 2_000);
+        }
+        if (Rs2GrandExchange.isOpen())
+        {
+            Rs2GrandExchange.closeExchange();
+            sleepUntil(() -> !Rs2GrandExchange.isOpen(), 2_500);
+        }
+
+        sleep(600, 900);
+        status = "Reopening Grand Exchange";
+        if (!Rs2GrandExchange.openExchange())
+        {
+            status = "Grand Exchange reopen failed - retrying";
+            return false;
+        }
+
+        if (geSubScreenOpen())
+        {
+            Rs2GrandExchange.backToOverview();
+            sleepUntil(() -> Rs2GrandExchange.isOpen() && !geSubScreenOpen(), 2_500);
+        }
+        status = Rs2GrandExchange.isOpen() && !geSubScreenOpen()
+            ? "Grand Exchange recovered - retrying offer"
+            : "Grand Exchange recovery incomplete - retrying";
+        return false;
+    }
+
     private void sellOutput()
     {
         if (handlePendingOffer()) return;
@@ -806,19 +978,7 @@ public class KspJewelryCrafterScript extends Script
             return;
         }
 
-        GrandExchangeRequest request = GrandExchangeRequest.builder()
-            .action(GrandExchangeAction.SELL)
-            .itemName(output)
-            .exact(true)
-            .quantity(qty)
-            .price(price)
-            .closeAfterCompletion(false)
-            .build();
-        if (!Rs2GrandExchange.processOffer(request))
-        {
-            status = Rs2GrandExchange.isOpen() ? "GE sell placement failed" : "GE closed during sell placement - recovering";
-            return;
-        }
+        if (!placeSellOfferSafely(output, qty, price)) return;
         GrandExchangeSlots slot = findOfferSlot(itemId, GrandExchangeAction.SELL);
         pendingOffer = new PendingOffer(output, itemId, GrandExchangeAction.SELL, slot, System.currentTimeMillis());
         status = "Selling all " + qty + " x " + output;
@@ -980,25 +1140,11 @@ public class KspJewelryCrafterScript extends Script
             order.itemId = itemId;
             order.slot = slot;
             order.placedAt = System.currentTimeMillis();
-            GrandExchangeRequest request = GrandExchangeRequest.builder()
-                .slot(slot)
-                .action(GrandExchangeAction.BUY)
-                .itemName(order.itemName)
-                .exact(true)
-                .quantity(order.remaining)
-                .price(price)
-                .closeAfterCompletion(false)
-                .build();
             status = "Buying " + order.remaining + " x " + order.itemName + " in GE slot " + (slot.ordinal() + 1);
-            if (!Rs2GrandExchange.processOffer(request))
+            if (!placeBuyOfferSafely(slot, order.itemName, order.remaining, price))
             {
-                if (Rs2GrandExchange.isOpen())
-                {
-                    order.slot = null;
-                    order.placedAt = 0L;
-                    status = "GE buy placement failed: " + order.itemName;
-                }
-                else status = "GE closed during buy placement - recovering " + order.itemName;
+                order.slot = null;
+                order.placedAt = 0L;
                 return;
             }
             if (!sleepUntil(() -> offerMatches(order) || !Rs2GrandExchange.isOpen(), 3_000))
