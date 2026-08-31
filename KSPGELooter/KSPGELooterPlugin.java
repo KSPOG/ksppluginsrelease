@@ -5,6 +5,7 @@ import net.runelite.client.config.ConfigManager;
 import net.runelite.client.plugins.Plugin;
 import net.runelite.client.plugins.PluginDescriptor;
 import net.runelite.client.plugins.microbot.PluginConstants;
+import net.runelite.client.plugins.microbot.kspmule.KspMuleWorkerService;
 import net.runelite.client.ui.overlay.OverlayManager;
 
 import javax.inject.Inject;
@@ -20,12 +21,13 @@ import javax.inject.Inject;
 )
 public class KSPGELooterPlugin extends Plugin
 {
-    public static final String VERSION = "0.1.7";
+    public static final String VERSION = "0.1.8";
 
     @Inject private KSPGELooterConfig config;
     @Inject private KSPGELooterScript script;
     @Inject private KSPGELooterOverlay overlay;
     @Inject private OverlayManager overlayManager;
+    private final KspMuleWorkerService muleService = new KspMuleWorkerService("GE Looter");
 
     @Provides
     KSPGELooterConfig provideConfig(ConfigManager configManager)
@@ -36,6 +38,7 @@ public class KSPGELooterPlugin extends Plugin
     @Override
     protected void startUp()
     {
+        muleService.start(config);
         overlayManager.add(overlay);
         script.run(config);
     }
@@ -43,6 +46,7 @@ public class KSPGELooterPlugin extends Plugin
     @Override
     protected void shutDown()
     {
+        muleService.shutdown();
         script.shutdown();
         overlayManager.remove(overlay);
     }

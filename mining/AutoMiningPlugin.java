@@ -16,6 +16,7 @@ import net.runelite.client.eventbus.Subscribe;
 import net.runelite.client.plugins.Plugin;
 import net.runelite.client.plugins.PluginDescriptor;
 import net.runelite.client.plugins.microbot.PluginConstants;
+import net.runelite.client.plugins.microbot.kspmule.KspMuleWorkerService;
 import net.runelite.client.ui.overlay.OverlayManager;
 
 import javax.inject.Inject;
@@ -33,24 +34,16 @@ import java.awt.*;
         isExternal = PluginConstants.IS_EXTERNAL
 )
 public class AutoMiningPlugin extends Plugin {
-    public static final String version = "1.0.32";
-    @Inject
-    private Client client;
+    public static final String version = "1.0.33";
+    @Inject private Client client;
+    @Inject private AutoMiningConfig config;
+    @Inject private OverlayManager overlayManager;
+    @Inject private AutoMiningOverlay autoMiningOverlay;
+    @Inject AutoMiningScript autoMiningScript;
+    private final KspMuleWorkerService muleService = new KspMuleWorkerService("Auto Mining");
 
-    @Inject
-    private AutoMiningConfig config;
     @Provides
-    AutoMiningConfig provideConfig(ConfigManager configManager) {
-        return configManager.getConfig(AutoMiningConfig.class);
-    }
-
-    @Inject
-    private OverlayManager overlayManager;
-    @Inject
-    private AutoMiningOverlay autoMiningOverlay;
-
-    @Inject
-    AutoMiningScript autoMiningScript;
+    AutoMiningConfig provideConfig(ConfigManager configManager) { return configManager.getConfig(AutoMiningConfig.class); }
 
     @Subscribe
     public void onClientTick(ClientTick event) {
@@ -60,42 +53,20 @@ public class AutoMiningPlugin extends Plugin {
         autoMiningScript.onClientTick(location, animating);
     }
 
-    @Subscribe
-    public void onGameTick(GameTick event) {
-        autoMiningScript.onMiningLevelSnapshot(client.getRealSkillLevel(Skill.MINING));
-    }
-
-    @Subscribe
-    public void onGameObjectDespawned(GameObjectDespawned event) {
-        if (event != null) {
-            autoMiningScript.onGameObjectDespawned(event.getGameObject());
-        }
-    }
-
-    @Subscribe
-    public void onGameObjectSpawned(GameObjectSpawned event) {
-        if (event != null) {
-            autoMiningScript.onGameObjectSpawned(event.getGameObject());
-        }
-    }
-
-    @Subscribe
-    public void onItemContainerChanged(ItemContainerChanged event) {
-        if (event != null && event.getContainerId() == InventoryID.INVENTORY.getId()) {
-            autoMiningScript.onInventoryChanged(event.getItemContainer());
-        }
-    }
-
+    @Subscribe public void onGameTick(GameTick event) { autoMiningScript.onMiningLevelSnapshot(client.getRealSkillLevel(Skill.MINING)); }
+    @Subscribe public void onGameObjectDespawned(GameObjectDespawned event) { if (event != null) autoMiningScript.onGameObjectDespawned(event.getGameObject()); }
+    @Subscribe public void onGameObjectSpawned(GameObjectSpawned event) { if (event != null) autoMiningScript.onGameObjectSpawned(event.getGameObject()); }
+    @Subscribe public void onItemContainerChanged(ItemContainerChanged event) { if (event != null && event.getContainerId() == InventoryID.INVENTORY.getId()) autoMiningScript.onInventoryChanged(event.getItemContainer()); }
 
     @Override
     protected void startUp() throws AWTException {
-        if (overlayManager != null) {
-            overlayManager.add(autoMiningOverlay);
-        }
+        muleService.start(config);
+        if (overlayManager != null) overlayManager.add(autoMiningOverlay);
         autoMiningScript.run(config);
     }
 
     protected void shutDown() {
+        muleService.shutdown();
         autoMiningScript.shutdown();
         overlayManager.remove(autoMiningOverlay);
     }

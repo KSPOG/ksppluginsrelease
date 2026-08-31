@@ -13,6 +13,7 @@ import net.runelite.client.plugins.*;
 import net.runelite.client.plugins.microbot.*;
 import net.runelite.client.plugins.microbot.api.tileobject.Rs2TileObjectCache;
 import net.runelite.client.plugins.microbot.api.tileobject.models.Rs2TileObjectModel;
+import net.runelite.client.plugins.microbot.kspmule.KspMuleWorkerService;
 import net.runelite.client.plugins.microbot.kspwillowchopper.forestry.*;
 import net.runelite.client.plugins.microbot.util.inventory.*;
 import net.runelite.client.plugins.microbot.util.npc.Rs2NpcModel;
@@ -26,8 +27,9 @@ import java.util.regex.*;
 
 @PluginDescriptor(name=PluginConstants.KSP+"Chopper",description="Direct willow chopping with bank or Forester's Campfire log handling and Forestry events.",tags={"willow","woodcutting","firemaking","forestry","ksp","microbot"},authors={"KSP"},version=KspWillowChopperPlugin.VERSION,minClientVersion="2.1.32",enabledByDefault=PluginConstants.DEFAULT_ENABLED,isExternal=PluginConstants.IS_EXTERNAL)
 public class KspWillowChopperPlugin extends Plugin {
-    public static final String VERSION="0.1.0"; private static final Pattern ANIMA_BARK_PATTERN=Pattern.compile("You've been awarded <col=[0-9a-f]+>(\\d+) Anima-infused bark</col>\\.");
+    public static final String VERSION="0.1.1"; private static final Pattern ANIMA_BARK_PATTERN=Pattern.compile("You've been awarded <col=[0-9a-f]+>(\\d+) Anima-infused bark</col>\\.");
     @Inject private KspWillowChopperConfig config; @Inject private OverlayManager overlayManager; @Inject private KspWillowChopperOverlay overlay; @Inject private KspWillowChopperScript script; @Inject public Rs2TileObjectCache rs2TileObjectCache;
+    private final KspMuleWorkerService muleService=new KspMuleWorkerService("Willow Chopper");
     public final List<Rs2NpcModel> ritualCircles=new ArrayList<>(); public final List<GameObject> saplingIngredients=new ArrayList<>();
     private final AtomicInteger completedForestryEvents=new AtomicInteger(),logsChopped=new AtomicInteger(),animaBarkGained=new AtomicInteger(); private final AtomicLong lastForestryInteractionMillis=new AtomicLong();
     private final Object forestryCompletionLock=new Object(); private final Map<KspForestryEvent,Long> forestryCompletionTimes=new EnumMap<>(KspForestryEvent.class); private final List<BlockingEvent> forestryEvents=new ArrayList<>();
@@ -35,8 +37,8 @@ public class KspWillowChopperPlugin extends Plugin {
 
     public KspWillowChopperConfig getConfig(){return config;} public KspWillowChopperScript getScript(){return script;} public KspForestryEvent getCurrentForestryEvent(){return currentForestryEvent;}
     @Provides KspWillowChopperConfig provideConfig(ConfigManager m){return m.getConfig(KspWillowChopperConfig.class);}
-    @Override protected void startUp(){completedForestryEvents.set(0);logsChopped.set(0);animaBarkGained.set(0);currentForestryEvent=KspForestryEvent.NONE;lastForestryInteractionMillis.set(0);lastForestryInteractionKey=Long.MIN_VALUE;synchronized(forestryCompletionLock){forestryCompletionTimes.clear();}overlayManager.add(overlay);if(config.enableForestry())addForestryEvents();script.run(config);}
-    @Override protected void shutDown(){script.shutdown();removeForestryEvents();ritualCircles.clear();saplingIngredients.clear();currentForestryEvent=KspForestryEvent.NONE;overlayManager.remove(overlay);}
+    @Override protected void startUp(){completedForestryEvents.set(0);logsChopped.set(0);animaBarkGained.set(0);currentForestryEvent=KspForestryEvent.NONE;lastForestryInteractionMillis.set(0);lastForestryInteractionKey=Long.MIN_VALUE;synchronized(forestryCompletionLock){forestryCompletionTimes.clear();}muleService.start(config);overlayManager.add(overlay);if(config.enableForestry())addForestryEvents();script.run(config);}
+    @Override protected void shutDown(){muleService.shutdown();script.shutdown();removeForestryEvents();ritualCircles.clear();saplingIngredients.clear();currentForestryEvent=KspForestryEvent.NONE;overlayManager.remove(overlay);}
     private void addForestryEvents(){removeForestryEvents();if(config.rootEvent())addForestryEvent(new KspRootEvent(this));if(config.saplingEvent()){saplingEvent=new KspStrugglingSaplingEvent(this);addForestryEvent(saplingEvent);}if(config.entlingsEvent())addForestryEvent(new KspEntlingsEvent(this));if(config.hivesEvent())addForestryEvent(new KspHivesEvent(this));if(config.eggEvent())addForestryEvent(new KspEggEvent(this));if(config.foxEvent())addForestryEvent(new KspFoxEvent(this));if(config.ritualEvent())addForestryEvent(new KspRitualEvent(this));if(config.leprechaunEvent())addForestryEvent(new KspLeprechaunEvent(this));if(config.flowersEvent())addForestryEvent(new KspFlowersEvent(this));}
     private void addForestryEvent(BlockingEvent e){forestryEvents.add(e);Microbot.getBlockingEventManager().add(e);} private void removeForestryEvents(){for(BlockingEvent e:forestryEvents)Microbot.getBlockingEventManager().remove(e);forestryEvents.clear();saplingEvent=null;}
 

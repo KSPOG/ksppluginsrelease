@@ -5,9 +5,10 @@ import net.runelite.client.config.ConfigGroup;
 import net.runelite.client.config.ConfigItem;
 import net.runelite.client.config.ConfigSection;
 import net.runelite.client.config.Range;
+import net.runelite.client.plugins.microbot.kspmule.KspMuleConfig;
 
 @ConfigGroup(F2PProcessingFactoryConfig.GROUP)
-public interface F2PProcessingFactoryConfig extends Config
+public interface F2PProcessingFactoryConfig extends Config, KspMuleConfig
 {
     String GROUP = "f2pProcessingFactory";
     String STATE_GROUP = "f2pProcessingFactoryState";
@@ -18,7 +19,6 @@ public interface F2PProcessingFactoryConfig extends Config
         position = 0
     )
     String factorySection = "factory";
-
 
     @ConfigSection(
         name = "Profitability",
@@ -47,6 +47,13 @@ public interface F2PProcessingFactoryConfig extends Config
         position = 4
     )
     String antibanSection = "antiban";
+
+    @ConfigSection(
+        name = "Local Mule",
+        description = "Automatic excess-GP transfer to KSP Trade Receiver",
+        position = 90
+    )
+    String muleSection = KspMuleConfig.SECTION;
 
     @ConfigItem(
         keyName = "mode",
@@ -313,4 +320,9 @@ public interface F2PProcessingFactoryConfig extends Config
         return FactoryAntibanProfile.BALANCED;
     }
 
+    @Override
+    default int muleMinimumBankReserve()
+    {
+        return cashReserve();
+    }
 }

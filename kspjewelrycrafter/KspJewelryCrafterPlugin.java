@@ -5,6 +5,7 @@ import net.runelite.client.config.ConfigManager;
 import net.runelite.client.plugins.Plugin;
 import net.runelite.client.plugins.PluginDescriptor;
 import net.runelite.client.plugins.microbot.PluginConstants;
+import net.runelite.client.plugins.microbot.kspmule.KspMuleWorkerService;
 import net.runelite.client.ui.overlay.OverlayManager;
 
 import javax.inject.Inject;
@@ -21,12 +22,13 @@ import javax.inject.Inject;
 )
 public class KspJewelryCrafterPlugin extends Plugin
 {
-    public static final String VERSION = "0.1.17";
+    public static final String VERSION = "0.1.18";
 
     @Inject private KspJewelryCrafterConfig config;
     @Inject private KspJewelryCrafterScript script;
     @Inject private KspJewelryCrafterOverlay overlay;
     @Inject private OverlayManager overlayManager;
+    private final KspMuleWorkerService muleService = new KspMuleWorkerService("Jewelry Crafter");
 
     @Provides
     KspJewelryCrafterConfig provideConfig(ConfigManager configManager)
@@ -37,6 +39,7 @@ public class KspJewelryCrafterPlugin extends Plugin
     @Override
     protected void startUp()
     {
+        muleService.start(config);
         overlayManager.add(overlay);
         script.run(config);
     }
@@ -44,6 +47,7 @@ public class KspJewelryCrafterPlugin extends Plugin
     @Override
     protected void shutDown()
     {
+        muleService.shutdown();
         script.shutdown();
         overlayManager.remove(overlay);
     }

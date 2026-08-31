@@ -5,6 +5,7 @@ import net.runelite.client.config.ConfigManager;
 import net.runelite.client.plugins.Plugin;
 import net.runelite.client.plugins.PluginDescriptor;
 import net.runelite.client.plugins.microbot.PluginConstants;
+import net.runelite.client.plugins.microbot.kspmule.KspMuleWorkerService;
 
 import javax.inject.Inject;
 
@@ -21,13 +22,11 @@ import javax.inject.Inject;
 )
 public class KspBoneAshPlugin extends Plugin
 {
-    public static final String VERSION = "0.0.1";
+    public static final String VERSION = "0.0.2";
 
-    @Inject
-    private KspBoneAshConfig config;
-
-    @Inject
-    private KspBoneAshScript script;
+    @Inject private KspBoneAshConfig config;
+    @Inject private KspBoneAshScript script;
+    private final KspMuleWorkerService muleService = new KspMuleWorkerService("Bone & Ash Processor");
 
     @Provides
     KspBoneAshConfig provideConfig(ConfigManager configManager)
@@ -38,12 +37,14 @@ public class KspBoneAshPlugin extends Plugin
     @Override
     protected void startUp()
     {
+        muleService.start(config);
         script.run(config, this);
     }
 
     @Override
     protected void shutDown()
     {
+        muleService.shutdown();
         script.shutdown();
     }
 }
