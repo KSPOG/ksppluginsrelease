@@ -780,14 +780,9 @@ public class KspJewelryCrafterScript extends Script
         }
         if (!ensureGeOverview("Opening Grand Exchange")) return false;
 
-        Widget slotWidget = Rs2Widget.getWidget(InterfaceID.GeOffers.INDEX_0 + slot.ordinal());
-        Widget buyButton = slotWidget == null ? null : slotWidget.getChild(0);
-        if (buyButton == null || buyButton.isHidden())
-            return recoverGrandExchange("GE buy slot is not ready");
-
         status = "Opening GE buy offer: " + itemName;
-        if (!Rs2Widget.clickWidget(buyButton))
-            return recoverGrandExchange("Unable to open GE buy offer");
+    if (!clickGeSlotChildSafely(slot, 0))
+        return recoverGrandExchange("GE buy slot is not ready");
         if (!sleepUntil(() -> Rs2GrandExchange.isOfferScreenOpen() || geSetupOpen(), 3_500))
             return recoverGrandExchange("GE buy editor did not open");
 
@@ -825,8 +820,7 @@ public class KspJewelryCrafterScript extends Script
 
     private boolean selectGeBuyItem(String itemName)
     {
-        var result = Rs2GrandExchange.getSearchResultWidget(itemName, true);
-        if (result == null)
+        if (!geSearchResultReady(itemName))
         {
             status = "Waiting for GE item search";
             if (!Rs2Widget.sleepUntilHasWidgetText(
@@ -835,43 +829,109 @@ public class KspJewelryCrafterScript extends Script
                 return false;
 
             Rs2Keyboard.typeString(itemName);
-            if (!sleepUntil(() -> Rs2GrandExchange.getSearchResultWidget(itemName, true) != null, 3_500))
+            if (!sleepUntil(() -> geSearchResultReady(itemName), 3_500))
                 return false;
-            result = Rs2GrandExchange.getSearchResultWidget(itemName, true);
         }
-        if (result == null) return false;
 
         status = "Selecting GE item: " + itemName;
-        Rs2Widget.clickWidgetFast(result.getLeft(), result.getRight(), 1);
+        if (!clickGeSearchResultSafely(itemName)) return false;
         return sleepUntil(this::geSetupControlsReady, 3_500);
     }
 
-    private Widget geSetupChild(int child)
+    private boolean geSearchResultReady(String itemName)
     {
-        Widget setup = Rs2Widget.getWidget(InterfaceID.GeOffers.SETUP);
-        if (setup == null || setup.isHidden()) return null;
-        Widget control = setup.getChild(child);
-        return control == null || control.isHidden() ? null : control;
+        return Microbot.getClientThread().runOnClientThreadOptional(
+            () -> Rs2GrandExchange.getSearchResultWidget(itemName, true) != null).orElse(false);
+    }
+
+    private boolean clickGeSearchResultSafely(String itemName)
+    {
+        return Microbot.getClientThread().runOnClientThreadOptional(() ->
+        {
+            var result = Rs2GrandExchange.getSearchResultWidget(itemName, true);
+            if (result == null || result.getLeft() == null) return false;
+            Rs2Widget.clickWidgetFast(result.getLeft(), result.getRight(), 1);
+            return true;
+        }).orElse(false);
+    }
+
+    private boolean geSetupChildVisible(int child)
+    {
+        return Microbot.getClientThread().runOnClientThreadOptional(() ->
+        {
+            Widget setup = Microbot.getClient().getWidget(InterfaceID.GeOffers.SETUP);
+            if (setup == null || setup.isHidden()) return false;
+            Widget control = setup.getChild(child);
+            return control != null && !control.isHidden();
+        }).orElse(false);
+    }
+
+    private boolean clickGeSetupChildSafely(int child)
+    {
+        return Microbot.getClientThread().runOnClientThreadOptional(() ->
+        {
+            Widget setup = Microbot.getClient().getWidget(InterfaceID.GeOffers.SETUP);
+            if (setup == null || setup.isHidden()) return false;
+            Widget control = setup.getChild(child);
+            if (control == null || control.isHidden()) return false;
+            return Rs2Widget.clickWidget(control);
+        }).orElse(false);
+    }
+
+    private boolean clickGeSlotChildSafely(GrandExchangeSlots slot, int child)
+    {
+        if (slot == null) return false;
+        int componentId = InterfaceID.GeOffers.INDEX_0 + slot.ordinal();
+        return Microbot.getClientThread().runOnClientThreadOptional(() ->
+        {
+            Widget slotWidget = Microbot.getClient().getWidget(componentId);
+            if (slotWidget == null || slotWidget.isHidden()) return false;
+            Widget control = slotWidget.getChild(child);
+            if (control == null || control.isHidden()) return false;
+            return Rs2Widget.clickWidget(control);
+        }).orElse(false);
+    }
+
+    private boolean clickGeComponentSafely(int componentId)
+    {
+        return Microbot.getClientThread().runOnClientThreadOptional(() ->
+        {
+            Widget widget = Microbot.getClient().getWidget(componentId);
+            if (widget == null || widget.isHidden()) return false;
+            return Rs2Widget.clickWidget(widget);
+        }).orElse(false);
+    }
+
+    private boolean clickGeSlotFastSafely(GrandExchangeSlots slot, int param0, int identifier)
+    {
+        if (slot == null) return false;
+        int componentId = InterfaceID.GeOffers.INDEX_0 + slot.ordinal();
+        return Microbot.getClientThread().runOnClientThreadOptional(() ->
+        {
+            Widget widget = Microbot.getClient().getWidget(componentId);
+            if (widget == null || widget.isHidden()) return false;
+            Rs2Widget.clickWidgetFast(widget, param0, identifier);
+            return true;
+        }).orElse(false);
     }
 
     private boolean geSetupControlsReady()
     {
         return Rs2GrandExchange.isOpen() && geSetupOpen()
-            && geSetupChild(GE_PRICE_X_CHILD) != null
-            && geSetupChild(GE_QUANTITY_X_CHILD) != null;
+            && geSetupChildVisible(GE_PRICE_X_CHILD)
+            && geSetupChildVisible(GE_QUANTITY_X_CHILD);
     }
 
     private boolean setGeOfferValue(int child, int value, String label)
     {
-        Widget control = geSetupChild(child);
-        if (control == null)
+        if (!geSetupChildVisible(child))
         {
             status = "Waiting for GE " + label + " control";
             return false;
         }
 
         status = "Setting GE " + label + ": " + value;
-        if (!Rs2Widget.clickWidget(control)) return false;
+        if (!clickGeSetupChildSafely(child)) return false;
         if (!sleepUntil(this::gePriceInputOpen, 2_500)) return false;
 
         sleep(250, 450);
@@ -888,8 +948,8 @@ public class KspJewelryCrafterScript extends Script
             return recoverGrandExchange("GE " + kind + " editor closed before confirm");
 
         status = "Confirming GE " + kind + " offer";
-        if (!Rs2Widget.clickWidget(InterfaceID.GeOffers.SETUP_CONFIRM))
-            return recoverGrandExchange("Unable to confirm GE " + kind + " offer");
+        if (!clickGeComponentSafely(InterfaceID.GeOffers.SETUP_CONFIRM))
+        return recoverGrandExchange("Unable to confirm GE " + kind + " offer");
 
         sleepUntil(() -> !geSetupOpen() || Rs2Widget.hasWidget("Your offer is much")
             || !Rs2GrandExchange.isOpen(), 3_000);
@@ -1276,15 +1336,12 @@ public class KspJewelryCrafterScript extends Script
         if (current != null && current.price == newPrice) return true;
         if (!ensureGeOverview("Reopening Grand Exchange to modify offer")) return false;
 
-        Widget slotWidget = Rs2Widget.getWidget(InterfaceID.GeOffers.INDEX_0 + slot.ordinal());
-        if (slotWidget == null)
+        status = "Opening GE Modify offer";
+        if (!clickGeSlotFastSafely(slot, 2, 3))
         {
             status = "Waiting for GE slot widget";
             return false;
         }
-
-        status = "Opening GE Modify offer";
-        Rs2Widget.clickWidgetFast(slotWidget, 2, 3);
         if (!sleepUntil(() -> geSetupOpen() || Rs2GrandExchange.isOfferScreenOpen() || !Rs2GrandExchange.isOpen(), 3_500))
         {
             status = "Waiting for GE Modify offer";
@@ -1298,8 +1355,7 @@ public class KspJewelryCrafterScript extends Script
 
         if (!geSetupOpen())
         {
-            Widget modify = Rs2Widget.getWidget(InterfaceID.GeOffers.DETAILS_MODIFY);
-            if (modify == null || !Rs2Widget.clickWidget(modify))
+            if (!clickGeComponentSafely(InterfaceID.GeOffers.DETAILS_MODIFY))
             {
                 status = "Waiting for GE Modify button";
                 return false;
@@ -1316,9 +1372,7 @@ public class KspJewelryCrafterScript extends Script
             return false;
         }
 
-        Widget setup = Rs2Widget.getWidget(InterfaceID.GeOffers.SETUP);
-        Widget priceX = setup == null ? null : setup.getChild(GE_PRICE_X_CHILD);
-        if (priceX == null || !Rs2Widget.clickWidget(priceX))
+        if (!clickGeSetupChildSafely(GE_PRICE_X_CHILD))
         {
             status = "Unable to open GE price input";
             return false;
@@ -1349,7 +1403,7 @@ public class KspJewelryCrafterScript extends Script
         }
 
         status = "Confirming modified GE price";
-        if (!Rs2Widget.clickWidget(InterfaceID.GeOffers.SETUP_CONFIRM))
+        if (!clickGeComponentSafely(InterfaceID.GeOffers.SETUP_CONFIRM))
         {
             status = "Unable to confirm modified GE price";
             return false;
