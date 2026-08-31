@@ -30,25 +30,19 @@ jobs:
 
           p = Path('kspmule/KspMuleWorkerService.java')
           s = p.read_text(encoding='utf-8')
-          assert 'POLL_MS = 250L' in s
-          assert 'NETWORK_POLL_MS = 700L' in s
+          for needle in ('POLL_MS = 250L', 'NETWORK_POLL_MS = 700L',
+                         '            receiverOnline = client.ping(c.muleReceiverPort());\n',
+                         '            Rs2Walker.walkTo(muleTile, 2);\n'):
+              assert needle in s, needle
           s = s.replace('POLL_MS = 250L', 'POLL_MS = 1_000L', 1)
           s = s.replace('NETWORK_POLL_MS = 700L', 'NETWORK_POLL_MS = 1_000L', 1)
-          s = s.replace('        refreshCoinSummary();\n\n        if (!c.muleEnabled())', '        if (!c.muleEnabled())', 1)
-          login_block = '''        if (!Microbot.isLoggedIn())
-          {
-              status = "Waiting for worker login";
-              return;
-          }
-          '''
-          assert login_block in s
-          s = s.replace(login_block, login_block + '        refreshCoinSummary();\n', 1)
-          idle_ping = '            receiverOnline = client.ping(c.muleReceiverPort());\n'
-          assert idle_ping in s
-          s = s.replace(idle_ping, '', 1)
-          walk = '            Rs2Walker.walkTo(muleTile, 2);\n'
-          assert walk in s
-          s = s.replace(walk, '            if (!Rs2Player.isMoving()) Rs2Walker.walkTo(muleTile, 2);\n', 1)
+          s = s.replace('        refreshCoinSummary();\n\n', '', 1)
+          assert '        if (requestId == null)\n' in s
+          s = s.replace('        if (requestId == null)\n',
+                        '        refreshCoinSummary();\n        if (requestId == null)\n', 1)
+          s = s.replace('            receiverOnline = client.ping(c.muleReceiverPort());\n', '', 1)
+          s = s.replace('            Rs2Walker.walkTo(muleTile, 2);\n',
+                        '            if (!Rs2Player.isMoving()) Rs2Walker.walkTo(muleTile, 2);\n', 1)
           p.write_text(s, encoding='utf-8')
 
           p = Path('KSPTradeReceiver/KspLocalMuleServer.java')
@@ -59,9 +53,9 @@ jobs:
 
           p = Path('KSPTradeReceiver/KspLocalMuleCoordinatorService.java')
           s = p.read_text(encoding='utf-8')
-          assert 'executor.scheduleWithFixedDelay(this::tickSafely, 0L, 250L, TimeUnit.MILLISECONDS);' in s
-          s = s.replace('executor.scheduleWithFixedDelay(this::tickSafely, 0L, 250L, TimeUnit.MILLISECONDS);',
-                        'executor.scheduleWithFixedDelay(this::tickSafely, 0L, 500L, TimeUnit.MILLISECONDS);', 1)
+          old = 'executor.scheduleWithFixedDelay(this::tickSafely, 0L, 250L, TimeUnit.MILLISECONDS);'
+          assert old in s
+          s = s.replace(old, 'executor.scheduleWithFixedDelay(this::tickSafely, 0L, 500L, TimeUnit.MILLISECONDS);', 1)
           p.write_text(s, encoding='utf-8')
 
           p = Path('KSPTradeReceiver/KSPTradeReceiverScript.java')
