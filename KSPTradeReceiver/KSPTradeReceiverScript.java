@@ -27,8 +27,6 @@ import java.util.concurrent.TimeUnit;
 @Slf4j
 public class KSPTradeReceiverScript extends Script
 {
-    private static final long FIRST_ACCEPT_COOLDOWN_MS = 900L;
-    private static final long CONFIRM_ACCEPT_COOLDOWN_MS = 900L;
     private static final long REQUEST_RESPONSE_COOLDOWN_MS = 1_000L;
     private static final String OTHER_PLAYER_ACCEPTED = "other player has accepted";
 
@@ -51,8 +49,9 @@ public class KSPTradeReceiverScript extends Script
 
     private WorldPoint tradeTile;
     private WorldPoint returnTile;
-    private long lastFirstAcceptAt;
-    private long lastConfirmAcceptAt;
+    private boolean firstAcceptSent;
+    private boolean confirmationAcceptSent;
+    private boolean tradeWasOpen;
     private long lastRequestResponseAt;
     private static long startTimeMs;
 
@@ -86,10 +85,19 @@ public class KSPTradeReceiverScript extends Script
                     return;
                 }
 
-                if (isTradeOpen())
+                boolean tradeOpen = isTradeOpen();
+                if (tradeOpen)
                 {
+                    tradeWasOpen = true;
                     handleTradeScreens(currentConfig);
                     return;
+                }
+
+                if (tradeWasOpen)
+                {
+                    firstAcceptSent = false;
+                    confirmationAcceptSent = false;
+                    tradeWasOpen = false;
                 }
 
                 if (currentConfig.bankWhenFull() && Rs2Inventory.isFull())
@@ -204,24 +212,27 @@ public class KSPTradeReceiverScript extends Script
             return;
         }
 
-        if (!otherPlayerHasAccepted(InterfaceID.Trademain.WHOLESCREEN))
+        boolean otherAccepted = otherPlayerHasAccepted(InterfaceID.Trademain.WHOLESCREEN);
+        if (!otherAccepted)
         {
+            // Re-arm only after the counterparty's accepted state genuinely clears, for
+            // example because they changed their offer. Never lead the acceptance.
+            firstAcceptSent = false;
             status = "Waiting for " + displayConfiguredName(currentConfig.traderName()) + " to accept first screen";
             return;
         }
 
-        long now = System.currentTimeMillis();
-        if (now - lastFirstAcceptAt < FIRST_ACCEPT_COOLDOWN_MS)
+        if (firstAcceptSent)
         {
-            status = "Counterparty accepted - waiting on first screen";
+            status = "Counterparty accepted - first screen already accepted";
             return;
         }
 
         if (Rs2Widget.clickWidget(InterfaceID.Trademain.ACCEPT))
         {
-            lastFirstAcceptAt = now;
+            firstAcceptSent = true;
             acceptedFirstScreens++;
-            status = "Counterparty accepted - accepted first screen";
+            status = "Counterparty accepted - accepted first screen once";
         }
         else
         {
@@ -248,24 +259,25 @@ public class KSPTradeReceiverScript extends Script
             return;
         }
 
-        if (!otherPlayerHasAccepted(InterfaceID.Tradeconfirm.UNIVERSE))
+        boolean otherAccepted = otherPlayerHasAccepted(InterfaceID.Tradeconfirm.UNIVERSE);
+        if (!otherAccepted)
         {
+            confirmationAcceptSent = false;
             status = "Waiting for " + displayConfiguredName(currentConfig.traderName()) + " to accept confirmation";
             return;
         }
 
-        long now = System.currentTimeMillis();
-        if (now - lastConfirmAcceptAt < CONFIRM_ACCEPT_COOLDOWN_MS)
+        if (confirmationAcceptSent)
         {
-            status = "Counterparty accepted - waiting on confirmation";
+            status = "Counterparty accepted - confirmation already accepted";
             return;
         }
 
         if (Rs2Widget.clickWidget(InterfaceID.Tradeconfirm.TRADE2ACCEPT))
         {
-            lastConfirmAcceptAt = now;
+            confirmationAcceptSent = true;
             acceptedConfirmations++;
-            status = "Counterparty accepted - accepted confirmation";
+            status = "Counterparty accepted - accepted confirmation once";
             clearPendingRequest();
         }
         else
@@ -668,7 +680,8 @@ public class KSPTradeReceiverScript extends Script
         ownOfferSafe = true;
 
         pendingTraderRaw = null;
-        pendingRequestAt = lastFirstAcceptAt = lastConfirmAcceptAt = lastRequestResponseAt = 0L;
+        pendingRequestAt = lastRequestResponseAt = 0L;
+        firstAcceptSent = confirmationAcceptSent = tradeWasOpen = false;
         tradeTile = returnTile = null;
         stopping = false;
     }
