@@ -1019,17 +1019,27 @@ public class KspJewelryCrafterScript extends Script
             Rs2GrandExchange.setChatboxValue(value);
             sleep(500, 750);
             Rs2Keyboard.enter();
-
-            if (!sleepUntil(() -> !gePriceInputOpen() || !Rs2GrandExchange.isOpen(), 3_000))
-            {
-                status = "Waiting for GE " + label + " entry";
-                sleep(300, 500);
-                continue;
-            }
             if (!Rs2GrandExchange.isOpen()) return false;
 
-            sleep(800, 1_100);
-            if (sleepUntil(() -> geOfferValueMatches(child, value), 2_000)) return true;
+            // The GE value varbit is authoritative. It commonly updates before RuneLite
+            // destroys/hides the chatbox component, so verify the value first instead of
+            // requiring the prompt object to disappear. This prevents re-entering an
+            // already-successful price forever.
+            if (sleepUntil(() -> geOfferValueMatches(child, value), 1_500))
+            {
+                sleepUntil(() -> !gePriceInputOpen(), 1_000);
+                return true;
+            }
+
+            if (gePriceInputOpen())
+            {
+                status = "Waiting for GE " + label + " entry";
+                sleepUntil(() -> !gePriceInputOpen() || geOfferValueMatches(child, value)
+                    || !Rs2GrandExchange.isOpen(), 1_500);
+            }
+            if (!Rs2GrandExchange.isOpen()) return false;
+            if (geOfferValueMatches(child, value)) return true;
+            sleep(250, 450);
         }
 
         status = "GE " + label + " did not update to " + value;
@@ -1507,7 +1517,9 @@ public class KspJewelryCrafterScript extends Script
 
     private boolean gePriceInputOpen()
     {
-        return Rs2Widget.getWidget(InterfaceID.Chatbox.MES_TEXT2) != null;
+        // RuneLite may keep the chatbox component allocated after Enter; only a visible
+        // input widget means the GE price/quantity prompt is still active.
+        return Rs2Widget.isWidgetVisible(InterfaceID.Chatbox.MES_TEXT2);
     }
 
     private boolean allBuyOrdersDone()
