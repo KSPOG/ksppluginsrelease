@@ -2,11 +2,9 @@ package net.runelite.client.plugins.microbot.kspaiofighter;
 
 import com.google.inject.Provides;
 import javax.inject.Inject;
+import javax.swing.SwingUtilities;
 import java.awt.Graphics2D;
-import java.awt.KeyEventDispatcher;
-import java.awt.KeyboardFocusManager;
 import java.awt.RenderingHints;
-import java.awt.event.KeyEvent;
 import java.awt.image.BufferedImage;
 import net.runelite.api.MenuAction;
 import net.runelite.api.MenuEntry;
@@ -16,11 +14,8 @@ import net.runelite.client.config.ConfigManager;
 import net.runelite.client.events.ConfigChanged;
 import net.runelite.client.eventbus.Subscribe;
 import net.runelite.client.game.ItemManager;
-import net.runelite.client.input.KeyListener;
-import net.runelite.client.input.KeyManager;
 import net.runelite.client.plugins.Plugin;
 import net.runelite.client.plugins.PluginDescriptor;
-import net.runelite.client.plugins.PluginManager;
 import net.runelite.client.plugins.microbot.Microbot;
 import net.runelite.client.plugins.microbot.PluginConstants;
 import net.runelite.client.plugins.microbot.kspmule.KspMuleWorkerService;
@@ -30,21 +25,19 @@ import net.runelite.client.ui.overlay.OverlayManager;
 
 @PluginDescriptor(
 		name = PluginConstants.KSP + "KSP AIO Fighter",
-		description = "Configurable AIO fighter with combat targets, Bryophyta-style gear selection, looting, bone burying, and high alchemy.",
-		tags = {"ksp", "aio", "fighter", "combat", "loot", "equipment"},
+		description = "Configurable AIO fighter with side-panel start controls, Explv-style map area selection, equipment loadouts, looting, bone burying, and high alchemy.",
+		tags = {"ksp", "aio", "fighter", "combat", "loot", "equipment", "map"},
 		authors = {"KSP"},
 		version = KspAioFighterPlugin.version,
 		minClientVersion = "2.1.32",
 		enabledByDefault = PluginConstants.DEFAULT_ENABLED,
 		isExternal = PluginConstants.IS_EXTERNAL
 )
-public class KspAioFighterPlugin extends Plugin implements KeyListener
+public class KspAioFighterPlugin extends Plugin
 {
-	static final String version = "1.9.11";
+	static final String version = "1.9.12";
 	private static final String WALK_HERE = "Walk here";
 	private static final String SET_SAFE_SPOT = "Set Safe Spot";
-	private static final String SET_AREA_TILE_1 = "Set Area Tile 1";
-	private static final String SET_AREA_TILE_2 = "Set Area Tile 2";
 	private static final String AREA_TILE_TARGET = "KSP AIO Fighter";
 	private static final String RESET_AREAS_CONFIG_KEY = "resetAreas";
 	private static volatile Runnable resetAreaCallback;
@@ -58,8 +51,6 @@ public class KspAioFighterPlugin extends Plugin implements KeyListener
 	@Inject private KspAioFighterScript script;
 	@Inject private KspAioFighterPaint paint;
 	@Inject private OverlayManager overlayManager;
-	@Inject private PluginManager pluginManager;
-	@Inject private KeyManager keyManager;
 	@Inject private ConfigManager configManager;
 	@Inject private KspAioFighterConfig config;
 	@Inject private ClientToolbar clientToolbar;
@@ -67,19 +58,9 @@ public class KspAioFighterPlugin extends Plugin implements KeyListener
 	@Inject private KspAioFighterEquipmentSettings equipmentSettings;
 	@Inject private KspAioFighterEquipmentIndex equipmentIndex;
 	private final KspMuleWorkerService muleService = new KspMuleWorkerService("AIO Fighter");
-	private volatile boolean shiftHeld;
+	private volatile boolean automationRunning;
 	private KspAioFighterEquipmentPanel equipmentPanel;
 	private NavigationButton navigationButton;
-
-	private final KeyEventDispatcher shiftKeyEventDispatcher = event ->
-	{
-		if (event.getKeyCode() == KeyEvent.VK_SHIFT)
-		{
-			if (event.getID() == KeyEvent.KEY_PRESSED) shiftHeld = true;
-			else if (event.getID() == KeyEvent.KEY_RELEASED) shiftHeld = false;
-		}
-		return false;
-	};
 
 	@Provides
 	KspAioFighterConfig provideConfig(ConfigManager configManager)
@@ -90,37 +71,91 @@ public class KspAioFighterPlugin extends Plugin implements KeyListener
 	@Override
 	protected void startUp()
 	{
-		shiftHeld = false;
-		KeyboardFocusManager.getCurrentKeyboardFocusManager().addKeyEventDispatcher(shiftKeyEventDispatcher);
-		keyManager.registerKeyListener(this);
+		automationRunning = false;
 		resetAreaCallback = this::resetAttackArea;
-		overlayManager.add(paint);
-		script.setStopPluginCallback(this::stopPluginFromScript);
-		muleService.start(config);
+		script.setStopPluginCallback(this::stopAutomationFromScript);
 		equipmentSettings.importLegacyIfNeeded();
 		addEquipmentPanel();
-		script.run();
+		Microbot.status = "KSP AIO Fighter: ready - press Start in the side panel";
 	}
 
 	@Override
 	protected void shutDown()
 	{
-		shiftHeld = false;
-		KeyboardFocusManager.getCurrentKeyboardFocusManager().removeKeyEventDispatcher(shiftKeyEventDispatcher);
-		keyManager.unregisterKeyListener(this);
 		resetAreaCallback = null;
+		stopAutomation();
 		removeEquipmentPanel();
-		muleService.shutdown();
+	}
+
+	private synchronized void startAutomation()
+	{
+		if (automationRunning) return;
+		automationRunning = true;
+		try
+		{
+			overlayManager.add(paint);
+			muleService.start(config);
+			script.run();
+			Microbot.status = "KSP AIO Fighter: running";
+		}
+		catch (Exception ex)
+		{
+			automationRunning = false;
+			script.shutdown();
+			muleService.shutdown();
+			overlayManager.remove(paint);
+			Microbot.status = "KSP AIO Fighter: failed to start - "
+					+ (ex.getMessage() == null ? ex.getClass().getSimpleName() : ex.getMessage());
+		}
+		refreshPanelAutomationState();
+	}
+
+	private synchronized void stopAutomation()
+	{
+		boolean wasRunning = automationRunning;
+		automationRunning = false;
 		script.shutdown();
+		muleService.shutdown();
 		overlayManager.remove(paint);
+		if (wasRunning) Microbot.status = "KSP AIO Fighter: stopped";
+		refreshPanelAutomationState();
+	}
+
+	private void stopAutomationFromScript()
+	{
+		SwingUtilities.invokeLater(this::stopAutomation);
+	}
+
+	private boolean isAutomationRunning()
+	{
+		return automationRunning;
+	}
+
+	private void refreshPanelAutomationState()
+	{
+		KspAioFighterEquipmentPanel panel = equipmentPanel;
+		if (panel == null) return;
+		if (SwingUtilities.isEventDispatchThread()) panel.refreshAutomationState();
+		else SwingUtilities.invokeLater(panel::refreshAutomationState);
 	}
 
 	private void addEquipmentPanel()
 	{
 		if (navigationButton != null) return;
-		equipmentPanel = new KspAioFighterEquipmentPanel(equipmentSettings, equipmentIndex, itemManager);
+		equipmentPanel = new KspAioFighterEquipmentPanel(
+			equipmentSettings,
+			equipmentIndex,
+			itemManager,
+			this::startAutomation,
+			this::stopAutomation,
+			this::isAutomationRunning,
+			this::getAreaMapCentre,
+			this::getConfiguredAttackArea,
+			this::isAttackAreaEnabled,
+			this::setAttackAreaFromMap,
+			this::resetAttackArea);
 		navigationButton = NavigationButton.builder()
-				.tooltip("KSP AIO Fighter Gear")
+				.tooltip("KSP AIO Fighter")
 				.priority(8)
 				.icon(createEquipmentIcon())
 				.panel(equipmentPanel)
@@ -174,39 +209,11 @@ public class KspAioFighterPlugin extends Plugin implements KeyListener
 		return scaled;
 	}
 
-	private void stopPluginFromScript()
-	{
-		try
-		{
-			pluginManager.getClass().getMethod("setPluginEnabled", Plugin.class, boolean.class).invoke(pluginManager, this, false);
-		}
-		catch (Exception ignored)
-		{
-		}
-
-		try
-		{
-			pluginManager.getClass().getMethod("stopPlugin", Plugin.class).invoke(pluginManager, this);
-		}
-		catch (Exception ignored)
-		{
-			muleService.shutdown();
-			script.shutdown();
-			overlayManager.remove(paint);
-			removeEquipmentPanel();
-		}
-	}
-
 	@Subscribe
 	private void onMenuEntryAdded(MenuEntryAdded event)
 	{
 		if (!WALK_HERE.equals(event.getOption()) || !event.getTarget().isEmpty()) return;
 		if (isUseSafeSpotEnabled()) createTileMenuEntry(event, SET_SAFE_SPOT).onClick(entry -> setSafeSpotFromMenuEntry());
-		if (shiftHeld && !hasCompleteAttackArea())
-		{
-			createTileMenuEntry(event, SET_AREA_TILE_1).onClick(entry -> setAttackAreaTileFromMenuEntry(1));
-			createTileMenuEntry(event, SET_AREA_TILE_2).onClick(entry -> setAttackAreaTileFromMenuEntry(2));
-		}
 	}
 
 	private MenuEntry createTileMenuEntry(MenuEntryAdded event, String option)
@@ -223,16 +230,22 @@ public class KspAioFighterPlugin extends Plugin implements KeyListener
 	@Subscribe
 	public void onConfigChanged(ConfigChanged event)
 	{
-		if (!KspAioFighterConfig.GROUP.equals(event.getGroup())
-				|| !RESET_AREAS_CONFIG_KEY.equals(event.getKey())
-				|| !Boolean.TRUE.equals(configManager.getConfiguration(KspAioFighterConfig.GROUP, RESET_AREAS_CONFIG_KEY, Boolean.class))) return;
-		resetAttackArea();
-		configManager.setConfiguration(KspAioFighterConfig.GROUP, RESET_AREAS_CONFIG_KEY, false);
-	}
+		if (!KspAioFighterConfig.GROUP.equals(event.getGroup())) return;
 
-	@Override public void keyTyped(KeyEvent event) {}
-	@Override public void keyPressed(KeyEvent event) { if (event.getKeyCode() == KeyEvent.VK_SHIFT) shiftHeld = true; }
-	@Override public void keyReleased(KeyEvent event) { if (event.getKeyCode() == KeyEvent.VK_SHIFT) shiftHeld = false; }
+		if (RESET_AREAS_CONFIG_KEY.equals(event.getKey())
+				&& Boolean.TRUE.equals(configManager.getConfiguration(
+					KspAioFighterConfig.GROUP, RESET_AREAS_CONFIG_KEY, Boolean.class)))
+		{
+			resetAttackArea();
+			configManager.setConfiguration(KspAioFighterConfig.GROUP, RESET_AREAS_CONFIG_KEY, false);
+		}
+
+		if (event.getKey() != null && (event.getKey().startsWith("attackAreaTile") || "useAttackArea".equals(event.getKey())))
+		{
+			KspAioFighterEquipmentPanel panel = equipmentPanel;
+			if (panel != null) SwingUtilities.invokeLater(panel::refreshAreaStatus);
+		}
+	}
 
 	private void setSafeSpotFromMenuEntry()
 	{
@@ -251,36 +264,28 @@ public class KspAioFighterPlugin extends Plugin implements KeyListener
 		return Boolean.TRUE.equals(configManager.getConfiguration(KspAioFighterConfig.GROUP, "useSafeSpot", Boolean.class));
 	}
 
-	private void setAttackAreaTileFromMenuEntry(int tileNumber)
+	private boolean isAttackAreaEnabled()
 	{
-		WorldPoint selectedTile = getSelectedWorldPoint();
-		if (selectedTile == null)
-		{
-			Microbot.status = "KSP AIO Fighter: could not read selected tile";
-			return;
-		}
-		setConfiguredPoint("attackAreaTile" + tileNumber, selectedTile);
-		Microbot.status = "KSP AIO Fighter: area tile " + tileNumber + " set to " + formatPoint(selectedTile);
-		tryFinalizeAttackArea();
+		return Boolean.TRUE.equals(configManager.getConfiguration(KspAioFighterConfig.GROUP, "useAttackArea", Boolean.class));
 	}
 
-	private void tryFinalizeAttackArea()
+	private void setAttackAreaFromMap(WorldPoint first, WorldPoint second)
 	{
-		WorldPoint tile1 = getConfiguredPoint("attackAreaTile1");
-		WorldPoint tile2 = getConfiguredPoint("attackAreaTile2");
-		if (!isConfiguredTileValid(tile1) || !isConfiguredTileValid(tile2))
+		if (!isConfiguredTileValid(first) || !isConfiguredTileValid(second))
 		{
-			configManager.setConfiguration(KspAioFighterConfig.GROUP, "useAttackArea", false);
+			Microbot.status = "KSP AIO Fighter: invalid attack area selection";
 			return;
 		}
-		if (tile1.getPlane() != tile2.getPlane())
+		if (first.getPlane() != second.getPlane())
 		{
-			Microbot.status = "KSP AIO Fighter: area tile 1 and tile 2 must be on the same plane";
-			configManager.setConfiguration(KspAioFighterConfig.GROUP, "useAttackArea", false);
+			Microbot.status = "KSP AIO Fighter: attack area corners must be on the same plane";
 			return;
 		}
+
+		setConfiguredPoint("attackAreaTile1", first);
+		setConfiguredPoint("attackAreaTile2", second);
 		configManager.setConfiguration(KspAioFighterConfig.GROUP, "useAttackArea", true);
-		Microbot.status = "KSP AIO Fighter: attack area set from " + formatPoint(tile1) + " to " + formatPoint(tile2);
+		Microbot.status = "KSP AIO Fighter: attack area set from " + formatPoint(first) + " to " + formatPoint(second);
 	}
 
 	private void resetAttackArea()
@@ -291,11 +296,32 @@ public class KspAioFighterPlugin extends Plugin implements KeyListener
 		Microbot.status = "KSP AIO Fighter: attack area reset";
 	}
 
-	private boolean hasCompleteAttackArea()
+	private WorldPoint[] getConfiguredAttackArea()
 	{
-		WorldPoint tile1 = getConfiguredPoint("attackAreaTile1");
-		WorldPoint tile2 = getConfiguredPoint("attackAreaTile2");
-		return isConfiguredTileValid(tile1) && isConfiguredTileValid(tile2) && tile1.getPlane() == tile2.getPlane();
+		return new WorldPoint[] {
+			getConfiguredPoint("attackAreaTile1"),
+			getConfiguredPoint("attackAreaTile2")
+		};
+	}
+
+	private WorldPoint getAreaMapCentre()
+	{
+		WorldPoint[] area = getConfiguredAttackArea();
+		if (isConfiguredTileValid(area[0]) && isConfiguredTileValid(area[1]) && area[0].getPlane() == area[1].getPlane())
+		{
+			return new WorldPoint(
+				(area[0].getX() + area[1].getX()) / 2,
+				(area[0].getY() + area[1].getY()) / 2,
+				area[0].getPlane());
+		}
+
+		WorldPoint player = Microbot.getClientThread().runOnClientThreadOptional(() ->
+		{
+			if (Microbot.getClient() == null || Microbot.getClient().getLocalPlayer() == null) return null;
+			return Microbot.getClient().getLocalPlayer().getWorldLocation();
+		}).orElse(null);
+		if (isConfiguredTileValid(player)) return player;
+		return new WorldPoint(3244, 3468, 0);
 	}
 
 	private void setConfiguredPoint(String prefix, WorldPoint point)
@@ -313,8 +339,15 @@ public class KspAioFighterPlugin extends Plugin implements KeyListener
 		return x == null || y == null || plane == null ? null : new WorldPoint(x, y, plane);
 	}
 
-	private boolean isConfiguredTileValid(WorldPoint point) { return point != null && point.getX() > 0 && point.getY() > 0; }
-	private String formatPoint(WorldPoint point) { return "(" + point.getX() + ", " + point.getY() + ", " + point.getPlane() + ")"; }
+	private boolean isConfiguredTileValid(WorldPoint point)
+	{
+		return point != null && point.getX() > 0 && point.getY() > 0;
+	}
+
+	private String formatPoint(WorldPoint point)
+	{
+		return "(" + point.getX() + ", " + point.getY() + ", " + point.getPlane() + ")";
+	}
 
 	private WorldPoint getSelectedWorldPoint()
 	{
