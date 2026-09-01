@@ -48,5 +48,13 @@ public interface KspJewelryCrafterConfig extends Config, KspMuleConfig
     default boolean showOverlay() { return true; }
 
     @Override
+    @Range(min = 0, max = 2_000_000_000)
+    @ConfigItem(
+            keyName = "muleMinimumTradingCapital",
+            name = "Jewelry Mule Trading Floor",
+            description = "Internal mule operating-cash floor derived from Reserve coins.",
+            hidden = true,
+            section = KspMuleConfig.SECTION
+    )
     default int muleMinimumTradingCapital() { return reserveCoins(); }
 }

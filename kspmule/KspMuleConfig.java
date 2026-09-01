@@ -89,13 +89,40 @@ public interface KspMuleConfig
         return 180;
     }
 
-    /** Existing plugin-specific bank reserve that muling must never reduce below. */
+    /**
+     * Existing plugin-specific bank reserve that muling must never reduce below.
+     *
+     * RuneLite configuration interfaces are invoked through a proxy. Even default
+     * interface methods return null from that proxy when they have no @ConfigItem,
+     * which causes primitive-return methods like this one to fail while unboxing.
+     * Keep this compatibility hook hidden, but annotated.
+     */
+    @Range(min = 0, max = 2_000_000_000)
+    @ConfigItem(
+            keyName = "muleMinimumBankReserve",
+            name = "Plugin Bank Reserve",
+            description = "Internal plugin-specific bank reserve floor used by the local mule service.",
+            hidden = true,
+            section = SECTION
+    )
     default int muleMinimumBankReserve()
     {
         return 0;
     }
 
-    /** Existing plugin-specific operating-cash floor that muling must preserve. */
+    /**
+     * Existing plugin-specific operating-cash floor that muling must preserve.
+     * This hook is also invoked through RuneLite's configuration proxy and therefore
+     * must remain a hidden @ConfigItem even though users do not edit it directly.
+     */
+    @Range(min = 0, max = 2_000_000_000)
+    @ConfigItem(
+            keyName = "muleMinimumTradingCapital",
+            name = "Plugin Trading Capital",
+            description = "Internal plugin-specific operating-cash floor used by the local mule service.",
+            hidden = true,
+            section = SECTION
+    )
     default int muleMinimumTradingCapital()
     {
         return 0;
