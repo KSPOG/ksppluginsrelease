@@ -10,7 +10,7 @@ import net.runelite.client.plugins.microbot.kspmule.KspMuleConfig;
 import net.runelite.client.plugins.microbot.util.magic.Rs2CombatSpells;
 
 @ConfigGroup(KspAioFighterConfig.GROUP)
-@ConfigInformation("Enter NPC names and item names as comma-separated lists. Gear lists are equipped automatically when that skill is selected for training.")
+@ConfigInformation("Configure combat, training, supplies and loot here. Equipment loadouts are managed from the AIO Fighter Gear side panel.")
 public interface KspAioFighterConfig extends Config, KspMuleConfig
 {
 	String GROUP = "kspaiofighter";
@@ -23,9 +23,6 @@ public interface KspAioFighterConfig extends Config, KspMuleConfig
 
 	@ConfigSection(name = "Training", description = "Combat skill targets", position = 2)
 	String trainingSection = "training";
-
-	@ConfigSection(name = "Gear", description = "Gear to equip for each training style", position = 3)
-	String gearSection = "gear";
 
 	@ConfigSection(name = "Supplies", description = "Healing and potion settings", position = 4)
 	String suppliesSection = "supplies";
@@ -226,31 +223,31 @@ public interface KspAioFighterConfig extends Config, KspMuleConfig
 		return false;
 	}
 
-	@ConfigItem(keyName = "attackGear", name = "Attack gear", description = "Comma-separated item names to equip when training Attack.", position = 0, section = gearSection)
+	@ConfigItem(keyName = "attackGear", name = "Attack gear", description = "Backing gear list managed by the AIO Fighter Gear side panel.", hidden = true)
 	default String attackGear()
 	{
 		return "";
 	}
 
-	@ConfigItem(keyName = "strengthGear", name = "Strength gear", description = "Comma-separated item names to equip when training Strength.", position = 1, section = gearSection)
+	@ConfigItem(keyName = "strengthGear", name = "Strength gear", description = "Backing gear list managed by the AIO Fighter Gear side panel.", hidden = true)
 	default String strengthGear()
 	{
 		return "";
 	}
 
-	@ConfigItem(keyName = "defenceGear", name = "Defence gear", description = "Comma-separated item names to equip when training Defence.", position = 2, section = gearSection)
+	@ConfigItem(keyName = "defenceGear", name = "Defence gear", description = "Backing gear list managed by the AIO Fighter Gear side panel.", hidden = true)
 	default String defenceGear()
 	{
 		return "";
 	}
 
-	@ConfigItem(keyName = "rangedGear", name = "Ranged gear", description = "Comma-separated item names to equip when training Ranged.", position = 3, section = gearSection)
+	@ConfigItem(keyName = "rangedGear", name = "Ranged gear", description = "Backing gear list managed by the AIO Fighter Gear side panel.", hidden = true)
 	default String rangedGear()
 	{
 		return "";
 	}
 
-	@ConfigItem(keyName = "magicGear", name = "Magic gear", description = "Comma-separated item names to equip when training Magic.", position = 4, section = gearSection)
+	@ConfigItem(keyName = "magicGear", name = "Magic gear", description = "Backing gear list managed by the AIO Fighter Gear side panel.", hidden = true)
 	default String magicGear()
 	{
 		return "";
