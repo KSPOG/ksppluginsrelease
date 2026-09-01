@@ -35,7 +35,7 @@ import net.runelite.client.ui.overlay.OverlayManager;
 )
 public class KspAioFighterPlugin extends Plugin
 {
-	static final String version = "1.9.12";
+	static final String version = "1.9.13";
 	private static final String WALK_HERE = "Walk here";
 	private static final String SET_SAFE_SPOT = "Set Safe Spot";
 	private static final String AREA_TILE_TARGET = "KSP AIO Fighter";
@@ -74,7 +74,7 @@ public class KspAioFighterPlugin extends Plugin
 		automationRunning = false;
 		resetAreaCallback = this::resetAttackArea;
 		script.setStopPluginCallback(this::stopAutomationFromScript);
-		equipmentSettings.importLegacyIfNeeded();
+		equipmentSettings.syncPanelGearToRuntime();
 		addEquipmentPanel();
 		Microbot.status = "KSP AIO Fighter: ready - press Start in the side panel";
 	}
@@ -93,6 +93,10 @@ public class KspAioFighterPlugin extends Plugin
 		automationRunning = true;
 		try
 		{
+			// The side-panel slot selections are authoritative. Refresh the legacy CSV
+			// compatibility mirror immediately before every run so stale hidden settings
+			// can never make the fighter request old equipment.
+			equipmentSettings.syncPanelGearToRuntime();
 			overlayManager.add(paint);
 			muleService.start(config);
 			script.run();
