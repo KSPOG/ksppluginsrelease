@@ -2,6 +2,7 @@ package net.runelite.client.plugins.microbot.kspaiofighter;
 
 import com.google.inject.Provides;
 import javax.inject.Inject;
+import javax.swing.JOptionPane;
 import javax.swing.SwingUtilities;
 import java.awt.Graphics2D;
 import java.awt.RenderingHints;
@@ -35,7 +36,7 @@ import net.runelite.client.ui.overlay.OverlayManager;
 )
 public class KspAioFighterPlugin extends Plugin
 {
-	static final String version = "1.9.15";
+	static final String version = "1.9.16";
 	private static final String WALK_HERE = "Walk here";
 	private static final String SET_SAFE_SPOT = "Set Safe Spot";
 	private static final String AREA_TILE_TARGET = "KSP AIO Fighter";
@@ -58,9 +59,13 @@ public class KspAioFighterPlugin extends Plugin
 	@Inject private KspAioFighterEquipmentSettings equipmentSettings;
 	@Inject private KspAioFighterEquipmentIndex equipmentIndex;
 	@Inject private KspAioFighterInventorySettings inventorySettings;
+	@Inject private KspAioFighterInventoryLoader inventoryLoader;
 	@Inject private KspAioFighterLevelTargetSettings levelTargetSettings;
 	private final KspMuleWorkerService muleService = new KspMuleWorkerService("AIO Fighter");
 	private volatile boolean automationRunning;
+	private volatile boolean preparingStart;
+	private volatile boolean inventoryLoadInProgress;
+	private long startGeneration;
 	private KspAioFighterEquipmentPanel equipmentPanel;
 	private KspAioFighterTrainingPanel trainingPanel;
 	private KspAioFighterInventoryPanel inventoryPanel;
@@ -76,6 +81,9 @@ public class KspAioFighterPlugin extends Plugin
 	protected void startUp()
 	{
 		automationRunning = false;
+		preparingStart = false;
+		inventoryLoadInProgress = false;
+		startGeneration = 0L;
 		// If the client/plugin was interrupted during a run with targets disabled,
 		// restore the user's real configured target values before showing the idle panel.
 		levelTargetSettings.restoreAfterRun();
@@ -94,17 +102,76 @@ public class KspAioFighterPlugin extends Plugin
 		removeEquipmentPanel();
 	}
 
-	private synchronized void startAutomation()
+	private void startAutomation()
 	{
-		if (automationRunning) return;
-		automationRunning = true;
-		try
+		final long generation;
+		synchronized (this)
 		{
+			if (automationRunning || preparingStart || inventoryLoadInProgress) return;
+			preparingStart = true;
+			generation = ++startGeneration;
+
 			// The side-panel slot selections are authoritative. Refresh the legacy CSV
 			// compatibility mirror immediately before every run so stale hidden settings
 			// can never make the fighter request old equipment.
 			equipmentSettings.syncPanelGearToRuntime();
 			levelTargetSettings.prepareForRun();
+			Microbot.status = "KSP AIO Fighter: preparing saved inventory setup";
+			refreshPanelAutomationState();
+		}
+
+		Thread loaderThread = new Thread(() ->
+		{
+			boolean loaded;
+			String error = "";
+			try
+			{
+				loaded = inventoryLoader.loadActiveSetup();
+				if (!loaded) error = inventoryLoader.getLastError();
+			}
+			catch (Exception ex)
+			{
+				loaded = false;
+				error = ex.getMessage() == null ? ex.getClass().getSimpleName() : ex.getMessage();
+			}
+
+			final boolean success = loaded;
+			final String finalError = error;
+			SwingUtilities.invokeLater(() -> completeStart(generation, success, finalError));
+		}, "KSP-AIO-Fighter-Inventory-Prepare");
+		loaderThread.setDaemon(true);
+		loaderThread.start();
+	}
+
+	private synchronized void completeStart(long generation, boolean inventoryReady, String inventoryError)
+	{
+		if (generation != startGeneration || !preparingStart)
+		{
+			levelTargetSettings.restoreAfterRun();
+			refreshPanelAutomationState();
+			return;
+		}
+
+		preparingStart = false;
+		if (!inventoryReady)
+		{
+			levelTargetSettings.restoreAfterRun();
+			String reason = inventoryError == null || inventoryError.isBlank()
+					? "Could not load the enabled inventory setup."
+					: inventoryError;
+			Microbot.status = "KSP AIO Fighter: start cancelled - " + reason;
+			refreshPanelAutomationState();
+			JOptionPane.showMessageDialog(
+				null,
+				reason,
+				"KSP AIO Fighter - Inventory Setup",
+				JOptionPane.ERROR_MESSAGE);
+			return;
+		}
+
+		automationRunning = true;
+		try
+		{
 			overlayManager.add(paint);
 			muleService.start(config);
 			script.run();
@@ -125,7 +192,9 @@ public class KspAioFighterPlugin extends Plugin
 
 	private synchronized void stopAutomation()
 	{
-		boolean wasRunning = automationRunning;
+		boolean wasRunning = automationRunning || preparingStart;
+		startGeneration++;
+		preparingStart = false;
 		automationRunning = false;
 		script.shutdown();
 		muleService.shutdown();
@@ -142,7 +211,65 @@ public class KspAioFighterPlugin extends Plugin
 
 	private boolean isAutomationRunning()
 	{
-		return automationRunning;
+		return automationRunning || preparingStart;
+	}
+
+	private void loadInventorySetup(KspAioFighterGearStyle style)
+	{
+		synchronized (this)
+		{
+			if (automationRunning || preparingStart)
+			{
+				Microbot.status = "KSP AIO Fighter: stop the fighter before manually loading an inventory setup";
+				return;
+			}
+			if (inventoryLoadInProgress) return;
+			inventoryLoadInProgress = true;
+		}
+
+		Thread loaderThread = new Thread(() ->
+		{
+			boolean loaded;
+			String error = "";
+			try
+			{
+				loaded = inventoryLoader.load(style);
+				if (!loaded) error = inventoryLoader.getLastError();
+			}
+			catch (Exception ex)
+			{
+				loaded = false;
+				error = ex.getMessage() == null ? ex.getClass().getSimpleName() : ex.getMessage();
+			}
+
+			final boolean success = loaded;
+			final String finalError = error;
+			SwingUtilities.invokeLater(() ->
+			{
+				synchronized (KspAioFighterPlugin.this)
+				{
+					inventoryLoadInProgress = false;
+				}
+				if (!success)
+				{
+					String reason = finalError == null || finalError.isBlank()
+							? "Could not load the saved inventory setup."
+							: finalError;
+					Microbot.status = "KSP AIO Fighter: " + reason;
+					JOptionPane.showMessageDialog(
+						null,
+						reason,
+						"KSP AIO Fighter - Inventory Setup",
+						JOptionPane.ERROR_MESSAGE);
+				}
+				else if (inventoryPanel != null)
+				{
+					inventoryPanel.refresh();
+				}
+			});
+		}, "KSP-AIO-Fighter-Inventory-Load");
+		loaderThread.setDaemon(true);
+		loaderThread.start();
 	}
 
 	private void setLevelTargetsEnabled(boolean enabled)
@@ -181,7 +308,7 @@ public class KspAioFighterPlugin extends Plugin
 			this::setAttackAreaFromMap,
 			this::resetAttackArea);
 		trainingPanel = new KspAioFighterTrainingPanel(levelTargetSettings::isEnabled, this::setLevelTargetsEnabled);
-		inventoryPanel = new KspAioFighterInventoryPanel(inventorySettings, itemManager);
+		inventoryPanel = new KspAioFighterInventoryPanel(inventorySettings, itemManager, this::loadInventorySetup);
 		equipmentPanel.add(trainingPanel);
 		equipmentPanel.add(inventoryPanel);
 		equipmentPanel.revalidate();
