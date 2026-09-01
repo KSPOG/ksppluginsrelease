@@ -24,21 +24,27 @@ import java.awt.GridLayout;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Consumer;
 
 final class KspAioFighterInventoryPanel extends JPanel
 {
     private final KspAioFighterInventorySettings settings;
     private final ItemManager itemManager;
+    private final Consumer<KspAioFighterGearStyle> loadAction;
     private final JComboBox<KspAioFighterGearStyle> styleSelector = new JComboBox<>(KspAioFighterGearStyle.values());
     private final JCheckBox enabled = new JCheckBox("Use saved setup");
     private final JLabel status = new JLabel("No inventory setup saved", SwingConstants.CENTER);
     private final JLabel[] slots = new JLabel[28];
+    private final JButton loadButton = new JButton("Load Setup");
     private boolean refreshing;
 
-    KspAioFighterInventoryPanel(KspAioFighterInventorySettings settings, ItemManager itemManager)
+    KspAioFighterInventoryPanel(KspAioFighterInventorySettings settings,
+                                ItemManager itemManager,
+                                Consumer<KspAioFighterGearStyle> loadAction)
     {
         this.settings = settings;
         this.itemManager = itemManager;
+        this.loadAction = loadAction;
         setLayout(new BoxLayout(this, BoxLayout.Y_AXIS));
         setBackground(ColorScheme.DARK_GRAY_COLOR);
         setBorder(new EmptyBorder(0, 0, 8, 0));
@@ -56,7 +62,7 @@ final class KspAioFighterInventoryPanel extends JPanel
         add(title);
 
         JLabel help = new JLabel(
-            "<html><center>Save and restore a different inventory for each combat style.</center></html>",
+            "<html><center>Save and restore a different inventory for each combat style.<br>Enabled setups are loaded before Start.</center></html>",
             SwingConstants.CENTER);
         help.setForeground(Color.LIGHT_GRAY);
         help.setAlignmentX(CENTER_ALIGNMENT);
@@ -108,9 +114,12 @@ final class KspAioFighterInventoryPanel extends JPanel
         JButton saveCurrent = new JButton("Save Current");
         saveCurrent.setToolTipText("Replace this setup with the player's current inventory and quantities");
         saveCurrent.addActionListener(e -> saveCurrent());
+        loadButton.setToolTipText("Walk to a bank and restore this saved inventory now");
+        loadButton.addActionListener(e -> loadAction.accept(selectedStyle()));
         JButton clear = new JButton("Clear");
         clear.addActionListener(e -> clear());
         actions.add(saveCurrent);
+        actions.add(loadButton);
         actions.add(clear);
         actions.setAlignmentX(CENTER_ALIGNMENT);
         add(actions);
@@ -181,6 +190,7 @@ final class KspAioFighterInventoryPanel extends JPanel
             List<KspAioFighterInventoryItem> items = settings.get(style);
             enabled.setSelected(settings.isEnabled(style));
             enabled.setEnabled(!items.isEmpty());
+            loadButton.setEnabled(!items.isEmpty());
 
             Map<Integer, KspAioFighterInventoryItem> bySlot = new HashMap<>();
             for (KspAioFighterInventoryItem item : items) bySlot.put(item.getSlot(), item);
