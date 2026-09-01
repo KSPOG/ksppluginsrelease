@@ -25,7 +25,7 @@ import net.runelite.client.ui.overlay.OverlayManager;
 
 @PluginDescriptor(
 		name = PluginConstants.KSP + "KSP AIO Fighter",
-		description = "Configurable AIO fighter with side-panel start controls, Explv-style map area selection, equipment and inventory loadouts, looting, bone burying, and high alchemy.",
+		description = "Configurable AIO fighter with side-panel start controls, Explv-style map area selection, equipment and inventory loadouts, optional level targets, looting, bone burying, and high alchemy.",
 		tags = {"ksp", "aio", "fighter", "combat", "loot", "equipment", "inventory", "map"},
 		authors = {"KSP"},
 		version = KspAioFighterPlugin.version,
@@ -35,7 +35,7 @@ import net.runelite.client.ui.overlay.OverlayManager;
 )
 public class KspAioFighterPlugin extends Plugin
 {
-	static final String version = "1.9.14";
+	static final String version = "1.9.15";
 	private static final String WALK_HERE = "Walk here";
 	private static final String SET_SAFE_SPOT = "Set Safe Spot";
 	private static final String AREA_TILE_TARGET = "KSP AIO Fighter";
@@ -58,9 +58,11 @@ public class KspAioFighterPlugin extends Plugin
 	@Inject private KspAioFighterEquipmentSettings equipmentSettings;
 	@Inject private KspAioFighterEquipmentIndex equipmentIndex;
 	@Inject private KspAioFighterInventorySettings inventorySettings;
+	@Inject private KspAioFighterLevelTargetSettings levelTargetSettings;
 	private final KspMuleWorkerService muleService = new KspMuleWorkerService("AIO Fighter");
 	private volatile boolean automationRunning;
 	private KspAioFighterEquipmentPanel equipmentPanel;
+	private KspAioFighterTrainingPanel trainingPanel;
 	private KspAioFighterInventoryPanel inventoryPanel;
 	private NavigationButton navigationButton;
 
@@ -74,6 +76,9 @@ public class KspAioFighterPlugin extends Plugin
 	protected void startUp()
 	{
 		automationRunning = false;
+		// If the client/plugin was interrupted during a run with targets disabled,
+		// restore the user's real configured target values before showing the idle panel.
+		levelTargetSettings.restoreAfterRun();
 		resetAreaCallback = this::resetAttackArea;
 		script.setStopPluginCallback(this::stopAutomationFromScript);
 		equipmentSettings.syncPanelGearToRuntime();
@@ -99,6 +104,7 @@ public class KspAioFighterPlugin extends Plugin
 			// compatibility mirror immediately before every run so stale hidden settings
 			// can never make the fighter request old equipment.
 			equipmentSettings.syncPanelGearToRuntime();
+			levelTargetSettings.prepareForRun();
 			overlayManager.add(paint);
 			muleService.start(config);
 			script.run();
@@ -110,6 +116,7 @@ public class KspAioFighterPlugin extends Plugin
 			script.shutdown();
 			muleService.shutdown();
 			overlayManager.remove(paint);
+			levelTargetSettings.restoreAfterRun();
 			Microbot.status = "KSP AIO Fighter: failed to start - "
 					+ (ex.getMessage() == null ? ex.getClass().getSimpleName() : ex.getMessage());
 		}
@@ -123,6 +130,7 @@ public class KspAioFighterPlugin extends Plugin
 		script.shutdown();
 		muleService.shutdown();
 		overlayManager.remove(paint);
+		levelTargetSettings.restoreAfterRun();
 		if (wasRunning) Microbot.status = "KSP AIO Fighter: stopped";
 		refreshPanelAutomationState();
 	}
@@ -135,6 +143,18 @@ public class KspAioFighterPlugin extends Plugin
 	private boolean isAutomationRunning()
 	{
 		return automationRunning;
+	}
+
+	private void setLevelTargetsEnabled(boolean enabled)
+	{
+		levelTargetSettings.setEnabled(enabled);
+		if (automationRunning)
+		{
+			if (enabled) levelTargetSettings.restoreAfterRun();
+			else levelTargetSettings.prepareForRun();
+		}
+		KspAioFighterTrainingPanel panel = trainingPanel;
+		if (panel != null) panel.refresh();
 	}
 
 	private void refreshPanelAutomationState()
@@ -160,7 +180,9 @@ public class KspAioFighterPlugin extends Plugin
 			this::isAttackAreaEnabled,
 			this::setAttackAreaFromMap,
 			this::resetAttackArea);
+		trainingPanel = new KspAioFighterTrainingPanel(levelTargetSettings::isEnabled, this::setLevelTargetsEnabled);
 		inventoryPanel = new KspAioFighterInventoryPanel(inventorySettings, itemManager);
+		equipmentPanel.add(trainingPanel);
 		equipmentPanel.add(inventoryPanel);
 		equipmentPanel.revalidate();
 		equipmentPanel.repaint();
@@ -181,6 +203,7 @@ public class KspAioFighterPlugin extends Plugin
 			navigationButton = null;
 		}
 		inventoryPanel = null;
+		trainingPanel = null;
 		equipmentPanel = null;
 	}
 
@@ -260,6 +283,12 @@ public class KspAioFighterPlugin extends Plugin
 		if (event.getKey() != null && event.getKey().startsWith("inventorySetup"))
 		{
 			KspAioFighterInventoryPanel panel = inventoryPanel;
+			if (panel != null) SwingUtilities.invokeLater(panel::refresh);
+		}
+
+		if ("useLevelTargets".equals(event.getKey()))
+		{
+			KspAioFighterTrainingPanel panel = trainingPanel;
 			if (panel != null) SwingUtilities.invokeLater(panel::refresh);
 		}
 	}
