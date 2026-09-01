@@ -1,0 +1,541 @@
+name: Apply AIO Fighter Inventory Integration
+
+on:
+  push:
+    branches:
+      - aio-fighter-sidepanel-gear-authoritative
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: aio-fighter-sidepanel-gear-authoritative
+          fetch-depth: 0
+      - name: Patch AIO Fighter script
+        shell: python
+        run: |
+          from pathlib import Path
+
+          path = Path('kspaiofighter/KspAioFighterScript.java')
+          s = path.read_text()
+
+          def replace_once(old, new, label):
+              global s
+              count = s.count(old)
+              if count != 1:
+                  raise RuntimeError(f'{label}: expected 1 occurrence, found {count}')
+              s = s.replace(old, new, 1)
+
+          def replace_method(signature, new_method):
+              global s
+              start = s.find(signature)
+              if start < 0:
+                  raise RuntimeError(f'Method not found: {signature}')
+              brace = s.find('{', start)
+              if brace < 0:
+                  raise RuntimeError(f'Opening brace not found: {signature}')
+              depth = 0
+              end = None
+              for i in range(brace, len(s)):
+                  ch = s[i]
+                  if ch == '{':
+                      depth += 1
+                  elif ch == '}':
+                      depth -= 1
+                      if depth == 0:
+                          end = i + 1
+                          break
+              if end is None:
+                  raise RuntimeError(f'Closing brace not found: {signature}')
+              s = s[:start] + new_method.rstrip() + s[end:]
+
+          replace_once(
+              '\tprivate final ConfigManager configManager;\n',
+              '\tprivate final ConfigManager configManager;\n\tprivate final KspAioFighterInventorySettings inventorySettings;\n',
+              'inventory settings field')
+
+          replace_once(
+              '\tprivate final AtomicBoolean missingRuneDialogShown = new AtomicBoolean(false);\n\tprivate int lastFoodRestockCount = 0;\n',
+              '\tprivate final AtomicBoolean missingRuneDialogShown = new AtomicBoolean(false);\n\tprivate final AtomicBoolean missingInventoryDialogShown = new AtomicBoolean(false);\n\tprivate int lastFoodRestockCount = 0;\n\tprivate KspAioFighterGearStyle lastInventorySetupStyle;\n',
+              'inventory runtime state')
+
+          replace_once(
+              '''\t@Inject\n\tpublic KspAioFighterScript(KspAioFighterConfig config, ConfigManager configManager)\n\t{\n\t\tthis.config = config;\n\t\tthis.configManager = configManager;\n\t}\n''',
+              '''\t@Inject\n\tpublic KspAioFighterScript(KspAioFighterConfig config,\n\t                           ConfigManager configManager,\n\t                           KspAioFighterInventorySettings inventorySettings)\n\t{\n\t\tthis.config = config;\n\t\tthis.configManager = configManager;\n\t\tthis.inventorySettings = inventorySettings;\n\t}\n''',
+              'constructor')
+
+          replace_once(
+              '\t\tlastFoodRestockCount = 0;\n\t\tlastGearBankAttemptMs = 0L;\n',
+              '\t\tlastFoodRestockCount = 0;\n\t\tlastInventorySetupStyle = null;\n\t\tlastGearBankAttemptMs = 0L;\n',
+              'run inventory reset')
+
+          replace_once(
+              '\t\tmissingRuneDialogShown.set(false);\n\t\tmainScheduledFuture',
+              '\t\tmissingRuneDialogShown.set(false);\n\t\tmissingInventoryDialogShown.set(false);\n\t\tmainScheduledFuture',
+              'dialog reset')
+
+          replace_method('\tprivate boolean shouldBankForSupplies()', r'''\tprivate boolean shouldBankForSupplies()
+\t{
+\t\tboolean fullInventoryNeedsBank = shouldBankBecauseInventoryIsFull();
+\t\tboolean usesSavedInventory = hasEnabledSavedInventoryForActiveSkill();
+\t\tboolean needsSavedInventory = shouldBankForSavedInventory();
+\t\tboolean needsFood = !usesSavedInventory
+\t\t\t\t&& config.useHealing()
+\t\t\t\t&& !config.foodName().trim().isEmpty()
+\t\t\t\t&& getConfiguredFoodCount() <= 0;
+\t\tboolean needsMagicRunes = shouldBankForMagicRunes();
+\t\tboolean needsHighAlchRunes = shouldBankForHighAlchRunes();
+
+\t\tif (fullInventoryNeedsBank)
+\t\t{
+\t\t\tsetStatus("inventory full - banking");
+\t\t}
+\t\telse if (needsSavedInventory)
+\t\t{
+\t\t\tsetStatus("saved inventory depleted - banking");
+\t\t}
+\t\telse if (needsFood)
+\t\t{
+\t\t\tsetStatus("out of food - banking");
+\t\t}
+\t\telse if (needsMagicRunes)
+\t\t{
+\t\t\tsetStatus("missing magic runes - banking");
+\t\t}
+\t\telse if (needsHighAlchRunes)
+\t\t{
+\t\t\tsetStatus("missing high alch runes - banking");
+\t\t}
+
+\t\treturn fullInventoryNeedsBank || needsSavedInventory || needsFood || needsMagicRunes || needsHighAlchRunes;
+\t}''')
+
+          replace_method('\tprivate boolean shouldBankBecauseInventoryIsFull()', r'''\tprivate boolean shouldBankBecauseInventoryIsFull()
+\t{
+\t\tif (!Rs2Inventory.isFull() || !isLootingEnabled())
+\t\t{
+\t\t\treturn false;
+\t\t}
+
+\t\tKspAioFighterGearStyle inventoryStyle = getActiveInventoryStyle();
+\t\tif (inventoryStyle != null
+\t\t\t\t&& inventorySettings.isEnabled(inventoryStyle)
+\t\t\t\t&& inventoryMatchesSavedInventory(inventoryStyle))
+\t\t{
+\t\t\t// A deliberately full saved loadout is not loot pressure. Do not immediately
+\t\t\t// bank-loop after restoring a 28-slot setup.
+\t\t\treturn false;
+\t\t}
+
+\t\tString activeFoodName = getActiveFoodName();
+\t\tif (config.useHealing()
+\t\t\t\t&& !activeFoodName.isEmpty()
+\t\t\t\t&& lastFoodRestockCount > 0
+\t\t\t\t&& getConfiguredFoodCount() >= lastFoodRestockCount)
+\t\t{
+\t\t\treturn false;
+\t\t}
+
+\t\tif (config.buryBones() && getBuryableInventoryBone() != null)
+\t\t{
+\t\t\treturn false;
+\t\t}
+
+\t\treturn true;
+\t}''')
+
+          replace_method('\tprivate void bankForSupplies()', r'''\tprivate void bankForSupplies()
+\t{
+\t\tsetStatus(Rs2Inventory.isFull() ? "inventory full - banking" : "banking for supplies");
+\t\tlastFoodRestockCount = 0;
+\t\tclearPendingLoot();
+\t\tpostKillLootUntilMs = 0L;
+
+\t\tif (!Rs2Bank.walkToBankAndUseBank())
+\t\t{
+\t\t\treturn;
+\t\t}
+
+\t\tSkill gearSkill = currentTrainingSkill != null ? currentTrainingSkill : selectTrainingSkill().orElse(null);
+\t\tboolean savedInventory = hasEnabledSavedInventoryFor(gearSkill);
+\t\tif (savedInventory)
+\t\t{
+\t\t\tRs2Bank.depositAll();
+\t\t}
+\t\telse
+\t\t{
+\t\t\tdepositAllExceptProtectedRunes();
+\t\t}
+
+\t\tif (gearSkill != null)
+\t\t{
+\t\t\tequipGearFromOpenBank(gearSkill);
+\t\t}
+
+\t\tif (savedInventory)
+\t\t{
+\t\t\tif (!restoreSavedInventorySetupFromOpenBank(gearSkill)
+\t\t\t\t\t|| !validateSavedInventoryCombatRequirements(gearSkill))
+\t\t\t{
+\t\t\t\tRs2Bank.closeBank();
+\t\t\t\tstopPlugin();
+\t\t\t\treturn;
+\t\t\t}
+\t\t\tlastFoodRestockCount = getConfiguredFoodCount();
+\t\t}
+\t\telse
+\t\t{
+\t\t\tif (!withdrawRunesForSelectedSpell())
+\t\t\t{
+\t\t\t\tRs2Bank.closeBank();
+\t\t\t\tstopPlugin();
+\t\t\t\treturn;
+\t\t\t}
+\t\t\tif (!withdrawRunesForHighAlch())
+\t\t\t{
+\t\t\t\tRs2Bank.closeBank();
+\t\t\t\tstopPlugin();
+\t\t\t\treturn;
+\t\t\t}
+\t\t\twithdrawConfiguredFoodFromOpenBank();
+\t\t}
+\t\tRs2Bank.closeBank();
+\t}''')
+
+          replace_method('\tprivate void healIfNeeded()', r'''\tprivate void healIfNeeded()
+\t{
+\t\tString foodName = getActiveFoodName();
+\t\tif (!config.useHealing() || foodName.isEmpty())
+\t\t{
+\t\t\treturn;
+\t\t}
+
+\t\tint currentHp = Rs2Player.getBoostedSkillLevel(Skill.HITPOINTS);
+\t\tint maxHp = Rs2Player.getRealSkillLevel(Skill.HITPOINTS);
+\t\tint healAt = Math.max(1, Math.min(maxHp - 1, Math.max(1, cachedTargetNpcMaxHit) + getConfiguredFoodHeal()));
+\t\tif (currentHp > healAt || getConfiguredFoodCount() <= 0)
+\t\t{
+\t\t\treturn;
+\t\t}
+
+\t\tString action = foodName.equalsIgnoreCase("Jug of wine") ? "drink" : "eat";
+\t\tif (Rs2Inventory.interact(foodName, action, true))
+\t\t{
+\t\t\tsleepUntil(() -> Rs2Player.getBoostedSkillLevel(Skill.HITPOINTS) > currentHp, 2_000);
+\t\t}
+\t}''')
+
+          replace_method('\tprivate int getConfiguredFoodCount()', r'''\tprivate int getConfiguredFoodCount()
+\t{
+\t\tString foodName = getActiveFoodName();
+\t\treturn foodName.isEmpty() ? 0 : Rs2Inventory.count(foodName, true);
+\t}''')
+
+          replace_method('\tprivate int getConfiguredFoodHeal()', r'''\tprivate int getConfiguredFoodHeal()
+\t{
+\t\tString foodName = getActiveFoodName();
+\t\tif (foodName.isEmpty())
+\t\t{
+\t\t\treturn config.unknownFoodHeal();
+\t\t}
+\t\treturn Arrays.stream(Rs2Food.values())
+\t\t\t\t.filter(food -> food.getName().equalsIgnoreCase(foodName))
+\t\t\t\t.map(Rs2Food::getHeal)
+\t\t\t\t.findFirst()
+\t\t\t\t.orElse(config.unknownFoodHeal());
+\t}''')
+
+          replace_method('\tprivate void bankForGearSetup(Skill skill, List<String> missingGearBeforeBank)', r'''\tprivate void bankForGearSetup(Skill skill, List<String> missingGearBeforeBank)
+\t{
+\t\tif (!Rs2Bank.walkToBankAndUseBank())
+\t\t{
+\t\t\treturn;
+\t\t}
+
+\t\tsetStatus("banking for " + skill.getName() + " gear");
+\t\tlastFoodRestockCount = 0;
+\t\tif (reportMissingGearNotAvailableInBank(missingGearBeforeBank))
+\t\t{
+\t\t\tRs2Bank.closeBank();
+\t\t\tstopPlugin();
+\t\t\treturn;
+\t\t}
+
+\t\tRs2Bank.depositAll();
+\t\tsleepUntil(() -> Rs2Inventory.isEmpty(), 1_800);
+\t\tdepositEquippedItemsFromBank();
+\t\tequipGearFromOpenBank(skill);
+\t\treportGearStillMissingAfterBank(skill);
+
+\t\tboolean savedInventory = hasEnabledSavedInventoryFor(skill);
+\t\tif (savedInventory)
+\t\t{
+\t\t\tif (!restoreSavedInventorySetupFromOpenBank(skill)
+\t\t\t\t\t|| !validateSavedInventoryCombatRequirements(skill))
+\t\t\t{
+\t\t\t\tRs2Bank.closeBank();
+\t\t\t\tstopPlugin();
+\t\t\t\treturn;
+\t\t\t}
+\t\t\tlastFoodRestockCount = getConfiguredFoodCount();
+\t\t}
+\t\telse
+\t\t{
+\t\t\tif (skill == Skill.MAGIC && !withdrawRunesForSelectedSpell())
+\t\t\t{
+\t\t\t\tRs2Bank.closeBank();
+\t\t\t\tstopPlugin();
+\t\t\t\treturn;
+\t\t\t}
+\t\t\tif (!withdrawRunesForHighAlch())
+\t\t\t{
+\t\t\t\tRs2Bank.closeBank();
+\t\t\t\tstopPlugin();
+\t\t\t\treturn;
+\t\t\t}
+\t\t\twithdrawConfiguredFoodFromOpenBank();
+\t\t}
+\t\tRs2Bank.closeBank();
+\t}''')
+
+          helpers = r'''
+\tprivate KspAioFighterGearStyle styleForSkill(Skill skill)
+\t{
+\t\tif (skill == null) return null;
+\t\tswitch (skill)
+\t\t{
+\t\t\tcase ATTACK: return KspAioFighterGearStyle.ATTACK;
+\t\t\tcase STRENGTH: return KspAioFighterGearStyle.STRENGTH;
+\t\t\tcase DEFENCE: return KspAioFighterGearStyle.DEFENCE;
+\t\t\tcase RANGED: return KspAioFighterGearStyle.RANGED;
+\t\t\tcase MAGIC: return KspAioFighterGearStyle.MAGIC;
+\t\t\tdefault: return null;
+\t\t}
+\t}
+
+\tprivate KspAioFighterGearStyle getActiveInventoryStyle()
+\t{
+\t\tSkill skill = currentTrainingSkill != null
+\t\t\t\t? currentTrainingSkill
+\t\t\t\t: selectTrainingSkill().orElse(null);
+\t\treturn styleForSkill(skill);
+\t}
+
+\tprivate boolean hasEnabledSavedInventoryForActiveSkill()
+\t{
+\t\tKspAioFighterGearStyle style = getActiveInventoryStyle();
+\t\treturn style != null && inventorySettings.isEnabled(style);
+\t}
+
+\tprivate boolean hasEnabledSavedInventoryFor(Skill skill)
+\t{
+\t\tKspAioFighterGearStyle style = styleForSkill(skill);
+\t\treturn style != null && inventorySettings.isEnabled(style);
+\t}
+
+\tprivate boolean shouldBankForSavedInventory()
+\t{
+\t\tKspAioFighterGearStyle style = getActiveInventoryStyle();
+\t\tif (style == null || !inventorySettings.isEnabled(style))
+\t\t{
+\t\t\tlastInventorySetupStyle = null;
+\t\t\treturn false;
+\t\t}
+
+\t\tList<KspAioFighterInventoryItem> setup = inventorySettings.get(style);
+\t\tif (setup.isEmpty()) return false;
+
+\t\tif (inventoryMatchesSavedInventory(style))
+\t\t{
+\t\t\tlastInventorySetupStyle = style;
+\t\t\treturn false;
+\t\t}
+
+\t\tif (lastInventorySetupStyle != style)
+\t\t{
+\t\t\treturn true;
+\t\t}
+
+\t\tfor (KspAioFighterInventoryItem wanted : setup)
+\t\t{
+\t\t\tif (!inventoryHasSavedFamily(wanted))
+\t\t\t{
+\t\t\t\treturn true;
+\t\t\t}
+\t\t}
+\t\treturn false;
+\t}
+
+\tprivate boolean inventoryMatchesSavedInventory(KspAioFighterGearStyle style)
+\t{
+\t\tMap<Integer, Integer> wanted = new LinkedHashMap<>();
+\t\tfor (KspAioFighterInventoryItem item : inventorySettings.get(style))
+\t\t{
+\t\t\twanted.merge(item.getId(), item.getQuantity(), Integer::sum);
+\t\t}
+
+\t\tMap<Integer, Integer> actual = new LinkedHashMap<>();
+\t\tfor (Rs2ItemModel item : Rs2Inventory.getList(value -> value != null && value.getId() > 0))
+\t\t{
+\t\t\tactual.merge(item.getId(), Math.max(1, item.getQuantity()), Integer::sum);
+\t\t}
+\t\treturn wanted.equals(actual);
+\t}
+
+\tprivate boolean inventoryHasSavedFamily(KspAioFighterInventoryItem wanted)
+\t{
+\t\tString family = normalizeInventorySetupFamily(wanted.getName());
+\t\treturn Rs2Inventory.getList(item -> item != null).stream()
+\t\t\t\t.anyMatch(item -> item.isNoted() == wanted.isNoted()
+\t\t\t\t\t\t&& normalizeInventorySetupFamily(item.getName()).equals(family));
+\t}
+
+\tprivate String normalizeInventorySetupFamily(String name)
+\t{
+\t\tString normalized = normalizeItemName(name);
+\t\treturn normalized.replaceFirst("\\s*\\([1-4]\\)$", "");
+\t}
+
+\tprivate String getActiveFoodName()
+\t{
+\t\tKspAioFighterGearStyle style = getActiveInventoryStyle();
+\t\tif (style != null && inventorySettings.isEnabled(style))
+\t\t{
+\t\t\tfor (KspAioFighterInventoryItem item : inventorySettings.get(style))
+\t\t\t{
+\t\t\t\tif (item.isNoted()) continue;
+\t\t\t\tString itemName = item.getName();
+\t\t\t\tif (itemName.equalsIgnoreCase("Jug of wine")
+\t\t\t\t\t\t|| Arrays.stream(Rs2Food.values()).anyMatch(food -> food.getName().equalsIgnoreCase(itemName)))
+\t\t\t\t{
+\t\t\t\t\treturn itemName;
+\t\t\t\t}
+\t\t\t}
+\t\t\treturn "";
+\t\t}
+\t\treturn config.foodName().trim();
+\t}
+
+\tprivate boolean restoreSavedInventorySetupFromOpenBank(Skill skill)
+\t{
+\t\tKspAioFighterGearStyle style = styleForSkill(skill);
+\t\tif (style == null || !inventorySettings.isEnabled(style)) return true;
+
+\t\tList<KspAioFighterInventoryItem> setup = inventorySettings.get(style);
+\t\tif (setup.isEmpty()) return true;
+
+\t\tMap<String, Integer> totalByName = new LinkedHashMap<>();
+\t\tMap<String, String> displayByName = new LinkedHashMap<>();
+\t\tfor (KspAioFighterInventoryItem item : setup)
+\t\t{
+\t\t\tString normalized = normalizeItemName(item.getName());
+\t\t\ttotalByName.merge(normalized, item.getQuantity(), Integer::sum);
+\t\t\tdisplayByName.putIfAbsent(normalized, item.getName());
+\t\t}
+
+\t\tList<String> missing = new ArrayList<>();
+\t\tfor (Map.Entry<String, Integer> entry : totalByName.entrySet())
+\t\t{
+\t\t\tString display = displayByName.get(entry.getKey());
+\t\t\tint available = Rs2Bank.count(display, true);
+\t\t\tif (available < entry.getValue())
+\t\t\t{
+\t\t\t\tmissing.add(display + " x" + entry.getValue() + " (bank: " + available + ")");
+\t\t\t}
+\t\t}
+\t\tif (!missing.isEmpty())
+\t\t{
+\t\t\treportMissingSavedInventory(missing);
+\t\t\treturn false;
+\t\t}
+
+\t\tMap<String, Integer> grouped = new LinkedHashMap<>();
+\t\tMap<String, String> groupNames = new LinkedHashMap<>();
+\t\tMap<String, Boolean> groupNoted = new LinkedHashMap<>();
+\t\tfor (KspAioFighterInventoryItem item : setup)
+\t\t{
+\t\t\tString key = normalizeItemName(item.getName()) + "|" + item.isNoted();
+\t\t\tgrouped.merge(key, item.getQuantity(), Integer::sum);
+\t\t\tgroupNames.putIfAbsent(key, item.getName());
+\t\t\tgroupNoted.putIfAbsent(key, item.isNoted());
+\t\t}
+
+\t\tfor (Map.Entry<String, Integer> entry : grouped.entrySet())
+\t\t{
+\t\t\tString itemName = groupNames.get(entry.getKey());
+\t\t\tboolean noted = Boolean.TRUE.equals(groupNoted.get(entry.getKey()));
+\t\t\tif (!Rs2Bank.setWithdrawAs(noted))
+\t\t\t{
+\t\t\t\treportMissingSavedInventory(List.of("Could not set withdraw mode for " + itemName));
+\t\t\t\treturn false;
+\t\t\t}
+\t\t\tsetStatus("withdrawing saved setup: " + itemName + " x" + entry.getValue());
+\t\t\tRs2Bank.withdrawX(true, itemName, entry.getValue(), true);
+\t\t}
+\t\tRs2Bank.setWithdrawAsItem();
+
+\t\tif (!inventoryMatchesSavedInventory(style))
+\t\t{
+\t\t\treportMissingSavedInventory(List.of("Inventory did not match the saved " + style + " setup after withdrawal"));
+\t\t\treturn false;
+\t\t}
+
+\t\tlastInventorySetupStyle = style;
+\t\treturn true;
+\t}
+
+\tprivate boolean validateSavedInventoryCombatRequirements(Skill skill)
+\t{
+\t\tif (skill == Skill.MAGIC && !hasRunesForSelectedSpell(1))
+\t\t{
+\t\t\treportMissingSavedInventory(List.of("Saved Magic inventory does not contain enough runes for " + config.magicSpell()));
+\t\t\treturn false;
+\t\t}
+\t\tif (config.highAlchLoot() && !hasHighAlchRunes(1))
+\t\t{
+\t\t\treportMissingSavedInventory(List.of("Saved inventory does not contain the runes required for High Alchemy"));
+\t\t\treturn false;
+\t\t}
+\t\treturn true;
+\t}
+
+\tprivate void reportMissingSavedInventory(List<String> problems)
+\t{
+\t\tlastError = "saved inventory setup unavailable: " + String.join(", ", problems);
+\t\tlastErrorMs = System.currentTimeMillis();
+\t\tMicrobot.log("KSP AIO Fighter " + lastError);
+\t\tif (!missingInventoryDialogShown.compareAndSet(false, true)) return;
+
+\t\tString message = "KSP AIO Fighter cannot restore the saved inventory setup:"
+\t\t\t\t+ System.lineSeparator() + System.lineSeparator()
+\t\t\t\t+ String.join(System.lineSeparator(), problems)
+\t\t\t\t+ System.lineSeparator() + System.lineSeparator()
+\t\t\t\t+ "Restock the missing items or use Save Current with a valid inventory, then start again.";
+\t\tSwingUtilities.invokeLater(() -> JOptionPane.showMessageDialog(
+\t\t\t\tnull,
+\t\t\t\tmessage,
+\t\t\t\t"KSP AIO Fighter - Inventory Setup",
+\t\t\t\tJOptionPane.ERROR_MESSAGE));
+\t}
+
+'''
+          anchor = '\tprivate void equipGearFor(Skill skill)\n'
+          if anchor not in s:
+              raise RuntimeError('equipGearFor anchor not found')
+          s = s.replace(anchor, helpers + anchor, 1)
+
+          path.write_text(s)
+      - name: Commit patched script
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add kspaiofighter/KspAioFighterScript.java
+          git diff --cached --quiet && exit 0
+          git commit -m "AIO Fighter: integrate saved inventory setups into banking"
+          git push origin HEAD:aio-fighter-sidepanel-gear-authoritative
