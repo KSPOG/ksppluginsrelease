@@ -321,6 +321,14 @@ public interface F2PProcessingFactoryConfig extends Config, KspMuleConfig
     }
 
     @Override
+    @Range(min = 0, max = 2_000_000_000)
+    @ConfigItem(
+        keyName = "muleMinimumBankReserve",
+        name = "Factory Mule Bank Reserve",
+        description = "Internal mule bank-reserve floor derived from Cash reserve.",
+        hidden = true,
+        section = KspMuleConfig.SECTION
+    )
     default int muleMinimumBankReserve()
     {
         return cashReserve();
