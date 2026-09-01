@@ -406,8 +406,6 @@ public class KspJewelryCrafterScript extends Script
         bankInteractionSentAt = attemptStartedAt;
         if (!Rs2Bank.openBank())
         {
-            // Rs2Bank.openBank() sends the interaction before waiting up to 5 seconds.
-            // Keep the latch when it actually spent time waiting; clear it only for an immediate no-target failure.
             if (System.currentTimeMillis() - attemptStartedAt < 750L) bankInteractionSentAt = 0L;
             else bankInteractionSentAt = System.currentTimeMillis();
             status = bankInteractionSentAt > 0L
@@ -1014,17 +1012,12 @@ public class KspJewelryCrafterScript extends Script
             }
             if (!Rs2GrandExchange.isOpen()) return false;
 
-            // Give the chatbox input the same settling time used by Microbot's GE utilities.
             sleep(600, 1_000);
             Rs2GrandExchange.setChatboxValue(value);
             sleep(500, 750);
             Rs2Keyboard.enter();
             if (!Rs2GrandExchange.isOpen()) return false;
 
-            // The GE value varbit is authoritative. It commonly updates before RuneLite
-            // destroys/hides the chatbox component, so verify the value first instead of
-            // requiring the prompt object to disappear. This prevents re-entering an
-            // already-successful price forever.
             if (sleepUntil(() -> geOfferValueMatches(child, value), 1_500))
             {
                 sleepUntil(() -> !gePriceInputOpen(), 1_000);
@@ -1140,7 +1133,7 @@ public class KspJewelryCrafterScript extends Script
         }
         if (bankWidgetOpen() && !closeBankIfDone("Closing bank before selling")) return;
         if (!ensureGeOverview("Opening Grand Exchange")) return;
-        if (hasCompletedGeOffers() && !collectAllCompletedOffers()) return;
+        if (hasCompletedGeOffers() && !collectAllCompletedOffers(false)) return;
 
         qty = Rs2Inventory.itemQuantity(output, true);
         int itemId = prices.getItemId(output);
@@ -1249,10 +1242,10 @@ public class KspJewelryCrafterScript extends Script
 
         if (bought || hasCompletedGeOffers())
         {
-            if (!collectAllCompletedOffers()) return false;
+            if (!collectAllCompletedOffers(true)) return false;
             for (BuyOrder order : buyQueue)
                 if (order.completed) { order.slot = null; order.placedAt = 0L; }
-            status = "Collected all completed GE offers";
+            status = "Collected completed purchases to bank";
             return false;
         }
 
@@ -1427,12 +1420,15 @@ public class KspJewelryCrafterScript extends Script
         }).orElse(false);
     }
 
-    private boolean collectAllCompletedOffers()
+    private boolean collectAllCompletedOffers(boolean toBank)
     {
         if (!hasCompletedGeOffers()) return true;
         if (!ensureGeOverview("Reopening Grand Exchange to collect")) return false;
-        status = "Collecting all completed GE offers";
-        if (!Rs2GrandExchange.collectAllToBank())
+        status = toBank ? "Collecting completed purchases to bank" : "Collecting sale proceeds to inventory";
+        boolean collected = toBank
+            ? Rs2GrandExchange.collectAllToBank()
+            : Rs2GrandExchange.collectAllToInventory();
+        if (!collected)
         {
             status = Rs2GrandExchange.isOpen() ? "Collect all failed - retrying" : "GE closed during Collect all - recovering";
             return false;
@@ -1517,8 +1513,6 @@ public class KspJewelryCrafterScript extends Script
 
     private boolean gePriceInputOpen()
     {
-        // RuneLite may keep the chatbox component allocated after Enter; only a visible
-        // input widget means the GE price/quantity prompt is still active.
         return Rs2Widget.isWidgetVisible(InterfaceID.Chatbox.MES_TEXT2);
     }
 
@@ -1569,22 +1563,27 @@ public class KspJewelryCrafterScript extends Script
         activeRecipe = best;
         activeQuote = prices.quote(best, config);
 
-        if (Rs2GrandExchange.isOpen())
+        // Rs2Bank.count() reads Microbot's mirrored bank cache and does not require the
+        // bank interface to be open. Only initialise that cache once if this session has
+        // never received a live bank snapshot; normal crafting bank trips keep it fresh.
+        if (Rs2Bank.getBankLiveEpoch() <= 0)
         {
-            Rs2GrandExchange.closeExchange();
             if (Rs2GrandExchange.isOpen())
             {
-                status = "Closing GE for restock check";
-                return false;
+                Rs2GrandExchange.closeExchange();
+                if (Rs2GrandExchange.isOpen())
+                {
+                    status = "Closing GE to initialise bank cache";
+                    return false;
+                }
             }
-        }
-        if (!openVerifiedBank(false, "Opening bank for capital check")) return false;
-        if (!Rs2Bank.setWithdrawAsItem())
-        {
-            status = "Setting bank withdraw mode";
+            if (!openVerifiedBank(false, "Opening bank once to initialise bank cache")) return false;
+            if (!closeBankIfDone("Closing bank after bank cache initialisation")) return false;
+            status = "Bank cache initialised - returning to GE";
             return false;
         }
 
+        status = "Planning restock from cached bank and carried coins";
         long coins = Rs2Bank.count("Coins", true) + (long) Rs2Inventory.itemQuantity("Coins", true);
         long spendable = Math.max(0L, coins - config.reserveCoins());
         spendable = spendable * config.capitalUsagePercent() / 100L;
@@ -1600,7 +1599,6 @@ public class KspJewelryCrafterScript extends Script
         target = Math.max(target, Math.min(config.maxRestockUnits(), existingUnits));
         if (target <= 0)
         {
-            if (!closeBankIfDone("Closing bank - no restock possible")) return false;
             pause("Not enough spendable coins to restock", 15_000L);
             return false;
         }
@@ -1616,7 +1614,6 @@ public class KspJewelryCrafterScript extends Script
             if (needGems > 0) buyQueue.add(new BuyOrder(activeRecipe.getGemName(), needGems));
         }
 
-        if (!closeBankIfDone("Closing bank - restock plan complete")) return false;
         if (buyQueue.isEmpty())
         {
             state = JewelryCrafterState.RETURN_TO_FURNACE;
@@ -1648,7 +1645,7 @@ public class KspJewelryCrafterScript extends Script
 
         if (offer.state == GrandExchangeOfferState.SOLD)
         {
-            if (!collectAllCompletedOffers()) return true;
+            if (!collectAllCompletedOffers(false)) return true;
             String itemName = pendingOffer.itemName;
             pendingOffer = null;
             geRetry = 0;
