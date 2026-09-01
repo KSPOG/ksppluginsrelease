@@ -1,6 +1,7 @@
 package net.runelite.client.plugins.microbot.kspaiofighter;
 
 import net.runelite.api.EquipmentInventorySlot;
+import net.runelite.api.coords.WorldPoint;
 import net.runelite.client.game.ItemManager;
 import net.runelite.client.ui.ColorScheme;
 import net.runelite.client.ui.PluginPanel;
@@ -39,37 +40,74 @@ import java.util.EnumMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.function.BiConsumer;
+import java.util.function.Supplier;
 
 final class KspAioFighterEquipmentPanel extends PluginPanel
 {
     private final KspAioFighterEquipmentSettings settings;
     private final KspAioFighterEquipmentIndex index;
     private final ItemManager itemManager;
+    private final Runnable startAction;
+    private final Runnable stopAction;
+    private final Supplier<Boolean> runningSupplier;
+    private final Supplier<WorldPoint> mapCentreSupplier;
+    private final Supplier<WorldPoint[]> attackAreaSupplier;
+    private final Supplier<Boolean> attackAreaEnabledSupplier;
+    private final BiConsumer<WorldPoint, WorldPoint> attackAreaSetter;
+    private final Runnable attackAreaResetter;
+
     private final JComboBox<KspAioFighterGearStyle> styleSelector = new JComboBox<>(KspAioFighterGearStyle.values());
     private final Map<EquipmentInventorySlot, JButton> slotButtons = new EnumMap<>(EquipmentInventorySlot.class);
-    private final JLabel status = new JLabel(" ", SwingConstants.CENTER);
+    private final JLabel gearStatus = new JLabel(" ", SwingConstants.CENTER);
+    private final JLabel areaStatus = new JLabel("No attack area selected", SwingConstants.CENTER);
+    private final JLabel automationStatus = new JLabel("Stopped - press Start when ready", SwingConstants.CENTER);
+    private final JButton startButton = new JButton("Start");
+    private final JButton stopButton = new JButton("Stop");
 
     KspAioFighterEquipmentPanel(KspAioFighterEquipmentSettings settings,
                                 KspAioFighterEquipmentIndex index,
-                                ItemManager itemManager)
+                                ItemManager itemManager,
+                                Runnable startAction,
+                                Runnable stopAction,
+                                Supplier<Boolean> runningSupplier,
+                                Supplier<WorldPoint> mapCentreSupplier,
+                                Supplier<WorldPoint[]> attackAreaSupplier,
+                                Supplier<Boolean> attackAreaEnabledSupplier,
+                                BiConsumer<WorldPoint, WorldPoint> attackAreaSetter,
+                                Runnable attackAreaResetter)
     {
         this.settings = settings;
         this.index = index;
         this.itemManager = itemManager;
+        this.startAction = startAction;
+        this.stopAction = stopAction;
+        this.runningSupplier = runningSupplier;
+        this.mapCentreSupplier = mapCentreSupplier;
+        this.attackAreaSupplier = attackAreaSupplier;
+        this.attackAreaEnabledSupplier = attackAreaEnabledSupplier;
+        this.attackAreaSetter = attackAreaSetter;
+        this.attackAreaResetter = attackAreaResetter;
         buildUi();
         refreshSlots();
+        refreshAreaStatus();
+        refreshAutomationState();
     }
 
     private void buildUi()
     {
-        JLabel title = new JLabel("KSP AIO Fighter Gear", SwingConstants.CENTER);
+        JLabel title = new JLabel("KSP AIO Fighter", SwingConstants.CENTER);
         title.setForeground(Color.WHITE);
         title.setFont(title.getFont().deriveFont(Font.BOLD, 15f));
         add(title);
 
-        JLabel help = new JLabel("<html><center>Bryophyta-style equipment selection.<br>Each training skill stores its own loadout.</center></html>", SwingConstants.CENTER);
+        JLabel help = new JLabel(
+            "<html><center>Configure equipment and your attack area here.<br>The fighter stays idle until you press Start.</center></html>",
+            SwingConstants.CENTER);
         help.setForeground(Color.LIGHT_GRAY);
         add(help);
+
+        add(sectionTitle("Equipment"));
 
         JPanel selector = darkPanel(new BorderLayout(6, 0));
         JLabel selectorLabel = new JLabel("Edit setup:");
@@ -95,17 +133,61 @@ final class KspAioFighterEquipmentPanel extends PluginPanel
         addSlot(equipment, EquipmentInventorySlot.RING, 2, 4);
         add(equipment);
 
-        status.setForeground(Color.LIGHT_GRAY);
-        add(status);
+        gearStatus.setForeground(Color.LIGHT_GRAY);
+        add(gearStatus);
 
-        JPanel actions = darkPanel(new FlowLayout(FlowLayout.CENTER, 4, 0));
+        JPanel gearActions = darkPanel(new FlowLayout(FlowLayout.CENTER, 4, 0));
         JButton reset = new JButton("Reset setup");
         reset.addActionListener(e -> resetStyle());
         JButton load = new JButton("Load items");
         load.addActionListener(e -> ensureLoaded(null));
-        actions.add(reset);
-        actions.add(load);
-        add(actions);
+        gearActions.add(reset);
+        gearActions.add(load);
+        add(gearActions);
+
+        add(sectionTitle("Attack Area"));
+        JPanel areaPanel = darkPanel(new BorderLayout(4, 6));
+        areaPanel.setBorder(new EmptyBorder(4, 4, 4, 4));
+        areaStatus.setForeground(Color.LIGHT_GRAY);
+        areaPanel.add(areaStatus, BorderLayout.NORTH);
+        JPanel areaButtons = new JPanel(new FlowLayout(FlowLayout.CENTER, 4, 0));
+        areaButtons.setOpaque(false);
+        JButton selectArea = new JButton("Select Area on Map");
+        selectArea.addActionListener(e -> openAreaMap());
+        JButton clearArea = new JButton("Clear Area");
+        clearArea.addActionListener(e -> clearAttackArea());
+        areaButtons.add(selectArea);
+        areaButtons.add(clearArea);
+        areaPanel.add(areaButtons, BorderLayout.CENTER);
+        areaPanel.setMaximumSize(new Dimension(230, 72));
+        add(areaPanel);
+
+        add(sectionTitle("Controls"));
+        automationStatus.setForeground(Color.LIGHT_GRAY);
+        add(automationStatus);
+        JPanel controls = darkPanel(new FlowLayout(FlowLayout.CENTER, 6, 0));
+        startButton.addActionListener(e -> {
+            startAction.run();
+            refreshAutomationState();
+        });
+        stopButton.addActionListener(e -> {
+            stopAction.run();
+            refreshAutomationState();
+        });
+        startButton.setPreferredSize(new Dimension(96, 30));
+        stopButton.setPreferredSize(new Dimension(96, 30));
+        controls.add(startButton);
+        controls.add(stopButton);
+        add(controls);
+    }
+
+    private JLabel sectionTitle(String text)
+    {
+        JLabel label = new JLabel(text, SwingConstants.LEFT);
+        label.setForeground(Color.WHITE);
+        label.setFont(label.getFont().deriveFont(Font.BOLD));
+        label.setBorder(new EmptyBorder(10, 2, 2, 2));
+        return label;
     }
 
     private void addSlot(JPanel panel, EquipmentInventorySlot slot, int x, int y)
@@ -132,7 +214,57 @@ final class KspAioFighterEquipmentPanel extends PluginPanel
             entry.getValue().setText(shortName(name.isBlank() ? pretty(entry.getKey()) : name));
             entry.getValue().setToolTipText(name.isBlank() ? pretty(entry.getKey()) + ": empty" : pretty(entry.getKey()) + ": " + name);
         }
-        status.setText("Editing: " + style);
+        gearStatus.setText("Editing: " + style);
+    }
+
+    void refreshAreaStatus()
+    {
+        WorldPoint[] area = attackAreaSupplier.get();
+        WorldPoint first = area != null && area.length > 0 ? area[0] : null;
+        WorldPoint second = area != null && area.length > 1 ? area[1] : null;
+        if (!valid(first) || !valid(second) || first.getPlane() != second.getPlane())
+        {
+            areaStatus.setText("No attack area selected");
+            return;
+        }
+        int minX = Math.min(first.getX(), second.getX());
+        int maxX = Math.max(first.getX(), second.getX());
+        int minY = Math.min(first.getY(), second.getY());
+        int maxY = Math.max(first.getY(), second.getY());
+        boolean enabled = Boolean.TRUE.equals(attackAreaEnabledSupplier.get());
+        areaStatus.setText("<html><center>" + (enabled ? "Active" : "Saved / disabled")
+            + ": (" + minX + ", " + minY + ") - (" + maxX + ", " + maxY + ")"
+            + "<br>Plane " + first.getPlane() + " | " + (maxX - minX + 1) + " x " + (maxY - minY + 1) + "</center></html>");
+    }
+
+    void refreshAutomationState()
+    {
+        boolean running = Boolean.TRUE.equals(runningSupplier.get());
+        startButton.setEnabled(!running);
+        stopButton.setEnabled(running);
+        automationStatus.setText(running ? "Running" : "Stopped - press Start when ready");
+    }
+
+    private void openAreaMap()
+    {
+        WorldPoint[] area = attackAreaSupplier.get();
+        WorldPoint first = area != null && area.length > 0 ? area[0] : null;
+        WorldPoint second = area != null && area.length > 1 ? area[1] : null;
+        WorldPoint centre = mapCentreSupplier.get();
+        KspAioFighterAreaMapDialog.show(this, centre, first, second, (a, b) -> {
+            attackAreaSetter.accept(a, b);
+            refreshAreaStatus();
+        });
+    }
+
+    private void clearAttackArea()
+    {
+        if (JOptionPane.showConfirmDialog(this,
+            "Clear the saved AIO Fighter attack area?",
+            "Clear attack area",
+            JOptionPane.YES_NO_OPTION) != JOptionPane.YES_OPTION) return;
+        attackAreaResetter.run();
+        refreshAreaStatus();
     }
 
     private void openPicker(EquipmentInventorySlot slot)
@@ -147,15 +279,15 @@ final class KspAioFighterEquipmentPanel extends PluginPanel
             if (next != null) next.run();
             return;
         }
-        status.setText("Loading equipment database...");
+        gearStatus.setText("Loading equipment database...");
         index.ensureLoaded(success -> SwingUtilities.invokeLater(() -> {
             if (!success)
             {
-                status.setText("Could not load equipment database.");
+                gearStatus.setText("Could not load equipment database.");
                 JOptionPane.showMessageDialog(this, "Log in and try Load items again.", "AIO Fighter Equipment", JOptionPane.ERROR_MESSAGE);
                 return;
             }
-            status.setText("Equipment database ready.");
+            gearStatus.setText("Equipment database ready.");
             if (next != null) next.run();
         }));
     }
@@ -269,6 +401,11 @@ final class KspAioFighterEquipmentPanel extends PluginPanel
     {
         if (value == null || value.isBlank()) return "Empty";
         return value.length() <= 11 ? value : value.substring(0, 10) + "…";
+    }
+
+    private static boolean valid(WorldPoint point)
+    {
+        return point != null && point.getX() > 0 && point.getY() > 0;
     }
 
     private static final class ItemRenderer extends JPanel implements ListCellRenderer<KspAioFighterEquipmentItem>
