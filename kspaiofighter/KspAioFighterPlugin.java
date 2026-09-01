@@ -2,9 +2,12 @@ package net.runelite.client.plugins.microbot.kspaiofighter;
 
 import com.google.inject.Provides;
 import javax.inject.Inject;
+import java.awt.Graphics2D;
 import java.awt.KeyEventDispatcher;
 import java.awt.KeyboardFocusManager;
+import java.awt.RenderingHints;
 import java.awt.event.KeyEvent;
+import java.awt.image.BufferedImage;
 import net.runelite.api.MenuAction;
 import net.runelite.api.MenuEntry;
 import net.runelite.api.coords.WorldPoint;
@@ -12,6 +15,7 @@ import net.runelite.api.events.MenuEntryAdded;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.events.ConfigChanged;
 import net.runelite.client.eventbus.Subscribe;
+import net.runelite.client.game.ItemManager;
 import net.runelite.client.input.KeyListener;
 import net.runelite.client.input.KeyManager;
 import net.runelite.client.plugins.Plugin;
@@ -20,12 +24,14 @@ import net.runelite.client.plugins.PluginManager;
 import net.runelite.client.plugins.microbot.Microbot;
 import net.runelite.client.plugins.microbot.PluginConstants;
 import net.runelite.client.plugins.microbot.kspmule.KspMuleWorkerService;
+import net.runelite.client.ui.ClientToolbar;
+import net.runelite.client.ui.NavigationButton;
 import net.runelite.client.ui.overlay.OverlayManager;
 
 @PluginDescriptor(
 		name = PluginConstants.KSP + "KSP AIO Fighter",
-		description = "Configurable AIO fighter with combat targets, looting, bone burying, and high alchemy.",
-		tags = {"ksp", "aio", "fighter", "combat", "loot"},
+		description = "Configurable AIO fighter with combat targets, Bryophyta-style gear selection, looting, bone burying, and high alchemy.",
+		tags = {"ksp", "aio", "fighter", "combat", "loot", "equipment"},
 		authors = {"KSP"},
 		version = KspAioFighterPlugin.version,
 		minClientVersion = "2.1.32",
@@ -34,7 +40,7 @@ import net.runelite.client.ui.overlay.OverlayManager;
 )
 public class KspAioFighterPlugin extends Plugin implements KeyListener
 {
-	static final String version = "1.9.10";
+	static final String version = "1.9.11";
 	private static final String WALK_HERE = "Walk here";
 	private static final String SET_SAFE_SPOT = "Set Safe Spot";
 	private static final String SET_AREA_TILE_1 = "Set Area Tile 1";
@@ -56,8 +62,14 @@ public class KspAioFighterPlugin extends Plugin implements KeyListener
 	@Inject private KeyManager keyManager;
 	@Inject private ConfigManager configManager;
 	@Inject private KspAioFighterConfig config;
+	@Inject private ClientToolbar clientToolbar;
+	@Inject private ItemManager itemManager;
+	@Inject private KspAioFighterEquipmentSettings equipmentSettings;
+	@Inject private KspAioFighterEquipmentIndex equipmentIndex;
 	private final KspMuleWorkerService muleService = new KspMuleWorkerService("AIO Fighter");
 	private volatile boolean shiftHeld;
+	private KspAioFighterEquipmentPanel equipmentPanel;
+	private NavigationButton navigationButton;
 
 	private final KeyEventDispatcher shiftKeyEventDispatcher = event ->
 	{
@@ -85,6 +97,8 @@ public class KspAioFighterPlugin extends Plugin implements KeyListener
 		overlayManager.add(paint);
 		script.setStopPluginCallback(this::stopPluginFromScript);
 		muleService.start(config);
+		equipmentSettings.importLegacyIfNeeded();
+		addEquipmentPanel();
 		script.run();
 	}
 
@@ -95,9 +109,69 @@ public class KspAioFighterPlugin extends Plugin implements KeyListener
 		KeyboardFocusManager.getCurrentKeyboardFocusManager().removeKeyEventDispatcher(shiftKeyEventDispatcher);
 		keyManager.unregisterKeyListener(this);
 		resetAreaCallback = null;
+		removeEquipmentPanel();
 		muleService.shutdown();
 		script.shutdown();
 		overlayManager.remove(paint);
+	}
+
+	private void addEquipmentPanel()
+	{
+		if (navigationButton != null) return;
+		equipmentPanel = new KspAioFighterEquipmentPanel(equipmentSettings, equipmentIndex, itemManager);
+		navigationButton = NavigationButton.builder()
+				.tooltip("KSP AIO Fighter Gear")
+				.priority(8)
+				.icon(createEquipmentIcon())
+				.panel(equipmentPanel)
+				.build();
+		clientToolbar.addNavigation(navigationButton);
+	}
+
+	private void removeEquipmentPanel()
+	{
+		if (navigationButton != null)
+		{
+			clientToolbar.removeNavigation(navigationButton);
+			navigationButton = null;
+		}
+		equipmentPanel = null;
+	}
+
+	private static BufferedImage createEquipmentIcon()
+	{
+		BufferedImage source = new BufferedImage(32, 32, BufferedImage.TYPE_INT_ARGB);
+		Graphics2D graphics = source.createGraphics();
+		try
+		{
+			graphics.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+			graphics.setColor(new java.awt.Color(210, 210, 210));
+			graphics.fillRoundRect(13, 3, 6, 20, 3, 3);
+			graphics.fillRoundRect(7, 20, 18, 5, 3, 3);
+			graphics.setColor(new java.awt.Color(145, 105, 55));
+			graphics.fillRoundRect(14, 24, 4, 6, 2, 2);
+		}
+		finally
+		{
+			graphics.dispose();
+		}
+		return resize(source, 16, 16);
+	}
+
+	private static BufferedImage resize(BufferedImage source, int width, int height)
+	{
+		BufferedImage scaled = new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB);
+		Graphics2D graphics = scaled.createGraphics();
+		try
+		{
+			graphics.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
+			graphics.drawImage(source, 0, 0, width, height, null);
+		}
+		finally
+		{
+			graphics.dispose();
+		}
+		return scaled;
 	}
 
 	private void stopPluginFromScript()
@@ -119,6 +193,7 @@ public class KspAioFighterPlugin extends Plugin implements KeyListener
 			muleService.shutdown();
 			script.shutdown();
 			overlayManager.remove(paint);
+			removeEquipmentPanel();
 		}
 	}
 
