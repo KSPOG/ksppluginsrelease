@@ -25,8 +25,8 @@ import net.runelite.client.ui.overlay.OverlayManager;
 
 @PluginDescriptor(
 		name = PluginConstants.KSP + "KSP AIO Fighter",
-		description = "Configurable AIO fighter with side-panel start controls, Explv-style map area selection, equipment loadouts, looting, bone burying, and high alchemy.",
-		tags = {"ksp", "aio", "fighter", "combat", "loot", "equipment", "map"},
+		description = "Configurable AIO fighter with side-panel start controls, Explv-style map area selection, equipment and inventory loadouts, looting, bone burying, and high alchemy.",
+		tags = {"ksp", "aio", "fighter", "combat", "loot", "equipment", "inventory", "map"},
 		authors = {"KSP"},
 		version = KspAioFighterPlugin.version,
 		minClientVersion = "2.1.32",
@@ -35,7 +35,7 @@ import net.runelite.client.ui.overlay.OverlayManager;
 )
 public class KspAioFighterPlugin extends Plugin
 {
-	static final String version = "1.9.13";
+	static final String version = "1.9.14";
 	private static final String WALK_HERE = "Walk here";
 	private static final String SET_SAFE_SPOT = "Set Safe Spot";
 	private static final String AREA_TILE_TARGET = "KSP AIO Fighter";
@@ -57,9 +57,11 @@ public class KspAioFighterPlugin extends Plugin
 	@Inject private ItemManager itemManager;
 	@Inject private KspAioFighterEquipmentSettings equipmentSettings;
 	@Inject private KspAioFighterEquipmentIndex equipmentIndex;
+	@Inject private KspAioFighterInventorySettings inventorySettings;
 	private final KspMuleWorkerService muleService = new KspMuleWorkerService("AIO Fighter");
 	private volatile boolean automationRunning;
 	private KspAioFighterEquipmentPanel equipmentPanel;
+	private KspAioFighterInventoryPanel inventoryPanel;
 	private NavigationButton navigationButton;
 
 	@Provides
@@ -158,6 +160,10 @@ public class KspAioFighterPlugin extends Plugin
 			this::isAttackAreaEnabled,
 			this::setAttackAreaFromMap,
 			this::resetAttackArea);
+		inventoryPanel = new KspAioFighterInventoryPanel(inventorySettings, itemManager);
+		equipmentPanel.add(inventoryPanel);
+		equipmentPanel.revalidate();
+		equipmentPanel.repaint();
 		navigationButton = NavigationButton.builder()
 				.tooltip("KSP AIO Fighter")
 				.priority(8)
@@ -174,6 +180,7 @@ public class KspAioFighterPlugin extends Plugin
 			clientToolbar.removeNavigation(navigationButton);
 			navigationButton = null;
 		}
+		inventoryPanel = null;
 		equipmentPanel = null;
 	}
 
@@ -248,6 +255,12 @@ public class KspAioFighterPlugin extends Plugin
 		{
 			KspAioFighterEquipmentPanel panel = equipmentPanel;
 			if (panel != null) SwingUtilities.invokeLater(panel::refreshAreaStatus);
+		}
+
+		if (event.getKey() != null && event.getKey().startsWith("inventorySetup"))
+		{
+			KspAioFighterInventoryPanel panel = inventoryPanel;
+			if (panel != null) SwingUtilities.invokeLater(panel::refresh);
 		}
 	}
 
