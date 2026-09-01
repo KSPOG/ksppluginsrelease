@@ -51,13 +51,13 @@ final class KspAioFighterEquipmentSettings
         {
             configManager.setConfiguration(KspAioFighterConfig.GROUP, key(style, slot), itemName.trim());
         }
-        syncLegacyGearList(style);
+        syncRuntimeGearList(style);
     }
 
     void clear(KspAioFighterGearStyle style, EquipmentInventorySlot slot)
     {
         configManager.unsetConfiguration(KspAioFighterConfig.GROUP, key(style, slot));
-        syncLegacyGearList(style);
+        syncRuntimeGearList(style);
     }
 
     void clearStyle(KspAioFighterGearStyle style)
@@ -66,7 +66,7 @@ final class KspAioFighterEquipmentSettings
         {
             configManager.unsetConfiguration(KspAioFighterConfig.GROUP, key(style, slot));
         }
-        syncLegacyGearList(style);
+        syncRuntimeGearList(style);
     }
 
     Map<EquipmentInventorySlot, String> equipmentFor(KspAioFighterGearStyle style)
@@ -80,20 +80,23 @@ final class KspAioFighterEquipmentSettings
         return result;
     }
 
-    void importLegacyIfNeeded()
+    /**
+     * The side-panel slot selections are the authoritative gear configuration.
+     *
+     * The fighter script still consumes the historical per-style CSV keys internally,
+     * so those keys are now treated strictly as a compatibility/runtime mirror. Never
+     * import them back into the side-panel slots: an old hidden CSV must not override
+     * gear the user selected in the side panel.
+     */
+    void syncPanelGearToRuntime()
     {
         for (KspAioFighterGearStyle style : KspAioFighterGearStyle.values())
         {
-            if (!equipmentFor(style).isEmpty()) continue;
-            String raw = configManager.getConfiguration(KspAioFighterConfig.GROUP, style.configKey());
-            if (raw == null || raw.isBlank()) continue;
-
-            // Preserve old setups until the user edits them in the new panel. The old CSV remains
-            // authoritative for imported setups because slot inference cannot be done reliably by name alone.
+            syncRuntimeGearList(style);
         }
     }
 
-    private void syncLegacyGearList(KspAioFighterGearStyle style)
+    private void syncRuntimeGearList(KspAioFighterGearStyle style)
     {
         List<String> names = new ArrayList<>();
         for (EquipmentInventorySlot slot : CONFIGURABLE_SLOTS)
