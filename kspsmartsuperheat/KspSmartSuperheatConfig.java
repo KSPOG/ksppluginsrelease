@@ -55,5 +55,13 @@ public interface KspSmartSuperheatConfig extends Config, KspMuleConfig
     default boolean bankWholeInventory() { return true; }
 
     @Override
+    @Range(min = 0, max = 2_000_000_000)
+    @ConfigItem(
+            keyName = "muleMinimumTradingCapital",
+            name = "Superheat Mule Trading Floor",
+            description = "Internal mule operating-cash floor derived from Cash reserve.",
+            hidden = true,
+            section = KspMuleConfig.SECTION
+    )
     default int muleMinimumTradingCapital() { return cashReserve(); }
 }
