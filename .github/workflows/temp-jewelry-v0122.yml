@@ -1,0 +1,92 @@
+name: Validate Jewelry Crafter v0.1.22
+
+on:
+  push:
+    branches:
+      - fix/jewelry-crafter-ge-value-loop-v0122
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/jewelry-crafter-ge-value-loop-v0122
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '11'
+
+      - name: Apply GE value-entry fix
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          script = Path('kspjewelrycrafter/KspJewelryCrafterScript.java')
+          text = script.read_text()
+
+          old_prompt = '''    private boolean gePriceInputOpen()\n    {\n        return Rs2Widget.getWidget(InterfaceID.Chatbox.MES_TEXT2) != null;\n    }'''
+          new_prompt = '''    private boolean gePriceInputOpen()\n    {\n        // RuneLite may keep the chatbox component allocated after Enter; only a visible\n        // input widget means the GE price/quantity prompt is still active.\n        return Rs2Widget.isWidgetVisible(InterfaceID.Chatbox.MES_TEXT2);\n    }'''
+          if old_prompt not in text:
+              raise SystemExit('gePriceInputOpen block not found')
+          text = text.replace(old_prompt, new_prompt, 1)
+
+          old_entry = '''            Rs2GrandExchange.setChatboxValue(value);\n            sleep(500, 750);\n            Rs2Keyboard.enter();\n\n            if (!sleepUntil(() -> !gePriceInputOpen() || !Rs2GrandExchange.isOpen(), 3_000))\n            {\n                status = "Waiting for GE " + label + " entry";\n                sleep(300, 500);\n                continue;\n            }\n            if (!Rs2GrandExchange.isOpen()) return false;\n\n            sleep(800, 1_100);\n            if (sleepUntil(() -> geOfferValueMatches(child, value), 2_000)) return true;'''
+          new_entry = '''            Rs2GrandExchange.setChatboxValue(value);\n            sleep(500, 750);\n            Rs2Keyboard.enter();\n            if (!Rs2GrandExchange.isOpen()) return false;\n\n            // The GE value varbit is authoritative. It commonly updates before RuneLite\n            // destroys/hides the chatbox component, so verify the value first instead of\n            // requiring the prompt object to disappear. This prevents re-entering an\n            // already-successful price forever.\n            if (sleepUntil(() -> geOfferValueMatches(child, value), 1_500))\n            {\n                sleepUntil(() -> !gePriceInputOpen(), 1_000);\n                return true;\n            }\n\n            if (gePriceInputOpen())\n            {\n                status = "Waiting for GE " + label + " entry";\n                sleepUntil(() -> !gePriceInputOpen() || geOfferValueMatches(child, value)\n                    || !Rs2GrandExchange.isOpen(), 1_500);\n            }\n            if (!Rs2GrandExchange.isOpen()) return false;\n            if (geOfferValueMatches(child, value)) return true;\n            sleep(250, 450);'''
+          if old_entry not in text:
+              raise SystemExit('GE value entry block not found')
+          text = text.replace(old_entry, new_entry, 1)
+          script.write_text(text)
+
+          plugin = Path('kspjewelrycrafter/KspJewelryCrafterPlugin.java')
+          p = plugin.read_text()
+          old_version = 'public static final String VERSION = "0.1.21";'
+          new_version = 'public static final String VERSION = "0.1.22";'
+          if old_version not in p:
+              raise SystemExit('Jewelry Crafter 0.1.21 version not found')
+          plugin.write_text(p.replace(old_version, new_version, 1))
+          PY
+
+      - uses: actions/checkout@v4
+        with:
+          repository: chsami/Microbot
+          path: microbot
+
+      - name: Compile Jewelry Crafter against Microbot
+        shell: bash
+        run: |
+          mkdir -p microbot/runelite-client/src/main/java/net/runelite/client/plugins/microbot/kspjewelrycrafter
+          mkdir -p microbot/runelite-client/src/main/java/net/runelite/client/plugins/microbot/kspmule
+          cp kspjewelrycrafter/*.java microbot/runelite-client/src/main/java/net/runelite/client/plugins/microbot/kspjewelrycrafter/
+          cp kspmule/*.java microbot/runelite-client/src/main/java/net/runelite/client/plugins/microbot/kspmule/
+          mkdir -p microbot/runelite-client/src/main/java/net/runelite/client/plugins/microbot
+          if [ ! -f microbot/runelite-client/src/main/java/net/runelite/client/plugins/microbot/PluginConstants.java ]; then
+            cat > microbot/runelite-client/src/main/java/net/runelite/client/plugins/microbot/PluginConstants.java <<'JAVA'
+          package net.runelite.client.plugins.microbot;
+          public final class PluginConstants {
+              public static final String KSP = "KSP ";
+              public static final boolean DEFAULT_ENABLED = false;
+              public static final boolean IS_EXTERNAL = true;
+              private PluginConstants() {}
+          }
+          JAVA
+          fi
+          cd microbot
+          chmod +x gradlew
+          ./gradlew :client:compileJava --no-daemon
+
+      - name: Commit validated runtime fix and remove temporary workflow
+        if: success()
+        shell: bash
+        run: |
+          rm -f .github/workflows/temp-jewelry-v0122.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add kspjewelrycrafter/KspJewelryCrafterScript.java kspjewelrycrafter/KspJewelryCrafterPlugin.java .github/workflows/temp-jewelry-v0122.yml
+          git commit -m "Fix Jewelry Crafter GE value-entry retry loop"
+          git push origin HEAD:fix/jewelry-crafter-ge-value-loop-v0122
