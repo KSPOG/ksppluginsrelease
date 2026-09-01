@@ -10,7 +10,7 @@ import net.runelite.client.plugins.microbot.kspmule.KspMuleConfig;
 import net.runelite.client.plugins.microbot.util.magic.Rs2CombatSpells;
 
 @ConfigGroup(KspAioFighterConfig.GROUP)
-@ConfigInformation("Configure combat, training, supplies and loot here. Equipment loadouts are managed from the AIO Fighter Gear side panel.")
+@ConfigInformation("Configure combat, training, supplies and loot here. Equipment loadouts and attack areas are managed from the AIO Fighter side panel.")
 public interface KspAioFighterConfig extends Config, KspMuleConfig
 {
 	String GROUP = "kspaiofighter";
@@ -18,7 +18,7 @@ public interface KspAioFighterConfig extends Config, KspMuleConfig
 	@ConfigSection(name = "Combat", description = "NPC and combat settings", position = 0)
 	String combatSection = "combat";
 
-	@ConfigSection(name = "Area", description = "Safe spot and NPC attack area", position = 1)
+	@ConfigSection(name = "Area", description = "Safe spot settings. Attack areas are selected from the AIO Fighter side-panel map.", position = 1)
 	String areaSection = "area";
 
 	@ConfigSection(name = "Training", description = "Combat skill targets", position = 2)
@@ -88,19 +88,19 @@ public interface KspAioFighterConfig extends Config, KspMuleConfig
 		return 0;
 	}
 
-	@ConfigItem(keyName = "useAttackArea", name = "Use attack area", description = "Only attack NPCs standing inside the configured area. This is enabled automatically after creating an area from a right-click tile action.", position = 1, section = areaSection)
+	@ConfigItem(keyName = "useAttackArea", name = "Use attack area", description = "Backing setting managed by the AIO Fighter side-panel map.", hidden = true)
 	default boolean useAttackArea()
 	{
 		return false;
 	}
 
-	@ConfigItem(keyName = "resetArea", name = "Reset Area", description = "Clear the saved attack area tiles and allow creating a new area from a right-click tile action.", position = 2, section = areaSection)
+	@ConfigItem(keyName = "resetArea", name = "Reset Area", description = "Legacy backing action. Attack areas are cleared from the AIO Fighter side panel.", hidden = true)
 	default void resetArea()
 	{
 		KspAioFighterPlugin.requestAreaReset();
 	}
 
-	@ConfigItem(keyName = "resetAreas", name = "Reset Areas", description = "Check this to clear the saved attack area tiles. It automatically turns off after the reset runs.", position = 3, section = areaSection)
+	@ConfigItem(keyName = "resetAreas", name = "Reset Areas", description = "Legacy backing setting for clearing the saved attack area.", hidden = true)
 	default boolean resetAreas()
 	{
 		return false;
