@@ -32,7 +32,7 @@ final class KspAioFighterInventoryPanel extends JPanel
     private final JComboBox<KspAioFighterGearStyle> styleSelector = new JComboBox<>(KspAioFighterGearStyle.values());
     private final JCheckBox enabled = new JCheckBox("Use saved setup");
     private final JLabel status = new JLabel("No inventory setup saved", SwingConstants.CENTER);
-    private final JButton[] slots = new JButton[28];
+    private final JLabel[] slots = new JLabel[28];
     private boolean refreshing;
 
     KspAioFighterInventoryPanel(KspAioFighterInventorySettings settings, ItemManager itemManager)
@@ -84,13 +84,15 @@ final class KspAioFighterInventoryPanel extends JPanel
         grid.setAlignmentX(CENTER_ALIGNMENT);
         for (int i = 0; i < slots.length; i++)
         {
-            JButton cell = new JButton();
+            JLabel cell = new JLabel("", SwingConstants.CENTER);
+            cell.setOpaque(true);
+            cell.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+            cell.setForeground(Color.WHITE);
             cell.setPreferredSize(new Dimension(50, 42));
             cell.setMinimumSize(new Dimension(44, 38));
-            cell.setMargin(new java.awt.Insets(1, 1, 1, 1));
+            cell.setBorder(BorderFactory.createLineBorder(ColorScheme.MEDIUM_GRAY_COLOR));
             cell.setHorizontalTextPosition(SwingConstants.CENTER);
             cell.setVerticalTextPosition(SwingConstants.BOTTOM);
-            cell.setFocusable(false);
             cell.setToolTipText("Empty slot " + (i + 1));
             slots[i] = cell;
             grid.add(cell);
@@ -185,7 +187,7 @@ final class KspAioFighterInventoryPanel extends JPanel
 
             for (int slot = 0; slot < slots.length; slot++)
             {
-                JButton cell = slots[slot];
+                JLabel cell = slots[slot];
                 KspAioFighterInventoryItem item = bySlot.get(slot);
                 cell.setIcon(null);
                 cell.setText("");
@@ -231,7 +233,6 @@ final class KspAioFighterInventoryPanel extends JPanel
     {
         JPanel panel = new JPanel(layout);
         panel.setBackground(ColorScheme.DARK_GRAY_COLOR);
-        panel.setBorder(BorderFactory.createEmptyBorder());
         return panel;
     }
 
