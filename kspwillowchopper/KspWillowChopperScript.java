@@ -1,10 +1,15 @@
 package net.runelite.client.plugins.microbot.kspwillowchopper;
 
 import lombok.extern.slf4j.Slf4j;
+import net.runelite.api.GameObject;
 import net.runelite.api.Skill;
 import net.runelite.api.coords.WorldPoint;
+import net.runelite.api.events.GameObjectDespawned;
+import net.runelite.api.events.GameObjectSpawned;
 import net.runelite.api.gameval.ItemID;
 import net.runelite.api.gameval.ObjectID;
+import net.runelite.client.eventbus.EventBus;
+import net.runelite.client.eventbus.Subscribe;
 import net.runelite.client.plugins.microbot.Microbot;
 import net.runelite.client.plugins.microbot.Script;
 import net.runelite.client.plugins.microbot.api.tileobject.models.Rs2TileObjectModel;
@@ -19,19 +24,20 @@ import javax.inject.Inject;
 import javax.inject.Singleton;
 import java.awt.event.KeyEvent;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * KSP Chopper runtime.
  *
- * The previous implementation accumulated object-despawn latches, immediate
- * retarget queues, campfire morph queues and global BlockingEvent state. This
- * rewrite intentionally uses a small deterministic state machine instead:
- *
+ * Core cycle:
  * CHOPPING -> BANKING -> CHOPPING
  * CHOPPING -> GETTING_TINDERBOX -> CREATING_FIRE -> BURNING -> CHOPPING
  *
- * Forestry is invoked synchronously by the owning plugin and never registered in
- * Microbot's global BlockingEventManager.
+ * The active chopping object is tracked by id/hash/tile. When RuneLite reports
+ * that exact object despawning/replacing (the normal signal for an object-id
+ * transition), a forced retarget is queued immediately. Forced retargets bypass
+ * the normal animation/retry suppression so the next valid loaded tree is
+ * clicked as soon as the old object changes.
  */
 @Slf4j
 @Singleton
@@ -63,6 +69,9 @@ public class KspWillowChopperScript extends Script {
 
     private final KspWillowChopperPlugin plugin;
 
+    @Inject
+    private EventBus eventBus;
+
     private volatile RuntimeState state = RuntimeState.IDLE;
     private volatile String status = "Idle";
     private volatile boolean sessionStarted;
@@ -72,6 +81,14 @@ public class KspWillowChopperScript extends Script {
     private volatile boolean burnBatchActive;
     private volatile boolean burnCommandIssued;
     private volatile boolean fireBurnedOutSignal;
+    private volatile KspWillowChopperConfig runtimeConfig;
+
+    private volatile int activeTreeObjectId = -1;
+    private volatile long activeTreeObjectHash = Long.MIN_VALUE;
+    private volatile WorldPoint activeTreeObjectLocation;
+    private volatile WorldPoint lastChangedTreeLocation;
+    private final AtomicBoolean immediateRetargetQueued = new AtomicBoolean(false);
+    private volatile boolean eventBusRegistered;
 
     private long startTimeMillis;
     private int startWoodcuttingXp;
@@ -101,6 +118,7 @@ public class KspWillowChopperScript extends Script {
     public synchronized boolean run(KspWillowChopperConfig config) {
         shutdown();
 
+        runtimeConfig = config;
         activeTree = safeTree(config.tree());
         state = RuntimeState.CHOPPING;
         status = "Starting";
@@ -110,6 +128,14 @@ public class KspWillowChopperScript extends Script {
         burnBatchActive = false;
         burnCommandIssued = false;
         fireBurnedOutSignal = false;
+        clearActiveTreeTarget();
+        lastChangedTreeLocation = null;
+        immediateRetargetQueued.set(false);
+
+        if (!eventBusRegistered && eventBus != null) {
+            eventBus.register(this);
+            eventBusRegistered = true;
+        }
 
         startTimeMillis = System.currentTimeMillis();
         startWoodcuttingXp = skillXp(Skill.WOODCUTTING);
@@ -138,9 +164,7 @@ public class KspWillowChopperScript extends Script {
 
     private void tick(KspWillowChopperConfig config) {
         try {
-            if (!sessionStarted) {
-                return;
-            }
+            if (!sessionStarted) return;
 
             if (!Microbot.isLoggedIn()) {
                 state = RuntimeState.PAUSED;
@@ -148,28 +172,23 @@ public class KspWillowChopperScript extends Script {
                 return;
             }
 
-            // Respect an explicit global pause, but do not call Script.run(). The
-            // old Chopper could be held forever by a stale global BlockingEvent.
             if (Microbot.pauseAllScripts.get()) {
                 state = RuntimeState.PAUSED;
                 status = "Paused globally";
                 return;
             }
 
-            if (Thread.currentThread().isInterrupted()) {
-                return;
-            }
+            if (Thread.currentThread().isInterrupted()) return;
 
             KspTree selected = safeTree(config.tree());
-            if (selected != activeTree) {
-                switchTree(selected);
-            }
+            if (selected != activeTree) switchTree(selected);
 
             trackResourceChanges();
 
             if (config.enableForestry() && plugin.runForestryIfNeeded()) {
                 state = RuntimeState.FORESTRY;
                 status = "Forestry complete";
+                clearActiveTreeTarget();
                 syncResourceBaseline();
                 resetActionLatches();
                 return;
@@ -178,6 +197,7 @@ public class KspWillowChopperScript extends Script {
             if (plugin.getCurrentForestryEvent() != KspForestryEvent.NONE) {
                 state = RuntimeState.FORESTRY;
                 status = "Forestry: " + plugin.getCurrentForestryEvent();
+                clearActiveTreeTarget();
                 return;
             }
 
@@ -185,20 +205,19 @@ public class KspWillowChopperScript extends Script {
             if (woodcuttingLevel < activeTree.getWoodcuttingLevel()) {
                 state = RuntimeState.PAUSED;
                 status = "Need " + activeTree.getWoodcuttingLevel() + " Woodcutting";
+                clearActiveTreeTarget();
                 return;
             }
 
             if (!hasAxe()) {
                 state = RuntimeState.PAUSED;
                 status = "No axe equipped/in inventory";
+                clearActiveTreeTarget();
                 return;
             }
 
-            if (config.bankLogs()) {
-                tickBankMode();
-            } else {
-                tickBurnMode();
-            }
+            if (config.bankLogs()) tickBankMode();
+            else tickBurnMode();
         } catch (Exception ex) {
             state = RuntimeState.ERROR;
             status = "Error - check logs";
@@ -214,18 +233,20 @@ public class KspWillowChopperScript extends Script {
         fireBurnedOutSignal = false;
 
         if (Rs2Inventory.isFull()) {
+            clearActiveTreeTarget();
             bankResource();
             return;
         }
 
         state = RuntimeState.CHOPPING;
-        chopSelectedTree();
+        chopSelectedTree(false, null);
     }
 
     private void tickBurnMode() {
         if (!activeTree.isCampfireBurnable()) {
             state = RuntimeState.PAUSED;
             status = activeTree.getResourceName() + " cannot be burned; enable Bank resources";
+            clearActiveTreeTarget();
             return;
         }
 
@@ -235,20 +256,19 @@ public class KspWillowChopperScript extends Script {
         if (resourceCount <= 0) {
             finishBurnBatch();
             state = RuntimeState.CHOPPING;
-            chopSelectedTree();
+            chopSelectedTree(false, null);
             return;
         }
 
         if (!burnBatchActive && !Rs2Inventory.isFull()) {
             state = RuntimeState.CHOPPING;
-            chopSelectedTree();
+            chopSelectedTree(false, null);
             return;
         }
 
+        clearActiveTreeTarget();
         burnBatchActive = true;
 
-        // After a bulk burn command, trust actual inventory decreases rather than
-        // repeatedly clicking the fire every scheduler iteration.
         if (burnCommandIssued) {
             long now = System.currentTimeMillis();
             if (resourceCount <= 0) {
@@ -266,8 +286,6 @@ public class KspWillowChopperScript extends Script {
                 return;
             }
 
-            // No progress, or the game explicitly reported the fire burned out.
-            // Release the command and reacquire/create a fire below.
             burnCommandIssued = false;
             burningActive = false;
         }
@@ -288,19 +306,19 @@ public class KspWillowChopperScript extends Script {
         startBulkBurn(campfire);
     }
 
-    private void chopSelectedTree() {
+    private void chopSelectedTree(boolean force, WorldPoint avoidLocation) {
         if (Rs2Bank.isOpen()) {
             Rs2Bank.closeBank();
             return;
         }
 
-        if (isPlayerBusy()) {
+        if (!force && isPlayerBusy()) {
             status = "Chopping " + activeTree;
             return;
         }
 
         long now = System.currentTimeMillis();
-        if (lastTreeClickMillis > 0L) {
+        if (!force && lastTreeClickMillis > 0L) {
             boolean recentProgress = lastTreeProgressMillis > 0L
                     && now - lastTreeProgressMillis < TREE_RETRY_MS;
             boolean recentClick = now - lastTreeClickMillis < TREE_RETRY_MS;
@@ -310,24 +328,152 @@ public class KspWillowChopperScript extends Script {
             }
         }
 
-        Rs2TileObjectModel tree = Microbot.getRs2TileObjectCache()
-                .query()
-                .withName(activeTree.getObjectName())
-                .nearestOnClientThread();
+        Rs2TileObjectModel tree = findNextChoppableTree(avoidLocation);
+        if (tree == null && avoidLocation != null) {
+            tree = findNextChoppableTree(null);
+        }
 
         if (tree == null) {
             status = "No " + activeTree + " loaded";
             lastTreeClickMillis = 0L;
+            clearActiveTreeTarget();
             return;
         }
 
-        status = "Clicking " + activeTree;
+        status = force
+                ? "Object changed - clicking next " + activeTree
+                : "Clicking " + activeTree;
+
         if (tree.click(activeTree.getAction())) {
+            rememberActiveTreeTarget(tree);
+            lastChangedTreeLocation = null;
             lastTreeClickMillis = now;
             status = "Chopping " + activeTree;
         } else {
+            clearActiveTreeTarget();
             status = activeTree + " click failed - retrying";
         }
+    }
+
+    private Rs2TileObjectModel findNextChoppableTree(WorldPoint avoidLocation) {
+        String objectName = activeTree.getObjectName();
+        String action = activeTree.getAction();
+
+        return Microbot.getRs2TileObjectCache()
+                .query()
+                .withName(objectName)
+                .where(object -> object != null
+                        && KspTileObjectSupport.hasAction(object, action)
+                        && (avoidLocation == null || !avoidLocation.equals(object.getWorldLocation())))
+                .nearestOnClientThread();
+    }
+
+    private void rememberActiveTreeTarget(Rs2TileObjectModel tree) {
+        if (tree == null) {
+            clearActiveTreeTarget();
+            return;
+        }
+        activeTreeObjectId = tree.getId();
+        activeTreeObjectHash = tree.getHash();
+        activeTreeObjectLocation = tree.getWorldLocation();
+    }
+
+    private void clearActiveTreeTarget() {
+        activeTreeObjectId = -1;
+        activeTreeObjectHash = Long.MIN_VALUE;
+        activeTreeObjectLocation = null;
+    }
+
+    @Subscribe
+    public void onGameObjectDespawned(GameObjectDespawned event) {
+        GameObject object = event.getGameObject();
+        if (!isActiveChopObject(object)) return;
+        requestImmediateRetarget(object.getWorldLocation(), object.getId());
+    }
+
+    @Subscribe
+    public void onGameObjectSpawned(GameObjectSpawned event) {
+        GameObject object = event.getGameObject();
+        WorldPoint targetLocation = activeTreeObjectLocation;
+
+        if (!sessionStarted
+                || state != RuntimeState.CHOPPING
+                || object == null
+                || targetLocation == null
+                || !targetLocation.equals(object.getWorldLocation())
+                || object.getId() == activeTreeObjectId) {
+            return;
+        }
+
+        requestImmediateRetarget(targetLocation, activeTreeObjectId);
+    }
+
+    private boolean isActiveChopObject(GameObject object) {
+        if (!sessionStarted
+                || state != RuntimeState.CHOPPING
+                || object == null
+                || activeTreeObjectLocation == null) {
+            return false;
+        }
+
+        if (!activeTreeObjectLocation.equals(object.getWorldLocation())) return false;
+
+        return object.getHash() == activeTreeObjectHash
+                || object.getId() == activeTreeObjectId;
+    }
+
+    private void requestImmediateRetarget(WorldPoint changedLocation, int previousObjectId) {
+        if (!canImmediateRetarget()) return;
+
+        lastChangedTreeLocation = changedLocation;
+        clearActiveTreeTarget();
+        lastTreeClickMillis = 0L;
+        lastTreeProgressMillis = 0L;
+        state = RuntimeState.CHOPPING;
+        status = "Object " + previousObjectId + " changed - selecting next " + activeTree;
+
+        if (!immediateRetargetQueued.compareAndSet(false, true)) return;
+
+        scheduledExecutorService.execute(() -> {
+            try {
+                if (!canImmediateRetarget()) return;
+
+                KspWillowChopperConfig config = runtimeConfig;
+                if (config != null) {
+                    KspTree selected = safeTree(config.tree());
+                    if (selected != activeTree) switchTree(selected);
+                }
+
+                chopSelectedTree(true, lastChangedTreeLocation);
+            } catch (Exception ex) {
+                Microbot.logStackTrace("KSP Chopper immediate retarget", ex);
+            } finally {
+                immediateRetargetQueued.set(false);
+            }
+        });
+    }
+
+    private boolean canImmediateRetarget() {
+        if (!sessionStarted
+                || !Microbot.isLoggedIn()
+                || Microbot.pauseAllScripts.get()
+                || state != RuntimeState.CHOPPING
+                || plugin.getCurrentForestryEvent() != KspForestryEvent.NONE
+                || Rs2Inventory.isFull()) {
+            return false;
+        }
+
+        KspWillowChopperConfig config = runtimeConfig;
+        if (config == null) return false;
+
+        if (!config.bankLogs()
+                && activeTree.isCampfireBurnable()
+                && burnBatchActive) {
+            return false;
+        }
+
+        return hasAxe()
+                && Rs2Player.getRealSkillLevel(Skill.WOODCUTTING) >= activeTree.getWoodcuttingLevel();
     }
 
     private void bankResource() {
@@ -374,6 +520,7 @@ public class KspWillowChopperScript extends Script {
         lastBankAttemptMillis = 0L;
         lastTreeClickMillis = 0L;
         lastTreeProgressMillis = 0L;
+        clearActiveTreeTarget();
         state = RuntimeState.CHOPPING;
         status = "Banked - resuming " + activeTree;
     }
@@ -381,12 +528,8 @@ public class KspWillowChopperScript extends Script {
     private void obtainTinderbox() {
         state = RuntimeState.GETTING_TINDERBOX;
 
-        if (Rs2Inventory.hasItem(TINDERBOX_ID)) {
-            return;
-        }
+        if (Rs2Inventory.hasItem(TINDERBOX_ID)) return;
 
-        // Full inventory: deliberately sacrifice one log for the permanent
-        // tinderbox slot. This loss is not counted as Firemaking.
         if (Rs2Inventory.emptySlotCount() <= 0) {
             int resourceId = activeTree.getResourceId();
             int before = Rs2Inventory.count(resourceId);
@@ -445,9 +588,7 @@ public class KspWillowChopperScript extends Script {
         }
 
         int resourceId = activeTree.getResourceId();
-        if (!Rs2Inventory.hasItem(TINDERBOX_ID) || !Rs2Inventory.hasItem(resourceId)) {
-            return;
-        }
+        if (!Rs2Inventory.hasItem(TINDERBOX_ID) || !Rs2Inventory.hasItem(resourceId)) return;
 
         lastFireAttemptMillis = now;
         int before = Rs2Inventory.count(resourceId);
@@ -506,9 +647,6 @@ public class KspWillowChopperScript extends Script {
         }
 
         if (!sleepUntil(() -> Rs2Widget.getWidget(BURN_INTERFACE_WIDGET) != null, 4_500)) {
-            // Some clients/Forestry revisions start processing without the Make-X
-            // widget being observable. If the player became busy or a log vanished,
-            // treat it as a successful start; otherwise retry.
             int current = Rs2Inventory.count(resourceId);
             if (!isPlayerBusy() && current >= lastResourceCount) {
                 status = "Waiting for Burn dialog";
@@ -526,9 +664,7 @@ public class KspWillowChopperScript extends Script {
     }
 
     private Rs2TileObjectModel findCampfire(WorldPoint anchor, int radius) {
-        if (anchor == null) {
-            return null;
-        }
+        if (anchor == null) return null;
 
         return Microbot.getClientThread().runOnClientThreadOptional(() -> {
             Rs2TileObjectModel target = Microbot.getRs2TileObjectCache()
@@ -576,6 +712,7 @@ public class KspWillowChopperScript extends Script {
         lastBurnProgressMillis = 0L;
         lastTreeClickMillis = 0L;
         lastTreeProgressMillis = 0L;
+        clearActiveTreeTarget();
         status = "Burn complete - resuming " + activeTree;
     }
 
@@ -583,6 +720,7 @@ public class KspWillowChopperScript extends Script {
         activeTree = selected;
         finishBurnBatch();
         campfireNearby = false;
+        lastChangedTreeLocation = null;
         lastBankAttemptMillis = 0L;
         lastTinderboxAttemptMillis = 0L;
         lastFireAttemptMillis = 0L;
@@ -597,6 +735,7 @@ public class KspWillowChopperScript extends Script {
         lastBankAttemptMillis = 0L;
         burnCommandIssued = false;
         burningActive = false;
+        clearActiveTreeTarget();
         syncResourceBaseline();
     }
 
@@ -636,6 +775,16 @@ public class KspWillowChopperScript extends Script {
     @Override
     public synchronized void shutdown() {
         super.shutdown();
+
+        if (eventBusRegistered && eventBus != null) {
+            try {
+                eventBus.unregister(this);
+            } catch (Exception ignored) {
+            }
+            eventBusRegistered = false;
+        }
+
+        runtimeConfig = null;
         sessionStarted = false;
         state = RuntimeState.IDLE;
         status = "Idle";
@@ -645,6 +794,9 @@ public class KspWillowChopperScript extends Script {
         burnCommandIssued = false;
         fireBurnedOutSignal = false;
         lastResourceCount = -1;
+        lastChangedTreeLocation = null;
+        immediateRetargetQueued.set(false);
+        clearActiveTreeTarget();
     }
 
     public RuntimeState getState() { return state; }
@@ -653,9 +805,11 @@ public class KspWillowChopperScript extends Script {
     public boolean isCampfireNearby() { return campfireNearby; }
     public boolean isBurningActive() { return burningActive; }
     public boolean hasSessionStarted() { return sessionStarted && startTimeMillis > 0L; }
+
     public long getRuntimeMillis() {
         return hasSessionStarted() ? Math.max(0L, System.currentTimeMillis() - startTimeMillis) : 0L;
     }
+
     public int getWoodcuttingXpGained() { return Math.max(0, skillXp(Skill.WOODCUTTING) - startWoodcuttingXp); }
     public int getFiremakingXpGained() { return Math.max(0, skillXp(Skill.FIREMAKING) - startFiremakingXp); }
     public int getWoodcuttingLevel() { return skillLevel(Skill.WOODCUTTING); }
