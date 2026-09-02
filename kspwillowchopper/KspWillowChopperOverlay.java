@@ -46,7 +46,7 @@ public class KspWillowChopperOverlay extends OverlayPanel {
         }
 
         try {
-            panelComponent.setPreferredSize(new Dimension(275, 0));
+            panelComponent.setPreferredSize(new Dimension(285, 0));
             panelComponent.getChildren().clear();
 
             panelComponent.getChildren().add(TitleComponent.builder()
@@ -57,19 +57,16 @@ public class KspWillowChopperOverlay extends OverlayPanel {
             KspTree tree = script.getActiveTree();
             addLine("Tree:", tree.toString(), ACTIVE);
             addLine("Mode:", config.bankLogs() ? "Bank resources" : "Burn logs", ACTIVE);
-            String scriptStatus = script.getStatus();
-            if ("Starting".equals(scriptStatus) && script.getRuntimeMillis() > 2_000L) {
-                scriptStatus = Microbot.pauseAllScripts.get()
-                        ? "Paused globally"
-                        : "Waiting for Microbot blocker";
-            }
-            addLine("Status:", scriptStatus, ACTIVE);
+            addLine("State:", prettyState(script.getState()), ACTIVE);
+            addLine("Status:", script.getStatus(), ACTIVE);
             addLine("Resource:", tree.getResourceName(), VALUE);
             addLine("Inventory:", String.valueOf(script.getCurrentResourceCount()), VALUE);
 
             if (!config.bankLogs() && tree.isCampfireBurnable()) {
-                String fireState = script.isBurningActive() ? "Burning" : (script.isCampfireNearby() ? "Nearby" : "None");
-                addLine("Campfire:", fireState, script.isCampfireNearby() ? GOOD : ACTIVE);
+                String campfire = script.isBurningActive()
+                        ? "Burning"
+                        : (script.isCampfireNearby() ? "Nearby" : "None");
+                addLine("Campfire:", campfire, script.isCampfireNearby() ? GOOD : ACTIVE);
             }
 
             if (config.enableForestry()) {
@@ -124,8 +121,19 @@ public class KspWillowChopperOverlay extends OverlayPanel {
         return super.render(graphics);
     }
 
+    private String prettyState(KspWillowChopperScript.RuntimeState state) {
+        if (state == null) {
+            return "Unknown";
+        }
+        String value = state.name().toLowerCase().replace('_', ' ');
+        return Character.toUpperCase(value.charAt(0)) + value.substring(1);
+    }
+
     private void header(String text) {
-        panelComponent.getChildren().add(LineComponent.builder().left(text).leftColor(HEADER).build());
+        panelComponent.getChildren().add(LineComponent.builder()
+                .left(text)
+                .leftColor(HEADER)
+                .build());
     }
 
     private void separator() {
@@ -156,10 +164,11 @@ public class KspWillowChopperOverlay extends OverlayPanel {
     }
 
     private String formatDuration(long millis) {
-        if (millis <= 0) {
+        if (millis <= 0L) {
             return "00:00:00";
         }
-        Duration d = Duration.ofMillis(millis);
-        return String.format("%02d:%02d:%02d", d.toHours(), d.toMinutesPart(), d.toSecondsPart());
+        Duration duration = Duration.ofMillis(millis);
+        return String.format("%02d:%02d:%02d",
+                duration.toHours(), duration.toMinutesPart(), duration.toSecondsPart());
     }
 }
