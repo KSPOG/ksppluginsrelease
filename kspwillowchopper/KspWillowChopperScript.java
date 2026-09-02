@@ -16,12 +16,16 @@ import net.runelite.client.eventbus.EventBus;
 import net.runelite.client.eventbus.Subscribe;
 import net.runelite.client.plugins.microbot.Microbot;
 import net.runelite.client.plugins.microbot.Script;
+import net.runelite.client.plugins.microbot.api.npc.models.Rs2NpcModel;
 import net.runelite.client.plugins.microbot.api.tileobject.models.Rs2TileObjectModel;
 import net.runelite.client.plugins.microbot.util.bank.Rs2Bank;
+import net.runelite.client.plugins.microbot.util.bank.enums.BankLocation;
+import net.runelite.client.plugins.microbot.util.gameobject.Rs2BankID;
 import net.runelite.client.plugins.microbot.util.equipment.Rs2Equipment;
 import net.runelite.client.plugins.microbot.util.inventory.Rs2Inventory;
 import net.runelite.client.plugins.microbot.util.keyboard.Rs2Keyboard;
 import net.runelite.client.plugins.microbot.util.player.Rs2Player;
+import net.runelite.client.plugins.microbot.util.walker.Rs2Walker;
 import net.runelite.client.plugins.microbot.util.widget.Rs2Widget;
 
 import javax.inject.Inject;
@@ -51,6 +55,11 @@ public class KspWillowChopperScript extends Script {
     private static final int BURN_INTERFACE_WIDGET = 17694735;
     private static final int FIRE_ID = ObjectID.FIRE;
     private static final int FIRE_ID_ALT = 49927;
+    // Cook's Guild bank targets are intentionally ignored. These are
+    // geometrically close to nearby chopping areas but can be inaccessible.
+    private static final int IGNORED_BANK_BOOTH_ID = 10583;
+    private static final int IGNORED_BANKER_ID_1 = 2897;
+    private static final int IGNORED_BANKER_ID_2 = 2898;
 
     private static final long LOOP_MS = 300L;
     private static final long TREE_RETRY_MS = 6_000L;
@@ -609,6 +618,78 @@ public class KspWillowChopperScript extends Script {
         return Rs2Inventory.count(activeTree.getResourceId()) > 0;
     }
 
+    /**
+     * Opens a bank without ever selecting the Cook's Guild bank booth/bankers
+     * reported by the user. If no allowed target is currently loaded, walk to
+     * the nearest usable bank location other than Cook's Guild.
+     */
+    private boolean openAllowedBank() {
+        if (Rs2Bank.isOpen()) return true;
+
+        Rs2TileObjectModel bankObject = Microbot.getRs2TileObjectCache()
+                .query()
+                .where(object -> object != null
+                        && object.getId() != IGNORED_BANK_BOOTH_ID
+                        && Rs2BankID.BANK_ID_SET.contains(object.getId()))
+                .nearestOnClientThread();
+
+        if (bankObject != null) {
+            status = "Opening allowed bank booth";
+            if (Rs2Bank.openBank(bankObject) || Rs2Bank.isOpen()) return true;
+        }
+
+        Rs2NpcModel banker = Microbot.getRs2NpcCache()
+                .query()
+                .withName("Banker")
+                .where(npc -> npc != null
+                        && npc.getId() != IGNORED_BANKER_ID_1
+                        && npc.getId() != IGNORED_BANKER_ID_2)
+                .nearestOnClientThread();
+
+        if (banker != null) {
+            status = "Opening allowed banker";
+            if (Rs2Bank.openBank(banker.getNpc()) || Rs2Bank.isOpen()) return true;
+        }
+
+        BankLocation alternative = nearestAllowedBank(Rs2Player.getWorldLocation());
+        if (alternative == null) {
+            status = "No allowed bank available";
+            return false;
+        }
+
+        status = "Walking to " + alternative.name().replace('_', ' ');
+        Rs2Walker.walkTo(alternative.getWorldPoint());
+        return Rs2Bank.isOpen();
+    }
+
+    private BankLocation nearestAllowedBank(WorldPoint player) {
+        if (player == null) return null;
+
+        BankLocation nearest = null;
+        int nearestDistance = Integer.MAX_VALUE;
+
+        for (BankLocation location : BankLocation.values()) {
+            if (location == BankLocation.COOKS_GUILD) continue;
+
+            try {
+                if (!location.hasRequirements()) continue;
+            } catch (Exception ignored) {
+                continue;
+            }
+
+            WorldPoint point = location.getWorldPoint();
+            if (point == null) continue;
+
+            int distance = player.distanceTo(point);
+            if (distance < nearestDistance) {
+                nearestDistance = distance;
+                nearest = location;
+            }
+        }
+
+        return nearest;
+    }
+
     private void bankResource() {
         state = RuntimeState.BANKING;
         long now = System.currentTimeMillis();
@@ -620,7 +701,7 @@ public class KspWillowChopperScript extends Script {
             }
             lastBankAttemptMillis = now;
             status = "Opening bank";
-            if (!Rs2Bank.openBank() && !Rs2Bank.isOpen()) {
+            if (!openAllowedBank() && !Rs2Bank.isOpen()) {
                 status = "Need nearby bank";
                 return;
             }
@@ -682,7 +763,7 @@ public class KspWillowChopperScript extends Script {
 
         if (!Rs2Bank.isOpen()) {
             status = "Getting tinderbox";
-            if (!Rs2Bank.openBank() && !Rs2Bank.isOpen()) {
+            if (!openAllowedBank() && !Rs2Bank.isOpen()) {
                 status = "Need Tinderbox / nearby bank";
                 return;
             }
