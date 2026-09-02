@@ -1,0 +1,99 @@
+name: Patch Jewelry production item-id selector
+on:
+  push:
+    branches: [fix-jewelry-production-item-id-click]
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix-jewelry-production-item-id-click
+      - name: Patch production selector
+        shell: python
+        run: |
+          from pathlib import Path
+          p = Path('kspjewelrycrafter/KspJewelryCrafterScript.java')
+          s = p.read_text()
+          old = '''        String widgetName = craftingWidgetName(activeRecipe);
+        status = "Selecting " + widgetName;
+        if (!Rs2Widget.clickWidget(widgetName, true))
+        {
+            status = "Unable to select " + widgetName;
+            return;
+        }
+'''
+          new = '''        int outputId = recipeOutputId();
+        status = "Selecting " + activeRecipe.getOutputName() + " [" + outputId + "]";
+        Widget productionWidget = findProductionWidgetByItemId(outputId);
+        if (productionWidget == null)
+        {
+            status = "Unable to find production item ID " + outputId + " for " + activeRecipe.getOutputName();
+            return;
+        }
+        if (!Rs2Widget.clickWidget(productionWidget))
+        {
+            status = "Unable to select " + activeRecipe.getOutputName() + " [" + outputId + "]";
+            return;
+        }
+'''
+          if old not in s:
+              raise SystemExit('production selection block not found')
+          s = s.replace(old, new, 1)
+          old_helper = '''    private String craftingWidgetName(JewelryRecipe recipe)
+    {
+        String name = recipe.getOutputName();
+        if (name.endsWith(" (u)")) name = name.substring(0, name.length() - 4);
+        if (name.equalsIgnoreCase("Dragonstone bracelet")) return "Dragon bracelet";
+        return name;
+    }
+'''
+          new_helper = '''    private Widget findProductionWidgetByItemId(int itemId)
+    {
+        if (itemId <= 0) return null;
+        int groupId = activeRecipe != null && activeRecipe.getBarName().equalsIgnoreCase("Silver bar") ? 6 : 446;
+        return Microbot.getClientThread().runOnClientThreadOptional(() ->
+        {
+            Widget root = Microbot.getClient().getWidget(groupId, 0);
+            return findProductionWidgetByItemId(root, itemId);
+        }).orElse(null);
+    }
+
+    private Widget findProductionWidgetByItemId(Widget widget, int itemId)
+    {
+        if (widget == null || widget.isHidden()) return null;
+        if (widget.getItemId() == itemId) return widget;
+
+        Widget[][] groups = {
+            widget.getChildren(),
+            widget.getNestedChildren(),
+            widget.getDynamicChildren(),
+            widget.getStaticChildren()
+        };
+        for (Widget[] group : groups)
+        {
+            if (group == null) continue;
+            for (Widget child : group)
+            {
+                Widget found = findProductionWidgetByItemId(child, itemId);
+                if (found != null) return found;
+            }
+        }
+        return null;
+    }
+'''
+          if old_helper not in s:
+              raise SystemExit('craftingWidgetName helper not found')
+          s = s.replace(old_helper, new_helper, 1)
+          p.write_text(s)
+      - name: Remove temporary workflow
+        run: rm .github/workflows/patch-jewelry-production-item-id-click.yml
+      - name: Commit patch
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git commit -m "fix: select Jewelry production by item ID"
+          git push origin HEAD:fix-jewelry-production-item-id-click
