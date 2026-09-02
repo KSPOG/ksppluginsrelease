@@ -51,7 +51,8 @@ public class KspStrugglingSaplingEvent implements BlockingEvent {
     @Override
     public boolean validate() {
         try {
-            if (!Microbot.isPluginEnabled(plugin) || !Microbot.isLoggedIn()) return false;
+            if (!plugin.isForestryEventEnabled(KspForestryEvent.STRUGGLING_SAPLING)
+                    || !Microbot.isPluginEnabled(plugin) || !Microbot.isLoggedIn()) return false;
 
             return Microbot.getRs2TileObjectCache()
                     .query()
@@ -105,14 +106,12 @@ public class KspStrugglingSaplingEvent implements BlockingEvent {
             int knownId = learnedIds[stage];
 
             if (knownId != -1) {
-                // Once a correct stage ingredient is discovered, always reuse it.
                 Rs2TileObjectModel known = ingredients.stream()
                         .filter(item -> item.getId() == knownId)
                         .findFirst()
                         .orElse(null);
 
                 if (known == null) {
-                    // Never degrade back to random once the optimal stage is known.
                     sleepUntil(() -> false, 400);
                     continue;
                 }
