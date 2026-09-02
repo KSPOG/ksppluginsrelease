@@ -11,6 +11,7 @@ import net.runelite.api.gameval.VarbitID;
 import net.runelite.api.widgets.Widget;
 import net.runelite.client.plugins.microbot.Microbot;
 import net.runelite.client.plugins.microbot.Script;
+import net.runelite.client.plugins.microbot.kspmule.KspMuleWorkerService;
 import net.runelite.client.plugins.microbot.util.bank.Rs2Bank;
 import net.runelite.client.plugins.microbot.util.gameobject.Rs2GameObject;
 import net.runelite.client.plugins.microbot.util.grandexchange.GrandExchangeAction;
@@ -124,7 +125,13 @@ public class KspJewelryCrafterScript extends Script
         {
             try
             {
-                if (!super.run() || !Microbot.isLoggedIn()) return;
+                if (!Microbot.isLoggedIn()) return;
+                if (KspMuleWorkerService.isTransferPriorityActive())
+                {
+                    status = "Mule transfer has priority";
+                    return;
+                }
+                if (!super.run()) return;
                 tick();
             }
             catch (Exception ex)
@@ -138,6 +145,11 @@ public class KspJewelryCrafterScript extends Script
 
     private void tick()
     {
+        if (KspMuleWorkerService.isTransferPriorityActive())
+        {
+            status = "Mule transfer has priority";
+            return;
+        }
         switch (state)
         {
             case STARTING: start(); break;
@@ -430,6 +442,11 @@ public class KspJewelryCrafterScript extends Script
 
     private boolean openVerifiedBank(boolean edgeville, String openingStatus)
     {
+        if (KspMuleWorkerService.isTransferPriorityActive())
+        {
+            status = "Mule transfer has priority";
+            return false;
+        }
         boolean wasOpen = bankWidgetOpen();
         int epoch = Rs2Bank.getBankLiveEpoch();
         if (wasOpen)
@@ -833,6 +850,11 @@ if (!Rs2Widget.clickWidget(productionWidget))
 
     private boolean openVerifiedGe(String openingStatus)
     {
+        if (KspMuleWorkerService.isTransferPriorityActive())
+        {
+            status = "Mule transfer has priority";
+            return false;
+        }
         if (Rs2GrandExchange.isOpen()) return true;
         status = openingStatus;
         if (!Rs2GrandExchange.openExchange())
