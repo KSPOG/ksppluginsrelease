@@ -17,10 +17,10 @@ import net.runelite.client.config.ConfigManager;
 import net.runelite.client.eventbus.Subscribe;
 import net.runelite.client.events.ConfigChanged;
 import net.runelite.client.plugins.Plugin;
-import net.runelite.client.plugins.PluginConstants;
 import net.runelite.client.plugins.PluginDescriptor;
 import net.runelite.client.plugins.microbot.BlockingEvent;
 import net.runelite.client.plugins.microbot.Microbot;
+import net.runelite.client.plugins.microbot.PluginConstants;
 import net.runelite.client.plugins.microbot.api.tileobject.Rs2TileObjectCache;
 import net.runelite.client.plugins.microbot.api.tileobject.models.Rs2TileObjectModel;
 import net.runelite.client.plugins.microbot.kspmule.KspMuleWorkerService;
@@ -62,9 +62,11 @@ import java.util.regex.Pattern;
         isExternal = PluginConstants.IS_EXTERNAL
 )
 public class KspWillowChopperPlugin extends Plugin {
-    // Intentionally unchanged at the user's request.
+    /** Intentionally unchanged at the user's request. */
     public static final String VERSION = "0.1.3";
 
+    private static final String LEGACY_FORESTRY_PACKAGE =
+            "net.runelite.client.plugins.microbot.kspwillowchopper.forestry.";
     private static final Pattern ANIMA_BARK_PATTERN = Pattern.compile(
             "You've been awarded <col=[0-9a-f]+>(\\d+) Anima-infused bark</col>\\.");
 
@@ -112,6 +114,7 @@ public class KspWillowChopperPlugin extends Plugin {
             forestryCompletionTimes.clear();
         }
 
+        purgeLegacyGlobalForestryHandlers();
         rebuildForestryHandlers();
         muleService.start(config);
         overlayManager.add(overlay);
@@ -130,13 +133,30 @@ public class KspWillowChopperPlugin extends Plugin {
         ritualCircles.clear();
         saplingIngredients.clear();
         overlayManager.remove(overlay);
+        purgeLegacyGlobalForestryHandlers();
     }
 
     /**
-     * Forestry handlers are deliberately private to this plugin. They are NOT
-     * registered in Microbot's global BlockingEventManager. The main Chopper
-     * script invokes one valid handler itself, which prevents stale/reloaded
-     * Forestry tasks from globally freezing every script.
+     * Older Chopper builds registered all Forestry helpers in Microbot's global
+     * BlockingEventManager. A hot reload could leave one behind and freeze every
+     * script. Remove only Chopper Forestry handlers; core Microbot events and
+     * other plugins are untouched.
+     */
+    private void purgeLegacyGlobalForestryHandlers() {
+        try {
+            List<BlockingEvent> registered = new ArrayList<>(Microbot.getBlockingEventManager().getEvents());
+            for (BlockingEvent event : registered) {
+                if (event != null && event.getClass().getName().startsWith(LEGACY_FORESTRY_PACKAGE)) {
+                    Microbot.getBlockingEventManager().remove(event);
+                }
+            }
+        } catch (Exception ex) {
+            Microbot.logStackTrace("KSP Chopper legacy Forestry cleanup", ex);
+        }
+    }
+
+    /**
+     * Build local event handlers only. Nothing here is registered globally.
      */
     private void rebuildForestryHandlers() {
         forestryHandlers.clear();
@@ -161,10 +181,8 @@ public class KspWillowChopperPlugin extends Plugin {
     }
 
     /**
-     * Called only from the Chopper script thread. Returns true when a Forestry
-     * handler owned the current iteration. execute() may remain in the event until
-     * it finishes; this pauses Chopper locally without occupying Microbot's global
-     * BlockingEventManager.
+     * Called from the Chopper script thread. A Forestry event may temporarily own
+     * that thread, but never Microbot's shared BlockingEvent executor.
      */
     public boolean runForestryIfNeeded() {
         if (!runtimeActive || config == null || !config.enableForestry()) {
@@ -188,9 +206,7 @@ public class KspWillowChopperPlugin extends Plugin {
                 Microbot.logStackTrace("KSP Chopper Forestry", ex);
                 return true;
             } finally {
-                if (currentForestryEvent != KspForestryEvent.NONE && !runtimeActive) {
-                    currentForestryEvent = KspForestryEvent.NONE;
-                }
+                currentForestryEvent = KspForestryEvent.NONE;
             }
         }
 
@@ -316,8 +332,7 @@ public class KspWillowChopperPlugin extends Plugin {
     }
 
     public boolean canStartForestryInteraction(long hash, String action) {
-        long now = System.currentTimeMillis();
-        long elapsed = now - lastForestryInteractionMillis.get();
+        long elapsed = System.currentTimeMillis() - lastForestryInteractionMillis.get();
         long key = forestryInteractionKey(hash, action);
         return runtimeActive
                 && elapsed >= 900L
