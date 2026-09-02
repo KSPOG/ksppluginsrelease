@@ -1,0 +1,55 @@
+name: Patch AIO Fighter combat area
+on:
+  push:
+    branches:
+      - fix-aio-fighter-combat-area
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix-aio-fighter-combat-area
+      - name: Patch AIO Fighter
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          script = Path('kspaiofighter/KspAioFighterScript.java')
+          text = script.read_text()
+
+          method_start = '''\tprivate boolean moveToAttackAreaCenterIfNeeded()\n\t{\n\t\tif (!config.useAttackArea())\n\t\t{\n\t\t\treturn false;\n\t\t}\n'''
+          method_replacement = '''\tprivate boolean moveToAttackAreaCenterIfNeeded()\n\t{\n\t\tif (!config.useAttackArea())\n\t\t{\n\t\t\treturn false;\n\t\t}\n\n\t\t// Do not interrupt an active fight just because melee movement temporarily\n\t\t// carried the player outside the configured rectangle. The target itself is\n\t\t// already filtered to the configured attack area before we click Attack.\n\t\tif (Rs2Player.isInCombat() || Rs2Player.isInteracting())\n\t\t{\n\t\t\treturn false;\n\t\t}\n'''
+          if method_start not in text:
+              raise SystemExit('moveToAttackAreaCenterIfNeeded start block not found')
+          text = text.replace(method_start, method_replacement, 1)
+
+          old_target = '''\t\tWorldPoint center = getAttackAreaCenterFromTiles();\n\t\tif (!isConfiguredTileValid(center))\n\t\t{\n\t\t\treturn false;\n\t\t}\n'''
+          new_target = '''\t\tWorldPoint returnPoint = getNearestPointInsideConfiguredArea(playerLocation);\n\t\tif (!isConfiguredTileValid(returnPoint))\n\t\t{\n\t\t\treturn false;\n\t\t}\n'''
+          if old_target not in text:
+              raise SystemExit('attack area center target block not found')
+          text = text.replace(old_target, new_target, 1)
+
+          old_walk = '''\t\tlastAttackAreaWalkAttemptMs = System.currentTimeMillis();\n\t\tRs2Walker.walkTo(center, ATTACK_AREA_WALK_DISTANCE);\n\t\tsetStatus("walking to attack area " + formatPoint(center) + " distance " + ATTACK_AREA_WALK_DISTANCE);\n\t\treturn true;\n\t}\n\n\tprivate boolean canRetryWalk(long lastWalkAttemptMs)\n'''
+          new_walk = '''\t\tlastAttackAreaWalkAttemptMs = System.currentTimeMillis();\n\t\tRs2Walker.walkTo(returnPoint, ATTACK_AREA_WALK_DISTANCE);\n\t\tsetStatus("walking to attack area " + formatPoint(returnPoint) + " distance " + ATTACK_AREA_WALK_DISTANCE);\n\t\treturn true;\n\t}\n\n\tprivate WorldPoint getNearestPointInsideConfiguredArea(WorldPoint playerLocation)\n\t{\n\t\tWorldPoint tile1 = getAttackAreaTile1();\n\t\tWorldPoint tile2 = getAttackAreaTile2();\n\t\tif (playerLocation == null || !isConfiguredTileValid(tile1) || !isConfiguredTileValid(tile2)\n\t\t\t\t|| tile1.getPlane() != tile2.getPlane())\n\t\t{\n\t\t\treturn getAttackAreaCenterFromTiles();\n\t\t}\n\n\t\tint minX = Math.min(tile1.getX(), tile2.getX());\n\t\tint maxX = Math.max(tile1.getX(), tile2.getX());\n\t\tint minY = Math.min(tile1.getY(), tile2.getY());\n\t\tint maxY = Math.max(tile1.getY(), tile2.getY());\n\t\tint x = Math.max(minX, Math.min(maxX, playerLocation.getX()));\n\t\tint y = Math.max(minY, Math.min(maxY, playerLocation.getY()));\n\t\treturn new WorldPoint(x, y, tile1.getPlane());\n\t}\n\n\tprivate boolean canRetryWalk(long lastWalkAttemptMs)\n'''
+          if old_walk not in text:
+              raise SystemExit('attack area walk block not found')
+          text = text.replace(old_walk, new_walk, 1)
+          script.write_text(text)
+
+          plugin = Path('kspaiofighter/KspAioFighterPlugin.java')
+          ptext = plugin.read_text()
+          if 'static final String version = "1.9.16";' not in ptext:
+              raise SystemExit('expected AIO Fighter version 1.9.16 not found')
+          plugin.write_text(ptext.replace('static final String version = "1.9.16";', 'static final String version = "1.9.17";', 1))
+          PY
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/patch-aio-fighter-combat-area.yml
+          git add kspaiofighter/KspAioFighterScript.java kspaiofighter/KspAioFighterPlugin.java
+          git commit -m "Fix AIO Fighter combat-area recentering"
+          git push origin HEAD:fix-aio-fighter-combat-area
