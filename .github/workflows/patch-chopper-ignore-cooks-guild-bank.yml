@@ -20,8 +20,8 @@ jobs:
           fetch-depth: 0
 
       - name: Patch Chopper banking
-        shell: python
         run: |
+          python3 - <<'PY'
           from pathlib import Path
 
           path = Path('kspwillowchopper/KspWillowChopperScript.java')
@@ -140,6 +140,7 @@ jobs:
 
           text = text.replace(marker, methods + marker, 1)
           path.write_text(text, encoding='utf-8')
+          PY
 
       - name: Commit source change and remove temporary workflow
         run: |
