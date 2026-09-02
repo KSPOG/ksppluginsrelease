@@ -781,13 +781,19 @@ public class KspJewelryCrafterScript extends Script
         }
         if (!makeAllSelected()) return;
 
-        String widgetName = craftingWidgetName(activeRecipe);
-        status = "Selecting " + widgetName;
-        if (!Rs2Widget.clickWidget(widgetName, true))
-        {
-            status = "Unable to select " + widgetName;
-            return;
-        }
+        int outputId = recipeOutputId();
+status = "Selecting " + activeRecipe.getOutputName() + " [" + outputId + "]";
+Widget productionWidget = findProductionWidgetByItemId(outputId);
+if (productionWidget == null)
+{
+    status = "Unable to find production item ID " + outputId + " for " + activeRecipe.getOutputName();
+    return;
+}
+if (!Rs2Widget.clickWidget(productionWidget))
+{
+    status = "Unable to select " + activeRecipe.getOutputName() + " [" + outputId + "]";
+    return;
+}
         status = "Starting " + activeRecipe.getOutputName();
         sleepUntil(() -> Rs2Player.isAnimating() || craftingInventoryChanged(), 5_000);
         if (craftingInventoryChanged()) observeCraftingProgress();
@@ -1837,13 +1843,39 @@ public class KspJewelryCrafterScript extends Script
         return Rs2Widget.isGoldCraftingWidgetOpen() || Rs2Widget.isSilverCraftingWidgetOpen();
     }
 
-    private String craftingWidgetName(JewelryRecipe recipe)
+    private Widget findProductionWidgetByItemId(int itemId)
+{
+    if (itemId <= 0) return null;
+    int groupId = activeRecipe != null && activeRecipe.getBarName().equalsIgnoreCase("Silver bar") ? 6 : 446;
+    return Microbot.getClientThread().runOnClientThreadOptional(() ->
     {
-        String name = recipe.getOutputName();
-        if (name.endsWith(" (u)")) name = name.substring(0, name.length() - 4);
-        if (name.equalsIgnoreCase("Dragonstone bracelet")) return "Dragon bracelet";
-        return name;
+        Widget root = Microbot.getClient().getWidget(groupId, 0);
+        return findProductionWidgetByItemId(root, itemId);
+    }).orElse(null);
+}
+
+private Widget findProductionWidgetByItemId(Widget widget, int itemId)
+{
+    if (widget == null || widget.isHidden()) return null;
+    if (widget.getItemId() == itemId) return widget;
+
+    Widget[][] groups = {
+        widget.getChildren(),
+        widget.getNestedChildren(),
+        widget.getDynamicChildren(),
+        widget.getStaticChildren()
+    };
+    for (Widget[] group : groups)
+    {
+        if (group == null) continue;
+        for (Widget child : group)
+        {
+            Widget found = findProductionWidgetByItemId(child, itemId);
+            if (found != null) return found;
+        }
     }
+    return null;
+}
 
     public long getRuntimeMillis()
     {
