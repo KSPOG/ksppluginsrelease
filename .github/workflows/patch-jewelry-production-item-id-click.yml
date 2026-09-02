@@ -12,82 +12,83 @@ jobs:
         with:
           ref: fix-jewelry-production-item-id-click
       - name: Patch production selector
-        shell: python
         run: |
+          python - <<'PY'
           from pathlib import Path
           p = Path('kspjewelrycrafter/KspJewelryCrafterScript.java')
           s = p.read_text()
           old = '''        String widgetName = craftingWidgetName(activeRecipe);
-        status = "Selecting " + widgetName;
-        if (!Rs2Widget.clickWidget(widgetName, true))
-        {
-            status = "Unable to select " + widgetName;
-            return;
-        }
-'''
+          status = "Selecting " + widgetName;
+          if (!Rs2Widget.clickWidget(widgetName, true))
+          {
+              status = "Unable to select " + widgetName;
+              return;
+          }
+          '''
           new = '''        int outputId = recipeOutputId();
-        status = "Selecting " + activeRecipe.getOutputName() + " [" + outputId + "]";
-        Widget productionWidget = findProductionWidgetByItemId(outputId);
-        if (productionWidget == null)
-        {
-            status = "Unable to find production item ID " + outputId + " for " + activeRecipe.getOutputName();
-            return;
-        }
-        if (!Rs2Widget.clickWidget(productionWidget))
-        {
-            status = "Unable to select " + activeRecipe.getOutputName() + " [" + outputId + "]";
-            return;
-        }
-'''
+          status = "Selecting " + activeRecipe.getOutputName() + " [" + outputId + "]";
+          Widget productionWidget = findProductionWidgetByItemId(outputId);
+          if (productionWidget == null)
+          {
+              status = "Unable to find production item ID " + outputId + " for " + activeRecipe.getOutputName();
+              return;
+          }
+          if (!Rs2Widget.clickWidget(productionWidget))
+          {
+              status = "Unable to select " + activeRecipe.getOutputName() + " [" + outputId + "]";
+              return;
+          }
+          '''
           if old not in s:
               raise SystemExit('production selection block not found')
           s = s.replace(old, new, 1)
           old_helper = '''    private String craftingWidgetName(JewelryRecipe recipe)
-    {
-        String name = recipe.getOutputName();
-        if (name.endsWith(" (u)")) name = name.substring(0, name.length() - 4);
-        if (name.equalsIgnoreCase("Dragonstone bracelet")) return "Dragon bracelet";
-        return name;
-    }
-'''
+          {
+              String name = recipe.getOutputName();
+              if (name.endsWith(" (u)")) name = name.substring(0, name.length() - 4);
+              if (name.equalsIgnoreCase("Dragonstone bracelet")) return "Dragon bracelet";
+              return name;
+          }
+          '''
           new_helper = '''    private Widget findProductionWidgetByItemId(int itemId)
-    {
-        if (itemId <= 0) return null;
-        int groupId = activeRecipe != null && activeRecipe.getBarName().equalsIgnoreCase("Silver bar") ? 6 : 446;
-        return Microbot.getClientThread().runOnClientThreadOptional(() ->
-        {
-            Widget root = Microbot.getClient().getWidget(groupId, 0);
-            return findProductionWidgetByItemId(root, itemId);
-        }).orElse(null);
-    }
+          {
+              if (itemId <= 0) return null;
+              int groupId = activeRecipe != null && activeRecipe.getBarName().equalsIgnoreCase("Silver bar") ? 6 : 446;
+              return Microbot.getClientThread().runOnClientThreadOptional(() ->
+              {
+                  Widget root = Microbot.getClient().getWidget(groupId, 0);
+                  return findProductionWidgetByItemId(root, itemId);
+              }).orElse(null);
+          }
 
-    private Widget findProductionWidgetByItemId(Widget widget, int itemId)
-    {
-        if (widget == null || widget.isHidden()) return null;
-        if (widget.getItemId() == itemId) return widget;
+          private Widget findProductionWidgetByItemId(Widget widget, int itemId)
+          {
+              if (widget == null || widget.isHidden()) return null;
+              if (widget.getItemId() == itemId) return widget;
 
-        Widget[][] groups = {
-            widget.getChildren(),
-            widget.getNestedChildren(),
-            widget.getDynamicChildren(),
-            widget.getStaticChildren()
-        };
-        for (Widget[] group : groups)
-        {
-            if (group == null) continue;
-            for (Widget child : group)
-            {
-                Widget found = findProductionWidgetByItemId(child, itemId);
-                if (found != null) return found;
-            }
-        }
-        return null;
-    }
-'''
+              Widget[][] groups = {
+                  widget.getChildren(),
+                  widget.getNestedChildren(),
+                  widget.getDynamicChildren(),
+                  widget.getStaticChildren()
+              };
+              for (Widget[] group : groups)
+              {
+                  if (group == null) continue;
+                  for (Widget child : group)
+                  {
+                      Widget found = findProductionWidgetByItemId(child, itemId);
+                      if (found != null) return found;
+                  }
+              }
+              return null;
+          }
+          '''
           if old_helper not in s:
               raise SystemExit('craftingWidgetName helper not found')
           s = s.replace(old_helper, new_helper, 1)
           p.write_text(s)
+          PY
       - name: Remove temporary workflow
         run: rm .github/workflows/patch-jewelry-production-item-id-click.yml
       - name: Commit patch
