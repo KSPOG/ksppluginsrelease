@@ -1,0 +1,60 @@
+name: Patch Jewelry Crafter exact input selection
+on:
+  push:
+    branches: [fix-jewelry-exact-input-selection]
+permissions:
+  contents: write
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix-jewelry-exact-input-selection
+      - name: Apply exact input selection fix
+        shell: python
+        run: |
+          from pathlib import Path
+
+          script_path = Path('kspjewelrycrafter/KspJewelryCrafterScript.java')
+          s = script_path.read_text(encoding='utf-8')
+
+          s = s.replace('Rs2Inventory.hasItem(activeRecipe.getMouldName())', 'Rs2Inventory.hasItem(activeRecipe.getMouldName(), true)')
+          s = s.replace('Rs2Inventory.hasItem(mould)', 'Rs2Inventory.hasItem(mould, true)')
+
+          old = '''    private boolean selectGeBuyItem(String itemName)\n    {\n        if (geSelectedOfferReady()) return true;\n\n        if (!geSearchResultReady(itemName))\n        {\n            status = "Waiting for GE item search";\n            if (!Rs2Widget.sleepUntilHasWidgetText(\n                "Start typing the name of an item to search for it",\n                GE_SEARCH_GROUP, GE_SEARCH_PROMPT_CHILD, false, 3_500))\n                return false;\n\n            Rs2Keyboard.typeString(itemName);\n            if (!sleepUntil(() -> geSearchResultReady(itemName), 3_500))\n                return false;\n        }\n\n        for (int attempt = 1; attempt <= 3; attempt++)\n        {\n            if (geSelectedOfferReady()) return true;\n            if (!geSearchResultReady(itemName))\n            {\n                if (sleepUntil(this::geSelectedOfferReady, 900)) return true;\n                status = "Waiting for GE search result: " + itemName;\n                continue;\n            }\n\n            status = attempt == 1\n                ? "Selecting GE item: " + itemName\n                : "Retrying GE item selection (" + attempt + "/3): " + itemName;\n            sleep(250, 450);\n            if (!clickGeSearchResultSafely(itemName))\n            {\n                sleep(250, 400);\n                continue;\n            }\n            if (sleepUntil(this::geSelectedOfferReady, 2_000))\n            {\n                sleep(250, 450);\n                return true;\n            }\n            sleep(300, 500);\n        }\n\n        status = "GE item did not select: " + itemName;\n        return false;\n    }\n'''
+
+          new = '''    private boolean selectGeBuyItem(String itemName)\n    {\n        if (itemName == null || itemName.isBlank()) return false;\n\n        // Never accept a previously selected GE item as the next input. The old\n        // shortcut only checked that some price was visible, so a ring/necklace/\n        // amulet from the previous offer could be mistaken for a bar, gem or mould.\n        status = "Waiting for exact GE item search: " + itemName;\n        if (!Rs2Widget.sleepUntilHasWidgetText(\n            "Start typing the name of an item to search for it",\n            GE_SEARCH_GROUP, GE_SEARCH_PROMPT_CHILD, false, 3_500))\n        {\n            status = "GE search prompt not ready for: " + itemName;\n            return false;\n        }\n\n        Rs2Keyboard.typeString(itemName);\n        if (!sleepUntil(() -> geSearchResultReady(itemName), 3_500))\n        {\n            status = "Exact GE search result not found: " + itemName;\n            return false;\n        }\n\n        for (int attempt = 1; attempt <= 3; attempt++)\n        {\n            if (!geSearchResultReady(itemName))\n            {\n                status = "Exact GE result disappeared: " + itemName;\n                if (!sleepUntil(() -> geSearchResultReady(itemName), 900)) continue;\n            }\n\n            status = attempt == 1\n                ? "Selecting exact GE item: " + itemName\n                : "Retrying exact GE item (" + attempt + "/3): " + itemName;\n            sleep(250, 450);\n            if (!clickGeSearchResultSafely(itemName))\n            {\n                sleep(250, 400);\n                continue;\n            }\n            if (sleepUntil(this::geSelectedOfferReady, 2_000))\n            {\n                sleep(250, 450);\n                return true;\n            }\n            sleep(300, 500);\n        }\n\n        status = "Exact GE item did not select: " + itemName;\n        return false;\n    }\n'''
+
+          if old not in s:
+              raise SystemExit('selectGeBuyItem block not found')
+          s = s.replace(old, new)
+          script_path.write_text(s, encoding='utf-8')
+
+          price_path = Path('kspjewelrycrafter/JewelryPriceService.java')
+          p = price_path.read_text(encoding='utf-8')
+          p = p.replace('import net.runelite.client.plugins.microbot.util.item.Rs2ItemManager;\n', '')
+          old_price = '''    public int getItemId(String itemName)\n    {\n        if (itemName == null || itemName.isBlank()) return -1;\n        String key = itemName.trim().toLowerCase(Locale.ROOT);\n        Integer cached = itemIds.get(key);\n        if (cached != null) return cached;\n\n        int id = Rs2ItemManager.getItemIdByName(itemName, false);\n        if (id <= 0)\n        {\n            try { id = Microbot.getRs2ItemManager().getItemId(itemName); }\n            catch (Exception ignored) { id = -1; }\n        }\n        if (id > 0) itemIds.put(key, id);\n        return id;\n    }\n'''
+          new_price = '''    public int getItemId(String itemName)\n    {\n        if (itemName == null || itemName.isBlank()) return -1;\n        String normalized = itemName.trim();\n        String key = normalized.toLowerCase(Locale.ROOT);\n        Integer cached = itemIds.get(key);\n        if (cached != null) return cached;\n\n        // Recipe inputs/outputs must resolve by exact canonical name. Falling back\n        // to the first fuzzy ItemManager result can map generic jewellery terms to\n        // another ring, necklace or amulet and poison pricing/restock decisions.\n        int id = Microbot.getClientThread().runOnClientThreadOptional(() ->\n        {\n            try\n            {\n                return Microbot.getItemManager().search(normalized).stream()\n                    .filter(item -> item != null && item.getName() != null\n                        && item.getName().equalsIgnoreCase(normalized))\n                    .mapToInt(item -> item.getId())\n                    .findFirst()\n                    .orElse(-1);\n            }\n            catch (Exception ignored)\n            {\n                return -1;\n            }\n        }).orElse(-1);\n\n        if (id > 0) itemIds.put(key, id);\n        return id;\n    }\n'''
+          if old_price not in p:
+              raise SystemExit('getItemId block not found')
+          p = p.replace(old_price, new_price)
+          price_path.write_text(p, encoding='utf-8')
+
+          plugin_path = Path('kspjewelrycrafter/KspJewelryCrafterPlugin.java')
+          v = plugin_path.read_text(encoding='utf-8')
+          if 'public static final String VERSION = "0.1.24";' not in v:
+              raise SystemExit('expected Jewelry Crafter version 0.1.24 not found')
+          v = v.replace('public static final String VERSION = "0.1.24";', 'public static final String VERSION = "0.1.25";')
+          plugin_path.write_text(v, encoding='utf-8')
+
+          workflow = Path('.github/workflows/patch-jewelry-exact-input-selection.yml')
+          workflow.unlink()
+      - name: Commit patch
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'fix: require exact Jewelry Crafter inputs'
+          git push origin HEAD:fix-jewelry-exact-input-selection
