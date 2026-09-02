@@ -9,8 +9,8 @@ import net.runelite.client.plugins.microbot.BlockingEventPriority;
 import net.runelite.client.plugins.microbot.Microbot;
 import net.runelite.client.plugins.microbot.api.tileobject.models.Rs2TileObjectModel;
 import net.runelite.client.plugins.microbot.kspwillowchopper.KspForestryEvent;
-import net.runelite.client.plugins.microbot.kspwillowchopper.KspWillowChopperPlugin;
 import net.runelite.client.plugins.microbot.kspwillowchopper.KspTileObjectSupport;
+import net.runelite.client.plugins.microbot.kspwillowchopper.KspWillowChopperPlugin;
 import net.runelite.client.plugins.microbot.util.inventory.Rs2Inventory;
 import net.runelite.client.plugins.microbot.util.player.Rs2Player;
 
@@ -19,11 +19,13 @@ import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
 
+import static net.runelite.client.plugins.microbot.util.Global.sleep;
 import static net.runelite.client.plugins.microbot.util.Global.sleepUntil;
 
 @Slf4j
 public class KspStrugglingSaplingEvent implements BlockingEvent {
     private static final int FORESTRY_DISTANCE = 15;
+    private static final long MAX_EVENT_MS = 120_000L;
 
     private static final List<Integer> INGREDIENT_IDS = List.of(
             ObjectID.GATHERING_EVENT_SAPLING_INGREDIENT_1,
@@ -40,7 +42,7 @@ public class KspStrugglingSaplingEvent implements BlockingEvent {
     private final String[] learnedNames = {"?", "?", "?"};
 
     @SuppressWarnings("unchecked")
-    private final Set<Integer>[] triedByStage = new Set[] {
+    private final Set<Integer>[] triedByStage = new Set[]{
             new HashSet<>(), new HashSet<>(), new HashSet<>()
     };
 
@@ -50,120 +52,120 @@ public class KspStrugglingSaplingEvent implements BlockingEvent {
 
     @Override
     public boolean validate() {
-        try {
-            if (!plugin.isForestryEventEnabled(KspForestryEvent.STRUGGLING_SAPLING)
-                    || !Microbot.isPluginEnabled(plugin) || !Microbot.isLoggedIn()) return false;
-
-            return Microbot.getRs2TileObjectCache()
-                    .query()
-                    .withName("Struggling sapling")
-                    .toListOnClientThread()
-                    .stream()
-                    .anyMatch(obj ->
-                            KspTileObjectSupport.hasAction(obj, "Add-mulch")
-                                    && obj.getWorldLocation().distanceTo(Rs2Player.getWorldLocation()) <= FORESTRY_DISTANCE);
-        } catch (Exception ex) {
-            log.error("Struggling Sapling validation failed", ex);
+        if (!plugin.isForestryEventEnabled(KspForestryEvent.STRUGGLING_SAPLING)
+                || !Microbot.isLoggedIn()) {
             return false;
         }
+        return findSapling() != null;
     }
 
     @Override
     public boolean execute() {
         plugin.setCurrentForestryEvent(KspForestryEvent.STRUGGLING_SAPLING);
-
         if (!plugin.ensureInventorySpace(5)) {
             return true;
         }
 
-        while (validate()) {
+        long deadline = System.currentTimeMillis() + MAX_EVENT_MS;
+        while (plugin.isForestryEventEnabled(KspForestryEvent.STRUGGLING_SAPLING)
+                && Microbot.isLoggedIn()
+                && System.currentTimeMillis() < deadline) {
             Rs2TileObjectModel sapling = findSapling();
             if (sapling == null) {
-                sleepUntil(() -> false, 300);
-                continue;
+                break;
             }
 
             if (Rs2Inventory.contains(ItemID.GATHERING_EVENT_SAPLING_MULCH_STAGE3)) {
                 if (!plugin.canStartForestryInteraction(sapling.getHash(), "Add-mulch")) {
-                    sleepUntil(() -> false, 150);
+                    sleep(120);
                     continue;
                 }
-                sapling.click("Add-mulch");
+
+                if (!sapling.click("Add-mulch")) {
+                    sleep(250);
+                    continue;
+                }
+
                 plugin.markForestryInteraction(sapling.getHash(), "Add-mulch");
-                Rs2Player.waitForAnimation();
-                sleepUntil(() -> !Rs2Player.isAnimating(), 5000);
+                Rs2Player.waitForAnimation(2_000);
+                sleepUntil(() -> !Rs2Player.isAnimating() || !validate(), 4_000);
                 continue;
             }
 
             int stage = currentStage();
             List<Rs2TileObjectModel> ingredients = availableIngredients();
-
             if (ingredients.isEmpty()) {
-                sleepUntil(() -> false, 300);
+                sleep(250);
                 continue;
             }
 
-            int knownId = learnedIds[stage];
-
-            if (knownId != -1) {
-                Rs2TileObjectModel known = ingredients.stream()
-                        .filter(item -> item.getId() == knownId)
-                        .findFirst()
-                        .orElse(null);
-
-                if (known == null) {
-                    sleepUntil(() -> false, 400);
-                    continue;
-                }
-
-                if (!plugin.canStartForestryInteraction(known.getHash(), "Collect")) {
-                    sleepUntil(() -> false, 150);
-                    continue;
-                }
-                known.click("Collect");
-                plugin.markForestryInteraction(known.getHash(), "Collect");
-                Rs2Player.waitForAnimation();
-                sleepUntil(() -> currentStage() != stage || !validate(), 4000);
-                continue;
-            }
-
-            Set<Integer> tried = triedByStage[stage];
-            Rs2TileObjectModel candidate = ingredients.stream()
-                    .filter(item -> !tried.contains(item.getId()))
-                    .findFirst()
-                    .orElse(null);
-
+            Rs2TileObjectModel candidate = chooseIngredient(stage, ingredients);
             if (candidate == null) {
-                tried.clear();
-                sleepUntil(() -> false, 300);
+                sleep(250);
                 continue;
             }
 
             if (!plugin.canStartForestryInteraction(candidate.getHash(), "Collect")) {
-                sleepUntil(() -> false, 150);
+                sleep(120);
                 continue;
             }
-            tried.add(candidate.getId());
-            candidate.click("Collect");
+
+            if (!candidate.click("Collect")) {
+                sleep(300);
+                continue;
+            }
+
+            if (learnedIds[stage] == -1) {
+                triedByStage[stage].add(candidate.getId());
+            }
             plugin.markForestryInteraction(candidate.getHash(), "Collect");
-            Rs2Player.waitForAnimation();
-            sleepUntil(() -> currentStage() != stage || learnedIds[stage] != -1 || !validate(), 4000);
+            Rs2Player.waitForAnimation(2_000);
+            sleepUntil(() -> currentStage() != stage
+                    || learnedIds[stage] != -1
+                    || !validate(), 4_000);
         }
 
-        plugin.completeForestryEvent(KspForestryEvent.STRUGGLING_SAPLING);
+        if (!validate()) {
+            plugin.completeForestryEvent(KspForestryEvent.STRUGGLING_SAPLING);
+        }
         return true;
     }
 
+    private Rs2TileObjectModel chooseIngredient(int stage, List<Rs2TileObjectModel> ingredients) {
+        int learnedId = learnedIds[stage];
+        if (learnedId != -1) {
+            return ingredients.stream()
+                    .filter(item -> item.getId() == learnedId)
+                    .findFirst()
+                    .orElse(null);
+        }
+
+        Set<Integer> tried = triedByStage[stage];
+        Rs2TileObjectModel candidate = ingredients.stream()
+                .filter(item -> !tried.contains(item.getId()))
+                .findFirst()
+                .orElse(null);
+
+        if (candidate == null) {
+            tried.clear();
+            candidate = ingredients.stream().findFirst().orElse(null);
+        }
+        return candidate;
+    }
+
     public void learnFromChatMessage(String message) {
-        if (message == null) return;
+        if (message == null) {
+            return;
+        }
 
         String lower = message.toLowerCase();
         int stage = lower.contains("first") ? 0
                 : lower.contains("second") ? 1
                 : lower.contains("third") ? 2
                 : -1;
-
-        if (stage < 0) return;
+        if (stage < 0) {
+            return;
+        }
 
         for (GameObject object : plugin.saplingIngredients) {
             String name = plugin.getObjectName(object);
@@ -171,7 +173,7 @@ public class KspStrugglingSaplingEvent implements BlockingEvent {
                 learnedIds[stage] = object.getId();
                 learnedNames[stage] = name;
                 triedByStage[stage].clear();
-                log.info("Learned optimal sapling stage {}: {}", stage + 1, name);
+                log.info("Learned Struggling Sapling stage {} ingredient: {}", stage + 1, name);
                 return;
             }
         }
@@ -190,38 +192,41 @@ public class KspStrugglingSaplingEvent implements BlockingEvent {
     }
 
     public String[] getLearnedNames() {
-        return new String[] {learnedNames[0], learnedNames[1], learnedNames[2]};
+        return new String[]{learnedNames[0], learnedNames[1], learnedNames[2]};
     }
 
     private int currentStage() {
-        if (Rs2Inventory.contains(ItemID.GATHERING_EVENT_SAPLING_MULCH_STAGE2)) return 2;
-        if (Rs2Inventory.contains(ItemID.GATHERING_EVENT_SAPLING_MULCH_STAGE1)) return 1;
+        if (Rs2Inventory.contains(ItemID.GATHERING_EVENT_SAPLING_MULCH_STAGE2)) {
+            return 2;
+        }
+        if (Rs2Inventory.contains(ItemID.GATHERING_EVENT_SAPLING_MULCH_STAGE1)) {
+            return 1;
+        }
         return 0;
     }
 
     private Rs2TileObjectModel findSapling() {
-        return Microbot.getRs2TileObjectCache()
-                .query()
+        return Microbot.getRs2TileObjectCache().query()
                 .withName("Struggling sapling")
                 .toListOnClientThread()
                 .stream()
-                .filter(obj ->
-                        KspTileObjectSupport.hasAction(obj, "Add-mulch")
-                                && obj.getWorldLocation().distanceTo(Rs2Player.getWorldLocation()) <= FORESTRY_DISTANCE)
+                .filter(object -> KspTileObjectSupport.hasAction(object, "Add-mulch"))
+                .filter(object -> object.getWorldLocation().distanceTo(Rs2Player.getWorldLocation()) <= FORESTRY_DISTANCE)
                 .findFirst()
                 .orElse(null);
     }
 
     private List<Rs2TileObjectModel> availableIngredients() {
-        return Microbot.getRs2TileObjectCache()
-                .query()
-                .where(obj -> INGREDIENT_IDS.contains(obj.getId()))
+        return Microbot.getRs2TileObjectCache().query()
+                .where(object -> INGREDIENT_IDS.contains(object.getId()))
                 .toListOnClientThread()
                 .stream()
-                .filter(obj -> KspTileObjectSupport.hasAction(obj, "Collect"))
+                .filter(object -> KspTileObjectSupport.hasAction(object, "Collect"))
                 .collect(Collectors.toList());
     }
 
     @Override
-    public BlockingEventPriority priority() { return BlockingEventPriority.NORMAL; }
+    public BlockingEventPriority priority() {
+        return BlockingEventPriority.NORMAL;
+    }
 }
