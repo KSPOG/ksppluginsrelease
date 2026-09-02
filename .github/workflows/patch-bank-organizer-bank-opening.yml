@@ -1,0 +1,98 @@
+name: Patch Bank Organizer bank opening
+on:
+  push:
+    branches:
+      - fix-bank-organizer-bank-opening
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix-bank-organizer-bank-opening
+      - name: Patch Bank Organizer
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          actuator = Path('kspbankorganizer/BankActuator.java')
+          text = actuator.read_text()
+          if 'import lombok.extern.slf4j.Slf4j;' not in text:
+              text = text.replace('import javax.inject.Inject;\n', 'import javax.inject.Inject;\nimport lombok.extern.slf4j.Slf4j;\n')
+          text = text.replace('final class BankActuator {', '@Slf4j\nfinal class BankActuator {')
+          text = text.replace('WALK_TIMEOUT_MS=15000', 'WALK_TIMEOUT_MS=30000')
+
+          pattern = re.compile(r'''    boolean ensureBankOpen\(\)\{.*?    private boolean waitForBankOrApproach\(\)\{.*?\}\n    private boolean approachingBank\(\)\{.*?\}\n    private boolean localBoothAvailable\(\)\{.*?\}\n''', re.S)
+          replacement = '''    boolean ensureBankOpen(){
+        if(bankReady())return true;
+        if(bankUiOpen()){
+            log.info("Bank Organizer: bank UI is already open; waiting for live bank contents.");
+            if(Global.sleepUntil(this::bankReady,4000))return true;
+            log.warn("Bank Organizer: bank UI opened but the live bank container never became ready.");
+            return false;
+        }
+
+        // Prefer a bank target that is already directly reachable. Do not start a walk if we can
+        // simply interact with the visible banker/booth beside the player.
+        if(tryImmediateBankInteraction())return true;
+
+        // Delegate the complete travel + interaction lifecycle to Microbot. The previous organizer
+        // mixed Rs2Bank.walkToBank() with its own stale booth reference, which could leave it stuck
+        // after shortest-path collision/live-scene disagreements.
+        log.info("Bank Organizer: walking to and opening the nearest supported bank.");
+        boolean started=Rs2Bank.walkToBankAndUseBank();
+        if(started&&Global.sleepUntil(this::bankReady,WALK_TIMEOUT_MS))return true;
+
+        // The high-level call can return before the bank container finishes syncing. If the UI is
+        // visible, give the live container one final bounded wait instead of clicking another target.
+        if(bankUiOpen()&&Global.sleepUntil(this::bankReady,4000))return true;
+
+        // If walking reached a bank but the final interaction did not register, perform one local
+        // recovery interaction. Never re-run the pathfinder in a tight retry loop.
+        if(tryImmediateBankInteraction())return true;
+
+        log.warn("Bank Organizer: unable to open a ready bank after travel/recovery attempts.");
+        return false;
+    }
+
+    private boolean tryImmediateBankInteraction(){
+        if(openNearbyBanker()){
+            log.info("Bank Organizer: interacting with nearby banker.");
+            if(Global.sleepUntil(this::bankReady,5000))return true;
+        }
+        GameObject booth=Rs2GameObject.findBank(SEARCH_RADIUS);
+        if(booth!=null&&near(booth,INTERACT_DISTANCE)){
+            log.info("Bank Organizer: interacting with nearby bank object id={} at {}.",booth.getId(),booth.getWorldLocation());
+            if(Rs2Bank.openBank(booth)&&Global.sleepUntil(this::bankReady,5000))return true;
+        }
+        return bankReady();
+    }
+'''
+          text2, count = pattern.subn(replacement, text, count=1)
+          if count != 1:
+              raise SystemExit(f'expected one ensureBankOpen block, replaced {count}')
+          actuator.write_text(text2)
+
+          engine = Path('kspbankorganizer/BankOrganizerEngine.java')
+          text = engine.read_text()
+          text = text.replace('private void setPhase(String value){phase=value;Microbot.status="Bank Organizer: "+value;} private RunResult fail(String message){phase="Stopped";lastMessage=message==null||message.isEmpty()?"Unknown organizer error.":message;Microbot.status="Bank Organizer: "+lastMessage;return RunResult.fail(lastMessage,movedCount,sortedCount);}',
+'''private void setPhase(String value){phase=value;Microbot.status="Bank Organizer: "+value;log.info("Bank Organizer phase: {}",value);} private RunResult fail(String message){phase="Stopped";lastMessage=message==null||message.isEmpty()?"Unknown organizer error.":message;Microbot.status="Bank Organizer: "+lastMessage;log.warn("Bank Organizer stopped: {}",lastMessage);return RunResult.fail(lastMessage,movedCount,sortedCount);}''')
+          engine.write_text(text)
+
+          plugin = Path('kspbankorganizer/KspBankOrganizerPlugin.java')
+          text = plugin.read_text()
+          text = text.replace('public static final String VERSION = "1.1.35";', 'public static final String VERSION = "1.1.36";')
+          text = text.replace('        task = executor.submit(() -> {', '        log.info("KSP Bank Organizer run requested: {}", mode);\n        task = executor.submit(() -> {')
+          plugin.write_text(text)
+          PY
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/patch-bank-organizer-bank-opening.yml
+          git add kspbankorganizer/BankActuator.java kspbankorganizer/BankOrganizerEngine.java kspbankorganizer/KspBankOrganizerPlugin.java
+          git commit -m "Fix Bank Organizer bank opening and diagnostics"
+          git push origin HEAD:fix-bank-organizer-bank-opening
