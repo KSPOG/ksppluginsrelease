@@ -1,0 +1,48 @@
+name: Patch Chopper fire timeout types
+
+on:
+  push:
+    branches:
+      - fix-chopper-fire-timeout-types
+    paths:
+      - .github/workflows/patch-chopper-fire-timeout-types.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix-chopper-fire-timeout-types
+          fetch-depth: 0
+
+      - name: Patch timeout types
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('kspwillowchopper/KspWillowChopperScript.java')
+          text = path.read_text(encoding='utf-8')
+          replacements = {
+              'private static final long BURN_START_GRACE_MS = 3_000L;': 'private static final int BURN_START_GRACE_MS = 3_000;',
+              'private static final long BURN_PROGRESS_GRACE_MS = 4_500L;': 'private static final int BURN_PROGRESS_GRACE_MS = 4_500;',
+              'private static final long FIRE_OBJECT_APPEAR_TIMEOUT_MS = 3_000L;': 'private static final int FIRE_OBJECT_APPEAR_TIMEOUT_MS = 3_000;',
+          }
+          for old, new in replacements.items():
+              if old not in text:
+                  raise SystemExit(f'Missing expected source: {old}')
+              text = text.replace(old, new, 1)
+          path.write_text(text, encoding='utf-8')
+          PY
+
+      - name: Commit source change and remove temporary workflow
+        run: |
+          rm .github/workflows/patch-chopper-fire-timeout-types.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add kspwillowchopper/KspWillowChopperScript.java .github/workflows/patch-chopper-fire-timeout-types.yml
+          git commit -m "fix: use compatible Chopper fire timeout types"
+          git push origin HEAD:fix-chopper-fire-timeout-types
