@@ -9,7 +9,7 @@ import net.runelite.api.coords.WorldPoint;
 import net.runelite.api.events.GameObjectDespawned;
 import net.runelite.api.events.GameObjectSpawned;
 import net.runelite.api.events.ItemContainerChanged;
-import net.runelite.api.gameval.InventoryID;
+import net.runelite.api.InventoryID;
 import net.runelite.api.gameval.ItemID;
 import net.runelite.api.gameval.ObjectID;
 import net.runelite.client.eventbus.EventBus;
@@ -459,7 +459,7 @@ public class KspWillowChopperScript extends Script {
         if (!sessionStarted || event == null) return;
 
         ItemContainer container = event.getItemContainer();
-        if (container == null || container != Microbot.getClient().getItemContainer(InventoryID.INVENTORY)) {
+        if (container == null || event.getContainerId() != InventoryID.INVENTORY.getId()) {
             return;
         }
 
