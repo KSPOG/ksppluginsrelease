@@ -282,8 +282,8 @@ public class KspJewelryCrafterScript extends Script
         if (!depositCraftedOutput()) return;
 
         int available = availableInputUnits();
-        boolean hasMould = Rs2Inventory.hasItem(activeRecipe.getMouldName())
-            || Rs2Bank.count(activeRecipe.getMouldName(), true) > 0;
+        int mouldId = recipeMouldId();
+        boolean hasMould = mouldId > 0 && (inventoryCountById(mouldId) > 0 || bankCountById(mouldId) > 0);
         if (!hasMould || available <= 0)
         {
             if (!prepareOutputForSale()) return;
@@ -294,9 +294,9 @@ public class KspJewelryCrafterScript extends Script
 
         int craftUnits = Math.min(activeRecipe.usesGem() ? 13 : 27, available);
         if (!normalizeCraftingInventory(craftUnits)) return;
-        int bars = Rs2Inventory.count(activeRecipe.getBarName(), true);
-        int gems = activeRecipe.usesGem() ? Rs2Inventory.count(activeRecipe.getGemName(), true) : craftUnits;
-        if (bars != craftUnits || gems != craftUnits || !Rs2Inventory.hasItem(activeRecipe.getMouldName()))
+        int bars = inventoryCountById(recipeBarId());
+        int gems = activeRecipe.usesGem() ? inventoryCountById(recipeGemId()) : craftUnits;
+        if (bars != craftUnits || gems != craftUnits || inventoryCountById(recipeMouldId()) <= 0)
         {
             status = "Inventory setup verification failed";
             return;
@@ -307,23 +307,75 @@ public class KspJewelryCrafterScript extends Script
         leaveBank(JewelryCrafterState.CRAFTING, "Ready: " + craftUnits + " x " + activeRecipe.getOutputName());
     }
 
+    private int recipeBarId()
+    {
+        return activeRecipe == null ? -1 : prices.getItemId(activeRecipe.getBarName());
+    }
+
+    private int recipeGemId()
+    {
+        return activeRecipe == null || !activeRecipe.usesGem() ? -1 : prices.getItemId(activeRecipe.getGemName());
+    }
+
+    private int recipeMouldId()
+    {
+        return activeRecipe == null ? -1 : prices.getItemId(activeRecipe.getMouldName());
+    }
+
+    private int recipeOutputId()
+    {
+        return activeRecipe == null ? -1 : prices.getItemId(activeRecipe.getOutputName());
+    }
+
+    private int inventoryCountById(int id)
+    {
+        return id <= 0 ? 0 : Rs2Inventory.count(id);
+    }
+
+    private int bankCountById(int id)
+    {
+        return id <= 0 ? 0 : Rs2Bank.count(id);
+    }
+
+    private boolean hasAnyCraftedJewelryInInventory()
+    {
+        for (JewelryRecipe recipe : JewelryRecipe.values())
+        {
+            int outputId = prices.getItemId(recipe.getOutputName());
+            if (outputId > 0 && Rs2Inventory.count(outputId) > 0) return true;
+        }
+        return false;
+    }
+
     private int availableInputUnits()
     {
-        int bars = Rs2Inventory.count(activeRecipe.getBarName(), true) + Rs2Bank.count(activeRecipe.getBarName(), true);
+        int barId = recipeBarId();
+        if (barId <= 0) return 0;
+        int bars = inventoryCountById(barId) + bankCountById(barId);
         if (!activeRecipe.usesGem()) return bars;
-        int gems = Rs2Inventory.count(activeRecipe.getGemName(), true) + Rs2Bank.count(activeRecipe.getGemName(), true);
+        int gemId = recipeGemId();
+        if (gemId <= 0) return 0;
+        int gems = inventoryCountById(gemId) + bankCountById(gemId);
         return Math.min(bars, gems);
     }
 
     private boolean normalizeCraftingInventory(int target)
     {
+        int mouldId = recipeMouldId();
+        int barId = recipeBarId();
+        int gemId = recipeGemId();
+        if (mouldId <= 0 || barId <= 0 || (activeRecipe.usesGem() && gemId <= 0))
+        {
+            status = "Unable to resolve recipe item IDs";
+            return false;
+        }
         if (!depositUnneededInventory()) return false;
-        if (!trimInventory(activeRecipe.getMouldName(), 1)) return false;
-        if (!trimInventory(activeRecipe.getBarName(), target)) return false;
-        if (activeRecipe.usesGem() && !trimInventory(activeRecipe.getGemName(), target)) return false;
+        if (!trimInventory(mouldId, activeRecipe.getMouldName(), 1)) return false;
+        if (!trimInventory(barId, activeRecipe.getBarName(), target)) return false;
+        if (activeRecipe.usesGem() && !trimInventory(gemId, activeRecipe.getGemName(), target)) return false;
         if (!ensureMould()) return false;
-        if (!ensureInventoryAmount(activeRecipe.getBarName(), target)) return false;
-        return !activeRecipe.usesGem() || ensureInventoryAmount(activeRecipe.getGemName(), target);
+        if (!ensureInventoryAmount(barId, activeRecipe.getBarName(), target)) return false;
+        return !activeRecipe.usesGem() || ensureInventoryAmount(gemId, activeRecipe.getGemName(), target);
     }
 
     private boolean depositUnneededInventory()
@@ -334,10 +386,13 @@ public class KspJewelryCrafterScript extends Script
             return false;
         }
         if (!hasUnneededInventory()) return true;
-        status = "Depositing unneeded inventory";
+        int mouldId = recipeMouldId();
+        int barId = recipeBarId();
+        int gemId = recipeGemId();
+        status = "Depositing non-input inventory";
         boolean started = activeRecipe.usesGem()
-            ? Rs2Bank.depositAllExcept(true, activeRecipe.getMouldName(), activeRecipe.getBarName(), activeRecipe.getGemName())
-            : Rs2Bank.depositAllExcept(true, activeRecipe.getMouldName(), activeRecipe.getBarName());
+            ? Rs2Bank.depositAllExcept(mouldId, barId, gemId)
+            : Rs2Bank.depositAllExcept(mouldId, barId);
         if (!started) return false;
         if (sleepUntil(() -> !hasUnneededInventory(), 5_000)) return true;
         status = "Waiting for inventory cleanup";
@@ -346,25 +401,25 @@ public class KspJewelryCrafterScript extends Script
 
     private boolean hasUnneededInventory()
     {
-        return Rs2Inventory.all().stream().anyMatch(item -> item != null && !isNeededInventoryItem(item.getName()));
+        return Rs2Inventory.all().stream().anyMatch(item -> item != null && !isNeededInventoryItem(item.getId()));
     }
 
-    private boolean isNeededInventoryItem(String name)
+    private boolean isNeededInventoryItem(int id)
     {
-        if (name == null) return false;
-        if (name.equalsIgnoreCase(activeRecipe.getMouldName())) return true;
-        if (name.equalsIgnoreCase(activeRecipe.getBarName())) return true;
-        return activeRecipe.usesGem() && name.equalsIgnoreCase(activeRecipe.getGemName());
+        if (id <= 0 || activeRecipe == null) return false;
+        if (id == recipeMouldId()) return true;
+        if (id == recipeBarId()) return true;
+        return activeRecipe.usesGem() && id == recipeGemId();
     }
 
-    private boolean trimInventory(String item, int target)
+    private boolean trimInventory(int itemId, String itemName, int target)
     {
-        int current = Rs2Inventory.count(item, true);
+        int current = inventoryCountById(itemId);
         if (current <= target) return true;
-        status = "Depositing excess " + item.toLowerCase();
-        if (!Rs2Bank.depositX(item, current - target)) return false;
-        if (sleepUntil(() -> Rs2Inventory.count(item, true) <= target, 4_000)) return true;
-        status = "Waiting to trim " + item.toLowerCase();
+        status = "Depositing excess " + itemName.toLowerCase();
+        if (!Rs2Bank.depositX(itemId, current - target)) return false;
+        if (sleepUntil(() -> inventoryCountById(itemId) <= target, 4_000)) return true;
+        status = "Waiting to trim " + itemName.toLowerCase();
         return false;
     }
 
@@ -461,13 +516,21 @@ public class KspJewelryCrafterScript extends Script
             status = "Waiting for bank widget before deposit";
             return false;
         }
-        String output = activeRecipe.getOutputName();
-        if (Rs2Inventory.count(output, true) <= 0) return true;
-        status = "Depositing crafted output";
-        if (!Rs2Bank.depositAll(output, true)) return false;
-        if (sleepUntil(() -> Rs2Inventory.count(output, true) == 0, 4_000)) return true;
-        status = "Waiting for output deposit";
-        return false;
+        for (JewelryRecipe recipe : JewelryRecipe.values())
+        {
+            int outputId = prices.getItemId(recipe.getOutputName());
+            if (outputId <= 0 || Rs2Inventory.count(outputId) <= 0) continue;
+            status = "Depositing finished jewellery: " + recipe.getOutputName();
+            if (!Rs2Bank.depositAll(outputId)) return false;
+            if (!sleepUntil(() -> Rs2Inventory.count(outputId) == 0, 4_000))
+            {
+                status = "Waiting for finished jewellery deposit";
+                return false;
+            }
+            // One stack per tick keeps bank menu actions deterministic.
+            return !hasAnyCraftedJewelryInInventory();
+        }
+        return true;
     }
 
     private boolean prepareOutputForSale()
@@ -509,56 +572,71 @@ public class KspJewelryCrafterScript extends Script
             status = "Waiting for bank widget before mould withdrawal";
             return false;
         }
+        int mouldId = recipeMouldId();
         String mould = activeRecipe.getMouldName();
-        if (Rs2Inventory.hasItem(mould)) return true;
-        if (Rs2Bank.count(mould, true) <= 0)
+        if (mouldId <= 0)
+        {
+            status = "Unable to resolve " + mould + " item ID";
+            return false;
+        }
+        if (inventoryCountById(mouldId) > 0) return true;
+        if (bankCountById(mouldId) <= 0)
         {
             status = mould + " not available";
             return false;
         }
         status = "Withdrawing " + mould;
-        if (!Rs2Bank.withdrawOne(mould, true)) return false;
-        if (sleepUntil(() -> Rs2Inventory.hasItem(mould), 4_000)) return true;
+        if (!Rs2Bank.withdrawOne(mouldId)) return false;
+        if (sleepUntil(() -> inventoryCountById(mouldId) > 0, 4_000)) return true;
         status = "Waiting for " + mould;
         return false;
     }
 
-    private boolean ensureInventoryAmount(String item, int target)
+    private boolean ensureInventoryAmount(int itemId, String itemName, int target)
     {
         if (!bankWidgetOpen())
         {
             status = "Waiting for bank widget before withdrawal";
             return false;
         }
-        int current = Rs2Inventory.count(item, true);
-        if (current >= target) return true;
-        int need = target - current;
-        if (Rs2Bank.count(item, true) < need)
+        if (itemId <= 0)
         {
-            status = "Not enough " + item.toLowerCase();
+            status = "Unable to resolve " + itemName + " item ID";
             return false;
         }
-        status = "Withdrawing " + need + " x " + item;
-        if (!Rs2Bank.withdrawX(item, need, true)) return false;
-        if (sleepUntil(() -> Rs2Inventory.count(item, true) >= target, 4_000)) return true;
-        status = "Waiting for " + item + " count";
+        int current = inventoryCountById(itemId);
+        if (current >= target) return true;
+        int need = target - current;
+        if (bankCountById(itemId) < need)
+        {
+            status = "Not enough " + itemName.toLowerCase();
+            return false;
+        }
+        status = "Withdrawing " + need + " x " + itemName;
+        if (!Rs2Bank.withdrawX(itemId, need)) return false;
+        if (sleepUntil(() -> inventoryCountById(itemId) >= target, 4_000)) return true;
+        status = "Waiting for " + itemName + " count";
         return false;
     }
 
     private boolean hasCraftingInputsInInventory()
     {
-        if (activeRecipe == null || !Rs2Inventory.hasItem(activeRecipe.getMouldName())) return false;
-        int bars = Rs2Inventory.count(activeRecipe.getBarName(), true);
-        return bars > 0 && (!activeRecipe.usesGem() || Rs2Inventory.count(activeRecipe.getGemName(), true) > 0);
+        if (activeRecipe == null || hasAnyCraftedJewelryInInventory()) return false;
+        int mouldId = recipeMouldId();
+        int barId = recipeBarId();
+        int gemId = recipeGemId();
+        if (mouldId <= 0 || barId <= 0 || inventoryCountById(mouldId) <= 0) return false;
+        int bars = inventoryCountById(barId);
+        return bars > 0 && (!activeRecipe.usesGem() || (gemId > 0 && inventoryCountById(gemId) > 0));
     }
 
     private void primeCraftingMonitor()
     {
         if (activeRecipe == null) return;
         monitoredRecipe = activeRecipe;
-        monitoredBars = Rs2Inventory.count(activeRecipe.getBarName(), true);
-        monitoredGems = activeRecipe.usesGem() ? Rs2Inventory.count(activeRecipe.getGemName(), true) : monitoredBars;
-        monitoredOutput = Rs2Inventory.count(activeRecipe.getOutputName(), true);
+        monitoredBars = inventoryCountById(recipeBarId());
+        monitoredGems = activeRecipe.usesGem() ? inventoryCountById(recipeGemId()) : monitoredBars;
+        monitoredOutput = inventoryCountById(recipeOutputId());
         monitoredBatchMade = 0;
         lastCraftingInventoryChangeAt = System.currentTimeMillis();
         craftingMonitorPrimed = true;
@@ -568,10 +646,10 @@ public class KspJewelryCrafterScript extends Script
     private boolean craftingInventoryChanged()
     {
         if (!craftingMonitorPrimed || monitoredRecipe != activeRecipe) return false;
-        int bars = Rs2Inventory.count(activeRecipe.getBarName(), true);
-        int gems = activeRecipe.usesGem() ? Rs2Inventory.count(activeRecipe.getGemName(), true) : bars;
+        int bars = inventoryCountById(recipeBarId());
+        int gems = activeRecipe.usesGem() ? inventoryCountById(recipeGemId()) : bars;
         return monitoredBars != bars || monitoredGems != gems
-            || monitoredOutput != Rs2Inventory.count(activeRecipe.getOutputName(), true);
+            || monitoredOutput != inventoryCountById(recipeOutputId());
     }
 
     private int observeCraftingProgress()
@@ -581,9 +659,9 @@ public class KspJewelryCrafterScript extends Script
             primeCraftingMonitor();
             return 0;
         }
-        int bars = Rs2Inventory.count(activeRecipe.getBarName(), true);
-        int gems = activeRecipe.usesGem() ? Rs2Inventory.count(activeRecipe.getGemName(), true) : bars;
-        int output = Rs2Inventory.count(activeRecipe.getOutputName(), true);
+        int bars = inventoryCountById(recipeBarId());
+        int gems = activeRecipe.usesGem() ? inventoryCountById(recipeGemId()) : bars;
+        int output = inventoryCountById(recipeOutputId());
         int made = Math.max(0, monitoredBars - bars);
         boolean changed = bars != monitoredBars || gems != monitoredGems || output != monitoredOutput;
         monitoredBars = bars;
@@ -1591,9 +1669,17 @@ public class KspJewelryCrafterScript extends Script
         int affordable = (int) Math.min(Integer.MAX_VALUE, spendable / unitCost);
         int target = Math.min(config.maxRestockUnits(), affordable);
 
-        int existingBars = Rs2Bank.count(activeRecipe.getBarName(), true) + Rs2Inventory.count(activeRecipe.getBarName(), true);
+        int barId = recipeBarId();
+        int gemId = recipeGemId();
+        int mouldId = recipeMouldId();
+        if (barId <= 0 || mouldId <= 0 || (activeRecipe.usesGem() && gemId <= 0))
+        {
+            pause("Unable to resolve recipe input item IDs", 10_000L);
+            return false;
+        }
+        int existingBars = bankCountById(barId) + inventoryCountById(barId);
         int existingGems = activeRecipe.usesGem()
-            ? Rs2Bank.count(activeRecipe.getGemName(), true) + Rs2Inventory.count(activeRecipe.getGemName(), true)
+            ? bankCountById(gemId) + inventoryCountById(gemId)
             : target;
         int existingUnits = Math.min(existingBars, existingGems);
         target = Math.max(target, Math.min(config.maxRestockUnits(), existingUnits));
@@ -1604,7 +1690,7 @@ public class KspJewelryCrafterScript extends Script
         }
 
         buyQueue.clear();
-        if (!Rs2Inventory.hasItem(activeRecipe.getMouldName()) && Rs2Bank.count(activeRecipe.getMouldName(), true) <= 0)
+        if (inventoryCountById(mouldId) <= 0 && bankCountById(mouldId) <= 0)
             buyQueue.add(new BuyOrder(activeRecipe.getMouldName(), 1));
         int needBars = Math.max(0, target - existingBars);
         if (needBars > 0) buyQueue.add(new BuyOrder(activeRecipe.getBarName(), needBars));

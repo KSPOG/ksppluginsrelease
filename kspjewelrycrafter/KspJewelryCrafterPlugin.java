@@ -22,7 +22,7 @@ import javax.inject.Inject;
 )
 public class KspJewelryCrafterPlugin extends Plugin
 {
-    public static final String VERSION = "0.1.24";
+    public static final String VERSION = "0.1.25";
 
     @Inject private KspJewelryCrafterConfig config;
     @Inject private KspJewelryCrafterScript script;
