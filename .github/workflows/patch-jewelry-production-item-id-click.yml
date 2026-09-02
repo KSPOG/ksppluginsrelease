@@ -17,14 +17,9 @@ jobs:
           from pathlib import Path
           p = Path('kspjewelrycrafter/KspJewelryCrafterScript.java')
           s = p.read_text()
-          old = '''        String widgetName = craftingWidgetName(activeRecipe);
-          status = "Selecting " + widgetName;
-          if (!Rs2Widget.clickWidget(widgetName, true))
-          {
-              status = "Unable to select " + widgetName;
-              return;
-          }
-          '''
+
+          start = s.index('        String widgetName = craftingWidgetName(activeRecipe);')
+          end = s.index('        status = "Starting " + activeRecipe.getOutputName();', start)
           new = '''        int outputId = recipeOutputId();
           status = "Selecting " + activeRecipe.getOutputName() + " [" + outputId + "]";
           Widget productionWidget = findProductionWidgetByItemId(outputId);
@@ -39,18 +34,11 @@ jobs:
               return;
           }
           '''
-          if old not in s:
-              raise SystemExit('production selection block not found')
-          s = s.replace(old, new, 1)
-          old_helper = '''    private String craftingWidgetName(JewelryRecipe recipe)
-          {
-              String name = recipe.getOutputName();
-              if (name.endsWith(" (u)")) name = name.substring(0, name.length() - 4);
-              if (name.equalsIgnoreCase("Dragonstone bracelet")) return "Dragon bracelet";
-              return name;
-          }
-          '''
-          new_helper = '''    private Widget findProductionWidgetByItemId(int itemId)
+          s = s[:start] + new + s[end:]
+
+          hstart = s.index('    private String craftingWidgetName(JewelryRecipe recipe)')
+          hend = s.index('    public long getRuntimeMillis()', hstart)
+          helper = '''    private Widget findProductionWidgetByItemId(int itemId)
           {
               if (itemId <= 0) return null;
               int groupId = activeRecipe != null && activeRecipe.getBarName().equalsIgnoreCase("Silver bar") ? 6 : 446;
@@ -83,10 +71,9 @@ jobs:
               }
               return null;
           }
+
           '''
-          if old_helper not in s:
-              raise SystemExit('craftingWidgetName helper not found')
-          s = s.replace(old_helper, new_helper, 1)
+          s = s[:hstart] + helper + s[hend:]
           p.write_text(s)
           PY
       - name: Remove temporary workflow
