@@ -73,9 +73,9 @@ public class KspWillowChopperScript extends Script {
     private static final long BANK_RETRY_MS = 4_000L;
     private static final long TINDERBOX_RETRY_MS = 4_000L;
     private static final long FIRE_RETRY_MS = 3_000L;
-    private static final long BURN_START_GRACE_MS = 3_000L;
-    private static final long BURN_PROGRESS_GRACE_MS = 4_500L;
-    private static final long FIRE_OBJECT_APPEAR_TIMEOUT_MS = 3_000L;
+    private static final int BURN_START_GRACE_MS = 3_000;
+    private static final int BURN_PROGRESS_GRACE_MS = 4_500;
+    private static final int FIRE_OBJECT_APPEAR_TIMEOUT_MS = 3_000;
     private static final long FIRE_MORPH_SETTLE_MS = 175L;
 
     public enum RuntimeState {
