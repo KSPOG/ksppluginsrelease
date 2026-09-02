@@ -33,7 +33,7 @@ import net.runelite.client.ui.overlay.OverlayManager;
 @Slf4j
 public class KspBankOrganizerPlugin extends Plugin
 {
-    public static final String VERSION = "1.1.35";
+    public static final String VERSION = "1.1.36";
 
     @Inject private KspBankOrganizerConfig config;
     @Inject private BankOrganizerEngine engine;
@@ -95,6 +95,7 @@ public class KspBankOrganizerPlugin extends Plugin
             return;
         }
 
+        log.info("KSP Bank Organizer run requested: {}", mode);
         task = executor.submit(() -> {
             BankOrganizerEngine.RunResult result = engine.run(config, mode);
             if (result.success()) log.info("KSP Bank Organizer completed: {}", result.message());

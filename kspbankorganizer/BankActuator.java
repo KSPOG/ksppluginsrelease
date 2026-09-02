@@ -2,6 +2,7 @@ package net.runelite.client.plugins.microbot.kspbankorganizer;
 
 import java.awt.Rectangle;
 import javax.inject.Inject;
+import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.Client;
 import net.runelite.api.GameObject;
 import net.runelite.api.ItemContainer;
@@ -21,37 +22,53 @@ import net.runelite.client.plugins.microbot.util.npc.Rs2Npc;
 import net.runelite.client.plugins.microbot.util.npc.Rs2NpcModel;
 import net.runelite.client.plugins.microbot.util.player.Rs2Player;
 
+@Slf4j
 final class BankActuator {
-    private static final int BANK_GROUP_ID=12,REARRANGE_CHILD=23,MOVE_VERIFY_MS=5000,OPEN_VERIFY_MS=1500,BANK_APPROACH_MS=3500,SEARCH_RADIUS=20,INTERACT_DISTANCE=4,WALK_TIMEOUT_MS=15000;
+    private static final int BANK_GROUP_ID=12,REARRANGE_CHILD=23,MOVE_VERIFY_MS=5000,OPEN_VERIFY_MS=1500,BANK_APPROACH_MS=3500,SEARCH_RADIUS=20,INTERACT_DISTANCE=4,WALK_TIMEOUT_MS=30000;
     private static final int[] TAB_COUNTS={Varbits.BANK_TAB_ONE_COUNT,Varbits.BANK_TAB_TWO_COUNT,Varbits.BANK_TAB_THREE_COUNT,Varbits.BANK_TAB_FOUR_COUNT,Varbits.BANK_TAB_FIVE_COUNT,Varbits.BANK_TAB_SIX_COUNT,Varbits.BANK_TAB_SEVEN_COUNT,Varbits.BANK_TAB_EIGHT_COUNT,Varbits.BANK_TAB_NINE_COUNT};
     private static final MenuAction[] NPC_ACTIONS={MenuAction.NPC_FIRST_OPTION,MenuAction.NPC_SECOND_OPTION,MenuAction.NPC_THIRD_OPTION,MenuAction.NPC_FOURTH_OPTION,MenuAction.NPC_FIFTH_OPTION};
     private final Client client; private final BankSnapshotReader snapshots;
     @Inject BankActuator(Client client,BankSnapshotReader snapshots){this.client=client;this.snapshots=snapshots;}
 
     boolean ensureBankOpen(){
-        if(bankUiOpen())return Global.sleepUntil(this::bankReady,4000);
-        if(openNearbyBanker())return Global.sleepUntil(this::bankReady,5000);
-        GameObject localBooth=Rs2GameObject.findBank(SEARCH_RADIUS);
-        if(localBooth!=null){
-            if(!near(localBooth,INTERACT_DISTANCE)&&(!Rs2Bank.walkToBank()||!Global.sleepUntil(()->bankUiOpen()||near(localBooth,INTERACT_DISTANCE),WALK_TIMEOUT_MS)))return false;
-            if(bankUiOpen())return Global.sleepUntil(this::bankReady,OPEN_VERIFY_MS);
-            if(Rs2Bank.openBank(localBooth)&&Global.sleepUntil(this::bankReady,OPEN_VERIFY_MS))return true;
-            if(bankReady()||!near(localBooth,INTERACT_DISTANCE))return bankReady();
-            return (openNearbyBanker()||Rs2Bank.openBank(localBooth))&&Global.sleepUntil(this::bankReady,5000);
+        if(bankReady())return true;
+        if(bankUiOpen()){
+            log.info("Bank Organizer: bank UI is already open; waiting for live bank contents.");
+            if(Global.sleepUntil(this::bankReady,4000))return true;
+            log.warn("Bank Organizer: bank UI opened but the live bank container never became ready.");
+            return false;
         }
-        if(!Rs2Bank.walkToBank()||!Global.sleepUntil(()->bankUiOpen()||hasNearbyBanker()||localBoothAvailable(),WALK_TIMEOUT_MS))return false;
-        if(bankUiOpen())return Global.sleepUntil(this::bankReady,OPEN_VERIFY_MS);
-        GameObject reachableBooth=Rs2GameObject.findBank(SEARCH_RADIUS);
-        boolean started=openNearbyBanker()||(reachableBooth!=null&&near(reachableBooth,INTERACT_DISTANCE)&&Rs2Bank.openBank(reachableBooth));
-        if(!started&&!bankUiOpen())return false;
-        if(Global.sleepUntil(this::bankReady,OPEN_VERIFY_MS))return true;
-        if(waitForBankOrApproach())return true;
-        started=openNearbyBanker()||Rs2Bank.openBank();
-        return started&&Global.sleepUntil(this::bankReady,5000);
+
+        // Prefer a bank target that is already directly reachable.
+        if(tryImmediateBankInteraction())return true;
+
+        // Delegate travel + interaction to Microbot instead of mixing walkToBank() with a stale booth reference.
+        log.info("Bank Organizer: walking to and opening the nearest supported bank.");
+        boolean started=Rs2Bank.walkToBankAndUseBank();
+        if(started&&Global.sleepUntil(this::bankReady,WALK_TIMEOUT_MS))return true;
+
+        // If the UI appeared but the live bank container is still syncing, wait once instead of clicking again.
+        if(bankUiOpen()&&Global.sleepUntil(this::bankReady,4000))return true;
+
+        // One local recovery interaction after travel; do not restart pathfinding in a tight loop.
+        if(tryImmediateBankInteraction())return true;
+
+        log.warn("Bank Organizer: unable to open a ready bank after travel/recovery attempts.");
+        return false;
     }
-    private boolean waitForBankOrApproach(){Global.sleepUntil(()->bankReady()||!approachingBank(),BANK_APPROACH_MS);return bankReady();}
-    private boolean approachingBank(){return Rs2Player.isMoving()||Rs2Player.isInteracting()||Rs2Player.isAnimating(1200);}
-    private boolean localBoothAvailable(){GameObject b=Rs2GameObject.findBank(SEARCH_RADIUS);return b!=null&&near(b,INTERACT_DISTANCE);}
+
+    private boolean tryImmediateBankInteraction(){
+        if(openNearbyBanker()){
+            log.info("Bank Organizer: interacting with nearby banker.");
+            if(Global.sleepUntil(this::bankReady,5000))return true;
+        }
+        GameObject booth=Rs2GameObject.findBank(SEARCH_RADIUS);
+        if(booth!=null&&near(booth,INTERACT_DISTANCE)){
+            log.info("Bank Organizer: interacting with nearby bank object id={} at {}.",booth.getId(),booth.getWorldLocation());
+            if(Rs2Bank.openBank(booth)&&Global.sleepUntil(this::bankReady,5000))return true;
+        }
+        return bankReady();
+    }
     private boolean openNearbyBanker(){Rs2NpcModel b=nearbyBanker();return b!=null&&invokeBank(b);}
     private boolean hasNearbyBanker(){return nearbyBanker()!=null;}
     private Rs2NpcModel nearbyBanker(){Rs2NpcModel b=Rs2Npc.getBankerNPC();return b!=null&&near(b,INTERACT_DISTANCE)?b:null;}
