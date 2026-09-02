@@ -1,11 +1,11 @@
-name: Patch Chopper Cook's Guild bank blacklist
+name: Patch Chopper bank blacklist
 
 on:
   push:
     branches:
       - chopper-ignore-cooks-guild-bank
     paths:
-      - .github/workflows/patch-chopper-ignore-cooks-guild-bank.yml
+      - '.github/workflows/patch-chopper-ignore-cooks-guild-bank.yml'
 
 permissions:
   contents: write
@@ -18,135 +18,14 @@ jobs:
         with:
           ref: chopper-ignore-cooks-guild-bank
           fetch-depth: 0
-
-      - name: Patch Chopper banking
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
-
-          path = Path('kspwillowchopper/KspWillowChopperScript.java')
-          text = path.read_text(encoding='utf-8')
-
-          text = text.replace(
-              'import net.runelite.client.plugins.microbot.api.tileobject.models.Rs2TileObjectModel;\n',
-              'import net.runelite.client.plugins.microbot.api.npc.models.Rs2NpcModel;\n'
-              'import net.runelite.client.plugins.microbot.api.tileobject.models.Rs2TileObjectModel;\n'
-          )
-          text = text.replace(
-              'import net.runelite.client.plugins.microbot.util.bank.Rs2Bank;\n',
-              'import net.runelite.client.plugins.microbot.util.bank.Rs2Bank;\n'
-              'import net.runelite.client.plugins.microbot.util.bank.enums.BankLocation;\n'
-              'import net.runelite.client.plugins.microbot.util.gameobject.Rs2BankID;\n'
-          )
-          text = text.replace(
-              'import net.runelite.client.plugins.microbot.util.widget.Rs2Widget;\n',
-              'import net.runelite.client.plugins.microbot.util.walker.Rs2Walker;\n'
-              'import net.runelite.client.plugins.microbot.util.widget.Rs2Widget;\n'
-          )
-
-          text = text.replace(
-              '    private static final int FIRE_ID_ALT = 49927;\n',
-              '    private static final int FIRE_ID_ALT = 49927;\n'
-              '    // Cook\'s Guild bank targets are intentionally ignored. These are\n'
-              '    // geometrically close to nearby chopping areas but can be inaccessible.\n'
-              '    private static final int IGNORED_BANK_BOOTH_ID = 10583;\n'
-              '    private static final int IGNORED_BANKER_ID_1 = 2897;\n'
-              '    private static final int IGNORED_BANKER_ID_2 = 2898;\n'
-          )
-
-          old = 'if (!Rs2Bank.openBank() && !Rs2Bank.isOpen()) {'
-          count = text.count(old)
-          if count != 2:
-              raise SystemExit(f'Expected 2 generic openBank calls, found {count}')
-          text = text.replace(old, 'if (!openAllowedBank() && !Rs2Bank.isOpen()) {')
-
-          marker = '    private void bankResource() {\n'
-          if marker not in text:
-              raise SystemExit('bankResource marker not found')
-
-          methods = r'''    /**
-     * Opens a bank without ever selecting the Cook's Guild bank booth/bankers
-     * reported by the user. If no allowed target is currently loaded, walk to
-     * the nearest usable bank location other than Cook's Guild.
-     */
-    private boolean openAllowedBank() {
-        if (Rs2Bank.isOpen()) return true;
-
-        Rs2TileObjectModel bankObject = Microbot.getRs2TileObjectCache()
-                .query()
-                .where(object -> object != null
-                        && object.getId() != IGNORED_BANK_BOOTH_ID
-                        && Rs2BankID.BANK_ID_SET.contains(object.getId()))
-                .nearestOnClientThread();
-
-        if (bankObject != null) {
-            status = "Opening allowed bank booth";
-            if (Rs2Bank.openBank(bankObject) || Rs2Bank.isOpen()) return true;
-        }
-
-        Rs2NpcModel banker = Microbot.getRs2NpcCache()
-                .query()
-                .withName("Banker")
-                .where(npc -> npc != null
-                        && npc.getId() != IGNORED_BANKER_ID_1
-                        && npc.getId() != IGNORED_BANKER_ID_2)
-                .nearestOnClientThread();
-
-        if (banker != null) {
-            status = "Opening allowed banker";
-            if (Rs2Bank.openBank(banker.getNpc()) || Rs2Bank.isOpen()) return true;
-        }
-
-        BankLocation alternative = nearestAllowedBank(Rs2Player.getWorldLocation());
-        if (alternative == null) {
-            status = "No allowed bank available";
-            return false;
-        }
-
-        status = "Walking to " + alternative.name().replace('_', ' ');
-        Rs2Walker.walkTo(alternative.getWorldPoint());
-        return Rs2Bank.isOpen();
-    }
-
-    private BankLocation nearestAllowedBank(WorldPoint player) {
-        if (player == null) return null;
-
-        BankLocation nearest = null;
-        int nearestDistance = Integer.MAX_VALUE;
-
-        for (BankLocation location : BankLocation.values()) {
-            if (location == BankLocation.COOKS_GUILD) continue;
-
-            try {
-                if (!location.hasRequirements()) continue;
-            } catch (Exception ignored) {
-                continue;
-            }
-
-            WorldPoint point = location.getWorldPoint();
-            if (point == null) continue;
-
-            int distance = player.distanceTo(point);
-            if (distance < nearestDistance) {
-                nearestDistance = distance;
-                nearest = location;
-            }
-        }
-
-        return nearest;
-    }
-
-'''
-
-          text = text.replace(marker, methods + marker, 1)
-          path.write_text(text, encoding='utf-8')
-          PY
-
-      - name: Commit source change and remove temporary workflow
+      - name: Apply source patch
+        run: python3 .github/scripts/patch_chopper_bank.py
+      - name: Commit patch
         run: |
           rm .github/workflows/patch-chopper-ignore-cooks-guild-bank.yml
+          rm .github/scripts/patch_chopper_bank.py
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add kspwillowchopper/KspWillowChopperScript.java .github/workflows/patch-chopper-ignore-cooks-guild-bank.yml
+          git add -A
           git commit -m "fix: ignore Cook's Guild bank targets in Chopper"
           git push origin HEAD:chopper-ignore-cooks-guild-bank
