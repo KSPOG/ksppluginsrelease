@@ -12,34 +12,20 @@ import net.runelite.client.plugins.microbot.util.player.Rs2Player;
 import net.runelite.client.plugins.microbot.util.text.Rs2TextSanitizer;
 
 import java.util.Comparator;
-import java.util.HashMap;
+import java.util.List;
 import java.util.Locale;
-import java.util.Map;
 import java.util.Objects;
 
 import static net.runelite.client.plugins.microbot.util.Global.sleep;
 import static net.runelite.client.plugins.microbot.util.Global.sleepUntil;
 
-/**
- * Friendly Ent / Entling Forestry event.
- *
- * One Entling is hard-locked until that exact NPC morphs/despawns. The locked
- * Entling's CURRENT overhead request is read before every prune. Combined
- * requests do not require alternating cuts: they simply permit more than one
- * valid prune action. We deliberately use one deterministic valid action for
- * each request until the Entling is finished.
- */
 @Slf4j
 public class KspEntlingsEvent implements BlockingEvent {
     private static final int REGULAR_ENTLING_ID = NpcID.GATHERING_EVENT_ENTLINGS_NPC_01;
-
-    // Slightly longer than one 600 ms game tick, preventing duplicate menu
-    // emissions while still allowing the next legitimate prune immediately.
-    private static final long MIN_PRUNE_INTERVAL_MS = 700L;
-    private static final long FAILED_CLICK_RETRY_MS = 1_200L;
+    private static final long MAX_EVENT_MS = 120_000L;
+    private static final long CLICK_COOLDOWN_MS = 800L;
 
     private final KspWillowChopperPlugin plugin;
-    private final Map<Integer, EntlingProgress> progressByIndex = new HashMap<>();
 
     public KspEntlingsEvent(KspWillowChopperPlugin plugin) {
         this.plugin = plugin;
@@ -47,166 +33,113 @@ public class KspEntlingsEvent implements BlockingEvent {
 
     @Override
     public boolean validate() {
-        if (!plugin.isForestryEventEnabled(KspForestryEvent.FRIENDLY_ENTLINGS)
-                || !Microbot.isPluginEnabled(plugin) || !Microbot.isLoggedIn()) {
-            return false;
-        }
-        return !getRegularEntlings().isEmpty();
+        return plugin.isForestryEventEnabled(KspForestryEvent.FRIENDLY_ENTLINGS)
+                && Microbot.isLoggedIn()
+                && !getRegularEntlings().isEmpty();
     }
 
     @Override
     public boolean execute() {
         plugin.setCurrentForestryEvent(KspForestryEvent.FRIENDLY_ENTLINGS);
-        progressByIndex.clear();
-
         if (!plugin.ensureInventorySpace(2)) {
             return true;
         }
 
-        int lockedEntlingIndex = -1;
+        long deadline = System.currentTimeMillis() + MAX_EVENT_MS;
+        int lockedIndex = -1;
+        long lastClickMillis = 0L;
 
-        while (validate()) {
-            var entlings = getRegularEntlings();
-            Rs2NpcModel entling;
+        while (plugin.isForestryEventEnabled(KspForestryEvent.FRIENDLY_ENTLINGS)
+                && Microbot.isLoggedIn()
+                && System.currentTimeMillis() < deadline) {
+            List<Rs2NpcModel> entlings = getRegularEntlings();
+            if (entlings.isEmpty()) {
+                break;
+            }
 
-            if (lockedEntlingIndex >= 0) {
-                final int targetIndex = lockedEntlingIndex;
-                entling = entlings.stream()
+            Rs2NpcModel target = null;
+            if (lockedIndex >= 0) {
+                final int expectedIndex = lockedIndex;
+                target = entlings.stream()
                         .filter(Objects::nonNull)
-                        .filter(candidate -> candidate.getIndex() == targetIndex)
+                        .filter(entling -> entling.getIndex() == expectedIndex)
                         .findFirst()
                         .orElse(null);
-
-                // The locked Entling left NPC_01: it either completed/morphed or
-                // despawned. Only now may a different Entling be acquired.
-                if (entling == null) {
-                    progressByIndex.remove(lockedEntlingIndex);
-                    log.debug("Entlings: released completed/despawned npc={}", lockedEntlingIndex);
-                    lockedEntlingIndex = -1;
+                if (target == null) {
+                    lockedIndex = -1;
                     sleep(80);
                     continue;
                 }
             } else {
-                entling = entlings.stream()
+                target = entlings.stream()
                         .filter(Objects::nonNull)
-                        .filter(candidate -> candidate.getId() == REGULAR_ENTLING_ID)
-                        .min(Comparator.comparingInt(candidate ->
-                                candidate.getWorldLocation().distanceTo(Rs2Player.getWorldLocation())))
+                        .min(Comparator.comparingInt(entling ->
+                                entling.getWorldLocation().distanceTo(Rs2Player.getWorldLocation())))
                         .orElse(null);
-
-                if (entling == null) {
+                if (target == null) {
                     sleep(100);
                     continue;
                 }
-
-                lockedEntlingIndex = entling.getIndex();
-                log.debug("Entlings: hard-locked npc={}", lockedEntlingIndex);
+                lockedIndex = target.getIndex();
             }
 
-            final int npcIndex = entling.getIndex();
-            final String request = normalizeRequest(entling.getOverheadText());
-            final String action = actionForRequest(request);
-
-            // A temporary blank/countdown/satisfaction overhead must never cause
-            // the handler to switch Entlings or guess a prune action.
+            String request = normalizeRequest(target.getOverheadText());
+            String action = actionForRequest(request);
             if (action == null) {
+                sleep(120);
+                continue;
+            }
+
+            long now = System.currentTimeMillis();
+            if (now - lastClickMillis < CLICK_COOLDOWN_MS
+                    || Rs2Player.isMoving()
+                    || Rs2Player.isAnimating(800)) {
+                sleep(80);
+                continue;
+            }
+
+            // Re-read immediately before clicking so a server-side overhead update
+            // cannot make us use a stale haircut request.
+            String currentRequest = normalizeRequest(target.getOverheadText());
+            String currentAction = actionForRequest(currentRequest);
+            if (currentAction == null) {
                 sleep(100);
                 continue;
             }
 
-            EntlingProgress progress = progressByIndex.computeIfAbsent(
-                    npcIndex, ignored -> new EntlingProgress());
-
-            if (!Objects.equals(progress.lastObservedRequest, request)) {
-                progress.lastObservedRequest = request;
-                log.info("Entlings: npc={} request='{}' -> {}", npcIndex, request, action);
-            }
-
-            if (!canPruneNow(progress)) {
-                sleep(60);
+            int idBefore = target.getId();
+            String acknowledgedRequest = currentRequest;
+            if (!target.click(currentAction)) {
+                lastClickMillis = now;
+                sleep(250);
                 continue;
             }
 
-            // Re-read immediately before clicking so a server-side overhead
-            // update cannot leave us using a stale request/action pair.
-            final String requestAtClick = normalizeRequest(entling.getOverheadText());
-            final String actionAtClick = actionForRequest(requestAtClick);
-            if (actionAtClick == null) {
-                sleep(80);
-                continue;
-            }
+            plugin.markForestryInteraction(target.getHash(), currentAction);
+            lastClickMillis = now;
+            final Rs2NpcModel clickedTarget = target;
 
-            if (!Objects.equals(request, requestAtClick)) {
-                progress.lastObservedRequest = requestAtClick;
-                log.info("Entlings: npc={} request changed '{}' -> '{}' -> {}",
-                        npcIndex, request, requestAtClick, actionAtClick);
-            }
+            sleepUntil(() -> clickedTarget.getId() != idBefore
+                    || !Objects.equals(acknowledgedRequest, normalizeRequest(clickedTarget.getOverheadText()))
+                    || Rs2Player.isAnimating(), 2_000);
 
-            long targetKey = entlingTargetKey(entling);
-            int idBefore = entling.getId();
-            long now = System.currentTimeMillis();
-
-            log.debug("Entlings: npc={} request='{}' action='{}' prune={}",
-                    npcIndex, requestAtClick, actionAtClick, progress.successfulClicks + 1);
-
-            boolean clicked = entling.click(actionAtClick);
-            progress.lastAttemptMillis = now;
-
-            if (!clicked) {
-                progress.lastFailureMillis = now;
-                sleep(80);
-                continue;
-            }
-
-            plugin.markForestryInteraction(targetKey, actionAtClick);
-            progress.successfulClicks++;
-
-            final Rs2NpcModel lockedEntling = entling;
-            final String acknowledgedRequest = requestAtClick;
-
-            // Wait for either the pruning animation, a request change, or the
-            // Entling morphing out of the regular state. Player#getInteracting()
-            // is deliberately not used because it may stay latched after a cut.
-            sleepUntil(() ->
-                            lockedEntling.getId() != idBefore
-                            || !Objects.equals(acknowledgedRequest,
-                                    normalizeRequest(lockedEntling.getOverheadText()))
-                            || Rs2Player.isAnimating(),
-                    1_800);
-
-            if (lockedEntling.getId() == REGULAR_ENTLING_ID && Rs2Player.isAnimating()) {
+            if (clickedTarget.getId() == REGULAR_ENTLING_ID && Rs2Player.isAnimating()) {
                 sleepUntil(() -> !Rs2Player.isAnimating(), 3_000);
             }
         }
 
-        progressByIndex.clear();
-        plugin.completeForestryEvent(KspForestryEvent.FRIENDLY_ENTLINGS);
+        if (!validate()) {
+            plugin.completeForestryEvent(KspForestryEvent.FRIENDLY_ENTLINGS);
+        }
         return true;
     }
 
-    private boolean canPruneNow(EntlingProgress progress) {
-        long now = System.currentTimeMillis();
-
-        if (Rs2Player.isMoving() || Rs2Player.isAnimating(900)) {
-            return false;
-        }
-        if (now - progress.lastAttemptMillis < MIN_PRUNE_INTERVAL_MS) {
-            return false;
-        }
-        return progress.lastFailureMillis == 0L
-                || now - progress.lastFailureMillis >= FAILED_CLICK_RETRY_MS;
-    }
-
-    private java.util.List<Rs2NpcModel> getRegularEntlings() {
+    private List<Rs2NpcModel> getRegularEntlings() {
         return Microbot.getRs2NpcCache().query()
                 .withId(REGULAR_ENTLING_ID)
                 .toList();
     }
 
-    /**
-     * Normalize RuneLite/Jagex markup and the known wording variants seen across
-     * Forestry revisions. Returned text is canonical and safe for exact mapping.
-     */
     private String normalizeRequest(String request) {
         if (request == null) {
             return "";
@@ -214,7 +147,6 @@ public class KspEntlingsEvent implements BlockingEvent {
 
         String normalized = Rs2TextSanitizer.stripTagsToSpace(request).trim();
         String key = normalized.toLowerCase(Locale.ROOT);
-
         switch (key) {
             case "breezy at the back!":
             case "breezy on the back!":
@@ -231,14 +163,6 @@ public class KspEntlingsEvent implements BlockingEvent {
         }
     }
 
-    /**
-     * Exact Friendly Ent request mapping.
-     *
-     * For the two combined requests, both listed body regions are valid on every
-     * prune. Alternating is unnecessary, so use one deterministic valid action:
-     * top for the mullet and back for short-back-and-sides. This prevents the
-     * previous handler from inventing an alternating haircut sequence.
-     */
     private String actionForRequest(String request) {
         if (request == null || request.isEmpty()) {
             return null;
@@ -258,23 +182,8 @@ public class KspEntlingsEvent implements BlockingEvent {
         }
     }
 
-    private long entlingTargetKey(Rs2NpcModel entling) {
-        long location = entling.getWorldLocation() == null
-                ? 0L
-                : (((long) entling.getWorldLocation().getX()) << 32)
-                    ^ (entling.getWorldLocation().getY() & 0xffffffffL);
-        return (((long) entling.getIndex()) << 48) ^ location;
-    }
-
     @Override
     public BlockingEventPriority priority() {
         return BlockingEventPriority.NORMAL;
-    }
-
-    private static final class EntlingProgress {
-        private String lastObservedRequest = "";
-        private int successfulClicks;
-        private long lastAttemptMillis;
-        private long lastFailureMillis;
     }
 }
