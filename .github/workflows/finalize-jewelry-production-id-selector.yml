@@ -1,0 +1,130 @@
+name: Finalize Jewelry production item-id selector
+on:
+  push:
+    branches: [fix-jewelry-production-item-id-click]
+permissions:
+  contents: write
+jobs:
+  finalize:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix-jewelry-production-item-id-click
+      - name: Format selector and bump version
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('kspjewelrycrafter/KspJewelryCrafterScript.java')
+          s = p.read_text()
+          s = s.replace('''        int outputId = recipeOutputId();
+status = "Selecting " + activeRecipe.getOutputName() + " [" + outputId + "]";
+Widget productionWidget = findProductionWidgetByItemId(outputId);
+if (productionWidget == null)
+{
+    status = "Unable to find production item ID " + outputId + " for " + activeRecipe.getOutputName();
+    return;
+}
+if (!Rs2Widget.clickWidget(productionWidget))
+{
+    status = "Unable to select " + activeRecipe.getOutputName() + " [" + outputId + "]";
+    return;
+}
+''', '''        int outputId = recipeOutputId();
+        status = "Selecting " + activeRecipe.getOutputName() + " [" + outputId + "]";
+        Widget productionWidget = findProductionWidgetByItemId(outputId);
+        if (productionWidget == null)
+        {
+            status = "Unable to find production item ID " + outputId + " for " + activeRecipe.getOutputName();
+            return;
+        }
+        if (!Rs2Widget.clickWidget(productionWidget))
+        {
+            status = "Unable to select " + activeRecipe.getOutputName() + " [" + outputId + "]";
+            return;
+        }
+''', 1)
+          s = s.replace('''    private Widget findProductionWidgetByItemId(int itemId)
+{
+    if (itemId <= 0) return null;
+    int groupId = activeRecipe != null && activeRecipe.getBarName().equalsIgnoreCase("Silver bar") ? 6 : 446;
+    return Microbot.getClientThread().runOnClientThreadOptional(() ->
+    {
+        Widget root = Microbot.getClient().getWidget(groupId, 0);
+        return findProductionWidgetByItemId(root, itemId);
+    }).orElse(null);
+}
+
+private Widget findProductionWidgetByItemId(Widget widget, int itemId)
+{
+    if (widget == null || widget.isHidden()) return null;
+    if (widget.getItemId() == itemId) return widget;
+
+    Widget[][] groups = {
+        widget.getChildren(),
+        widget.getNestedChildren(),
+        widget.getDynamicChildren(),
+        widget.getStaticChildren()
+    };
+    for (Widget[] group : groups)
+    {
+        if (group == null) continue;
+        for (Widget child : group)
+        {
+            Widget found = findProductionWidgetByItemId(child, itemId);
+            if (found != null) return found;
+        }
+    }
+    return null;
+}
+''', '''    private Widget findProductionWidgetByItemId(int itemId)
+    {
+        if (itemId <= 0) return null;
+        int groupId = activeRecipe != null && activeRecipe.getBarName().equalsIgnoreCase("Silver bar") ? 6 : 446;
+        return Microbot.getClientThread().runOnClientThreadOptional(() ->
+        {
+            Widget root = Microbot.getClient().getWidget(groupId, 0);
+            return findProductionWidgetByItemId(root, itemId);
+        }).orElse(null);
+    }
+
+    private Widget findProductionWidgetByItemId(Widget widget, int itemId)
+    {
+        if (widget == null || widget.isHidden()) return null;
+        if (widget.getItemId() == itemId) return widget;
+
+        Widget[][] groups = {
+            widget.getChildren(),
+            widget.getNestedChildren(),
+            widget.getDynamicChildren(),
+            widget.getStaticChildren()
+        };
+        for (Widget[] group : groups)
+        {
+            if (group == null) continue;
+            for (Widget child : group)
+            {
+                Widget found = findProductionWidgetByItemId(child, itemId);
+                if (found != null) return found;
+            }
+        }
+        return null;
+    }
+''', 1)
+          p.write_text(s)
+
+          v = Path('kspjewelrycrafter/KspJewelryCrafterPlugin.java')
+          t = v.read_text()
+          if 'VERSION = "0.1.25"' in t:
+              t = t.replace('VERSION = "0.1.25"', 'VERSION = "0.1.26"', 1)
+          v.write_text(t)
+          PY
+      - name: Remove temporary workflow
+        run: rm .github/workflows/finalize-jewelry-production-id-selector.yml
+      - name: Commit
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git commit -m "chore: finalize Jewelry item-id selector"
+          git push origin HEAD:fix-jewelry-production-item-id-click
