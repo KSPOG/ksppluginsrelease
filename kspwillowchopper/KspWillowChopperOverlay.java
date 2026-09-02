@@ -57,7 +57,13 @@ public class KspWillowChopperOverlay extends OverlayPanel {
             KspTree tree = script.getActiveTree();
             addLine("Tree:", tree.toString(), ACTIVE);
             addLine("Mode:", config.bankLogs() ? "Bank resources" : "Burn logs", ACTIVE);
-            addLine("Status:", script.getStatus(), ACTIVE);
+            String scriptStatus = script.getStatus();
+            if ("Starting".equals(scriptStatus) && script.getRuntimeMillis() > 2_000L) {
+                scriptStatus = Microbot.pauseAllScripts.get()
+                        ? "Paused globally"
+                        : "Waiting for Microbot blocker";
+            }
+            addLine("Status:", scriptStatus, ACTIVE);
             addLine("Resource:", tree.getResourceName(), VALUE);
             addLine("Inventory:", String.valueOf(script.getCurrentResourceCount()), VALUE);
 
