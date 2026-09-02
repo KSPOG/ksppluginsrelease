@@ -9,6 +9,7 @@ import net.runelite.api.widgets.Widget;
 import net.runelite.client.plugins.microbot.Microbot;
 import net.runelite.client.plugins.microbot.api.player.models.Rs2PlayerModel;
 import net.runelite.client.plugins.microbot.util.bank.Rs2Bank;
+import net.runelite.client.plugins.microbot.util.grandexchange.Rs2GrandExchange;
 import net.runelite.client.plugins.microbot.util.inventory.Rs2Inventory;
 import net.runelite.client.plugins.microbot.util.inventory.Rs2ItemModel;
 import net.runelite.client.plugins.microbot.util.menu.NewMenuEntry;
@@ -34,7 +35,8 @@ public final class KspMuleWorkerService
 {
     private static final int COINS_ID = 995;
     private static final long POLL_MS = 1_000L, NETWORK_POLL_MS = 1_000L, HOP_RETRY_MS = 4_000L,
-            TRADE_RETRY_MS = 1_500L, ACCEPT_RETRY_MS = 800L, CONFIRM_TRANSITION_TIMEOUT_MS = 6_000L;
+            TRADE_RETRY_MS = 1_500L, ACCEPT_RETRY_MS = 800L, CONFIRM_TRANSITION_TIMEOUT_MS = 6_000L,
+            FAILED_RETRY_BACKOFF_MS = 10_000L;
     private static final AtomicBoolean GLOBAL_TRANSFER_LOCK = new AtomicBoolean(false);
 
     public enum State { IDLE, PREPARING, QUEUED, TRAVELLING, TRADING, CONFIRMING, WAITING_COMPLETE, RESTORING, FAILED }
@@ -57,10 +59,17 @@ public final class KspMuleWorkerService
     private int muleWorld;
     private boolean offeredCoins, firstAccepted, finalAccepted, pauseOwned, transferLockOwned;
     private volatile boolean stopping;
+    private volatile long retryNotBefore;
 
     public KspMuleWorkerService(String ownerName)
     {
         this.ownerName = ownerName == null || ownerName.isBlank() ? "KSP worker" : ownerName;
+    }
+
+    /** True while any local KSP mule transfer owns interaction priority. */
+    public static boolean isTransferPriorityActive()
+    {
+        return GLOBAL_TRANSFER_LOCK.get();
     }
 
     public synchronized void start(KspMuleConfig config)
@@ -140,6 +149,14 @@ public final class KspMuleWorkerService
     {
         KspMuleConfig c = config;
         if (c == null) return;
+        long now = System.currentTimeMillis();
+        if (retryNotBefore > now)
+        {
+            state = State.FAILED;
+            long seconds = Math.max(1L, (retryNotBefore - now + 999L) / 1_000L);
+            status = "Mule retry backoff (" + seconds + "s)";
+            return;
+        }
         long threshold = Math.max(1_000L, c.muleTransferAt());
         if (totalCoins < threshold)
         {
@@ -191,7 +208,14 @@ public final class KspMuleWorkerService
     private long prepareCoinsForTransfer()
     {
         KspMuleConfig c = config;
-        if (c == null || !Rs2Bank.walkToBankAndUseBank()) return -1L;
+        if (c == null) return -1L;
+        if (Rs2GrandExchange.isOpen())
+        {
+            status = "Closing Grand Exchange for mule transfer";
+            Rs2GrandExchange.closeExchange();
+            if (!sleepUntil(() -> !Rs2GrandExchange.isOpen(), 2_500)) return -1L;
+        }
+        if (!Rs2Bank.walkToBankAndUseBank()) return -1L;
         sleep(400);
 
         long inv = Math.max(0L, Rs2Inventory.itemQuantity(COINS_ID));
@@ -301,6 +325,7 @@ public final class KspMuleWorkerService
             status = "Waiting for mule identity";
             return;
         }
+        if (!prepareClientForTrade()) return;
         if (muleWorld > 0 && Rs2Player.getWorld() != muleWorld)
         {
             state = State.TRAVELLING;
@@ -328,6 +353,34 @@ public final class KspMuleWorkerService
             return;
         }
         handleTrade();
+    }
+
+    private boolean prepareClientForTrade()
+    {
+        if (isFirstTradeOpen() || isConfirmationOpen()) return true;
+
+        boolean closedSomething = false;
+        if (Rs2GrandExchange.isOpen())
+        {
+            status = "Closing Grand Exchange for mule trade";
+            Rs2GrandExchange.closeExchange();
+            closedSomething = true;
+        }
+        if (Rs2Bank.isOpen())
+        {
+            status = "Closing bank for mule trade";
+            Rs2Bank.closeBank();
+            closedSomething = true;
+        }
+        if (closedSomething)
+            sleepUntil(() -> !Rs2GrandExchange.isOpen() && !Rs2Bank.isOpen(), 2_500);
+
+        if (Rs2GrandExchange.isOpen() || Rs2Bank.isOpen())
+        {
+            status = "Waiting for interfaces to close before mule trade";
+            return false;
+        }
+        return true;
     }
 
     private void handleTrade()
@@ -565,6 +618,7 @@ public final class KspMuleWorkerService
 
     private void finishSuccess()
     {
+        retryNotBefore = 0L;
         clearTransferState();
         state = State.IDLE;
         status = "Transfer complete - worker resumed";
@@ -576,6 +630,7 @@ public final class KspMuleWorkerService
     {
         state = State.FAILED;
         status = reason == null || reason.isBlank() ? "Mule failed" : reason;
+        retryNotBefore = System.currentTimeMillis() + FAILED_RETRY_BACKOFF_MS;
         if (recoverCapital && pauseOwned && Microbot.isLoggedIn() && !isFirstTradeOpen() && !isConfirmationOpen())
             try { restoreTradingCapital(); } catch (Exception ex) { log.debug("Unable to restore capital after mule failure", ex); }
         clearTransferState();
@@ -651,7 +706,7 @@ public final class KspMuleWorkerService
         status = config != null && config.muleEnabled() ? "Waiting for threshold" : "Disabled";
         muleName = "-";
         totalCoins = transferCoins = requestStartedAt = lastNetworkPollAt = lastWorldHopAt = lastTradeAttemptAt = lastAcceptAt
-                = firstAcceptedAt = preparedTransfer = 0L;
+                = firstAcceptedAt = preparedTransfer = retryNotBefore = 0L;
         queuePosition = muleWorld = 0;
         receiverOnline = false;
         requestId = activeMuleName = null;
