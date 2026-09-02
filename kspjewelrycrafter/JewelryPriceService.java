@@ -5,7 +5,6 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.client.plugins.microbot.Microbot;
-import net.runelite.client.plugins.microbot.util.item.Rs2ItemManager;
 
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -74,16 +73,31 @@ public final class JewelryPriceService
     public int getItemId(String itemName)
     {
         if (itemName == null || itemName.isBlank()) return -1;
-        String key = itemName.trim().toLowerCase(Locale.ROOT);
+        String normalized = itemName.trim();
+        String key = normalized.toLowerCase(Locale.ROOT);
         Integer cached = itemIds.get(key);
         if (cached != null) return cached;
 
-        int id = Rs2ItemManager.getItemIdByName(itemName, false);
-        if (id <= 0)
+        // Recipe inputs/outputs must resolve by exact canonical name. Falling back
+        // to the first fuzzy ItemManager result can map generic jewellery terms to
+        // another ring, necklace or amulet and poison pricing/restock decisions.
+        int id = Microbot.getClientThread().runOnClientThreadOptional(() ->
         {
-            try { id = Microbot.getRs2ItemManager().getItemId(itemName); }
-            catch (Exception ignored) { id = -1; }
-        }
+            try
+            {
+                return Microbot.getItemManager().search(normalized).stream()
+                    .filter(item -> item != null && item.getName() != null
+                        && item.getName().equalsIgnoreCase(normalized))
+                    .mapToInt(item -> item.getId())
+                    .findFirst()
+                    .orElse(-1);
+            }
+            catch (Exception ignored)
+            {
+                return -1;
+            }
+        }).orElse(-1);
+
         if (id > 0) itemIds.put(key, id);
         return id;
     }

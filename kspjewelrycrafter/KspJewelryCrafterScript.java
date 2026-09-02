@@ -282,7 +282,7 @@ public class KspJewelryCrafterScript extends Script
         if (!depositCraftedOutput()) return;
 
         int available = availableInputUnits();
-        boolean hasMould = Rs2Inventory.hasItem(activeRecipe.getMouldName())
+        boolean hasMould = Rs2Inventory.hasItem(activeRecipe.getMouldName(), true)
             || Rs2Bank.count(activeRecipe.getMouldName(), true) > 0;
         if (!hasMould || available <= 0)
         {
@@ -296,7 +296,7 @@ public class KspJewelryCrafterScript extends Script
         if (!normalizeCraftingInventory(craftUnits)) return;
         int bars = Rs2Inventory.count(activeRecipe.getBarName(), true);
         int gems = activeRecipe.usesGem() ? Rs2Inventory.count(activeRecipe.getGemName(), true) : craftUnits;
-        if (bars != craftUnits || gems != craftUnits || !Rs2Inventory.hasItem(activeRecipe.getMouldName()))
+        if (bars != craftUnits || gems != craftUnits || !Rs2Inventory.hasItem(activeRecipe.getMouldName(), true))
         {
             status = "Inventory setup verification failed";
             return;
@@ -510,7 +510,7 @@ public class KspJewelryCrafterScript extends Script
             return false;
         }
         String mould = activeRecipe.getMouldName();
-        if (Rs2Inventory.hasItem(mould)) return true;
+        if (Rs2Inventory.hasItem(mould, true)) return true;
         if (Rs2Bank.count(mould, true) <= 0)
         {
             status = mould + " not available";
@@ -518,7 +518,7 @@ public class KspJewelryCrafterScript extends Script
         }
         status = "Withdrawing " + mould;
         if (!Rs2Bank.withdrawOne(mould, true)) return false;
-        if (sleepUntil(() -> Rs2Inventory.hasItem(mould), 4_000)) return true;
+        if (sleepUntil(() -> Rs2Inventory.hasItem(mould, true), 4_000)) return true;
         status = "Waiting for " + mould;
         return false;
     }
@@ -547,7 +547,7 @@ public class KspJewelryCrafterScript extends Script
 
     private boolean hasCraftingInputsInInventory()
     {
-        if (activeRecipe == null || !Rs2Inventory.hasItem(activeRecipe.getMouldName())) return false;
+        if (activeRecipe == null || !Rs2Inventory.hasItem(activeRecipe.getMouldName(), true)) return false;
         int bars = Rs2Inventory.count(activeRecipe.getBarName(), true);
         return bars > 0 && (!activeRecipe.usesGem() || Rs2Inventory.count(activeRecipe.getGemName(), true) > 0);
     }
@@ -824,34 +824,38 @@ public class KspJewelryCrafterScript extends Script
 
     private boolean selectGeBuyItem(String itemName)
     {
-        if (geSelectedOfferReady()) return true;
+        if (itemName == null || itemName.isBlank()) return false;
 
-        if (!geSearchResultReady(itemName))
+        // Never accept a previously selected GE item as the next input. The old
+        // shortcut only checked that some price was visible, so a ring/necklace/
+        // amulet from the previous offer could be mistaken for a bar, gem or mould.
+        status = "Waiting for exact GE item search: " + itemName;
+        if (!Rs2Widget.sleepUntilHasWidgetText(
+            "Start typing the name of an item to search for it",
+            GE_SEARCH_GROUP, GE_SEARCH_PROMPT_CHILD, false, 3_500))
         {
-            status = "Waiting for GE item search";
-            if (!Rs2Widget.sleepUntilHasWidgetText(
-                "Start typing the name of an item to search for it",
-                GE_SEARCH_GROUP, GE_SEARCH_PROMPT_CHILD, false, 3_500))
-                return false;
+            status = "GE search prompt not ready for: " + itemName;
+            return false;
+        }
 
-            Rs2Keyboard.typeString(itemName);
-            if (!sleepUntil(() -> geSearchResultReady(itemName), 3_500))
-                return false;
+        Rs2Keyboard.typeString(itemName);
+        if (!sleepUntil(() -> geSearchResultReady(itemName), 3_500))
+        {
+            status = "Exact GE search result not found: " + itemName;
+            return false;
         }
 
         for (int attempt = 1; attempt <= 3; attempt++)
         {
-            if (geSelectedOfferReady()) return true;
             if (!geSearchResultReady(itemName))
             {
-                if (sleepUntil(this::geSelectedOfferReady, 900)) return true;
-                status = "Waiting for GE search result: " + itemName;
-                continue;
+                status = "Exact GE result disappeared: " + itemName;
+                if (!sleepUntil(() -> geSearchResultReady(itemName), 900)) continue;
             }
 
             status = attempt == 1
-                ? "Selecting GE item: " + itemName
-                : "Retrying GE item selection (" + attempt + "/3): " + itemName;
+                ? "Selecting exact GE item: " + itemName
+                : "Retrying exact GE item (" + attempt + "/3): " + itemName;
             sleep(250, 450);
             if (!clickGeSearchResultSafely(itemName))
             {
@@ -866,7 +870,7 @@ public class KspJewelryCrafterScript extends Script
             sleep(300, 500);
         }
 
-        status = "GE item did not select: " + itemName;
+        status = "Exact GE item did not select: " + itemName;
         return false;
     }
 
@@ -1604,7 +1608,7 @@ public class KspJewelryCrafterScript extends Script
         }
 
         buyQueue.clear();
-        if (!Rs2Inventory.hasItem(activeRecipe.getMouldName()) && Rs2Bank.count(activeRecipe.getMouldName(), true) <= 0)
+        if (!Rs2Inventory.hasItem(activeRecipe.getMouldName(), true) && Rs2Bank.count(activeRecipe.getMouldName(), true) <= 0)
             buyQueue.add(new BuyOrder(activeRecipe.getMouldName(), 1));
         int needBars = Math.max(0, target - existingBars);
         if (needBars > 0) buyQueue.add(new BuyOrder(activeRecipe.getBarName(), needBars));
