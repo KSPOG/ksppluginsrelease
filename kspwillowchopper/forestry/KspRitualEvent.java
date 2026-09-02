@@ -43,7 +43,7 @@ public class KspRitualEvent implements BlockingEvent {
                 break;
             }
 
-            Rs2NpcModel target = solveCircles(plugin.ritualCircles);
+            net.runelite.client.plugins.microbot.util.npc.Rs2NpcModel target = solveCircles(plugin.ritualCircles);
             if (target == null) {
                 sleep(250);
                 continue;
@@ -79,18 +79,19 @@ public class KspRitualEvent implements BlockingEvent {
                 .nearest();
     }
 
-    private Rs2NpcModel solveCircles(List<Rs2NpcModel> circles) {
+    private net.runelite.client.plugins.microbot.util.npc.Rs2NpcModel solveCircles(
+            List<net.runelite.client.plugins.microbot.util.npc.Rs2NpcModel> circles) {
         if (circles == null || circles.size() != 5) {
             return null;
         }
 
         int xor = 0;
-        for (Rs2NpcModel circle : circles) {
+        for (net.runelite.client.plugins.microbot.util.npc.Rs2NpcModel circle : circles) {
             if (circle == null) return null;
             xor ^= ritualValue(circle);
         }
 
-        for (Rs2NpcModel circle : circles) {
+        for (net.runelite.client.plugins.microbot.util.npc.Rs2NpcModel circle : circles) {
             int value = ritualValue(circle);
             if ((value & xor) == value) {
                 return circle;
@@ -99,7 +100,7 @@ public class KspRitualEvent implements BlockingEvent {
         return null;
     }
 
-    private int ritualValue(Rs2NpcModel npc) {
+    private int ritualValue(net.runelite.client.plugins.microbot.util.npc.Rs2NpcModel npc) {
         int offset = npc.getId() - NpcID.GATHERING_EVENT_ENCHANTED_RITUAL_A_1;
         return (16 << (offset / 4)) | (1 << (offset % 4));
     }
