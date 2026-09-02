@@ -180,7 +180,7 @@ public class KspJewelryCrafterScript extends Script
         if (activeRecipe != null && activeRecipe.isEligible(craftingLevel, memberAccount))
         {
             activeQuote = prices.quote(activeRecipe, config);
-            if (hasCraftingInputsInInventory())
+            if (inventoryReadyToStartCrafting())
             {
                 primeCraftingMonitor();
                 state = JewelryCrafterState.CRAFTING;
@@ -209,7 +209,7 @@ public class KspJewelryCrafterScript extends Script
 
         activeRecipe = selected;
         activeQuote = prices.quote(selected, config);
-        if (hasCraftingInputsInInventory())
+        if (inventoryReadyToStartCrafting())
         {
             primeCraftingMonitor();
             state = JewelryCrafterState.CRAFTING;
@@ -263,7 +263,7 @@ public class KspJewelryCrafterScript extends Script
         }
 
         activeQuote = prices.quote(activeRecipe, config);
-        if (!bankWidgetOpen() && hasCraftingInputsInInventory())
+        if (!bankWidgetOpen() && inventoryReadyToStartCrafting())
         {
             bankInteractionSentAt = 0L;
             primeCraftingMonitor();
@@ -619,9 +619,16 @@ public class KspJewelryCrafterScript extends Script
         return false;
     }
 
+    private boolean inventoryReadyToStartCrafting()
+    {
+        // Finished jewellery from any recipe means this is a dirty inventory.
+        // Bank it before re-entering the furnace state.
+        return !hasAnyCraftedJewelryInInventory() && hasCraftingInputsInInventory();
+    }
+
     private boolean hasCraftingInputsInInventory()
     {
-        if (activeRecipe == null || hasAnyCraftedJewelryInInventory()) return false;
+        if (activeRecipe == null) return false;
         int mouldId = recipeMouldId();
         int barId = recipeBarId();
         int gemId = recipeGemId();
