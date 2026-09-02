@@ -1,0 +1,119 @@
+name: Patch Jewelry Crafter item-id inputs
+on:
+  push:
+    branches: [fix-jewelry-output-input-confusion]
+permissions:
+  contents: write
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix-jewelry-output-input-confusion
+      - name: Apply item-id crafting fix
+        shell: python
+        run: |
+          from pathlib import Path
+
+          script_path = Path('kspjewelrycrafter/KspJewelryCrafterScript.java')
+          s = script_path.read_text(encoding='utf-8')
+
+          marker = '''    private int availableInputUnits()\n    {\n        int bars = Rs2Inventory.count(activeRecipe.getBarName(), true) + Rs2Bank.count(activeRecipe.getBarName(), true);\n        if (!activeRecipe.usesGem()) return bars;\n        int gems = Rs2Inventory.count(activeRecipe.getGemName(), true) + Rs2Bank.count(activeRecipe.getGemName(), true);\n        return Math.min(bars, gems);\n    }\n'''
+          replacement = '''    private int recipeBarId()\n    {\n        return activeRecipe == null ? -1 : prices.getItemId(activeRecipe.getBarName());\n    }\n\n    private int recipeGemId()\n    {\n        return activeRecipe == null || !activeRecipe.usesGem() ? -1 : prices.getItemId(activeRecipe.getGemName());\n    }\n\n    private int recipeMouldId()\n    {\n        return activeRecipe == null ? -1 : prices.getItemId(activeRecipe.getMouldName());\n    }\n\n    private int recipeOutputId()\n    {\n        return activeRecipe == null ? -1 : prices.getItemId(activeRecipe.getOutputName());\n    }\n\n    private int inventoryCountById(int id)\n    {\n        return id <= 0 ? 0 : Rs2Inventory.count(id);\n    }\n\n    private int bankCountById(int id)\n    {\n        return id <= 0 ? 0 : Rs2Bank.count(id);\n    }\n\n    private boolean hasAnyCraftedJewelryInInventory()\n    {\n        for (JewelryRecipe recipe : JewelryRecipe.values())\n        {\n            int outputId = prices.getItemId(recipe.getOutputName());\n            if (outputId > 0 && Rs2Inventory.count(outputId) > 0) return true;\n        }\n        return false;\n    }\n\n    private int availableInputUnits()\n    {\n        int barId = recipeBarId();\n        if (barId <= 0) return 0;\n        int bars = inventoryCountById(barId) + bankCountById(barId);\n        if (!activeRecipe.usesGem()) return bars;\n        int gemId = recipeGemId();\n        if (gemId <= 0) return 0;\n        int gems = inventoryCountById(gemId) + bankCountById(gemId);\n        return Math.min(bars, gems);\n    }\n'''
+          if marker not in s:
+              raise SystemExit('availableInputUnits block not found')
+          s = s.replace(marker, replacement)
+
+          old = '''    private boolean normalizeCraftingInventory(int target)\n    {\n        if (!depositUnneededInventory()) return false;\n        if (!trimInventory(activeRecipe.getMouldName(), 1)) return false;\n        if (!trimInventory(activeRecipe.getBarName(), target)) return false;\n        if (activeRecipe.usesGem() && !trimInventory(activeRecipe.getGemName(), target)) return false;\n        if (!ensureMould()) return false;\n        if (!ensureInventoryAmount(activeRecipe.getBarName(), target)) return false;\n        return !activeRecipe.usesGem() || ensureInventoryAmount(activeRecipe.getGemName(), target);\n    }\n'''
+          new = '''    private boolean normalizeCraftingInventory(int target)\n    {\n        int mouldId = recipeMouldId();\n        int barId = recipeBarId();\n        int gemId = recipeGemId();\n        if (mouldId <= 0 || barId <= 0 || (activeRecipe.usesGem() && gemId <= 0))\n        {\n            status = "Unable to resolve recipe item IDs";\n            return false;\n        }\n        if (!depositUnneededInventory()) return false;\n        if (!trimInventory(mouldId, activeRecipe.getMouldName(), 1)) return false;\n        if (!trimInventory(barId, activeRecipe.getBarName(), target)) return false;\n        if (activeRecipe.usesGem() && !trimInventory(gemId, activeRecipe.getGemName(), target)) return false;\n        if (!ensureMould()) return false;\n        if (!ensureInventoryAmount(barId, activeRecipe.getBarName(), target)) return false;\n        return !activeRecipe.usesGem() || ensureInventoryAmount(gemId, activeRecipe.getGemName(), target);\n    }\n'''
+          if old not in s: raise SystemExit('normalize block not found')
+          s = s.replace(old, new)
+
+          old = '''    private boolean depositUnneededInventory()\n    {\n        if (!bankWidgetOpen())\n        {\n            status = "Waiting for bank widget before inventory cleanup";\n            return false;\n        }\n        if (!hasUnneededInventory()) return true;\n        status = "Depositing unneeded inventory";\n        boolean started = activeRecipe.usesGem()\n            ? Rs2Bank.depositAllExcept(true, activeRecipe.getMouldName(), activeRecipe.getBarName(), activeRecipe.getGemName())\n            : Rs2Bank.depositAllExcept(true, activeRecipe.getMouldName(), activeRecipe.getBarName());\n        if (!started) return false;\n        if (sleepUntil(() -> !hasUnneededInventory(), 5_000)) return true;\n        status = "Waiting for inventory cleanup";\n        return false;\n    }\n\n    private boolean hasUnneededInventory()\n    {\n        return Rs2Inventory.all().stream().anyMatch(item -> item != null && !isNeededInventoryItem(item.getName()));\n    }\n\n    private boolean isNeededInventoryItem(String name)\n    {\n        if (name == null) return false;\n        if (name.equalsIgnoreCase(activeRecipe.getMouldName())) return true;\n        if (name.equalsIgnoreCase(activeRecipe.getBarName())) return true;\n        return activeRecipe.usesGem() && name.equalsIgnoreCase(activeRecipe.getGemName());\n    }\n\n    private boolean trimInventory(String item, int target)\n    {\n        int current = Rs2Inventory.count(item, true);\n        if (current <= target) return true;\n        status = "Depositing excess " + item.toLowerCase();\n        if (!Rs2Bank.depositX(item, current - target)) return false;\n        if (sleepUntil(() -> Rs2Inventory.count(item, true) <= target, 4_000)) return true;\n        status = "Waiting to trim " + item.toLowerCase();\n        return false;\n    }\n'''
+          new = '''    private boolean depositUnneededInventory()\n    {\n        if (!bankWidgetOpen())\n        {\n            status = "Waiting for bank widget before inventory cleanup";\n            return false;\n        }\n        if (!hasUnneededInventory()) return true;\n        int mouldId = recipeMouldId();\n        int barId = recipeBarId();\n        int gemId = recipeGemId();\n        status = "Depositing non-input inventory";\n        boolean started = activeRecipe.usesGem()\n            ? Rs2Bank.depositAllExcept(mouldId, barId, gemId)\n            : Rs2Bank.depositAllExcept(mouldId, barId);\n        if (!started) return false;\n        if (sleepUntil(() -> !hasUnneededInventory(), 5_000)) return true;\n        status = "Waiting for inventory cleanup";\n        return false;\n    }\n\n    private boolean hasUnneededInventory()\n    {\n        return Rs2Inventory.all().stream().anyMatch(item -> item != null && !isNeededInventoryItem(item.getId()));\n    }\n\n    private boolean isNeededInventoryItem(int id)\n    {\n        if (id <= 0 || activeRecipe == null) return false;\n        if (id == recipeMouldId()) return true;\n        if (id == recipeBarId()) return true;\n        return activeRecipe.usesGem() && id == recipeGemId();\n    }\n\n    private boolean trimInventory(int itemId, String itemName, int target)\n    {\n        int current = inventoryCountById(itemId);\n        if (current <= target) return true;\n        status = "Depositing excess " + itemName.toLowerCase();\n        if (!Rs2Bank.depositX(itemId, current - target)) return false;\n        if (sleepUntil(() -> inventoryCountById(itemId) <= target, 4_000)) return true;\n        status = "Waiting to trim " + itemName.toLowerCase();\n        return false;\n    }\n'''
+          if old not in s: raise SystemExit('inventory cleanup block not found')
+          s = s.replace(old, new)
+
+          old = '''    private boolean depositCraftedOutput()\n    {\n        if (!bankWidgetOpen())\n        {\n            status = "Waiting for bank widget before deposit";\n            return false;\n        }\n        String output = activeRecipe.getOutputName();\n        if (Rs2Inventory.count(output, true) <= 0) return true;\n        status = "Depositing crafted output";\n        if (!Rs2Bank.depositAll(output, true)) return false;\n        if (sleepUntil(() -> Rs2Inventory.count(output, true) == 0, 4_000)) return true;\n        status = "Waiting for output deposit";\n        return false;\n    }\n'''
+          new = '''    private boolean depositCraftedOutput()\n    {\n        if (!bankWidgetOpen())\n        {\n            status = "Waiting for bank widget before deposit";\n            return false;\n        }\n        for (JewelryRecipe recipe : JewelryRecipe.values())\n        {\n            int outputId = prices.getItemId(recipe.getOutputName());\n            if (outputId <= 0 || Rs2Inventory.count(outputId) <= 0) continue;\n            status = "Depositing finished jewellery: " + recipe.getOutputName();\n            if (!Rs2Bank.depositAll(outputId)) return false;\n            if (!sleepUntil(() -> Rs2Inventory.count(outputId) == 0, 4_000))\n            {\n                status = "Waiting for finished jewellery deposit";\n                return false;\n            }\n            // One stack per tick keeps bank menu actions deterministic.\n            return !hasAnyCraftedJewelryInInventory();\n        }\n        return true;\n    }\n'''
+          if old not in s: raise SystemExit('depositCraftedOutput block not found')
+          s = s.replace(old, new)
+
+          old = '''    private boolean ensureMould()\n    {\n        if (!bankWidgetOpen())\n        {\n            status = "Waiting for bank widget before mould withdrawal";\n            return false;\n        }\n        String mould = activeRecipe.getMouldName();\n        if (Rs2Inventory.hasItem(mould)) return true;\n        if (Rs2Bank.count(mould, true) <= 0)\n        {\n            status = mould + " not available";\n            return false;\n        }\n        status = "Withdrawing " + mould;\n        if (!Rs2Bank.withdrawOne(mould, true)) return false;\n        if (sleepUntil(() -> Rs2Inventory.hasItem(mould), 4_000)) return true;\n        status = "Waiting for " + mould;\n        return false;\n    }\n\n    private boolean ensureInventoryAmount(String item, int target)\n    {\n        if (!bankWidgetOpen())\n        {\n            status = "Waiting for bank widget before withdrawal";\n            return false;\n        }\n        int current = Rs2Inventory.count(item, true);\n        if (current >= target) return true;\n        int need = target - current;\n        if (Rs2Bank.count(item, true) < need)\n        {\n            status = "Not enough " + item.toLowerCase();\n            return false;\n        }\n        status = "Withdrawing " + need + " x " + item;\n        if (!Rs2Bank.withdrawX(item, need, true)) return false;\n        if (sleepUntil(() -> Rs2Inventory.count(item, true) >= target, 4_000)) return true;\n        status = "Waiting for " + item + " count";\n        return false;\n    }\n\n    private boolean hasCraftingInputsInInventory()\n    {\n        if (activeRecipe == null || !Rs2Inventory.hasItem(activeRecipe.getMouldName())) return false;\n        int bars = Rs2Inventory.count(activeRecipe.getBarName(), true);\n        return bars > 0 && (!activeRecipe.usesGem() || Rs2Inventory.count(activeRecipe.getGemName(), true) > 0);\n    }\n'''
+          new = '''    private boolean ensureMould()\n    {\n        if (!bankWidgetOpen())\n        {\n            status = "Waiting for bank widget before mould withdrawal";\n            return false;\n        }\n        int mouldId = recipeMouldId();\n        String mould = activeRecipe.getMouldName();\n        if (mouldId <= 0)\n        {\n            status = "Unable to resolve " + mould + " item ID";\n            return false;\n        }\n        if (inventoryCountById(mouldId) > 0) return true;\n        if (bankCountById(mouldId) <= 0)\n        {\n            status = mould + " not available";\n            return false;\n        }\n        status = "Withdrawing " + mould;\n        if (!Rs2Bank.withdrawOne(mouldId)) return false;\n        if (sleepUntil(() -> inventoryCountById(mouldId) > 0, 4_000)) return true;\n        status = "Waiting for " + mould;\n        return false;\n    }\n\n    private boolean ensureInventoryAmount(int itemId, String itemName, int target)\n    {\n        if (!bankWidgetOpen())\n        {\n            status = "Waiting for bank widget before withdrawal";\n            return false;\n        }\n        if (itemId <= 0)\n        {\n            status = "Unable to resolve " + itemName + " item ID";\n            return false;\n        }\n        int current = inventoryCountById(itemId);\n        if (current >= target) return true;\n        int need = target - current;\n        if (bankCountById(itemId) < need)\n        {\n            status = "Not enough " + itemName.toLowerCase();\n            return false;\n        }\n        status = "Withdrawing " + need + " x " + itemName;\n        if (!Rs2Bank.withdrawX(itemId, need)) return false;\n        if (sleepUntil(() -> inventoryCountById(itemId) >= target, 4_000)) return true;\n        status = "Waiting for " + itemName + " count";\n        return false;\n    }\n\n    private boolean hasCraftingInputsInInventory()\n    {\n        if (activeRecipe == null || hasAnyCraftedJewelryInInventory()) return false;\n        int mouldId = recipeMouldId();\n        int barId = recipeBarId();\n        int gemId = recipeGemId();\n        if (mouldId <= 0 || barId <= 0 || inventoryCountById(mouldId) <= 0) return false;\n        int bars = inventoryCountById(barId);\n        return bars > 0 && (!activeRecipe.usesGem() || (gemId > 0 && inventoryCountById(gemId) > 0));\n    }\n'''
+          if old not in s: raise SystemExit('ensure/input block not found')
+          s = s.replace(old, new)
+
+          old = '''        monitoredBars = Rs2Inventory.count(activeRecipe.getBarName(), true);\n        monitoredGems = activeRecipe.usesGem() ? Rs2Inventory.count(activeRecipe.getGemName(), true) : monitoredBars;\n        monitoredOutput = Rs2Inventory.count(activeRecipe.getOutputName(), true);'''
+          new = '''        monitoredBars = inventoryCountById(recipeBarId());\n        monitoredGems = activeRecipe.usesGem() ? inventoryCountById(recipeGemId()) : monitoredBars;\n        monitoredOutput = inventoryCountById(recipeOutputId());'''
+          if old not in s: raise SystemExit('prime monitor counts not found')
+          s = s.replace(old, new)
+
+          old = '''        int bars = Rs2Inventory.count(activeRecipe.getBarName(), true);\n        int gems = activeRecipe.usesGem() ? Rs2Inventory.count(activeRecipe.getGemName(), true) : bars;\n        return monitoredBars != bars || monitoredGems != gems\n            || monitoredOutput != Rs2Inventory.count(activeRecipe.getOutputName(), true);'''
+          new = '''        int bars = inventoryCountById(recipeBarId());\n        int gems = activeRecipe.usesGem() ? inventoryCountById(recipeGemId()) : bars;\n        return monitoredBars != bars || monitoredGems != gems\n            || monitoredOutput != inventoryCountById(recipeOutputId());'''
+          if old not in s: raise SystemExit('changed monitor counts not found')
+          s = s.replace(old, new)
+
+          old = '''        int bars = Rs2Inventory.count(activeRecipe.getBarName(), true);\n        int gems = activeRecipe.usesGem() ? Rs2Inventory.count(activeRecipe.getGemName(), true) : bars;\n        int output = Rs2Inventory.count(activeRecipe.getOutputName(), true);'''
+          new = '''        int bars = inventoryCountById(recipeBarId());\n        int gems = activeRecipe.usesGem() ? inventoryCountById(recipeGemId()) : bars;\n        int output = inventoryCountById(recipeOutputId());'''
+          if old not in s: raise SystemExit('observe monitor counts not found')
+          s = s.replace(old, new)
+
+          old = '''        int bars = Rs2Inventory.count(activeRecipe.getBarName(), true);\n        int gems = activeRecipe.usesGem() ? Rs2Inventory.count(activeRecipe.getGemName(), true) : craftUnits;\n        if (bars != craftUnits || gems != craftUnits || !Rs2Inventory.hasItem(activeRecipe.getMouldName()))'''
+          new = '''        int bars = inventoryCountById(recipeBarId());\n        int gems = activeRecipe.usesGem() ? inventoryCountById(recipeGemId()) : craftUnits;\n        if (bars != craftUnits || gems != craftUnits || inventoryCountById(recipeMouldId()) <= 0)'''
+          if old not in s: raise SystemExit('bank verification counts not found')
+          s = s.replace(old, new)
+
+          old = '''        boolean hasMould = Rs2Inventory.hasItem(activeRecipe.getMouldName())\n            || Rs2Bank.count(activeRecipe.getMouldName(), true) > 0;'''
+          new = '''        int mouldId = recipeMouldId();\n        boolean hasMould = mouldId > 0 && (inventoryCountById(mouldId) > 0 || bankCountById(mouldId) > 0);'''
+          if old not in s: raise SystemExit('hasMould bank block not found')
+          s = s.replace(old, new)
+
+          old = '''        int existingBars = Rs2Bank.count(activeRecipe.getBarName(), true) + Rs2Inventory.count(activeRecipe.getBarName(), true);\n        int existingGems = activeRecipe.usesGem()\n            ? Rs2Bank.count(activeRecipe.getGemName(), true) + Rs2Inventory.count(activeRecipe.getGemName(), true)\n            : target;'''
+          new = '''        int barId = recipeBarId();\n        int gemId = recipeGemId();\n        int mouldId = recipeMouldId();\n        if (barId <= 0 || mouldId <= 0 || (activeRecipe.usesGem() && gemId <= 0))\n        {\n            pause("Unable to resolve recipe input item IDs", 10_000L);\n            return false;\n        }\n        int existingBars = bankCountById(barId) + inventoryCountById(barId);\n        int existingGems = activeRecipe.usesGem()\n            ? bankCountById(gemId) + inventoryCountById(gemId)\n            : target;'''
+          if old not in s: raise SystemExit('buildBuyQueue input counts not found')
+          s = s.replace(old, new)
+
+          old = '''        if (!Rs2Inventory.hasItem(activeRecipe.getMouldName()) && Rs2Bank.count(activeRecipe.getMouldName(), true) <= 0)\n            buyQueue.add(new BuyOrder(activeRecipe.getMouldName(), 1));'''
+          new = '''        if (inventoryCountById(mouldId) <= 0 && bankCountById(mouldId) <= 0)\n            buyQueue.add(new BuyOrder(activeRecipe.getMouldName(), 1));'''
+          if old not in s: raise SystemExit('buildBuyQueue mould block not found')
+          s = s.replace(old, new)
+
+          price_path = Path('kspjewelrycrafter/JewelryPriceService.java')
+          p = price_path.read_text(encoding='utf-8')
+          p = p.replace('import net.runelite.client.plugins.microbot.util.item.Rs2ItemManager;\n', '')
+          old_price = '''    public int getItemId(String itemName)\n    {\n        if (itemName == null || itemName.isBlank()) return -1;\n        String key = itemName.trim().toLowerCase(Locale.ROOT);\n        Integer cached = itemIds.get(key);\n        if (cached != null) return cached;\n\n        int id = Rs2ItemManager.getItemIdByName(itemName, false);\n        if (id <= 0)\n        {\n            try { id = Microbot.getRs2ItemManager().getItemId(itemName); }\n            catch (Exception ignored) { id = -1; }\n        }\n        if (id > 0) itemIds.put(key, id);\n        return id;\n    }\n'''
+          new_price = '''    public int getItemId(String itemName)\n    {\n        if (itemName == null || itemName.isBlank()) return -1;\n        String normalized = itemName.trim();\n        String key = normalized.toLowerCase(Locale.ROOT);\n        Integer cached = itemIds.get(key);\n        if (cached != null) return cached;\n\n        // Resolve one canonical item ID by exact name, cache it, then let the\n        // crafting runtime operate exclusively on IDs. Never use fuzzy results.\n        int id = Microbot.getClientThread().runOnClientThreadOptional(() ->\n        {\n            try\n            {\n                return Microbot.getItemManager().search(normalized).stream()\n                    .filter(item -> item != null && item.getName() != null\n                        && item.getName().equalsIgnoreCase(normalized))\n                    .mapToInt(item -> item.getId())\n                    .findFirst()\n                    .orElse(-1);\n            }\n            catch (Exception ignored)\n            {\n                return -1;\n            }\n        }).orElse(-1);\n\n        if (id > 0) itemIds.put(key, id);\n        return id;\n    }\n'''
+          if old_price not in p: raise SystemExit('price getItemId block not found')
+          p = p.replace(old_price, new_price)
+          price_path.write_text(p, encoding='utf-8')
+
+          plugin_path = Path('kspjewelrycrafter/KspJewelryCrafterPlugin.java')
+          v = plugin_path.read_text(encoding='utf-8')
+          if 'public static final String VERSION = "0.1.24";' not in v:
+              raise SystemExit('expected version 0.1.24 not found')
+          v = v.replace('public static final String VERSION = "0.1.24";', 'public static final String VERSION = "0.1.25";')
+          plugin_path.write_text(v, encoding='utf-8')
+
+          script_path.write_text(s, encoding='utf-8')
+
+          # Ensure the crafting path no longer counts recipe inputs by names.
+          checks = [
+              'Rs2Inventory.count(activeRecipe.getGemName(), true)',
+              'Rs2Inventory.count(activeRecipe.getBarName(), true)',
+              'Rs2Inventory.hasItem(activeRecipe.getMouldName())',
+          ]
+          for check in checks:
+              if check in s:
+                  raise SystemExit('name-based crafting input lookup remains: ' + check)
+
+          Path('.github/workflows/patch-jewelry-id-inputs.yml').unlink()
+      - name: Commit patch
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'fix: use item IDs for Jewelry Crafter inputs'
+          git push origin HEAD:fix-jewelry-output-input-confusion
