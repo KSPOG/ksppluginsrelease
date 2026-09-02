@@ -47,7 +47,8 @@ public class KspEntlingsEvent implements BlockingEvent {
 
     @Override
     public boolean validate() {
-        if (!Microbot.isPluginEnabled(plugin) || !Microbot.isLoggedIn()) {
+        if (!plugin.isForestryEventEnabled(KspForestryEvent.FRIENDLY_ENTLINGS)
+                || !Microbot.isPluginEnabled(plugin) || !Microbot.isLoggedIn()) {
             return false;
         }
         return !getRegularEntlings().isEmpty();
