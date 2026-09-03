@@ -238,6 +238,11 @@ public class KspAioFighterScript extends Script
 		}
 		catch (Exception ex)
 		{
+			if (isExpectedShutdownInterruption(generation, ex))
+			{
+				return;
+			}
+
 			lastError = ex.getClass().getSimpleName() + ": " + (ex.getMessage() == null ? "<no message>" : ex.getMessage());
 			lastErrorMs = System.currentTimeMillis();
 			lastAction = "Error";
@@ -247,6 +252,30 @@ public class KspAioFighterScript extends Script
 		{
 			loopRunning.set(false);
 		}
+	}
+
+	private boolean isExpectedShutdownInterruption(long generation, Throwable throwable)
+	{
+		if (generation != runGeneration || Thread.currentThread().isInterrupted())
+		{
+			return true;
+		}
+
+		for (Throwable cause = throwable; cause != null; cause = cause.getCause())
+		{
+			if (cause instanceof InterruptedException)
+			{
+				return true;
+			}
+
+			String message = cause.getMessage();
+			if (message != null && message.toLowerCase(Locale.ROOT).contains("interrupted waiting for client thread"))
+			{
+				return true;
+			}
+		}
+
+		return false;
 	}
 
 	private boolean configureStartCameraIfNeeded()
