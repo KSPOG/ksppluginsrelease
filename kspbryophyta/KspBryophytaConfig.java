@@ -1,7 +1,8 @@
 package net.runelite.client.plugins.microbot.kspbryophyta;
 
 
-import net.runelite.client.plugins.microbot.kspsupport.KspSupportConfig;
+
+import net.runelite.client.config.ConfigButton;
 import net.runelite.client.config.Config;
 import net.runelite.client.config.ConfigGroup;
 import net.runelite.client.config.ConfigItem;
@@ -10,7 +11,7 @@ import net.runelite.client.config.Range;
 import net.runelite.client.plugins.microbot.kspmule.KspMuleConfig;
 
 @ConfigGroup("kspbryophyta")
-public interface KspBryophytaConfig extends Config, KspMuleConfig, KspSupportConfig {
+public interface KspBryophytaConfig extends Config, KspMuleConfig {
     @ConfigSection(name = "Strategy", description = "Combat strategy and automatic strategy loadout", position = 0)
     String strategySection = "strategySection";
     @ConfigSection(name = "Banking & restock", description = "Varrock banking, teleport runes and trip supplies", position = 1)
@@ -73,4 +74,15 @@ public interface KspBryophytaConfig extends Config, KspMuleConfig, KspSupportCon
     default boolean openRewardChest() { return true; }
     @ConfigItem(keyName = "shutdownAfterDeath", name = "Shutdown after death", description = "Stop the script if the player dies", position = 4, section = lootSection)
     default boolean shutdownAfterDeath() { return true; }
+
+    @ConfigItem(
+            keyName = "kspSupportDiscord",
+            name = "Support",
+            description = "Open the KSP Plugins support Discord.",
+            position = 10_000
+    )
+    default ConfigButton kspSupportDiscord()
+    {
+        return new ConfigButton();
+    }
 }

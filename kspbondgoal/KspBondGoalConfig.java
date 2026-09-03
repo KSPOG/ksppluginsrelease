@@ -1,14 +1,15 @@
 package net.runelite.client.plugins.microbot.kspbondgoal;
 
 
-import net.runelite.client.plugins.microbot.kspsupport.KspSupportConfig;
+
+import net.runelite.client.config.ConfigButton;
 import net.runelite.client.config.Config;
 import net.runelite.client.config.ConfigGroup;
 import net.runelite.client.config.ConfigItem;
 import net.runelite.client.config.Range;
 
 @ConfigGroup(KspBondGoalConfig.GROUP)
-public interface KspBondGoalConfig extends Config, KspSupportConfig
+public interface KspBondGoalConfig extends Config
 {
     String GROUP = "kspbondgoal";
 
@@ -80,5 +81,16 @@ public interface KspBondGoalConfig extends Config, KspSupportConfig
     default boolean showAlternatives()
     {
         return true;
+    }
+
+    @ConfigItem(
+            keyName = "kspSupportDiscord",
+            name = "Support",
+            description = "Open the KSP Plugins support Discord.",
+            position = 10_000
+    )
+    default ConfigButton kspSupportDiscord()
+    {
+        return new ConfigButton();
     }
 }

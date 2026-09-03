@@ -1,7 +1,8 @@
 package net.runelite.client.plugins.microbot.ksprenderdisable;
 
 
-import net.runelite.client.plugins.microbot.kspsupport.KspSupportConfig;
+
+import net.runelite.client.config.ConfigButton;
 import net.runelite.client.config.Config;
 import net.runelite.client.config.ConfigGroup;
 import net.runelite.client.config.ConfigInformation;
@@ -15,7 +16,7 @@ import net.runelite.client.config.Range;
         + "Aggressive scene filtering can remove clickboxes, so it is disabled by default."
 )
 @ConfigGroup(KspDisableRenderConfig.GROUP)
-public interface KspDisableRenderConfig extends Config, KspSupportConfig
+public interface KspDisableRenderConfig extends Config
 {
     String GROUP = "kspDisableRender";
 
@@ -113,5 +114,16 @@ public interface KspDisableRenderConfig extends Config, KspSupportConfig
     default boolean filterSceneTiles()
     {
         return false;
+    }
+
+    @ConfigItem(
+            keyName = "kspSupportDiscord",
+            name = "Support",
+            description = "Open the KSP Plugins support Discord.",
+            position = 10_000
+    )
+    default ConfigButton kspSupportDiscord()
+    {
+        return new ConfigButton();
     }
 }

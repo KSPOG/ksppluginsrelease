@@ -1,7 +1,8 @@
 package net.runelite.client.plugins.microbot.kspbankorganizer;
 
 
-import net.runelite.client.plugins.microbot.kspsupport.KspSupportConfig;
+
+import net.runelite.client.config.ConfigButton;
 import java.awt.Color;
 import net.runelite.client.config.Alpha;
 import net.runelite.client.config.Config;
@@ -10,7 +11,7 @@ import net.runelite.client.config.ConfigItem;
 import net.runelite.client.config.ConfigSection;
 
 @ConfigGroup(KspBankOrganizerConfig.GROUP)
-public interface KspBankOrganizerConfig extends Config, KspSupportConfig
+public interface KspBankOrganizerConfig extends Config
 {
     String GROUP = "kspbankorganizer";
 
@@ -254,5 +255,16 @@ public interface KspBankOrganizerConfig extends Config, KspSupportConfig
     default Color misplacedColor()
     {
         return new Color(255, 70, 70, 220);
+    }
+
+    @ConfigItem(
+            keyName = "kspSupportDiscord",
+            name = "Support",
+            description = "Open the KSP Plugins support Discord.",
+            position = 10_000
+    )
+    default ConfigButton kspSupportDiscord()
+    {
+        return new ConfigButton();
     }
 }

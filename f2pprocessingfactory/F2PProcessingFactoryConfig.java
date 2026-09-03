@@ -1,7 +1,8 @@
 package net.runelite.client.plugins.microbot.f2pprocessingfactory;
 
 
-import net.runelite.client.plugins.microbot.kspsupport.KspSupportConfig;
+
+import net.runelite.client.config.ConfigButton;
 import net.runelite.client.config.Config;
 import net.runelite.client.config.ConfigGroup;
 import net.runelite.client.config.ConfigItem;
@@ -10,7 +11,7 @@ import net.runelite.client.config.Range;
 import net.runelite.client.plugins.microbot.kspmule.KspMuleConfig;
 
 @ConfigGroup(F2PProcessingFactoryConfig.GROUP)
-public interface F2PProcessingFactoryConfig extends Config, KspMuleConfig, KspSupportConfig
+public interface F2PProcessingFactoryConfig extends Config, KspMuleConfig
 {
     String GROUP = "f2pProcessingFactory";
     String STATE_GROUP = "f2pProcessingFactoryState";
@@ -334,5 +335,16 @@ public interface F2PProcessingFactoryConfig extends Config, KspMuleConfig, KspSu
     default int muleMinimumBankReserve()
     {
         return cashReserve();
+    }
+
+    @ConfigItem(
+            keyName = "kspSupportDiscord",
+            name = "Support",
+            description = "Open the KSP Plugins support Discord.",
+            position = 10_000
+    )
+    default ConfigButton kspSupportDiscord()
+    {
+        return new ConfigButton();
     }
 }

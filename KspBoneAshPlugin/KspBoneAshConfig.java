@@ -1,7 +1,8 @@
 package net.runelite.client.plugins.microbot.KspBoneAshPlugin;
 
 
-import net.runelite.client.plugins.microbot.kspsupport.KspSupportConfig;
+
+import net.runelite.client.config.ConfigButton;
 import net.runelite.client.config.Config;
 import net.runelite.client.config.ConfigGroup;
 import net.runelite.client.config.ConfigItem;
@@ -10,7 +11,7 @@ import net.runelite.client.config.Range;
 import net.runelite.client.plugins.microbot.kspmule.KspMuleConfig;
 
 @ConfigGroup(KspBoneAshConfig.GROUP)
-public interface KspBoneAshConfig extends Config, KspMuleConfig, KspSupportConfig
+public interface KspBoneAshConfig extends Config, KspMuleConfig
 {
     String GROUP = "kspboneash";
 
@@ -136,5 +137,16 @@ public interface KspBoneAshConfig extends Config, KspMuleConfig, KspSupportConfi
     default int hesitationMax()
     {
         return 420;
+    }
+
+    @ConfigItem(
+            keyName = "kspSupportDiscord",
+            name = "Support",
+            description = "Open the KSP Plugins support Discord.",
+            position = 10_000
+    )
+    default ConfigButton kspSupportDiscord()
+    {
+        return new ConfigButton();
     }
 }

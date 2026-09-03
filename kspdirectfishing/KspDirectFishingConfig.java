@@ -1,7 +1,8 @@
 package net.runelite.client.plugins.microbot.kspdirectfishing;
 
 
-import net.runelite.client.plugins.microbot.kspsupport.KspSupportConfig;
+
+import net.runelite.client.config.ConfigButton;
 import net.runelite.client.config.Config;
 import net.runelite.client.config.ConfigGroup;
 import net.runelite.client.config.ConfigItem;
@@ -10,7 +11,7 @@ import net.runelite.client.config.Range;
 import net.runelite.client.plugins.microbot.kspmule.KspMuleConfig;
 
 @ConfigGroup("kspDirectFishing")
-public interface KspDirectFishingConfig extends Config, KspMuleConfig, KspSupportConfig
+public interface KspDirectFishingConfig extends Config, KspMuleConfig
 {
     @ConfigSection(name="Local Mule",description="Automatic excess-GP transfer to KSP Trade Receiver",position=90)
     String muleSection=KspMuleConfig.SECTION;
@@ -28,4 +29,15 @@ public interface KspDirectFishingConfig extends Config, KspMuleConfig, KspSuppor
     default boolean waitForFire(){return true;}
     @ConfigItem(keyName="directBankFirst",name="Direct bank interaction",description="If a bank booth is visible in the local scene, click that booth directly. Walking is recovery only.",position=5)
     default boolean directBankFirst(){return true;}
+
+    @ConfigItem(
+            keyName = "kspSupportDiscord",
+            name = "Support",
+            description = "Open the KSP Plugins support Discord.",
+            position = 10_000
+    )
+    default ConfigButton kspSupportDiscord()
+    {
+        return new ConfigButton();
+    }
 }

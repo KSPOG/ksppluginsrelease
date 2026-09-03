@@ -1,7 +1,8 @@
 package net.runelite.client.plugins.microbot.KSPTradeReceiver;
 
 
-import net.runelite.client.plugins.microbot.kspsupport.KspSupportConfig;
+
+import net.runelite.client.config.ConfigButton;
 import net.runelite.client.config.Config;
 import net.runelite.client.config.ConfigGroup;
 import net.runelite.client.config.ConfigItem;
@@ -9,7 +10,7 @@ import net.runelite.client.config.ConfigSection;
 import net.runelite.client.config.Range;
 
 @ConfigGroup("KSPTradeReceiver")
-public interface KSPTradeReceiverConfig extends Config, KspSupportConfig
+public interface KSPTradeReceiverConfig extends Config
 {
     @ConfigSection(
             name = "Local Mule",
@@ -240,5 +241,16 @@ public interface KSPTradeReceiverConfig extends Config, KspSupportConfig
     default boolean showOverlay()
     {
         return true;
+    }
+
+    @ConfigItem(
+            keyName = "kspSupportDiscord",
+            name = "Support",
+            description = "Open the KSP Plugins support Discord.",
+            position = 10_000
+    )
+    default ConfigButton kspSupportDiscord()
+    {
+        return new ConfigButton();
     }
 }

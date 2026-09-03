@@ -1,7 +1,8 @@
 package net.runelite.client.plugins.microbot.mining;
 
 
-import net.runelite.client.plugins.microbot.kspsupport.KspSupportConfig;
+
+import net.runelite.client.config.ConfigButton;
 import net.runelite.client.config.Config;
 import net.runelite.client.config.ConfigGroup;
 import net.runelite.client.config.ConfigInformation;
@@ -23,7 +24,7 @@ import net.runelite.client.plugins.microbot.util.inventory.InteractOrder;
         "<p>4. <strong>Dropping:</strong> Inventory pickaxes are retained automatically; all other inventory items are dropped.</p>" +
         "<p></p>" +
         "<p>5. <strong>Basalt:</strong> Enable UseBank to note basalt at Snowflake.</p>")
-public interface AutoMiningConfig extends Config, KspMuleConfig, KspSupportConfig
+public interface AutoMiningConfig extends Config, KspMuleConfig
 {
     @ConfigSection(name = "General", description = "General settings", position = 0)
     String generalSection = "general";
@@ -50,4 +51,15 @@ public interface AutoMiningConfig extends Config, KspMuleConfig, KspSupportConfi
     default boolean clayBracelet() { return false; }
     @ConfigItem(keyName = "dropOrder", name = "Drop Order", description = "Order used when dropping inventory items", position = 0, section = droppingSection)
     default InteractOrder interactOrder() { return InteractOrder.STANDARD; }
+
+    @ConfigItem(
+            keyName = "kspSupportDiscord",
+            name = "Support",
+            description = "Open the KSP Plugins support Discord.",
+            position = 10_000
+    )
+    default ConfigButton kspSupportDiscord()
+    {
+        return new ConfigButton();
+    }
 }

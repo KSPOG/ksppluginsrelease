@@ -1,7 +1,8 @@
 package net.runelite.client.plugins.microbot.kspsmartsmelter;
 
 
-import net.runelite.client.plugins.microbot.kspsupport.KspSupportConfig;
+
+import net.runelite.client.config.ConfigButton;
 import net.runelite.client.config.Config;
 import net.runelite.client.config.ConfigGroup;
 import net.runelite.client.config.ConfigInformation;
@@ -21,7 +22,7 @@ import net.runelite.client.plugins.microbot.kspsmartsmelter.model.RankingMode;
         "Cannonballs require an ammo mould or double ammo mould." +
         "</body></html>"
 )
-public interface KspSmartSmelterConfig extends Config, KspMuleConfig, KspSupportConfig {
+public interface KspSmartSmelterConfig extends Config, KspMuleConfig {
     @ConfigSection(name = "Local Mule", description = "Automatic excess-GP transfer to KSP Trade Receiver", position = 90)
     String muleSection = KspMuleConfig.SECTION;
 
@@ -55,4 +56,15 @@ public interface KspSmartSmelterConfig extends Config, KspMuleConfig, KspSupport
     default int offerWaitSeconds() { return 15; }
     @ConfigItem(keyName = "showOverlay", name = "Overlay", description = "Show the Smart Smelter overlay", position = 15)
     default boolean showOverlay() { return true; }
+
+    @ConfigItem(
+            keyName = "kspSupportDiscord",
+            name = "Support",
+            description = "Open the KSP Plugins support Discord.",
+            position = 10_000
+    )
+    default ConfigButton kspSupportDiscord()
+    {
+        return new ConfigButton();
+    }
 }

@@ -27,9 +27,9 @@ public class KspSupportPlugin extends Plugin
     @Subscribe
     public void onConfigChanged(ConfigChanged event)
     {
-        if (event != null && KspSupportConfig.SUPPORT_KEY.equals(event.getKey()))
+        if (event != null && "kspSupportDiscord".equals(event.getKey()))
         {
-            LinkBrowser.browse(KspSupportConfig.SUPPORT_URL);
+            LinkBrowser.browse("https://discord.gg/mTBVf5FKB2");
         }
     }
 }

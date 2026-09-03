@@ -1,7 +1,8 @@
 package net.runelite.client.plugins.microbot.kspmadcow;
 
 
-import net.runelite.client.plugins.microbot.kspsupport.KspSupportConfig;
+
+import net.runelite.client.config.ConfigButton;
 import net.runelite.client.config.Config;
 import net.runelite.client.config.ConfigGroup;
 import net.runelite.client.config.ConfigItem;
@@ -11,7 +12,7 @@ import net.runelite.client.plugins.microbot.kspmule.KspMuleConfig;
 import net.runelite.client.plugins.microbot.util.misc.Rs2Food;
 
 @ConfigGroup(KspMadCowConfig.GROUP)
-public interface KspMadCowConfig extends Config, KspMuleConfig, KspSupportConfig {
+public interface KspMadCowConfig extends Config, KspMuleConfig {
     String GROUP = "kspmadcow";
 
     @ConfigSection(name = "Supplies", description = "Food, Cowbell and boosting-potion settings", position = 0)
@@ -76,4 +77,15 @@ public interface KspMadCowConfig extends Config, KspMuleConfig, KspSupportConfig
     default boolean restorePrayerBeforeTravel() { return true; }
     @ConfigItem(keyName = "shutdownOnMissingSupplies", name = "Stop if supplies missing", description = "Disable the plugin when the bank lacks food, a Cowbell, or required air runes", position = 3, section = travelSection)
     default boolean shutdownOnMissingSupplies() { return true; }
+
+    @ConfigItem(
+            keyName = "kspSupportDiscord",
+            name = "Support",
+            description = "Open the KSP Plugins support Discord.",
+            position = 10_000
+    )
+    default ConfigButton kspSupportDiscord()
+    {
+        return new ConfigButton();
+    }
 }
