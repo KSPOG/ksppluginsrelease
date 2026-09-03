@@ -12,16 +12,12 @@ import net.runelite.client.eventbus.EventBus;
 import net.runelite.client.eventbus.Subscribe;
 import net.runelite.client.plugins.microbot.Microbot;
 import net.runelite.client.plugins.microbot.Script;
-import net.runelite.client.plugins.microbot.api.npc.models.Rs2NpcModel;
 import net.runelite.client.plugins.microbot.api.tileobject.models.Rs2TileObjectModel;
 import net.runelite.client.plugins.microbot.util.bank.Rs2Bank;
-import net.runelite.client.plugins.microbot.util.bank.enums.BankLocation;
-import net.runelite.client.plugins.microbot.util.gameobject.Rs2BankID;
 import net.runelite.client.plugins.microbot.util.equipment.Rs2Equipment;
 import net.runelite.client.plugins.microbot.util.inventory.Rs2Inventory;
 import net.runelite.client.plugins.microbot.util.keyboard.Rs2Keyboard;
 import net.runelite.client.plugins.microbot.util.player.Rs2Player;
-import net.runelite.client.plugins.microbot.util.walker.Rs2Walker;
 import net.runelite.client.plugins.microbot.util.widget.Rs2Widget;
 
 import javax.inject.Inject;
@@ -58,11 +54,10 @@ public class KspWillowChopperScript extends Script {
     private static final int REGULAR_FIRE_WHITE_ID = 20000;
     private static final int FORESTER_CAMPFIRE_MIN_ID = 49927;
     private static final int FORESTER_CAMPFIRE_MAX_ID = 49932;
-    // Cook's Guild bank targets are intentionally ignored. These are
-    // geometrically close to nearby chopping areas but can be inaccessible.
-    private static final int IGNORED_BANK_BOOTH_ID = 10583;
-    private static final int IGNORED_BANKER_ID_1 = 2897;
-    private static final int IGNORED_BANKER_ID_2 = 2898;
+    // Chopper banking is intentionally restricted to this exact booth.
+    // Never fall back to bankers, alternate booth IDs, deposit boxes or WebWalker.
+    private static final int BANK_BOOTH_ID = 10583;
+    private static final String BANK_BOOTH_NAME = "Bank Booth";
 
     private static final long LOOP_MS = 300L;
     private static final long TREE_RETRY_MS = 6_000L;
@@ -106,6 +101,7 @@ public class KspWillowChopperScript extends Script {
     private volatile long activeTreeObjectHash = Long.MIN_VALUE;
     private volatile WorldPoint activeTreeObjectLocation;
     private volatile WorldPoint lastChangedTreeLocation;
+    private volatile long activeTreeMissingSinceMillis;
     private final AtomicBoolean immediateRetargetQueued = new AtomicBoolean(false);
 
     private volatile int activeCampfireObjectId = -1;
@@ -352,37 +348,67 @@ public class KspWillowChopperScript extends Script {
     }
 
     private void chopSelectedTree(boolean force, WorldPoint avoidLocation) {
+        if (!force && immediateRetargetQueued.get()) {
+            status = "Tree object changed - selecting next " + activeTree;
+            return;
+        }
+
         if (Rs2Bank.isOpen()) {
             Rs2Bank.closeBank();
             return;
         }
 
         // The active tree object is the authoritative interaction lock. Never
-        // switch to another tree while this exact object id/tile is still alive.
-        // If RuneScape drops the interaction without changing the object, retry
-        // only this same tree after a short idle grace period.
+        // switch while that exact object id/tile is still alive. Poll the locked
+        // tile before trusting animation/interacting state: RuneScape can leave a
+        // stale chopping animation briefly after the tree has already morphed.
         if (activeTreeObjectLocation != null) {
+            long lockedNow = System.currentTimeMillis();
+            Rs2TileObjectModel lockedTree = findActiveTreeObject();
+
+            if (lockedTree == null) {
+                Rs2TileObjectModel replacement = findChangedObjectAtActiveTreeTile();
+                if (replacement != null) {
+                    WorldPoint changedLocation = activeTreeObjectLocation;
+                    int previousId = activeTreeObjectId;
+                    activeTreeMissingSinceMillis = 0L;
+                    requestImmediateRetarget(changedLocation,
+                            "Object " + previousId + " changed to " + replacement.getId());
+                    return;
+                }
+
+                // A cache refresh can hide an object for one script pass. Give it
+                // one 300ms loop before treating disappearance as an ID change.
+                if (activeTreeMissingSinceMillis <= 0L) {
+                    activeTreeMissingSinceMillis = lockedNow;
+                    status = "Detected " + activeTree + " object update";
+                    return;
+                }
+                if (lockedNow - activeTreeMissingSinceMillis >= LOOP_MS) {
+                    WorldPoint changedLocation = activeTreeObjectLocation;
+                    int previousId = activeTreeObjectId;
+                    activeTreeMissingSinceMillis = 0L;
+                    requestImmediateRetarget(changedLocation,
+                            "Object " + previousId + " no longer active");
+                    return;
+                }
+                status = "Waiting for active " + activeTree + " object update";
+                return;
+            }
+
+            activeTreeMissingSinceMillis = 0L;
+
             if (isPlayerBusy()) {
                 status = "Chopping " + activeTree + " - waiting for object ID change";
                 return;
             }
 
-            long lockedNow = System.currentTimeMillis();
             boolean recentLockedClick = lastTreeClickMillis > 0L
                     && lockedNow - lastTreeClickMillis < 1_500L;
             boolean recentLockedProgress = lastTreeProgressMillis > 0L
                     && lockedNow - lastTreeProgressMillis < 1_500L;
             if (recentLockedClick || recentLockedProgress) {
                 status = "Chopping " + activeTree + " - waiting for object ID change";
-                return;
-            }
-
-            Rs2TileObjectModel lockedTree = findActiveTreeObject();
-            if (lockedTree == null) {
-                // Do not select a different tree merely because a cache lookup
-                // missed one tick. The despawn/spawn event is authoritative for
-                // releasing this lock.
-                status = "Waiting for active " + activeTree + " object update";
                 return;
             }
 
@@ -465,6 +491,25 @@ public class KspWillowChopperScript extends Script {
                 .nearestOnClientThread();
     }
 
+    /**
+     * Polling fallback for tree morphs when the client does not deliver a clean
+     * GameObjectDespawned/GameObjectSpawned pair. Only consulted after the exact
+     * locked object is already absent, so unrelated objects cannot break a live
+     * tree lock.
+     */
+    private Rs2TileObjectModel findChangedObjectAtActiveTreeTile() {
+        WorldPoint location = activeTreeObjectLocation;
+        int previousId = activeTreeObjectId;
+        if (location == null || previousId < 0) return null;
+
+        return Microbot.getRs2TileObjectCache()
+                .query()
+                .where(object -> object != null
+                        && location.equals(object.getWorldLocation())
+                        && object.getId() != previousId)
+                .nearestOnClientThread();
+    }
+
     private void rememberActiveTreeTarget(Rs2TileObjectModel tree) {
         if (tree == null) {
             clearActiveTreeTarget();
@@ -473,12 +518,14 @@ public class KspWillowChopperScript extends Script {
         activeTreeObjectId = tree.getId();
         activeTreeObjectHash = tree.getHash();
         activeTreeObjectLocation = tree.getWorldLocation();
+        activeTreeMissingSinceMillis = 0L;
     }
 
     private void clearActiveTreeTarget() {
         activeTreeObjectId = -1;
         activeTreeObjectHash = Long.MIN_VALUE;
         activeTreeObjectLocation = null;
+        activeTreeMissingSinceMillis = 0L;
     }
 
     private void rememberActiveCampfireTarget(Rs2TileObjectModel fire) {
@@ -706,68 +753,27 @@ public class KspWillowChopperScript extends Script {
     private boolean openAllowedBank() {
         if (Rs2Bank.isOpen()) return true;
 
-        Rs2TileObjectModel bankObject = Microbot.getRs2TileObjectCache()
+        Rs2TileObjectModel bankBooth = Microbot.getRs2TileObjectCache()
                 .query()
                 .where(object -> object != null
-                        && object.getId() != IGNORED_BANK_BOOTH_ID
-                        && Rs2BankID.BANK_ID_SET.contains(object.getId()))
+                        && object.getId() == BANK_BOOTH_ID
+                        && BANK_BOOTH_NAME.equals(object.getName())
+                        && KspTileObjectSupport.hasAction(object, "Bank"))
                 .nearestOnClientThread();
 
-        if (bankObject != null) {
-            status = "Opening allowed bank booth";
-            if (Rs2Bank.openBank(bankObject) || Rs2Bank.isOpen()) return true;
-        }
-
-        Rs2NpcModel banker = Microbot.getRs2NpcCache()
-                .query()
-                .withName("Banker")
-                .where(npc -> npc != null
-                        && npc.getId() != IGNORED_BANKER_ID_1
-                        && npc.getId() != IGNORED_BANKER_ID_2)
-                .nearestOnClientThread();
-
-        if (banker != null) {
-            status = "Opening allowed banker";
-            if (Rs2Bank.openBank(banker.getNpc()) || Rs2Bank.isOpen()) return true;
-        }
-
-        BankLocation alternative = nearestAllowedBank(Rs2Player.getWorldLocation());
-        if (alternative == null) {
-            status = "No allowed bank available";
+        if (bankBooth == null) {
+            status = "Bank Booth 10583 not loaded";
             return false;
         }
 
-        status = "Walking to " + alternative.name().replace('_', ' ');
-        Rs2Walker.walkTo(alternative.getWorldPoint());
-        return Rs2Bank.isOpen();
-    }
-
-    private BankLocation nearestAllowedBank(WorldPoint player) {
-        if (player == null) return null;
-
-        BankLocation nearest = null;
-        int nearestDistance = Integer.MAX_VALUE;
-
-        for (BankLocation location : BankLocation.values()) {
-            if (location == BankLocation.COOKS_GUILD) continue;
-
-            try {
-                if (!location.hasRequirements()) continue;
-            } catch (Exception ignored) {
-                continue;
-            }
-
-            WorldPoint point = location.getWorldPoint();
-            if (point == null) continue;
-
-            int distance = player.distanceTo(point);
-            if (distance < nearestDistance) {
-                nearestDistance = distance;
-                nearest = location;
-            }
+        status = "Opening Bank Booth 10583";
+        if (!bankBooth.click("Bank")) {
+            status = "Bank Booth interaction failed - retrying";
+            return false;
         }
 
-        return nearest;
+        sleepUntil(Rs2Bank::isOpen, 4_000);
+        return Rs2Bank.isOpen();
     }
 
     private void bankResource() {
