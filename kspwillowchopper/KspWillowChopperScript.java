@@ -35,8 +35,9 @@ import java.util.concurrent.atomic.AtomicBoolean;
  *
  * Chopping is object driven. After a tree is clicked, that exact object remains
  * locked as the active target until its object id changes/despawns/replaces.
- * Inventory gains, animation changes and retry timers never select another tree
- * while the active tree object is still unchanged.
+ * Inventory gains and animation changes never select another tree while the
+ * active object is unchanged. If the interaction itself stops unexpectedly, the
+ * same locked tree may be re-clicked; a different tree is never selected first.
  *
  * Firemaking is also object driven. The exact campfire being used is tracked by
  * id/hash/tile. If that object disappears or changes id while a burn batch still
@@ -356,12 +357,43 @@ public class KspWillowChopperScript extends Script {
             return;
         }
 
-        // The active tree object is the authoritative interaction lock. Once a
-        // click succeeds, never click this or any other tree until RuneLite tells
-        // us that exact object changed id/despawned/replaced. This prevents log
-        // inventory gains, animation gaps and retry timers from double-clicking.
+        // The active tree object is the authoritative interaction lock. Never
+        // switch to another tree while this exact object id/tile is still alive.
+        // If RuneScape drops the interaction without changing the object, retry
+        // only this same tree after a short idle grace period.
         if (activeTreeObjectLocation != null) {
-            status = "Chopping " + activeTree + " - waiting for object ID change";
+            if (isPlayerBusy()) {
+                status = "Chopping " + activeTree + " - waiting for object ID change";
+                return;
+            }
+
+            long lockedNow = System.currentTimeMillis();
+            boolean recentLockedClick = lastTreeClickMillis > 0L
+                    && lockedNow - lastTreeClickMillis < 1_500L;
+            boolean recentLockedProgress = lastTreeProgressMillis > 0L
+                    && lockedNow - lastTreeProgressMillis < 1_500L;
+            if (recentLockedClick || recentLockedProgress) {
+                status = "Chopping " + activeTree + " - waiting for object ID change";
+                return;
+            }
+
+            Rs2TileObjectModel lockedTree = findActiveTreeObject();
+            if (lockedTree == null) {
+                // Do not select a different tree merely because a cache lookup
+                // missed one tick. The despawn/spawn event is authoritative for
+                // releasing this lock.
+                status = "Waiting for active " + activeTree + " object update";
+                return;
+            }
+
+            status = "Woodcutting stopped - retrying same " + activeTree;
+            if (lockedTree.click(activeTree.getAction())) {
+                rememberActiveTreeTarget(lockedTree);
+                lastTreeClickMillis = lockedNow;
+                status = "Chopping " + activeTree + " - waiting for object ID change";
+            } else {
+                status = "Same " + activeTree + " retry failed - waiting";
+            }
             return;
         }
 
@@ -416,6 +448,20 @@ public class KspWillowChopperScript extends Script {
                 .where(object -> object != null
                         && KspTileObjectSupport.hasAction(object, action)
                         && (avoidLocation == null || !avoidLocation.equals(object.getWorldLocation())))
+                .nearestOnClientThread();
+    }
+
+    private Rs2TileObjectModel findActiveTreeObject() {
+        WorldPoint location = activeTreeObjectLocation;
+        int objectId = activeTreeObjectId;
+        if (location == null || objectId < 0) return null;
+
+        return Microbot.getRs2TileObjectCache()
+                .query()
+                .where(object -> object != null
+                        && object.getId() == objectId
+                        && location.equals(object.getWorldLocation())
+                        && KspTileObjectSupport.hasAction(object, activeTree.getAction()))
                 .nearestOnClientThread();
     }
 
