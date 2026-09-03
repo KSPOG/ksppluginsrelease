@@ -106,6 +106,7 @@ public class KspWillowChopperScript extends Script {
     private volatile long activeTreeObjectHash = Long.MIN_VALUE;
     private volatile WorldPoint activeTreeObjectLocation;
     private volatile WorldPoint lastChangedTreeLocation;
+    private volatile long activeTreeMissingSinceMillis;
     private final AtomicBoolean immediateRetargetQueued = new AtomicBoolean(false);
 
     private volatile int activeCampfireObjectId = -1;
@@ -352,37 +353,67 @@ public class KspWillowChopperScript extends Script {
     }
 
     private void chopSelectedTree(boolean force, WorldPoint avoidLocation) {
+        if (!force && immediateRetargetQueued.get()) {
+            status = "Tree object changed - selecting next " + activeTree;
+            return;
+        }
+
         if (Rs2Bank.isOpen()) {
             Rs2Bank.closeBank();
             return;
         }
 
         // The active tree object is the authoritative interaction lock. Never
-        // switch to another tree while this exact object id/tile is still alive.
-        // If RuneScape drops the interaction without changing the object, retry
-        // only this same tree after a short idle grace period.
+        // switch while that exact object id/tile is still alive. Poll the locked
+        // tile before trusting animation/interacting state: RuneScape can leave a
+        // stale chopping animation briefly after the tree has already morphed.
         if (activeTreeObjectLocation != null) {
+            long lockedNow = System.currentTimeMillis();
+            Rs2TileObjectModel lockedTree = findActiveTreeObject();
+
+            if (lockedTree == null) {
+                Rs2TileObjectModel replacement = findChangedObjectAtActiveTreeTile();
+                if (replacement != null) {
+                    WorldPoint changedLocation = activeTreeObjectLocation;
+                    int previousId = activeTreeObjectId;
+                    activeTreeMissingSinceMillis = 0L;
+                    requestImmediateRetarget(changedLocation,
+                            "Object " + previousId + " changed to " + replacement.getId());
+                    return;
+                }
+
+                // A cache refresh can hide an object for one script pass. Give it
+                // one 300ms loop before treating disappearance as an ID change.
+                if (activeTreeMissingSinceMillis <= 0L) {
+                    activeTreeMissingSinceMillis = lockedNow;
+                    status = "Detected " + activeTree + " object update";
+                    return;
+                }
+                if (lockedNow - activeTreeMissingSinceMillis >= LOOP_MS) {
+                    WorldPoint changedLocation = activeTreeObjectLocation;
+                    int previousId = activeTreeObjectId;
+                    activeTreeMissingSinceMillis = 0L;
+                    requestImmediateRetarget(changedLocation,
+                            "Object " + previousId + " no longer active");
+                    return;
+                }
+                status = "Waiting for active " + activeTree + " object update";
+                return;
+            }
+
+            activeTreeMissingSinceMillis = 0L;
+
             if (isPlayerBusy()) {
                 status = "Chopping " + activeTree + " - waiting for object ID change";
                 return;
             }
 
-            long lockedNow = System.currentTimeMillis();
             boolean recentLockedClick = lastTreeClickMillis > 0L
                     && lockedNow - lastTreeClickMillis < 1_500L;
             boolean recentLockedProgress = lastTreeProgressMillis > 0L
                     && lockedNow - lastTreeProgressMillis < 1_500L;
             if (recentLockedClick || recentLockedProgress) {
                 status = "Chopping " + activeTree + " - waiting for object ID change";
-                return;
-            }
-
-            Rs2TileObjectModel lockedTree = findActiveTreeObject();
-            if (lockedTree == null) {
-                // Do not select a different tree merely because a cache lookup
-                // missed one tick. The despawn/spawn event is authoritative for
-                // releasing this lock.
-                status = "Waiting for active " + activeTree + " object update";
                 return;
             }
 
@@ -465,6 +496,25 @@ public class KspWillowChopperScript extends Script {
                 .nearestOnClientThread();
     }
 
+    /**
+     * Polling fallback for tree morphs when the client does not deliver a clean
+     * GameObjectDespawned/GameObjectSpawned pair. Only consulted after the exact
+     * locked object is already absent, so unrelated objects cannot break a live
+     * tree lock.
+     */
+    private Rs2TileObjectModel findChangedObjectAtActiveTreeTile() {
+        WorldPoint location = activeTreeObjectLocation;
+        int previousId = activeTreeObjectId;
+        if (location == null || previousId < 0) return null;
+
+        return Microbot.getRs2TileObjectCache()
+                .query()
+                .where(object -> object != null
+                        && location.equals(object.getWorldLocation())
+                        && object.getId() != previousId)
+                .nearestOnClientThread();
+    }
+
     private void rememberActiveTreeTarget(Rs2TileObjectModel tree) {
         if (tree == null) {
             clearActiveTreeTarget();
@@ -473,12 +523,14 @@ public class KspWillowChopperScript extends Script {
         activeTreeObjectId = tree.getId();
         activeTreeObjectHash = tree.getHash();
         activeTreeObjectLocation = tree.getWorldLocation();
+        activeTreeMissingSinceMillis = 0L;
     }
 
     private void clearActiveTreeTarget() {
         activeTreeObjectId = -1;
         activeTreeObjectHash = Long.MIN_VALUE;
         activeTreeObjectLocation = null;
+        activeTreeMissingSinceMillis = 0L;
     }
 
     private void rememberActiveCampfireTarget(Rs2TileObjectModel fire) {
@@ -737,9 +789,43 @@ public class KspWillowChopperScript extends Script {
             return false;
         }
 
-        status = "Walking to " + alternative.name().replace('_', ' ');
-        Rs2Walker.walkTo(alternative.getWorldPoint());
+        status = "Walking locally to " + alternative.name().replace('_', ' ');
+        walkTowardWithoutWebWalker(alternative.getWorldPoint());
         return Rs2Bank.isOpen();
+    }
+
+    /**
+     * Chopper must never invoke WebWalker/ShortestPath walking. Move in bounded
+     * local minimap hops only; the next script passes continue the approach.
+     */
+    private boolean walkTowardWithoutWebWalker(WorldPoint destination) {
+        WorldPoint player = Rs2Player.getWorldLocation();
+        if (player == null || destination == null || player.getPlane() != destination.getPlane()) {
+            return false;
+        }
+
+        int dx = destination.getX() - player.getX();
+        int dy = destination.getY() - player.getY();
+        int maxDelta = Math.max(Math.abs(dx), Math.abs(dy));
+        if (maxDelta <= 0) return true;
+
+        final int maxLocalHop = 11;
+        WorldPoint hop = destination;
+        if (maxDelta > maxLocalHop) {
+            double scale = maxLocalHop / (double) maxDelta;
+            hop = new WorldPoint(
+                    player.getX() + (int) Math.round(dx * scale),
+                    player.getY() + (int) Math.round(dy * scale),
+                    player.getPlane());
+        }
+
+        try {
+            if (Rs2Walker.walkMiniMap(hop)) return true;
+            return Rs2Walker.walkFastCanvas(hop);
+        } catch (Exception ex) {
+            status = "Local bank walk retrying";
+            return false;
+        }
     }
 
     private BankLocation nearestAllowedBank(WorldPoint player) {
