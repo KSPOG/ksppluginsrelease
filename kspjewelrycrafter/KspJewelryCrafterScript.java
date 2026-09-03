@@ -8,7 +8,6 @@ import net.runelite.api.ObjectComposition;
 import net.runelite.api.TileObject;
 import net.runelite.api.GrandExchangeOfferState;
 import net.runelite.api.Skill;
-import net.runelite.api.TileObject;
 import net.runelite.api.coords.WorldPoint;
 import net.runelite.api.gameval.InterfaceID;
 import net.runelite.api.gameval.VarbitID;
@@ -522,7 +521,7 @@ public class KspJewelryCrafterScript extends Script
         // Do not fall back to Rs2Bank.openBank(), because its banker/object path
         // can rotate the camera as well. Move close enough for a bank object to
         // enter the scene and retry on the next script tick.
-        WorldPoint destination = edgeville ? EDGEVILLE_BANK : EDGEVILLE_BANK;
+        WorldPoint destination = EDGEVILLE_BANK;
         status = edgeville ? "Approaching Edgeville bank" : "Walking to bank without camera movement";
         if (!Rs2Player.isMoving()) Rs2Walker.walkTo(destination, 10);
         return false;
