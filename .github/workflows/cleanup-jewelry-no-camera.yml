@@ -1,0 +1,40 @@
+name: Clean Jewellery Crafter no-camera patch
+
+on:
+  push:
+    branches:
+      - jewelry-no-camera-bank-furnace
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup:
+    if: ${{ !contains(github.event.head_commit.message, '[jewelry-no-camera-clean]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Clean patch
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('kspjewelrycrafter/KspJewelryCrafterScript.java')
+          s = p.read_text(encoding='utf-8')
+          first = s.find('import net.runelite.api.TileObject;')
+          second = s.find('import net.runelite.api.TileObject;', first + 1)
+          if second >= 0:
+              end = second + len('import net.runelite.api.TileObject;')
+              if end < len(s) and s[end] == '\n': end += 1
+              s = s[:second] + s[end:]
+          s = s.replace('WorldPoint destination = edgeville ? EDGEVILLE_BANK : EDGEVILLE_BANK;', 'WorldPoint destination = EDGEVILLE_BANK;')
+          p.write_text(s, encoding='utf-8')
+          Path('.github/workflows/cleanup-jewelry-no-camera.yml').unlink(missing_ok=True)
+          PY
+      - name: Commit cleanup
+        run: |
+          git config user.name "KSP Automation"
+          git config user.email "ksp-automation@users.noreply.github.com"
+          git add -A
+          git diff --cached --quiet && exit 0
+          git commit -m "chore: clean Jewellery Crafter no-camera patch [jewelry-no-camera-clean]"
+          git push
