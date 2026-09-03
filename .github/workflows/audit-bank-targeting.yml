@@ -1,0 +1,33 @@
+name: Audit bank targeting
+
+on:
+  push:
+    branches:
+      - fix-safe-bank-targeting
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout KSP plugins
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - name: Checkout Microbot Hub reference
+        uses: actions/checkout@v4
+        with:
+          repository: KSPOG/Microbot-Hub
+          path: microbot-hub
+          fetch-depth: 1
+      - name: Audit banking code
+        shell: bash
+        run: |
+          set -euo pipefail
+          PATTERN='Rs2Bank|findBank|openBank|walkToBank|walkToBankAndUseBank|Banker|Bank booth|Bank Booth|Bank chest|Bank Chest|contains\("Bank"|contains\("bank"|hasAction\("Bank"|hasAction\("bank"|interact\([^,]+,[[:space:]]*"Bank"'
+          echo '=== KSP BANK REFERENCES ==='
+          grep -RInE "$PATTERN" --include='*.java' . --exclude-dir=.git --exclude-dir=microbot-hub || true
+          echo '=== MICROBOT HUB BANK REFERENCES ==='
+          grep -RInE "$PATTERN" --include='*.java' microbot-hub --exclude-dir=.git || true
