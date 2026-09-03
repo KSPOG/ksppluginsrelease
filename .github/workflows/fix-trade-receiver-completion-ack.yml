@@ -1,0 +1,26 @@
+name: Fix Trade Receiver completion handshake
+
+on:
+  push:
+    branches:
+      - fix-trade-receiver-completion-ack
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: ${{ !contains(github.event.head_commit.message, '[trade-completion-fixed]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply completion handshake patch
+        run: python .github/scripts/fix_trade_receiver_completion_ack.py
+      - name: Commit completion handshake
+        run: |
+          git config user.name "KSP Automation"
+          git config user.email "ksp-automation@users.noreply.github.com"
+          git add -A
+          git diff --cached --quiet && exit 0
+          git commit -m "fix: keep Trade Receiver online through completion acknowledgement [trade-completion-fixed]"
+          git push
