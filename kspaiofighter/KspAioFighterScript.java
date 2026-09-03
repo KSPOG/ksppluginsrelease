@@ -1064,6 +1064,14 @@ public class KspAioFighterScript extends Script
 			return false;
 		}
 
+		// Do not interrupt an active fight just because melee movement temporarily
+		// carried the player outside the configured rectangle. The target itself is
+		// already filtered to the configured attack area before we click Attack.
+		if (Rs2Player.isInCombat() || Rs2Player.isInteracting())
+		{
+			return false;
+		}
+
 		// Safe spot mode intentionally owns the standing tile. Otherwise the script would
 		// bounce between the safe spot and the attack-area center when both are enabled.
 		if (config.useSafeSpot())
@@ -1088,8 +1096,8 @@ public class KspAioFighterScript extends Script
 			return false;
 		}
 
-		WorldPoint center = getAttackAreaCenterFromTiles();
-		if (!isConfiguredTileValid(center))
+		WorldPoint returnPoint = getNearestPointInsideConfiguredArea(playerLocation);
+		if (!isConfiguredTileValid(returnPoint))
 		{
 			return false;
 		}
@@ -1101,9 +1109,28 @@ public class KspAioFighterScript extends Script
 		}
 
 		lastAttackAreaWalkAttemptMs = System.currentTimeMillis();
-		Rs2Walker.walkTo(center, ATTACK_AREA_WALK_DISTANCE);
-		setStatus("walking to attack area " + formatPoint(center) + " distance " + ATTACK_AREA_WALK_DISTANCE);
+		Rs2Walker.walkTo(returnPoint, ATTACK_AREA_WALK_DISTANCE);
+		setStatus("walking to attack area " + formatPoint(returnPoint) + " distance " + ATTACK_AREA_WALK_DISTANCE);
 		return true;
+	}
+
+	private WorldPoint getNearestPointInsideConfiguredArea(WorldPoint playerLocation)
+	{
+		WorldPoint tile1 = getAttackAreaTile1();
+		WorldPoint tile2 = getAttackAreaTile2();
+		if (playerLocation == null || !isConfiguredTileValid(tile1) || !isConfiguredTileValid(tile2)
+				|| tile1.getPlane() != tile2.getPlane())
+		{
+			return getAttackAreaCenterFromTiles();
+		}
+
+		int minX = Math.min(tile1.getX(), tile2.getX());
+		int maxX = Math.max(tile1.getX(), tile2.getX());
+		int minY = Math.min(tile1.getY(), tile2.getY());
+		int maxY = Math.max(tile1.getY(), tile2.getY());
+		int x = Math.max(minX, Math.min(maxX, playerLocation.getX()));
+		int y = Math.max(minY, Math.min(maxY, playerLocation.getY()));
+		return new WorldPoint(x, y, tile1.getPlane());
 	}
 
 	private boolean canRetryWalk(long lastWalkAttemptMs)
