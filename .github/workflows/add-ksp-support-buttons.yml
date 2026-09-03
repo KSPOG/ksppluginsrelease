@@ -1,0 +1,28 @@
+name: Add KSP support buttons
+
+on:
+  push:
+    branches:
+      - add-ksp-support-buttons
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: ${{ !contains(github.event.head_commit.message, '[support-buttons-done]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Apply support button patch
+        run: python .github/scripts/add_ksp_support_buttons.py
+
+      - name: Commit support buttons
+        run: |
+          git config user.name "KSP Automation"
+          git config user.email "ksp-automation@users.noreply.github.com"
+          git add -A
+          git diff --cached --quiet && exit 0
+          git commit -m "feat: add Discord support button to all KSP plugins [support-buttons-done]"
+          git push
