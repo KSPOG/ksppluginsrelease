@@ -1,0 +1,48 @@
+name: Patch Bank Organizer overrides v2
+on:
+  push:
+    branches: [fix-bank-organizer-missing-overrides]
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix-bank-organizer-missing-overrides
+          fetch-depth: 0
+      - name: Patch files
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          auto = Path('kspbankorganizer/AutoCategorizer.java')
+          text = auto.read_text(encoding='utf-8')
+          old = "        this.itemManager = itemManager;\n        loadBundledOverrides();\n        installCoreIds();"
+          new = "        this.itemManager = itemManager;\n        // Source-loaded KSP plugins compile Java sources only. The historical\n        // reference_default_overrides.txt resource is not part of this release,\n        // so use the embedded canonical ID defaults directly.\n        installCoreIds();"
+          if old not in text:
+              raise SystemExit('AutoCategorizer constructor pattern not found')
+          auto.write_text(text.replace(old, new, 1), encoding='utf-8')
+
+          plugin = Path('kspbankorganizer/KspBankOrganizerPlugin.java')
+          text = plugin.read_text(encoding='utf-8')
+          old = 'public static final String VERSION = "1.1.36";'
+          new = 'public static final String VERSION = "1.1.37";'
+          if old not in text:
+              raise SystemExit('Bank Organizer version pattern not found')
+          plugin.write_text(text.replace(old, new, 1), encoding='utf-8')
+
+          for path in [
+              Path('.github/workflows/patch-bank-organizer-overrides.yml'),
+              Path('.github/workflows/patch-bank-organizer-overrides-v2.yml')
+          ]:
+              if path.exists():
+                  path.unlink()
+          PY
+      - name: Commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Fix Bank Organizer missing overrides warning"
+          git push origin HEAD:fix-bank-organizer-missing-overrides
