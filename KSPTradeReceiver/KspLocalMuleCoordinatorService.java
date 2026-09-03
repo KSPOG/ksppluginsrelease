@@ -192,6 +192,12 @@ public class KspLocalMuleCoordinatorService
             restoreManualTrader();
             activeWorker = "-";
             activeCoins = 0L;
+            if (currentServer.hasUnacknowledgedCompletion())
+            {
+                status = "Transfer complete - waiting for worker acknowledgement";
+                queueEmptySince = 0L;
+                return;
+            }
             maybeLogoutWhenDone(currentServer);
             return;
         }
