@@ -1,0 +1,26 @@
+name: Fix Chopper same-tree retry clean
+
+on:
+  push:
+    branches:
+      - fix-chopper-resume-same-tree-clean
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: ${{ !contains(github.event.head_commit.message, '[same-tree-clean-fixed]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply same-tree retry patch
+        run: python .github/scripts/fix_chopper_resume_same_tree_clean.py
+      - name: Commit same-tree retry
+        run: |
+          git config user.name "KSP Automation"
+          git config user.email "ksp-automation@users.noreply.github.com"
+          git add -A
+          git diff --cached --quiet && exit 0
+          git commit -m "fix: retry same Chopper tree when interaction drops [same-tree-clean-fixed]"
+          git push
