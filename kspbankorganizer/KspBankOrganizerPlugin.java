@@ -33,7 +33,7 @@ import net.runelite.client.ui.overlay.OverlayManager;
 @Slf4j
 public class KspBankOrganizerPlugin extends Plugin
 {
-    public static final String VERSION = "1.1.36";
+    public static final String VERSION = "1.1.37";
 
     @Inject private KspBankOrganizerConfig config;
     @Inject private BankOrganizerEngine engine;
