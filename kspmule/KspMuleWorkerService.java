@@ -295,8 +295,17 @@ public final class KspMuleWorkerService
                 handleActive(reply);
                 return;
             case COMPLETE:
+                state = State.WAITING_COMPLETE;
+                status = "Transfer complete - acknowledging receiver";
+                KspMuleConfig currentConfig = config;
+                if (currentConfig == null || requestId == null
+                        || !client.acknowledgeComplete(currentConfig.muleReceiverPort(), requestId))
+                {
+                    status = "Transfer complete - waiting for receiver acknowledgement";
+                    return;
+                }
                 state = State.RESTORING;
-                status = "Transfer complete - restoring capital";
+                status = "Transfer acknowledged - restoring capital";
                 restoreTradingCapital();
                 finishSuccess();
                 return;
