@@ -2,14 +2,10 @@ package net.runelite.client.plugins.microbot.kspwillowchopper;
 
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.GameObject;
-import net.runelite.api.Item;
-import net.runelite.api.ItemContainer;
 import net.runelite.api.Skill;
 import net.runelite.api.coords.WorldPoint;
 import net.runelite.api.events.GameObjectDespawned;
 import net.runelite.api.events.GameObjectSpawned;
-import net.runelite.api.events.ItemContainerChanged;
-import net.runelite.api.InventoryID;
 import net.runelite.api.gameval.ItemID;
 import net.runelite.api.gameval.ObjectID;
 import net.runelite.client.eventbus.EventBus;
@@ -37,11 +33,10 @@ import java.util.concurrent.atomic.AtomicBoolean;
 /**
  * Deterministic Chopper runtime.
  *
- * Chopping is event driven in two ways:
- *  - when the currently clicked tree changes id/despawns;
- *  - when the selected resource count increases in the player inventory.
- * Either signal immediately selects another valid tree and bypasses the normal
- * animation/retry suppression.
+ * Chopping is object driven. After a tree is clicked, that exact object remains
+ * locked as the active target until its object id changes/despawns/replaces.
+ * Inventory gains, animation changes and retry timers never select another tree
+ * while the active tree object is still unchanged.
  *
  * Firemaking is also object driven. The exact campfire being used is tracked by
  * id/hash/tile. If that object disappears or changes id while a burn batch still
@@ -118,7 +113,6 @@ public class KspWillowChopperScript extends Script {
     private final AtomicBoolean immediateCampfireQueued = new AtomicBoolean(false);
 
     private volatile boolean eventBusRegistered;
-    private volatile int lastInventoryEventResourceCount = -1;
 
     private long startTimeMillis;
     private int startWoodcuttingXp;
@@ -182,7 +176,6 @@ public class KspWillowChopperScript extends Script {
         resourcesBurned = 0;
         campfiresLit = 0;
         lastResourceCount = Rs2Inventory.count(activeTree.getResourceId());
-        lastInventoryEventResourceCount = lastResourceCount;
         burnCommandResourceCount = -1;
         promotingFireToCampfire = false;
 
@@ -363,6 +356,15 @@ public class KspWillowChopperScript extends Script {
             return;
         }
 
+        // The active tree object is the authoritative interaction lock. Once a
+        // click succeeds, never click this or any other tree until RuneLite tells
+        // us that exact object changed id/despawned/replaced. This prevents log
+        // inventory gains, animation gaps and retry timers from double-clicking.
+        if (activeTreeObjectLocation != null) {
+            status = "Chopping " + activeTree + " - waiting for object ID change";
+            return;
+        }
+
         if (!force && isPlayerBusy()) {
             status = "Chopping " + activeTree;
             return;
@@ -515,41 +517,6 @@ public class KspWillowChopperScript extends Script {
                 && object.getId() != activeTreeObjectId) {
             requestImmediateRetarget(treeLocation, "Object " + activeTreeObjectId + " changed");
         }
-    }
-
-    @Subscribe
-    public void onItemContainerChanged(ItemContainerChanged event) {
-        if (!sessionStarted || event == null) return;
-
-        ItemContainer container = event.getItemContainer();
-        if (container == null || event.getContainerId() != InventoryID.INVENTORY.getId()) {
-            return;
-        }
-
-        int current = countItem(container, activeTree.getResourceId());
-        int previous = lastInventoryEventResourceCount;
-        lastInventoryEventResourceCount = current;
-
-        if (previous < 0 || current <= previous || state != RuntimeState.CHOPPING) {
-            return;
-        }
-
-        // A selected log/resource was added to inventory. Immediately rotate to
-        // another tree, bypassing the old chopping animation and retry timer.
-        WorldPoint previousTree = activeTreeObjectLocation;
-        requestImmediateRetarget(previousTree, "Inventory changed");
-    }
-
-    private int countItem(ItemContainer container, int itemId) {
-        int total = 0;
-        Item[] items = container.getItems();
-        if (items == null) return 0;
-        for (Item item : items) {
-            if (item != null && item.getId() == itemId) {
-                total += Math.max(1, item.getQuantity());
-            }
-        }
-        return total;
     }
 
     private boolean isActiveChopObject(GameObject object) {
@@ -788,7 +755,6 @@ public class KspWillowChopperScript extends Script {
         int after = Rs2Inventory.count(resourceId);
         resourcesBanked += Math.max(0, before - after);
         lastResourceCount = after;
-        lastInventoryEventResourceCount = after;
 
         if (after > 0) {
             status = "Waiting for bank deposit";
@@ -817,7 +783,6 @@ public class KspWillowChopperScript extends Script {
             Rs2Inventory.drop(resourceId);
             sleepUntil(() -> Rs2Inventory.count(resourceId) < before, 2_500);
             lastResourceCount = Rs2Inventory.count(resourceId);
-            lastInventoryEventResourceCount = lastResourceCount;
             return;
         }
 
@@ -904,7 +869,6 @@ public class KspWillowChopperScript extends Script {
 
         resourcesBurned += before - after;
         lastResourceCount = after;
-        lastInventoryEventResourceCount = after;
         lastBurnProgressMillis = System.currentTimeMillis();
         campfiresLit++;
 
@@ -997,7 +961,6 @@ public class KspWillowChopperScript extends Script {
 
         resourcesBurned += before - after;
         lastResourceCount = after;
-        lastInventoryEventResourceCount = after;
         lastBurnProgressMillis = System.currentTimeMillis();
 
         if (promoting) {
@@ -1122,7 +1085,6 @@ public class KspWillowChopperScript extends Script {
         lastTinderboxAttemptMillis = 0L;
         lastFireAttemptMillis = 0L;
         lastResourceCount = Rs2Inventory.count(activeTree.getResourceId());
-        lastInventoryEventResourceCount = lastResourceCount;
         state = RuntimeState.CHOPPING;
         status = "Tree changed to " + activeTree;
     }
@@ -1142,7 +1104,6 @@ public class KspWillowChopperScript extends Script {
 
     private void syncResourceBaseline() {
         lastResourceCount = Rs2Inventory.count(activeTree.getResourceId());
-        lastInventoryEventResourceCount = lastResourceCount;
     }
 
     private boolean hasAxe() {
@@ -1202,7 +1163,6 @@ public class KspWillowChopperScript extends Script {
         promotingFireToCampfire = false;
         fireBurnedOutSignal = false;
         lastResourceCount = -1;
-        lastInventoryEventResourceCount = -1;
         lastChangedTreeLocation = null;
         immediateRetargetQueued.set(false);
         immediateCampfireQueued.set(false);
