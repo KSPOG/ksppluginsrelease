@@ -1,7 +1,11 @@
 package net.runelite.client.plugins.microbot.kspjewelrycrafter;
 
 import lombok.extern.slf4j.Slf4j;
+import net.runelite.api.GameObject;
 import net.runelite.api.GrandExchangeOffer;
+import net.runelite.api.MenuAction;
+import net.runelite.api.ObjectComposition;
+import net.runelite.api.TileObject;
 import net.runelite.api.GrandExchangeOfferState;
 import net.runelite.api.Skill;
 import net.runelite.api.TileObject;
@@ -12,6 +16,8 @@ import net.runelite.api.widgets.Widget;
 import net.runelite.client.plugins.microbot.Microbot;
 import net.runelite.client.plugins.microbot.Script;
 import net.runelite.client.plugins.microbot.kspmule.KspMuleWorkerService;
+import net.runelite.client.plugins.microbot.util.menu.NewMenuEntry;
+import net.runelite.client.plugins.microbot.util.misc.Rs2UiHelper;
 import net.runelite.client.plugins.microbot.util.bank.Rs2Bank;
 import net.runelite.client.plugins.microbot.util.gameobject.Rs2GameObject;
 import net.runelite.client.plugins.microbot.util.grandexchange.GrandExchangeAction;
@@ -476,7 +482,7 @@ public class KspJewelryCrafterScript extends Script
         status = openingStatus;
         long attemptStartedAt = System.currentTimeMillis();
         bankInteractionSentAt = attemptStartedAt;
-        if (!Rs2Bank.openBank())
+        if (!openBankWithoutCamera(edgeville))
         {
             if (System.currentTimeMillis() - attemptStartedAt < 750L) bankInteractionSentAt = 0L;
             else bankInteractionSentAt = System.currentTimeMillis();
@@ -497,6 +503,95 @@ public class KspJewelryCrafterScript extends Script
             return false;
         }
         return true;
+    }
+
+    /**
+     * Opens a bank without invoking Microbot's normal object interaction helper.
+     * That helper rotates the camera when the target is off-screen; Jewellery
+     * Crafter deliberately leaves the camera untouched and dispatches the Bank
+     * menu action directly instead.
+     */
+    private boolean openBankWithoutCamera(boolean edgeville)
+    {
+        GameObject bank = Rs2GameObject.findBank();
+        if (bank != null)
+        {
+            return interactGameObjectWithoutCamera(bank, "Bank");
+        }
+
+        // Do not fall back to Rs2Bank.openBank(), because its banker/object path
+        // can rotate the camera as well. Move close enough for a bank object to
+        // enter the scene and retry on the next script tick.
+        WorldPoint destination = edgeville ? EDGEVILLE_BANK : EDGEVILLE_BANK;
+        status = edgeville ? "Approaching Edgeville bank" : "Walking to bank without camera movement";
+        if (!Rs2Player.isMoving()) Rs2Walker.walkTo(destination, 10);
+        return false;
+    }
+
+    /**
+     * Dispatches a game-object action without Rs2Camera.turnTo(...). This is a
+     * local equivalent of the normal object click path minus camera movement.
+     */
+    private boolean interactGameObjectWithoutCamera(TileObject tileObject, String action)
+    {
+        if (!(tileObject instanceof GameObject) || action == null || action.isBlank()) return false;
+        GameObject object = (GameObject) tileObject;
+
+        ObjectComposition composition = Microbot.getClientThread().runOnClientThreadOptional(() ->
+        {
+            ObjectComposition resolved = Microbot.getClient().getObjectDefinition(object.getId());
+            if (resolved != null && resolved.getImpostorIds() != null && resolved.getImpostor() != null)
+                resolved = resolved.getImpostor();
+            return resolved;
+        }).orElse(null);
+        if (composition == null) return false;
+
+        String[] actions = composition.getActions();
+        if (actions == null) return false;
+        int actionIndex = -1;
+        for (int i = 0; i < actions.length; i++)
+        {
+            if (actions[i] != null && action.equalsIgnoreCase(actions[i]))
+            {
+                actionIndex = i;
+                break;
+            }
+        }
+        if (actionIndex < 0) return false;
+
+        MenuAction menuAction = gameObjectMenuAction(actionIndex);
+        if (menuAction == null) return false;
+
+        int sceneX = object.getLocalLocation().getSceneX();
+        int sceneY = object.getLocalLocation().getSceneY();
+        if (object.sizeX() > 1) sceneX -= object.sizeX() / 2;
+        if (object.sizeY() > 1) sceneY -= object.sizeY() / 2;
+
+        NewMenuEntry entry = new NewMenuEntry()
+            .param0(sceneX)
+            .param1(sceneY)
+            .opcode(menuAction.getId())
+            .identifier(object.getId())
+            .itemId(-1)
+            .option(actions[actionIndex])
+            .target(composition.getName())
+            .gameObject(object);
+
+        Microbot.doInvoke(entry, Rs2UiHelper.getObjectClickbox(object));
+        return true;
+    }
+
+    private MenuAction gameObjectMenuAction(int actionIndex)
+    {
+        switch (actionIndex)
+        {
+            case 0: return MenuAction.GAME_OBJECT_FIRST_OPTION;
+            case 1: return MenuAction.GAME_OBJECT_SECOND_OPTION;
+            case 2: return MenuAction.GAME_OBJECT_THIRD_OPTION;
+            case 3: return MenuAction.GAME_OBJECT_FOURTH_OPTION;
+            case 4: return MenuAction.GAME_OBJECT_FIFTH_OPTION;
+            default: return null;
+        }
     }
 
     private boolean closeBankIfDone(String closingStatus)
@@ -783,7 +878,7 @@ public class KspJewelryCrafterScript extends Script
         if (!isJewelryProductionOpen())
         {
             status = "Opening jewellery furnace interface";
-            if (!Rs2GameObject.interact(furnace, "Smelt"))
+            if (!interactGameObjectWithoutCamera(furnace, "Smelt"))
             {
                 status = "Unable to use Edgeville furnace";
                 return;
