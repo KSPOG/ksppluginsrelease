@@ -1,12 +1,14 @@
 package net.runelite.client.plugins.microbot.kspbondgoal;
 
+
+import net.runelite.client.plugins.microbot.kspsupport.KspSupportConfig;
 import net.runelite.client.config.Config;
 import net.runelite.client.config.ConfigGroup;
 import net.runelite.client.config.ConfigItem;
 import net.runelite.client.config.Range;
 
 @ConfigGroup(KspBondGoalConfig.GROUP)
-public interface KspBondGoalConfig extends Config
+public interface KspBondGoalConfig extends Config, KspSupportConfig
 {
     String GROUP = "kspbondgoal";
 

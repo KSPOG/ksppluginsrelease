@@ -1,5 +1,7 @@
 package net.runelite.client.plugins.microbot.kspaiofighter;
 
+
+import net.runelite.client.plugins.microbot.kspsupport.KspSupportConfig;
 import net.runelite.client.config.Config;
 import net.runelite.client.config.ConfigGroup;
 import net.runelite.client.config.ConfigInformation;
@@ -11,7 +13,7 @@ import net.runelite.client.plugins.microbot.util.magic.Rs2CombatSpells;
 
 @ConfigGroup(KspAioFighterConfig.GROUP)
 @ConfigInformation("Configure combat, training, supplies and loot here. Equipment loadouts and attack areas are managed from the AIO Fighter side panel.")
-public interface KspAioFighterConfig extends Config, KspMuleConfig
+public interface KspAioFighterConfig extends Config, KspMuleConfig, KspSupportConfig
 {
 	String GROUP = "kspaiofighter";
 
