@@ -653,7 +653,7 @@ public class KSPTradeReceiverScript extends Script
     private static String cleanText(String value)
     {
         if (value == null) return "";
-        return Text.removeTags(Text.unescapeJagex(value)).trim();
+        return Text.removeTags(value).trim();
     }
 
     private static String formatTile(WorldPoint point)
