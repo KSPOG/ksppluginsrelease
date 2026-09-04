@@ -298,8 +298,15 @@ public class KspHighAlchMuleService
                 return;
 
             case COMPLETE:
+                state = MuleState.WAITING_COMPLETE;
+                status = "Transfer complete - acknowledging receiver";
+                if (requestId == null || !client.acknowledgeComplete(config.mulePort(), requestId))
+                {
+                    status = "Transfer complete - waiting for receiver acknowledgement";
+                    return;
+                }
                 state = MuleState.RESTORING;
-                status = "Transfer complete - restoring capital";
+                status = "Transfer acknowledged - restoring capital";
                 restoreTradingCapital();
                 finishSuccess();
                 return;
@@ -631,7 +638,7 @@ public class KspHighAlchMuleService
 
     private static String cleanText(String value)
     {
-        return value == null ? "" : Text.removeTags(Text.unescapeJagex(value)).trim();
+        return value == null ? "" : Text.removeTags(value).trim();
     }
 
     private static String normaliseName(String value)

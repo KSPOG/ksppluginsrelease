@@ -703,7 +703,7 @@ public final class KspMuleWorkerService
 
     private static boolean isFirstTradeOpen() { return Rs2Widget.isWidgetVisible(InterfaceID.Trademain.ACCEPT); }
     private static boolean isConfirmationOpen() { return Rs2Widget.isWidgetVisible(InterfaceID.Tradeconfirm.TRADE2ACCEPT); }
-    private static String cleanText(String value) { return value == null ? "" : Text.removeTags(Text.unescapeJagex(value)).trim(); }
+    private static String cleanText(String value) { return value == null ? "" : Text.removeTags(value).trim(); }
     private static String normaliseName(String value)
     {
         return cleanText(value).replace('_', ' ').replace('\u00A0', ' ').trim().replaceAll("\\s+", " ").toLowerCase(Locale.ROOT);
