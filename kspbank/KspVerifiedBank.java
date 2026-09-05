@@ -1,10 +1,10 @@
 package net.runelite.client.plugins.microbot.kspbank;
 
 import net.runelite.api.GameObject;
-import net.runelite.client.plugins.microbot.api.npc.models.Rs2NpcModel;
 import net.runelite.client.plugins.microbot.util.bank.Rs2Bank;
 import net.runelite.client.plugins.microbot.util.gameobject.Rs2GameObject;
 import net.runelite.client.plugins.microbot.util.npc.Rs2Npc;
+import net.runelite.client.plugins.microbot.util.npc.Rs2NpcModel;
 
 /**
  * Central bank-target validation for KSP plugins.
