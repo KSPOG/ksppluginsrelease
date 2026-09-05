@@ -1,5 +1,7 @@
 package net.runelite.client.plugins.microbot.kspsmartsmelter;
 
+
+import net.runelite.client.plugins.microbot.kspbank.KspVerifiedBank;
 import net.runelite.api.Skill;
 import net.runelite.api.gameval.InterfaceID;
 import net.runelite.api.gameval.ItemID;
@@ -296,7 +298,7 @@ public class KspSmartSmelterScript extends Script {
         Microbot.status = "Opening " + location.getDisplayName() + " bank";
 
         // Non-Edgeville locations retain their existing bank behavior.
-        if (Rs2Bank.openBank() && sleepUntil(Rs2Bank::isOpen, 2500)) {
+        if (KspVerifiedBank.openBank() && sleepUntil(Rs2Bank::isOpen, 2500)) {
             return true;
         }
 
@@ -588,7 +590,7 @@ public class KspSmartSmelterScript extends Script {
 
     private void sellBankedOutput(SmeltRoute route) {
         if (!Rs2Bank.isOpen()) {
-            Rs2Bank.openBank();
+            KspVerifiedBank.openBank();
         }
         if (!sleepUntil(Rs2Bank::isOpen, 5000)) {
             return;

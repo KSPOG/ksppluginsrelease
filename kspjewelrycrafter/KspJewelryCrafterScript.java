@@ -512,7 +512,7 @@ public class KspJewelryCrafterScript extends Script
      */
     private boolean openBankWithoutCamera(boolean edgeville)
     {
-        GameObject bank = Rs2GameObject.findBank();
+        GameObject bank = Rs2GameObject.get("Bank booth", true);
         if (bank != null)
         {
             return interactGameObjectWithoutCamera(bank, "Bank");
