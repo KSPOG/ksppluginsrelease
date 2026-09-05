@@ -57,6 +57,7 @@ public class KspSmartSmelterOverlay extends OverlayPanel {
             add("Account", script.isMemberAccount() ? "Members" : "F2P");
             add("Location", config.furnaceLocation().getDisplayName());
             add("Ranking", config.rankingMode().toString());
+            add("Anti-ban", shorten(script.getAntibanStatus(), 31));
 
             RouteQuote quote = script.getSelectedQuote();
             if (quote == null) {

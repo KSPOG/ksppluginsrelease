@@ -43,6 +43,7 @@ public class KspSmartSmelterScript extends Script {
 
     private final KspSmartSmelterPlugin plugin;
     private final KspSmartSmelterConfig config;
+    private final SmartSmelterAntibanController antiban;
 
     private volatile SmartSmelterState state = SmartSmelterState.STARTING;
     private volatile RouteQuote selectedQuote;
@@ -56,11 +57,13 @@ public class KspSmartSmelterScript extends Script {
     private volatile int startingSmithingXp;
     private volatile long bankInteractionSentAt;
     private volatile long furnaceInteractionSentAt;
+    private volatile int antibanHandledTrips;
 
     @Inject
     public KspSmartSmelterScript(KspSmartSmelterPlugin plugin, KspSmartSmelterConfig config) {
         this.plugin = plugin;
         this.config = config;
+        this.antiban = new SmartSmelterAntibanController(config);
     }
 
     public boolean run() {
@@ -71,10 +74,16 @@ public class KspSmartSmelterScript extends Script {
         state = SmartSmelterState.STARTING;
         bankInteractionSentAt = 0L;
         furnaceInteractionSentAt = 0L;
+        antibanHandledTrips = 0;
+        antiban.reset();
 
         mainScheduledFuture = scheduledExecutorService.scheduleWithFixedDelay(() -> {
             try {
                 if (!Microbot.isLoggedIn() || !super.run() || !isRunning()) {
+                    return;
+                }
+
+                if (antiban.beforeTick(state)) {
                     return;
                 }
 
@@ -195,6 +204,13 @@ public class KspSmartSmelterScript extends Script {
         depositProductionInventory(route);
 
         int availableCycles = bankCycles(route);
+        if (completedTrips > antibanHandledTrips) {
+            antibanHandledTrips = completedTrips;
+            antiban.onBatchBanked(availableCycles > 0);
+            if (antiban.beforeTick(state)) {
+                return;
+            }
+        }
         if (availableCycles <= 0) {
             Rs2Bank.closeBank();
 
@@ -493,6 +509,7 @@ public class KspSmartSmelterScript extends Script {
             Microbot.status = "Could not start " + route.getOutputName();
             return;
         }
+        antiban.onProductionStarted();
 
         long timeout = Math.max(30_000L, route.getMaxCyclesPerTrip() * (route.isCannonballs() ? 7_000L : 4_000L));
         sleepUntil(() -> !hasOneCycleInInventory(route), (int) Math.min(timeout, 180_000L));
@@ -784,7 +801,9 @@ public class KspSmartSmelterScript extends Script {
         Microbot.status = SmartSmelterGeTrader.hasOpenOffers()
                 ? "Waiting for GE restock offers"
                 : "Restock offers completed";
-        sleep(Math.max(3, config.offerWaitSeconds()) * 1000);
+        antiban.onGeWaitStart();
+        long restockWait = antiban.jitterOfferTimeout(Math.max(3, config.offerWaitSeconds()) * 1000L);
+        sleep((int) Math.min(Integer.MAX_VALUE, restockWait));
 
         if (!SmartSmelterGeTrader.collectCompletedToBank()) {
             return;
@@ -840,7 +859,9 @@ public class KspSmartSmelterScript extends Script {
                 route.getOutputId(), outputName, quantity, config.sellPercent())) {
             state = SmartSmelterState.WAITING_FOR_OFFERS;
             Microbot.status = "Selling " + route.getOutputName();
-            sleep(Math.max(3, config.offerWaitSeconds()) * 1000);
+            antiban.onGeWaitStart();
+            long sellWait = antiban.jitterOfferTimeout(Math.max(3, config.offerWaitSeconds()) * 1000L);
+            sleep((int) Math.min(Integer.MAX_VALUE, sellWait));
             SmartSmelterGeTrader.collectCompletedToBank();
         } else {
             Microbot.status = "GE sell placement/verification failed: " + outputName;
@@ -946,6 +967,10 @@ public class KspSmartSmelterScript extends Script {
     public int getSelectedInventoryCycles() {
         RouteQuote quote = selectedQuote;
         return quote == null ? 0 : inventoryCycles(quote.getRoute());
+    }
+
+    public String getAntibanStatus() {
+        return antiban.getStatus();
     }
 
     @Override

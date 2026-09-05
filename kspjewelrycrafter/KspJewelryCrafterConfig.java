@@ -12,6 +12,9 @@ import net.runelite.client.plugins.microbot.kspmule.KspMuleConfig;
 @ConfigGroup("kspjewelrycrafter")
 public interface KspJewelryCrafterConfig extends Config, KspMuleConfig, KspSupportConfig
 {
+    @ConfigSection(name = "Anti-ban", description = "Task-aware behavior variation that only runs in safe idle windows", position = 50)
+    String antibanSection = "antiban";
+
     @ConfigSection(name = "Local Mule", description = "Automatic excess-GP transfer to KSP Trade Receiver", position = 90)
     String muleSection = KspMuleConfig.SECTION;
 
@@ -48,6 +51,12 @@ public interface KspJewelryCrafterConfig extends Config, KspMuleConfig, KspSuppo
     default int maxOfferRetries() { return 4; }
     @ConfigItem(keyName = "showOverlay", name = "Show overlay", description = "Show status, membership, recipe and live profitability", position = 11)
     default boolean showOverlay() { return true; }
+
+    @ConfigItem(keyName = "customAntiban", name = "Custom anti-ban", description = "Enable Jewellery Crafter's safe, task-aware humanization layer", position = 0, section = antibanSection)
+    default boolean customAntiban() { return true; }
+
+    @ConfigItem(keyName = "antibanProfile", name = "Anti-ban profile", description = "Light keeps delays small, Balanced is the default, High adds longer pauses and more mouse-away behavior", position = 1, section = antibanSection)
+    default JewelryAntibanProfile antibanProfile() { return JewelryAntibanProfile.BALANCED; }
 
     @Override
     @Range(min = 0, max = 2_000_000_000)

@@ -62,6 +62,7 @@ public class KspJewelryCrafterScript extends Script
 
     private KspJewelryCrafterConfig config;
     private final JewelryPriceService prices = new JewelryPriceService();
+    private JewelryAntibanController antiban;
 
     private volatile JewelryCrafterState state = JewelryCrafterState.STOPPED;
     private volatile String status = "Stopped";
@@ -86,6 +87,7 @@ public class KspJewelryCrafterScript extends Script
     private boolean silverMakeAllSelected;
     private long bankInteractionSentAt;
     private long furnaceInteractionSentAt;
+    private long antibanHandledCraftedCount;
 
     private JewelryRecipe monitoredRecipe;
     private int monitoredBars;
@@ -108,10 +110,13 @@ public class KspJewelryCrafterScript extends Script
     public long getSessionStartedAt() { return sessionStartedAt; }
     public int getLastBatchMade() { return lastBatchMade; }
     public int getCurrentBatchTarget() { return currentBatchTarget; }
+    public String getAntibanStatus() { return antiban == null ? "Disabled" : antiban.getStatus(); }
 
     public boolean run(KspJewelryCrafterConfig config)
     {
         this.config = config;
+        this.antiban = new JewelryAntibanController(config);
+        this.antiban.reset();
         state = JewelryCrafterState.STARTING;
         status = "Starting";
         activeRecipe = null;
@@ -124,6 +129,7 @@ public class KspJewelryCrafterScript extends Script
         startingCraftingLevel = lastBatchMade = currentBatchTarget = 0;
         goldMakeAllSelected = silverMakeAllSelected = false;
         bankInteractionSentAt = furnaceInteractionSentAt = 0L;
+        antibanHandledCraftedCount = 0L;
         resetCraftingMonitor();
 
         mainScheduledFuture = scheduledExecutorService.scheduleWithFixedDelay(() ->
@@ -137,6 +143,8 @@ public class KspJewelryCrafterScript extends Script
                     return;
                 }
                 if (!super.run()) return;
+                boolean marketWaiting = pendingOffer != null || activeBuyOrders() > 0;
+                if (antiban != null && antiban.beforeTick(state, marketWaiting)) return;
                 tick();
             }
             catch (Exception ex)
@@ -301,6 +309,11 @@ public class KspJewelryCrafterScript extends Script
         int available = availableInputUnits();
         int mouldId = recipeMouldId();
         boolean hasMould = mouldId > 0 && (inventoryCountById(mouldId) > 0 || bankCountById(mouldId) > 0);
+        if (antiban != null && craftedCount > antibanHandledCraftedCount) {
+            antibanHandledCraftedCount = craftedCount;
+            antiban.onBatchBanked(hasMould && available > 0);
+            if (antiban.beforeTick(state, false)) return;
+        }
         if (!hasMould || available <= 0)
         {
             if (!prepareOutputForSale()) return;
@@ -906,7 +919,8 @@ if (!Rs2Widget.clickWidget(productionWidget))
     return;
 }
         status = "Starting " + activeRecipe.getOutputName();
-        sleepUntil(() -> Rs2Player.isAnimating() || craftingInventoryChanged(), 5_000);
+        boolean productionStarted = sleepUntil(() -> Rs2Player.isAnimating() || craftingInventoryChanged(), 5_000);
+        if (productionStarted && antiban != null) antiban.onProductionStarted();
         if (craftingInventoryChanged()) observeCraftingProgress();
         if (!hasCraftingInputsInInventory()) finishCraftingBatch();
     }
