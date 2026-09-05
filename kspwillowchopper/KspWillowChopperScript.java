@@ -14,6 +14,7 @@ import net.runelite.client.plugins.microbot.Microbot;
 import net.runelite.client.plugins.microbot.Script;
 import net.runelite.client.plugins.microbot.api.tileobject.models.Rs2TileObjectModel;
 import net.runelite.client.plugins.microbot.util.bank.Rs2Bank;
+import net.runelite.client.plugins.microbot.util.depositbox.Rs2DepositBox;
 import net.runelite.client.plugins.microbot.util.equipment.Rs2Equipment;
 import net.runelite.client.plugins.microbot.util.inventory.Rs2Inventory;
 import net.runelite.client.plugins.microbot.util.keyboard.Rs2Keyboard;
@@ -54,10 +55,12 @@ public class KspWillowChopperScript extends Script {
     private static final int REGULAR_FIRE_WHITE_ID = 20000;
     private static final int FORESTER_CAMPFIRE_MIN_ID = 49927;
     private static final int FORESTER_CAMPFIRE_MAX_ID = 49932;
-    // Chopper banking is intentionally restricted to this exact booth.
-    // Never fall back to bankers, alternate booth IDs, deposit boxes or WebWalker.
+    // Chopper uses only explicitly verified local banking objects.
+    // The Port Sarim deposit box is resource-deposit only; withdrawals still use the bank booth.
     private static final int BANK_BOOTH_ID = 10583;
     private static final String BANK_BOOTH_NAME = "Bank Booth";
+    private static final int RESOURCE_DEPOSIT_BOX_ID = 26254;
+    private static final WorldPoint RESOURCE_DEPOSIT_BOX_LOCATION = new WorldPoint(3045, 3234, 0);
 
     private static final long LOOP_MS = 300L;
     private static final long TREE_RETRY_MS = 6_000L;
@@ -745,6 +748,66 @@ public class KspWillowChopperScript extends Script {
         return Rs2Inventory.count(activeTree.getResourceId()) > 0;
     }
 
+    private boolean bankResourceAtDepositBox() {
+        Rs2TileObjectModel depositBox = Microbot.getRs2TileObjectCache()
+                .query()
+                .where(object -> object != null
+                        && object.getId() == RESOURCE_DEPOSIT_BOX_ID
+                        && RESOURCE_DEPOSIT_BOX_LOCATION.equals(object.getWorldLocation())
+                        && KspTileObjectSupport.hasAction(object, "Deposit"))
+                .nearestOnClientThread();
+
+        if (!Rs2DepositBox.isOpen() && depositBox == null) {
+            return false;
+        }
+
+        long now = System.currentTimeMillis();
+        if (!Rs2DepositBox.isOpen()) {
+            if (now - lastBankAttemptMillis < BANK_RETRY_MS) {
+                status = Rs2Player.isMoving() ? "Going to deposit box" : "Waiting for deposit box";
+                return true;
+            }
+
+            lastBankAttemptMillis = now;
+            status = "Opening Bank deposit box 26254";
+            if (!depositBox.click("Deposit")) {
+                status = "Deposit box interaction failed - retrying";
+                return true;
+            }
+
+            sleepUntil(Rs2DepositBox::isOpen, 4_000);
+            if (!Rs2DepositBox.isOpen()) {
+                status = "Waiting for deposit box";
+                return true;
+            }
+        }
+
+        int resourceId = activeTree.getResourceId();
+        int before = Rs2Inventory.count(resourceId);
+        status = "Depositing " + activeTree.getResourceName();
+        Rs2DepositBox.depositAll(resourceId);
+        sleepUntil(() -> Rs2Inventory.count(resourceId) == 0, 4_000);
+
+        int after = Rs2Inventory.count(resourceId);
+        resourcesBanked += Math.max(0, before - after);
+        lastResourceCount = after;
+
+        if (after > 0) {
+            status = "Waiting for deposit";
+            return true;
+        }
+
+        Rs2DepositBox.closeDepositBox();
+        sleepUntil(() -> !Rs2DepositBox.isOpen(), 2_500);
+        lastBankAttemptMillis = 0L;
+        lastTreeClickMillis = 0L;
+        lastTreeProgressMillis = 0L;
+        clearActiveTreeTarget();
+        state = RuntimeState.CHOPPING;
+        status = "Deposited - resuming " + activeTree;
+        return true;
+    }
+
     /**
      * Opens a bank without ever selecting the Cook's Guild bank booth/bankers
      * reported by the user. If no allowed target is currently loaded, walk to
@@ -778,8 +841,14 @@ public class KspWillowChopperScript extends Script {
 
     private void bankResource() {
         state = RuntimeState.BANKING;
-        long now = System.currentTimeMillis();
 
+        // Prefer the exact Port Sarim deposit box when it is loaded. This path is
+        // intentionally resource-only so axes, tinderboxes and unrelated items stay put.
+        if (bankResourceAtDepositBox()) {
+            return;
+        }
+
+        long now = System.currentTimeMillis();
         if (!Rs2Bank.isOpen()) {
             if (now - lastBankAttemptMillis < BANK_RETRY_MS) {
                 status = Rs2Player.isMoving() ? "Going to bank" : "Waiting for bank";
