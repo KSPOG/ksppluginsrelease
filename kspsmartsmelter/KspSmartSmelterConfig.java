@@ -22,6 +22,9 @@ import net.runelite.client.plugins.microbot.kspsmartsmelter.model.RankingMode;
         "</body></html>"
 )
 public interface KspSmartSmelterConfig extends Config, KspMuleConfig, KspSupportConfig {
+    @ConfigSection(name = "Anti-ban", description = "Task-aware behavior variation that only runs in safe idle windows", position = 50)
+    String antibanSection = "antiban";
+
     @ConfigSection(name = "Local Mule", description = "Automatic excess-GP transfer to KSP Trade Receiver", position = 90)
     String muleSection = KspMuleConfig.SECTION;
 
@@ -55,4 +58,10 @@ public interface KspSmartSmelterConfig extends Config, KspMuleConfig, KspSupport
     default int offerWaitSeconds() { return 15; }
     @ConfigItem(keyName = "showOverlay", name = "Overlay", description = "Show the Smart Smelter overlay", position = 15)
     default boolean showOverlay() { return true; }
+
+    @ConfigItem(keyName = "customAntiban", name = "Custom anti-ban", description = "Enable Smart Smelter's safe, task-aware humanization layer", position = 0, section = antibanSection)
+    default boolean customAntiban() { return true; }
+
+    @ConfigItem(keyName = "antibanProfile", name = "Anti-ban profile", description = "Light keeps delays small, Balanced is the default, High adds longer pauses and more mouse-away behavior", position = 1, section = antibanSection)
+    default SmartSmelterAntibanProfile antibanProfile() { return SmartSmelterAntibanProfile.BALANCED; }
 }
