@@ -14,6 +14,7 @@ import net.runelite.client.plugins.microbot.kspsmartsmelter.model.SmartSmelterSt
 import net.runelite.client.plugins.microbot.kspsmartsmelter.model.SmeltRoute;
 import net.runelite.client.plugins.microbot.util.bank.Rs2Bank;
 import net.runelite.client.plugins.microbot.util.grandexchange.Rs2GrandExchange;
+import net.runelite.client.plugins.microbot.util.gameobject.Rs2GameObject;
 import net.runelite.client.plugins.microbot.util.inventory.Rs2Inventory;
 import net.runelite.client.plugins.microbot.util.walker.Rs2Walker;
 import net.runelite.client.plugins.microbot.util.widget.Rs2Widget;
@@ -27,6 +28,7 @@ import java.util.concurrent.TimeUnit;
 public class KspSmartSmelterScript extends Script {
     private static final int CANNONBALL_INTERFACE = 17694733;
     private static final int CANNONBALL_BUTTON = 17694734;
+    private static final int EDGEVILLE_BANK_BOOTH_ID = 10583;
     private static final net.runelite.api.coords.WorldPoint GRAND_EXCHANGE =
             new net.runelite.api.coords.WorldPoint(3164, 3487, 0);
 
@@ -277,9 +279,23 @@ public class KspSmartSmelterScript extends Script {
 
         FurnaceLocation location = config.furnaceLocation();
         state = SmartSmelterState.WALKING_TO_BANK;
+
+        // Edgeville is intentionally direct-interaction only. Do not use the generic
+        // bank finder/walker here: it can select unrelated objects containing "Bank"
+        // or start a route when the booth is already expected to be in the local scene.
+        if (location == FurnaceLocation.EDGEVILLE) {
+            Microbot.status = "Opening Edgeville Bank Booth";
+            if (Rs2GameObject.interact(EDGEVILLE_BANK_BOOTH_ID, "Bank")
+                    && sleepUntil(Rs2Bank::isOpen, 2500)) {
+                return true;
+            }
+            Microbot.status = "Waiting for Edgeville Bank Booth (10583)";
+            return false;
+        }
+
         Microbot.status = "Opening " + location.getDisplayName() + " bank";
 
-        // Interact first when a bank is already loaded/reachable in the selected area.
+        // Non-Edgeville locations retain their existing bank behavior.
         if (Rs2Bank.openBank() && sleepUntil(Rs2Bank::isOpen, 2500)) {
             return true;
         }
@@ -309,7 +325,11 @@ public class KspSmartSmelterScript extends Script {
         if (!isSmeltingInterfaceOpen(route)) {
             Rs2TileObjectModel furnace = findConfiguredFurnace(location);
             if (furnace == null) {
-                if (location != FurnaceLocation.CURRENT_AREA && location.getFurnacePoint() != null) {
+                if (location == FurnaceLocation.EDGEVILLE) {
+                    // Edgeville is direct-interaction only: wait for the configured
+                    // furnace to be present instead of invoking Rs2Walker.
+                    Microbot.status = "Waiting for Edgeville Furnace";
+                } else if (location != FurnaceLocation.CURRENT_AREA && location.getFurnacePoint() != null) {
                     Microbot.status = "Walking to " + location.getDisplayName() + " furnace";
                     Rs2Walker.walkTo(location.getFurnacePoint(), 4);
                 } else {
