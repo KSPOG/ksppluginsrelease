@@ -20,6 +20,20 @@ jobs:
         shell: bash
         run: |
           if [ -f .github/scripts/apply_smelter_jewelry_antiban.py ]; then
+            python - <<'PY'
+          from pathlib import Path
+          path = Path('.github/scripts/apply_smelter_jewelry_antiban.py')
+          text = path.read_text(encoding='utf-8')
+          old = '''    replace_once(overlay,
+          ''' + "'''        addLine(\"Status\", script.getStatus());\n'''" + ''',
+          ''' + "'''        addLine(\"Status\", script.getStatus());\n        addLine(\"Anti-ban\", script.getAntibanStatus());\n'''" + ''')'''
+          new = '''    replace_once(overlay,
+          ''' + "'''        line(\"Status\", shorten(script.getStatus(), 40));\n'''" + ''',
+          ''' + "'''        line(\"Status\", shorten(script.getStatus(), 40));\n        line(\"Anti-ban\", shorten(script.getAntibanStatus(), 40));\n'''" + ''')'''
+          if old not in text:
+              raise SystemExit('Jewellery overlay patch anchor not found')
+          path.write_text(text.replace(old, new, 1), encoding='utf-8')
+          PY
             python .github/scripts/apply_smelter_jewelry_antiban.py
           else
             echo "Patch script not present yet; waiting for next push."
