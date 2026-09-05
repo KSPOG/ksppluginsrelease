@@ -1,14 +1,17 @@
 package net.runelite.client.plugins.microbot.kspsmartsmelter;
 
-
-import net.runelite.client.plugins.microbot.kspbank.KspVerifiedBank;
+import net.runelite.api.GameObject;
+import net.runelite.api.MenuAction;
+import net.runelite.api.ObjectComposition;
 import net.runelite.api.Skill;
+import net.runelite.api.TileObject;
 import net.runelite.api.gameval.InterfaceID;
 import net.runelite.api.gameval.ItemID;
 import net.runelite.api.widgets.Widget;
 import net.runelite.client.plugins.microbot.Microbot;
 import net.runelite.client.plugins.microbot.Script;
 import net.runelite.client.plugins.microbot.api.tileobject.models.Rs2TileObjectModel;
+import net.runelite.client.plugins.microbot.kspbank.KspVerifiedBank;
 import net.runelite.client.plugins.microbot.kspsmartsmelter.model.FurnaceLocation;
 import net.runelite.client.plugins.microbot.kspsmartsmelter.model.RankingMode;
 import net.runelite.client.plugins.microbot.kspsmartsmelter.model.RouteQuote;
@@ -18,6 +21,9 @@ import net.runelite.client.plugins.microbot.util.bank.Rs2Bank;
 import net.runelite.client.plugins.microbot.util.grandexchange.Rs2GrandExchange;
 import net.runelite.client.plugins.microbot.util.gameobject.Rs2GameObject;
 import net.runelite.client.plugins.microbot.util.inventory.Rs2Inventory;
+import net.runelite.client.plugins.microbot.util.menu.NewMenuEntry;
+import net.runelite.client.plugins.microbot.util.misc.Rs2UiHelper;
+import net.runelite.client.plugins.microbot.util.player.Rs2Player;
 import net.runelite.client.plugins.microbot.util.walker.Rs2Walker;
 import net.runelite.client.plugins.microbot.util.widget.Rs2Widget;
 import net.runelite.client.plugins.microbot.util.world.Rs2WorldUtil;
@@ -30,7 +36,8 @@ import java.util.concurrent.TimeUnit;
 public class KspSmartSmelterScript extends Script {
     private static final int CANNONBALL_INTERFACE = 17694733;
     private static final int CANNONBALL_BUTTON = 17694734;
-    private static final int EDGEVILLE_BANK_BOOTH_ID = 10583;
+    private static final int EDGEVILLE_FURNACE_ID = 16469;
+    private static final long TARGET_INTERACTION_TIMEOUT_MS = 8_000L;
     private static final net.runelite.api.coords.WorldPoint GRAND_EXCHANGE =
             new net.runelite.api.coords.WorldPoint(3164, 3487, 0);
 
@@ -47,6 +54,8 @@ public class KspSmartSmelterScript extends Script {
     private volatile double expectedSessionProfit;
     private volatile long startedAt;
     private volatile int startingSmithingXp;
+    private volatile long bankInteractionSentAt;
+    private volatile long furnaceInteractionSentAt;
 
     @Inject
     public KspSmartSmelterScript(KspSmartSmelterPlugin plugin, KspSmartSmelterConfig config) {
@@ -60,6 +69,8 @@ public class KspSmartSmelterScript extends Script {
                 .runOnClientThreadOptional(() -> Microbot.getClient().getSkillExperience(Skill.SMITHING))
                 .orElse(0);
         state = SmartSmelterState.STARTING;
+        bankInteractionSentAt = 0L;
+        furnaceInteractionSentAt = 0L;
 
         mainScheduledFuture = scheduledExecutorService.scheduleWithFixedDelay(() -> {
             try {
@@ -292,39 +303,65 @@ public class KspSmartSmelterScript extends Script {
 
     private boolean openWorkBank() {
         if (Rs2Bank.isOpen()) {
+            bankInteractionSentAt = 0L;
             return true;
         }
 
         FurnaceLocation location = config.furnaceLocation();
 
-        // Once the account is already in Edgeville, keep the bank/furnace loop local.
-        // The walker is only a travel fallback for reaching Edgeville from elsewhere.
         if (location == FurnaceLocation.EDGEVILLE) {
-            Microbot.status = "Opening Edgeville Bank Booth";
-            if (Rs2GameObject.interact(EDGEVILLE_BANK_BOOTH_ID, "Bank")
-                    && sleepUntil(Rs2Bank::isOpen, 2500)) {
-                return true;
-            }
-
-            if (isInEdgevilleWorkArea()) {
-                Microbot.status = "Waiting for Edgeville Bank Booth";
+            if (!isInEdgevilleWorkArea()) {
+                bankInteractionSentAt = 0L;
+                if (location.getBankPoint() != null) {
+                    state = SmartSmelterState.WALKING_TO_BANK;
+                    Microbot.status = "Walking to Edgeville bank";
+                    if (!Rs2Player.isMoving()) {
+                        Rs2Walker.walkTo(location.getBankPoint(), 4);
+                    }
+                } else {
+                    Microbot.status = "Cannot find Edgeville bank location";
+                }
                 return false;
             }
 
-            if (location.getBankPoint() != null) {
-                state = SmartSmelterState.WALKING_TO_BANK;
-                Microbot.status = "Walking to Edgeville bank";
-                Rs2Walker.walkTo(location.getBankPoint(), 4);
-            } else {
-                Microbot.status = "Cannot find Edgeville bank location";
+            long now = System.currentTimeMillis();
+            if (bankInteractionSentAt > 0L
+                    && (Rs2Player.isMoving() || now - bankInteractionSentAt < TARGET_INTERACTION_TIMEOUT_MS)) {
+                Microbot.status = Rs2Player.isMoving()
+                        ? "Approaching Edgeville bank"
+                        : "Waiting for Edgeville bank";
+                return false;
             }
+            bankInteractionSentAt = 0L;
+
+            GameObject bank = Rs2GameObject.get("Bank booth", true);
+            if (bank == null) {
+                Microbot.status = "Finding nearby Edgeville bank booth";
+                return false;
+            }
+
+            Microbot.status = "Opening Edgeville bank";
+            bankInteractionSentAt = now;
+            if (!interactGameObjectWithoutCamera(bank, "Bank")) {
+                bankInteractionSentAt = 0L;
+                Microbot.status = "Edgeville bank target not ready";
+                return false;
+            }
+
+            if (sleepUntil(Rs2Bank::isOpen, 5000)) {
+                bankInteractionSentAt = 0L;
+                return true;
+            }
+
+            Microbot.status = Rs2Player.isMoving()
+                    ? "Approaching Edgeville bank"
+                    : "Waiting for Edgeville bank";
             return false;
         }
 
         state = SmartSmelterState.WALKING_TO_BANK;
         Microbot.status = "Opening " + location.getDisplayName() + " bank";
 
-        // Non-Edgeville locations retain their existing bank behavior.
         if (KspVerifiedBank.openBank() && sleepUntil(Rs2Bank::isOpen, 2500)) {
             return true;
         }
@@ -349,30 +386,73 @@ public class KspSmartSmelterScript extends Script {
         int beforeOutput = Rs2Inventory.itemQuantity(route.getOutputId());
         int beforeCycles = inventoryCycles(route);
 
-        // Reuse an already-open product/smithing widget instead of clicking the furnace again.
         if (!isSmeltingInterfaceOpen(route)) {
-            Rs2TileObjectModel furnace = findConfiguredFurnace(location);
-            if (furnace == null) {
-                if (location == FurnaceLocation.EDGEVILLE && isInEdgevilleWorkArea()) {
-                    Microbot.status = "Waiting for Edgeville Furnace";
+            if (location == FurnaceLocation.EDGEVILLE) {
+                if (!isInEdgevilleWorkArea()) {
+                    furnaceInteractionSentAt = 0L;
+                    if (location.getFurnacePoint() != null) {
+                        state = SmartSmelterState.WALKING_TO_FURNACE;
+                        Microbot.status = "Walking to Edgeville furnace";
+                        if (!Rs2Player.isMoving()) {
+                            Rs2Walker.walkTo(location.getFurnacePoint(), 4);
+                        }
+                    } else {
+                        Microbot.status = "Cannot find Edgeville furnace location";
+                    }
                     return;
                 }
 
-                if (location != FurnaceLocation.CURRENT_AREA && location.getFurnacePoint() != null) {
-                    state = SmartSmelterState.WALKING_TO_FURNACE;
-                    Microbot.status = "Walking to " + location.getDisplayName() + " furnace";
-                    Rs2Walker.walkTo(location.getFurnacePoint(), 4);
-                } else {
-                    Microbot.status = "Cannot find Furnace";
+                long now = System.currentTimeMillis();
+                if (furnaceInteractionSentAt > 0L
+                        && (Rs2Player.isMoving() || now - furnaceInteractionSentAt < TARGET_INTERACTION_TIMEOUT_MS)) {
+                    Microbot.status = Rs2Player.isMoving()
+                            ? "Approaching Edgeville furnace"
+                            : "Waiting for smelting interface";
+                    return;
                 }
-                return;
-            }
+                furnaceInteractionSentAt = 0L;
 
-            Microbot.status = "Opening furnace interface";
-            if (!furnace.click("Smelt")) {
-                Microbot.status = "Could not interact with Furnace";
-                return;
+                TileObject furnace = Rs2GameObject.findObjectById(EDGEVILLE_FURNACE_ID);
+                if (furnace == null) {
+                    Microbot.status = "Finding nearby Edgeville furnace";
+                    return;
+                }
+
+                Microbot.status = "Opening Edgeville furnace interface";
+                if (!interactGameObjectWithoutCamera(furnace, "Smelt")) {
+                    Microbot.status = "Could not interact with Edgeville furnace";
+                    return;
+                }
+                furnaceInteractionSentAt = now;
+
+                if (!sleepUntil(() -> isSmeltingInterfaceOpen(route), 5000)) {
+                    Microbot.status = Rs2Player.isMoving()
+                            ? "Approaching Edgeville furnace"
+                            : "Waiting for smelting interface";
+                    return;
+                }
+                furnaceInteractionSentAt = 0L;
+            } else {
+                Rs2TileObjectModel furnace = findConfiguredFurnace(location);
+                if (furnace == null) {
+                    if (location != FurnaceLocation.CURRENT_AREA && location.getFurnacePoint() != null) {
+                        state = SmartSmelterState.WALKING_TO_FURNACE;
+                        Microbot.status = "Walking to " + location.getDisplayName() + " furnace";
+                        Rs2Walker.walkTo(location.getFurnacePoint(), 4);
+                    } else {
+                        Microbot.status = "Cannot find Furnace";
+                    }
+                    return;
+                }
+
+                Microbot.status = "Opening furnace interface";
+                if (!furnace.click("Smelt")) {
+                    Microbot.status = "Could not interact with Furnace";
+                    return;
+                }
             }
+        } else {
+            furnaceInteractionSentAt = 0L;
         }
 
         state = SmartSmelterState.SMELTING;
@@ -396,6 +476,78 @@ public class KspSmartSmelterScript extends Script {
         completedTrips++;
 
         Microbot.status = "Trip complete: " + route.getOutputName();
+    }
+
+    private boolean interactGameObjectWithoutCamera(TileObject tileObject, String action) {
+        if (!(tileObject instanceof GameObject) || action == null || action.isBlank()) {
+            return false;
+        }
+
+        GameObject object = (GameObject) tileObject;
+        ObjectComposition composition = Microbot.getClientThread().runOnClientThreadOptional(() -> {
+            ObjectComposition resolved = Microbot.getClient().getObjectDefinition(object.getId());
+            if (resolved != null && resolved.getImpostorIds() != null && resolved.getImpostor() != null) {
+                resolved = resolved.getImpostor();
+            }
+            return resolved;
+        }).orElse(null);
+        if (composition == null) {
+            return false;
+        }
+
+        String[] actions = composition.getActions();
+        if (actions == null) {
+            return false;
+        }
+
+        int actionIndex = -1;
+        for (int i = 0; i < actions.length; i++) {
+            if (actions[i] != null && action.equalsIgnoreCase(actions[i])) {
+                actionIndex = i;
+                break;
+            }
+        }
+        if (actionIndex < 0) {
+            return false;
+        }
+
+        MenuAction menuAction = gameObjectMenuAction(actionIndex);
+        if (menuAction == null) {
+            return false;
+        }
+
+        int sceneX = object.getLocalLocation().getSceneX();
+        int sceneY = object.getLocalLocation().getSceneY();
+        if (object.sizeX() > 1) {
+            sceneX -= object.sizeX() / 2;
+        }
+        if (object.sizeY() > 1) {
+            sceneY -= object.sizeY() / 2;
+        }
+
+        NewMenuEntry entry = new NewMenuEntry()
+                .param0(sceneX)
+                .param1(sceneY)
+                .opcode(menuAction.getId())
+                .identifier(object.getId())
+                .itemId(-1)
+                .option(actions[actionIndex])
+                .target(composition.getName())
+                .gameObject(object);
+
+        Microbot.doInvoke(entry, Rs2UiHelper.getObjectClickbox(object));
+        return true;
+    }
+
+    private MenuAction gameObjectMenuAction(int actionIndex) {
+        switch (actionIndex) {
+            case 0: return MenuAction.GAME_OBJECT_FIRST_OPTION;
+            case 1: return MenuAction.GAME_OBJECT_SECOND_OPTION;
+            case 2: return MenuAction.GAME_OBJECT_THIRD_OPTION;
+            case 3: return MenuAction.GAME_OBJECT_FOURTH_OPTION;
+            case 4: return MenuAction.GAME_OBJECT_FIFTH_OPTION;
+            default: return null;
+        }
     }
 
     private Rs2TileObjectModel findConfiguredFurnace(FurnaceLocation location) {
@@ -437,7 +589,6 @@ public class KspSmartSmelterScript extends Script {
             return false;
         }
 
-        // The generic product dialogue (SKILLMULTI) is separate from the Smithing widget.
         if (Rs2Widget.isProductionWidgetOpen()) {
             Microbot.status = "Selecting " + route.getOutputName() + " / All";
             Rs2Widget.enableQuantityOption("All");
@@ -772,6 +923,8 @@ public class KspSmartSmelterScript extends Script {
         state = SmartSmelterState.STOPPED;
         selectedQuote = null;
         lastQuotes = Collections.emptyList();
+        bankInteractionSentAt = 0L;
+        furnaceInteractionSentAt = 0L;
         super.shutdown();
     }
 }
