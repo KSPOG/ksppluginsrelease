@@ -107,12 +107,28 @@ public class KspSmartSmelterScript extends Script {
     }
 
     private boolean shouldScanPrices() {
+        RouteQuote current = selectedQuote;
+        SmeltRoute currentRoute = current == null ? null : current.getRoute();
+        if (currentRoute != null && availableInputCycles(currentRoute) > 0) {
+            return false;
+        }
+
         int refreshSeconds = Math.max(15, config.priceRefreshSeconds());
         return selectedQuote == null
                 || System.currentTimeMillis() - lastPriceScan >= refreshSeconds * 1000L;
     }
 
     private void refreshRoute() {
+        RouteQuote current = selectedQuote;
+        SmeltRoute currentRoute = current == null ? null : current.getRoute();
+
+        // A selected route stays locked until every complete craftable cycle of its
+        // inputs has been consumed from inventory + bank. Market rescans must not
+        // interrupt an in-progress stockpile.
+        if (currentRoute != null && availableInputCycles(currentRoute) > 0) {
+            return;
+        }
+
         state = SmartSmelterState.SCANNING;
         Microbot.status = "Scanning profitable smelting routes...";
 
@@ -126,8 +142,6 @@ public class KspSmartSmelterScript extends Script {
         }
 
         RouteQuote best = quotes.get(0);
-        RouteQuote current = selectedQuote;
-        SmeltRoute currentRoute = current == null ? null : current.getRoute();
         if (current == null || currentRoute == null || currentRoute == best.getRoute()) {
             selectedQuote = best;
             return;
@@ -137,7 +151,7 @@ public class KspSmartSmelterScript extends Script {
         double newScore = score(best);
         double required = currentScore * (1.0 + Math.max(0, config.switchAdvantagePercent()) / 100.0);
 
-        if (newScore >= required && !hasOneCycleInInventory(currentRoute)) {
+        if (newScore >= required && availableInputCycles(currentRoute) <= 0) {
             selectedQuote = best;
         } else {
             selectedQuote = quotes.stream()
@@ -270,6 +284,22 @@ public class KspSmartSmelterScript extends Script {
 
         for (int i = 0; i < ids.length; i++) {
             cycles = Math.min(cycles, bankQuantity(ids[i]) / quantities[i]);
+        }
+        return cycles == Integer.MAX_VALUE ? 0 : cycles;
+    }
+
+    private int availableInputCycles(SmeltRoute route) {
+        if (route == null) {
+            return 0;
+        }
+
+        int cycles = Integer.MAX_VALUE;
+        int[] ids = route.getInputIds();
+        int[] quantities = route.getInputQuantities();
+
+        for (int i = 0; i < ids.length; i++) {
+            int total = Math.max(0, bankQuantity(ids[i])) + Math.max(0, Rs2Inventory.itemQuantity(ids[i]));
+            cycles = Math.min(cycles, total / quantities[i]);
         }
         return cycles == Integer.MAX_VALUE ? 0 : cycles;
     }
