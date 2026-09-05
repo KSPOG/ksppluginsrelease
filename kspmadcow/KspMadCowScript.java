@@ -1194,11 +1194,9 @@ public class KspMadCowScript extends Script {
                 setState(KspMadCowState.BANKING, "At Lumbridge; opening bank");
                 KspVerifiedBank.openBank();
             } else {
-                // Ferox is interaction-only: never call the generic KspVerifiedBank.openBank()
-                // here because that helper is allowed to select another bank target or
-                // start walker movement. Target the known Ferox bank chest (26711)
-                // directly, turn the camera to it when needed, then click its real bank
-                // action. The game handles the short local approach after the click.
+                // Ferox is interaction-only: bypass the generic verified-bank helper here.
+                // Target the known Ferox bank chest (26711) directly, turn the camera
+                // when needed, then click its real Bank action.
                 clearWalkerRouteIfActive("brutus-ferox-direct-bank-interaction");
                 openFeroxBankChestDirectly();
             }
