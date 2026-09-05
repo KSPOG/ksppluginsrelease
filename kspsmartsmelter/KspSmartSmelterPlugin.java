@@ -23,7 +23,7 @@ import javax.inject.Singleton;
         isExternal = PluginConstants.IS_EXTERNAL
 )
 public class KspSmartSmelterPlugin extends Plugin {
-    public static final String VERSION = "0.0.9";
+    public static final String VERSION = "0.0.10";
 
     @Inject private KspSmartSmelterConfig config;
     @Inject private KspSmartSmelterScript script;
