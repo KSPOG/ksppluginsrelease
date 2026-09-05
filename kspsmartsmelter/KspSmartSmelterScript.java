@@ -282,16 +282,22 @@ public class KspSmartSmelterScript extends Script {
         FurnaceLocation location = config.furnaceLocation();
         state = SmartSmelterState.WALKING_TO_BANK;
 
-        // Edgeville is intentionally direct-interaction only. Do not use the generic
-        // bank finder/walker here: it can select unrelated objects containing "Bank"
-        // or start a route when the booth is already expected to be in the local scene.
+        // Edgeville uses a fixed bank point and booth ID so it cannot wander to an
+        // unrelated bank target. If the booth is not in the local scene yet, walk
+        // toward Edgeville first and retry the direct interaction on the next tick.
         if (location == FurnaceLocation.EDGEVILLE) {
             Microbot.status = "Opening Edgeville Bank Booth";
             if (Rs2GameObject.interact(EDGEVILLE_BANK_BOOTH_ID, "Bank")
                     && sleepUntil(Rs2Bank::isOpen, 2500)) {
                 return true;
             }
-            Microbot.status = "Waiting for Edgeville Bank Booth (10583)";
+
+            if (location.getBankPoint() != null) {
+                Microbot.status = "Walking to Edgeville bank";
+                Rs2Walker.walkTo(location.getBankPoint(), 4);
+            } else {
+                Microbot.status = "Cannot find Edgeville bank location";
+            }
             return false;
         }
 
@@ -327,11 +333,7 @@ public class KspSmartSmelterScript extends Script {
         if (!isSmeltingInterfaceOpen(route)) {
             Rs2TileObjectModel furnace = findConfiguredFurnace(location);
             if (furnace == null) {
-                if (location == FurnaceLocation.EDGEVILLE) {
-                    // Edgeville is direct-interaction only: wait for the configured
-                    // furnace to be present instead of invoking Rs2Walker.
-                    Microbot.status = "Waiting for Edgeville Furnace";
-                } else if (location != FurnaceLocation.CURRENT_AREA && location.getFurnacePoint() != null) {
+                if (location != FurnaceLocation.CURRENT_AREA && location.getFurnacePoint() != null) {
                     Microbot.status = "Walking to " + location.getDisplayName() + " furnace";
                     Rs2Walker.walkTo(location.getFurnacePoint(), 4);
                 } else {
