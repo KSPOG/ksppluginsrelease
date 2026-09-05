@@ -38,6 +38,8 @@ public class KspSmartSmelterScript extends Script {
     private static final int CANNONBALL_BUTTON = 17694734;
     private static final int EDGEVILLE_FURNACE_ID = 16469;
     private static final long TARGET_INTERACTION_TIMEOUT_MS = 8_000L;
+    // Restock sizing is internal; users should not have to tune a cycle count.
+    private static final int AUTO_RESTOCK_CYCLES = 500;
     private static final net.runelite.api.coords.WorldPoint GRAND_EXCHANGE =
             new net.runelite.api.coords.WorldPoint(3164, 3487, 0);
 
@@ -55,6 +57,7 @@ public class KspSmartSmelterScript extends Script {
     private volatile double expectedSessionProfit;
     private volatile long startedAt;
     private volatile int startingSmithingXp;
+    private volatile int startingSmithingLevel;
     private volatile long bankInteractionSentAt;
     private volatile long furnaceInteractionSentAt;
     private volatile int antibanHandledTrips;
@@ -71,6 +74,9 @@ public class KspSmartSmelterScript extends Script {
         startingSmithingXp = Microbot.getClientThread()
                 .runOnClientThreadOptional(() -> Microbot.getClient().getSkillExperience(Skill.SMITHING))
                 .orElse(0);
+        startingSmithingLevel = Microbot.getClientThread()
+                .runOnClientThreadOptional(() -> Microbot.getClient().getRealSkillLevel(Skill.SMITHING))
+                .orElse(1);
         state = SmartSmelterState.STARTING;
         bankInteractionSentAt = 0L;
         furnaceInteractionSentAt = 0L;
@@ -775,7 +781,7 @@ public class KspSmartSmelterScript extends Script {
             return;
         }
 
-        int targetCycles = Math.max(1, config.restockCycles());
+        int targetCycles = AUTO_RESTOCK_CYCLES;
         int[] ids = route.getInputIds();
         int[] quantities = route.getInputQuantities();
 
@@ -789,7 +795,7 @@ public class KspSmartSmelterScript extends Script {
 
             String inputName = itemName(ids[i]);
             Microbot.status = "Placing GE buy: " + inputName;
-            if (!SmartSmelterGeTrader.placeBuy(ids[i], inputName, wanted, config.buyPercent())) {
+            if (!SmartSmelterGeTrader.placeBuy(ids[i], inputName, wanted)) {
                 Microbot.status = "GE buy placement/verification failed: " + inputName;
                 lastPriceScan = 0L;
                 return;
@@ -856,7 +862,7 @@ public class KspSmartSmelterScript extends Script {
         }
 
         if (SmartSmelterGeTrader.placeSell(
-                route.getOutputId(), outputName, quantity, config.sellPercent())) {
+                route.getOutputId(), outputName, quantity)) {
             state = SmartSmelterState.WAITING_FOR_OFFERS;
             Microbot.status = "Selling " + route.getOutputName();
             antiban.onGeWaitStart();
@@ -914,6 +920,10 @@ public class KspSmartSmelterScript extends Script {
         return Microbot.getClientThread()
                 .runOnClientThreadOptional(() -> Microbot.getClient().getRealSkillLevel(Skill.SMITHING))
                 .orElse(1);
+    }
+
+    public int getSmithingLevelsGained() {
+        return Math.max(0, getSmithingLevel() - startingSmithingLevel);
     }
 
     public boolean isMemberAccount() {
