@@ -1249,6 +1249,17 @@ public class KspWillowChopperScript extends Script {
                 () -> Microbot.getClient().getRealSkillLevel(skill)).orElse(0);
     }
 
+    public void enterForestryEvent(KspForestryEvent event) {
+        if (!sessionStarted || event == null || event == KspForestryEvent.NONE) {
+            return;
+        }
+        clearActiveTreeTarget();
+        clearActiveCampfireTarget();
+        burningActive = false;
+        state = RuntimeState.FORESTRY;
+        status = "Forestry: " + event;
+    }
+
     public void notifyFireBurnedOut() {
         fireBurnedOutSignal = true;
         burnCommandIssued = false;

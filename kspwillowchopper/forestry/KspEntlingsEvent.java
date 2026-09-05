@@ -12,8 +12,10 @@ import net.runelite.client.plugins.microbot.util.player.Rs2Player;
 import net.runelite.client.plugins.microbot.util.text.Rs2TextSanitizer;
 
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Objects;
 
 import static net.runelite.client.plugins.microbot.util.Global.sleep;
@@ -46,8 +48,8 @@ public class KspEntlingsEvent implements BlockingEvent {
         }
 
         long deadline = System.currentTimeMillis() + MAX_EVENT_MS;
-        int lockedIndex = -1;
         long lastClickMillis = 0L;
+        Map<Integer, Integer> actionPhaseByNpc = new HashMap<>();
 
         while (plugin.isForestryEventEnabled(KspForestryEvent.FRIENDLY_ENTLINGS)
                 && Microbot.isLoggedIn()
@@ -57,78 +59,95 @@ public class KspEntlingsEvent implements BlockingEvent {
                 break;
             }
 
-            Rs2NpcModel target = null;
-            if (lockedIndex >= 0) {
-                final int expectedIndex = lockedIndex;
-                target = entlings.stream()
-                        .filter(Objects::nonNull)
-                        .filter(entling -> entling.getIndex() == expectedIndex)
-                        .findFirst()
-                        .orElse(null);
+            entlings.sort(Comparator.comparingInt(entling ->
+                    entling.getWorldLocation().distanceTo(Rs2Player.getWorldLocation())));
+
+            boolean interacted = false;
+            for (Rs2NpcModel target : entlings) {
                 if (target == null) {
-                    lockedIndex = -1;
+                    continue;
+                }
+
+                String request = normalizeRequest(target.getOverheadText());
+                String[] actions = actionsForRequest(request);
+                if (actions.length == 0) {
+                    continue;
+                }
+
+                long now = System.currentTimeMillis();
+                if (now - lastClickMillis < CLICK_COOLDOWN_MS) {
+                    sleep(Math.min(100L, CLICK_COOLDOWN_MS - (now - lastClickMillis)));
+                    break;
+                }
+                if (Rs2Player.isMoving() || Rs2Player.isAnimating(800)) {
                     sleep(80);
+                    break;
+                }
+
+                // Requests containing two regions must actually service both regions.
+                // Rotate between the valid actions for that exact entling until it morphs
+                // into its pruned NPC form. This prevents repeatedly pruning only Back/Top.
+                int phase = actionPhaseByNpc.getOrDefault(target.getIndex(), 0);
+                String action = actions[phase % actions.length];
+
+                // Re-read immediately before clicking so we never use an action chosen
+                // from stale overhead text after a server-side update.
+                String currentRequest = normalizeRequest(target.getOverheadText());
+                String[] currentActions = actionsForRequest(currentRequest);
+                if (currentActions.length == 0) {
                     continue;
                 }
-            } else {
-                target = entlings.stream()
-                        .filter(Objects::nonNull)
-                        .min(Comparator.comparingInt(entling ->
-                                entling.getWorldLocation().distanceTo(Rs2Player.getWorldLocation())))
-                        .orElse(null);
-                if (target == null) {
-                    sleep(100);
-                    continue;
+                if (!Objects.equals(request, currentRequest)) {
+                    phase = 0;
+                    action = currentActions[0];
+                } else {
+                    action = currentActions[phase % currentActions.length];
                 }
-                lockedIndex = target.getIndex();
+
+                int idBefore = target.getId();
+                if (!target.click(action)) {
+                    // If a dual-region request changed its active menu ordering during
+                    // the tick, try the other valid action before giving up this pass.
+                    if (currentActions.length > 1) {
+                        String alternate = currentActions[(phase + 1) % currentActions.length];
+                        if (!target.click(alternate)) {
+                            lastClickMillis = now;
+                            sleep(180);
+                            continue;
+                        }
+                        action = alternate;
+                        phase++;
+                    } else {
+                        lastClickMillis = now;
+                        sleep(180);
+                        continue;
+                    }
+                }
+
+                plugin.markForestryInteraction(target.getHash(), action);
+                actionPhaseByNpc.put(target.getIndex(), phase + 1);
+                lastClickMillis = System.currentTimeMillis();
+                interacted = true;
+
+                final Rs2NpcModel clickedTarget = target;
+                final int clickedId = idBefore;
+                sleepUntil(() -> clickedTarget.getId() != clickedId
+                        || Rs2Player.isAnimating(), 1_800);
+                if (Rs2Player.isAnimating()) {
+                    sleepUntil(() -> !Rs2Player.isAnimating(), 3_000);
+                }
+
+                // Refresh the NPC cache after every successful prune. Entlings roam and
+                // eventually morph to the pruned ID, so stale model/index locks are unsafe.
+                break;
             }
 
-            String request = normalizeRequest(target.getOverheadText());
-            String action = actionForRequest(request);
-            if (action == null) {
-                sleep(120);
-                continue;
-            }
-
-            long now = System.currentTimeMillis();
-            if (now - lastClickMillis < CLICK_COOLDOWN_MS
-                    || Rs2Player.isMoving()
-                    || Rs2Player.isAnimating(800)) {
-                sleep(80);
-                continue;
-            }
-
-            // Re-read immediately before clicking so a server-side overhead update
-            // cannot make us use a stale haircut request.
-            String currentRequest = normalizeRequest(target.getOverheadText());
-            String currentAction = actionForRequest(currentRequest);
-            if (currentAction == null) {
+            if (!interacted) {
                 sleep(100);
-                continue;
-            }
-
-            int idBefore = target.getId();
-            String acknowledgedRequest = currentRequest;
-            if (!target.click(currentAction)) {
-                lastClickMillis = now;
-                sleep(250);
-                continue;
-            }
-
-            plugin.markForestryInteraction(target.getHash(), currentAction);
-            lastClickMillis = now;
-            final Rs2NpcModel clickedTarget = target;
-
-            sleepUntil(() -> clickedTarget.getId() != idBefore
-                    || !Objects.equals(acknowledgedRequest, normalizeRequest(clickedTarget.getOverheadText()))
-                    || Rs2Player.isAnimating(), 2_000);
-
-            if (clickedTarget.getId() == REGULAR_ENTLING_ID && Rs2Player.isAnimating()) {
-                sleepUntil(() -> !Rs2Player.isAnimating(), 3_000);
             }
         }
 
-        if (!validate()) {
+        if (getRegularEntlings().isEmpty()) {
             plugin.completeForestryEvent(KspForestryEvent.FRIENDLY_ENTLINGS);
         }
         return true;
@@ -163,22 +182,22 @@ public class KspEntlingsEvent implements BlockingEvent {
         }
     }
 
-    private String actionForRequest(String request) {
+    private String[] actionsForRequest(String request) {
         if (request == null || request.isEmpty()) {
-            return null;
+            return new String[0];
         }
 
         switch (request) {
             case "Breezy at the back!":
-                return "Prune-back";
+                return new String[]{"Prune-back"};
             case "Short on top!":
-                return "Prune-top";
+                return new String[]{"Prune-top"};
             case "A leafy mullet!":
-                return "Prune-top";
+                return new String[]{"Prune-top", "Prune-sides"};
             case "Short back and sides!":
-                return "Prune-back";
+                return new String[]{"Prune-back", "Prune-sides"};
             default:
-                return null;
+                return new String[0];
         }
     }
 

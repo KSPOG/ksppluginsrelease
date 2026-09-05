@@ -424,6 +424,9 @@ public class KspWillowChopperPlugin extends Plugin {
     public KspForestryEvent getCurrentForestryEvent() { return currentForestryEvent; }
     public void setCurrentForestryEvent(KspForestryEvent event) {
         currentForestryEvent = event == null ? KspForestryEvent.NONE : event;
+        if (currentForestryEvent != KspForestryEvent.NONE && script != null) {
+            script.enterForestryEvent(currentForestryEvent);
+        }
     }
     public KspTree getSelectedTree() {
         KspTree tree = config == null ? null : config.tree();
