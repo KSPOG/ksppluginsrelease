@@ -37,7 +37,7 @@ final class SmartSmelterGeTrader
     {
     }
 
-    static boolean placeBuy(int itemId, String itemName, int quantity, int percent)
+    static boolean placeBuy(int itemId, String itemName, int quantity)
     {
         if (itemId <= 0 || itemName == null || itemName.isBlank() || quantity <= 0)
         {
@@ -68,7 +68,7 @@ final class SmartSmelterGeTrader
             return false;
         }
 
-        int price = offerPrice(itemId, GrandExchangeAction.BUY, percent);
+        int price = offerPrice(itemId, GrandExchangeAction.BUY);
         if (price <= 0)
         {
             Microbot.status = "No reliable GE buy price: " + itemName;
@@ -114,7 +114,7 @@ final class SmartSmelterGeTrader
         return findOfferSlot(itemId, GrandExchangeAction.BUY) != null;
     }
 
-    static boolean placeSell(int itemId, String itemName, int quantity, int percent)
+    static boolean placeSell(int itemId, String itemName, int quantity)
     {
         if (itemId <= 0 || itemName == null || itemName.isBlank() || quantity <= 0)
         {
@@ -144,7 +144,7 @@ final class SmartSmelterGeTrader
             return false;
         }
 
-        int price = offerPrice(itemId, GrandExchangeAction.SELL, percent);
+        int price = offerPrice(itemId, GrandExchangeAction.SELL);
         if (price <= 0)
         {
             Microbot.status = "No reliable GE sell price: " + itemName;
@@ -451,7 +451,7 @@ final class SmartSmelterGeTrader
         }).orElse(false);
     }
 
-    private static int offerPrice(int itemId, GrandExchangeAction action, int percent)
+    private static int offerPrice(int itemId, GrandExchangeAction action)
     {
         try
         {
@@ -460,15 +460,14 @@ final class SmartSmelterGeTrader
             {
                 return 0;
             }
-            int baseline = action == GrandExchangeAction.BUY
+
+            // RuneLite's real-time Wiki pricing is already side-aware: buyPrice is
+            // the current instant-buy/high side and sellPrice is the instant-sell/low
+            // side. Use that market value directly instead of applying a manual %.
+            int marketPrice = action == GrandExchangeAction.BUY
                     ? market.buyPrice
                     : market.sellPrice;
-            if (baseline <= 0)
-            {
-                return 0;
-            }
-            long adjusted = Math.round(baseline * ((100.0 + percent) / 100.0));
-            return (int) Math.max(1L, Math.min(Integer.MAX_VALUE, adjusted));
+            return marketPrice > 0 ? marketPrice : 0;
         }
         catch (RuntimeException ex)
         {
