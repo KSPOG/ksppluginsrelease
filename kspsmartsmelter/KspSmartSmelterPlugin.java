@@ -1,7 +1,10 @@
 package net.runelite.client.plugins.microbot.kspsmartsmelter;
 
 import com.google.inject.Provides;
+import net.runelite.api.events.ItemContainerChanged;
+import net.runelite.api.gameval.InventoryID;
 import net.runelite.client.config.ConfigManager;
+import net.runelite.client.eventbus.Subscribe;
 import net.runelite.client.plugins.Plugin;
 import net.runelite.client.plugins.PluginDescriptor;
 import net.runelite.client.plugins.microbot.Microbot;
@@ -23,7 +26,7 @@ import javax.inject.Singleton;
         isExternal = PluginConstants.IS_EXTERNAL
 )
 public class KspSmartSmelterPlugin extends Plugin {
-    public static final String VERSION = "0.0.11";
+    public static final String VERSION = "0.0.12";
 
     @Inject private KspSmartSmelterConfig config;
     @Inject private KspSmartSmelterScript script;
@@ -48,6 +51,13 @@ public class KspSmartSmelterPlugin extends Plugin {
         muleService.start(config);
         overlayManager.add(overlay);
         script.run();
+    }
+
+    @Subscribe
+    public void onItemContainerChanged(ItemContainerChanged event) {
+        if (event != null && event.getContainerId() == InventoryID.INV) {
+            script.onInventoryChanged();
+        }
     }
 
     @Override

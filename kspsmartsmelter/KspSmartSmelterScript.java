@@ -62,6 +62,12 @@ public class KspSmartSmelterScript extends Script {
     private volatile long furnaceInteractionSentAt;
     private volatile int antibanHandledTrips;
 
+    private final Object productionStatsLock = new Object();
+    private SmeltRoute trackedProductionRoute;
+    private RouteQuote trackedProductionQuote;
+    private int trackedOutputCount;
+    private int trackedInputCycles;
+
     @Inject
     public KspSmartSmelterScript(KspSmartSmelterPlugin plugin, KspSmartSmelterConfig config) {
         this.plugin = plugin;
@@ -81,6 +87,9 @@ public class KspSmartSmelterScript extends Script {
         bankInteractionSentAt = 0L;
         furnaceInteractionSentAt = 0L;
         antibanHandledTrips = 0;
+        synchronized (productionStatsLock) {
+            clearProductionTrackingLocked();
+        }
         antiban.reset();
 
         mainScheduledFuture = scheduledExecutorService.scheduleWithFixedDelay(() -> {
@@ -510,8 +519,10 @@ public class KspSmartSmelterScript extends Script {
         state = SmartSmelterState.SMELTING;
         Microbot.status = "Smelting " + route.getOutputName();
 
+        beginProductionTracking(route, quoteSnapshot, beforeOutput, beforeCycles);
         boolean started = route.isCannonballs() ? startCannonballs() : startNormalBar(route);
         if (!started) {
+            finishProductionTracking();
             Microbot.status = "Could not start " + route.getOutputName();
             return;
         }
@@ -520,15 +531,77 @@ public class KspSmartSmelterScript extends Script {
         long timeout = Math.max(30_000L, route.getMaxCyclesPerTrip() * (route.isCannonballs() ? 7_000L : 4_000L));
         sleepUntil(() -> !hasOneCycleInInventory(route), (int) Math.min(timeout, 180_000L));
 
-        int afterOutput = Rs2Inventory.itemQuantity(route.getOutputId());
-        int produced = Math.max(0, afterOutput - beforeOutput);
-        int processedCycles = Math.max(0, beforeCycles - inventoryCycles(route));
-
-        outputProduced += produced;
-        expectedSessionProfit += processedCycles * quoteSnapshot.getProfitPerCycle();
+        // Inventory-change events update output/profit continuously while the
+        // production interface is running. Take one final snapshot to catch the last
+        // change before disarming the monitor, then only finalize the trip counter.
+        finishProductionTracking();
         completedTrips++;
 
         Microbot.status = "Trip complete: " + route.getOutputName();
+    }
+
+    public void onInventoryChanged() {
+        synchronized (productionStatsLock) {
+            if (trackedProductionRoute == null
+                    || trackedProductionQuote == null
+                    || state != SmartSmelterState.SMELTING) {
+                return;
+            }
+            recordProductionProgressLocked();
+        }
+    }
+
+    private void beginProductionTracking(
+            SmeltRoute route,
+            RouteQuote quote,
+            int outputCount,
+            int inputCycles
+    ) {
+        synchronized (productionStatsLock) {
+            trackedProductionRoute = route;
+            trackedProductionQuote = quote;
+            trackedOutputCount = Math.max(0, outputCount);
+            trackedInputCycles = Math.max(0, inputCycles);
+        }
+    }
+
+    private void finishProductionTracking() {
+        synchronized (productionStatsLock) {
+            if (trackedProductionRoute != null && trackedProductionQuote != null) {
+                recordProductionProgressLocked();
+            }
+            clearProductionTrackingLocked();
+        }
+    }
+
+    private void recordProductionProgressLocked() {
+        SmeltRoute route = trackedProductionRoute;
+        RouteQuote quote = trackedProductionQuote;
+        if (route == null || quote == null) {
+            return;
+        }
+
+        int currentOutput = Math.max(0, Rs2Inventory.itemQuantity(route.getOutputId()));
+        int currentCycles = Math.max(0, inventoryCycles(route));
+        int outputDelta = Math.max(0, currentOutput - trackedOutputCount);
+        int processedCycleDelta = Math.max(0, trackedInputCycles - currentCycles);
+
+        if (outputDelta > 0) {
+            outputProduced += outputDelta;
+        }
+        if (processedCycleDelta > 0) {
+            expectedSessionProfit += processedCycleDelta * quote.getProfitPerCycle();
+        }
+
+        trackedOutputCount = currentOutput;
+        trackedInputCycles = currentCycles;
+    }
+
+    private void clearProductionTrackingLocked() {
+        trackedProductionRoute = null;
+        trackedProductionQuote = null;
+        trackedOutputCount = 0;
+        trackedInputCycles = 0;
     }
 
     private boolean interactGameObjectWithoutCamera(TileObject tileObject, String action) {
@@ -985,6 +1058,7 @@ public class KspSmartSmelterScript extends Script {
 
     @Override
     public void shutdown() {
+        finishProductionTracking();
         state = SmartSmelterState.STOPPED;
         selectedQuote = null;
         lastQuotes = Collections.emptyList();
