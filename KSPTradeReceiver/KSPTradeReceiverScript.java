@@ -1,5 +1,7 @@
 package net.runelite.client.plugins.microbot.KSPTradeReceiver;
 
+
+import net.runelite.client.plugins.microbot.kspbank.KspVerifiedBank;
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.ChatMessageType;
 import net.runelite.api.MenuAction;
@@ -521,7 +523,7 @@ public class KSPTradeReceiverScript extends Script
             returnTile = tradeTile != null ? tradeTile : Rs2Player.getWorldLocation();
 
             status = "Inventory full - walking to bank";
-            if (!Rs2Bank.walkToBankAndUseBank())
+            if (!KspVerifiedBank.walkToBankAndOpenBank())
             {
                 status = "Could not open nearest bank";
                 return;

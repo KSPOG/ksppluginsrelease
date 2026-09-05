@@ -1,5 +1,7 @@
 package net.runelite.client.plugins.microbot.kspmule;
 
+
+import net.runelite.client.plugins.microbot.kspbank.KspVerifiedBank;
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.MenuAction;
 import net.runelite.api.Player;
@@ -215,7 +217,7 @@ public final class KspMuleWorkerService
             Rs2GrandExchange.closeExchange();
             if (!sleepUntil(() -> !Rs2GrandExchange.isOpen(), 2_500)) return -1L;
         }
-        if (!Rs2Bank.walkToBankAndUseBank()) return -1L;
+        if (!KspVerifiedBank.walkToBankAndOpenBank()) return -1L;
         sleep(400);
 
         long inv = Math.max(0L, Rs2Inventory.itemQuantity(COINS_ID));
@@ -597,7 +599,7 @@ public final class KspMuleWorkerService
     {
         KspMuleConfig c = config;
         if (c == null || !Microbot.isLoggedIn()) return;
-        if (!Rs2Bank.walkToBankAndUseBank())
+        if (!KspVerifiedBank.walkToBankAndOpenBank())
         {
             status = "Transfer done - could not restore trading capital";
             return;

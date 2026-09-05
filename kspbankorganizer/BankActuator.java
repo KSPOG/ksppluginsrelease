@@ -1,5 +1,7 @@
 package net.runelite.client.plugins.microbot.kspbankorganizer;
 
+
+import net.runelite.client.plugins.microbot.kspbank.KspVerifiedBank;
 import java.awt.Rectangle;
 import javax.inject.Inject;
 import lombok.extern.slf4j.Slf4j;
@@ -44,7 +46,7 @@ final class BankActuator {
 
         // Delegate travel + interaction to Microbot instead of mixing walkToBank() with a stale booth reference.
         log.info("Bank Organizer: walking to and opening the nearest supported bank.");
-        boolean started=Rs2Bank.walkToBankAndUseBank();
+        boolean started=KspVerifiedBank.walkToBankAndOpenBank();
         if(started&&Global.sleepUntil(this::bankReady,WALK_TIMEOUT_MS))return true;
 
         // If the UI appeared but the live bank container is still syncing, wait once instead of clicking again.
@@ -62,7 +64,7 @@ final class BankActuator {
             log.info("Bank Organizer: interacting with nearby banker.");
             if(Global.sleepUntil(this::bankReady,5000))return true;
         }
-        GameObject booth=Rs2GameObject.findBank(SEARCH_RADIUS);
+        GameObject booth=Rs2GameObject.get("Bank booth",true);
         if(booth!=null&&near(booth,INTERACT_DISTANCE)){
             log.info("Bank Organizer: interacting with nearby bank object id={} at {}.",booth.getId(),booth.getWorldLocation());
             if(Rs2Bank.openBank(booth)&&Global.sleepUntil(this::bankReady,5000))return true;
@@ -71,7 +73,7 @@ final class BankActuator {
     }
     private boolean openNearbyBanker(){Rs2NpcModel b=nearbyBanker();return b!=null&&invokeBank(b);}
     private boolean hasNearbyBanker(){return nearbyBanker()!=null;}
-    private Rs2NpcModel nearbyBanker(){Rs2NpcModel b=Rs2Npc.getBankerNPC();return b!=null&&near(b,INTERACT_DISTANCE)?b:null;}
+    private Rs2NpcModel nearbyBanker(){Rs2NpcModel b=Rs2Npc.getBankerNPC();return b!=null&&b.getName()!=null&&"Banker".equalsIgnoreCase(b.getName())&&near(b,INTERACT_DISTANCE)?b:null;}
     private boolean near(Rs2NpcModel n,int d){return Microbot.getClientThread().runOnClientThreadOptional(()->client.getLocalPlayer()!=null&&client.getLocalPlayer().getWorldLocation()!=null&&n.getWorldLocation()!=null&&n.getWorldLocation().distanceTo(client.getLocalPlayer().getWorldLocation())<=d).orElse(false);}
     private boolean near(GameObject o,int d){return Microbot.getClientThread().runOnClientThreadOptional(()->client.getLocalPlayer()!=null&&client.getLocalPlayer().getWorldLocation()!=null&&o.getWorldLocation()!=null&&o.getWorldLocation().distanceTo(client.getLocalPlayer().getWorldLocation())<=d).orElse(false);}
     private boolean invokeBank(Rs2NpcModel npc){

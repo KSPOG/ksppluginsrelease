@@ -1,5 +1,7 @@
 package net.runelite.client.plugins.microbot.kspbryophyta;
 
+
+import net.runelite.client.plugins.microbot.kspbank.KspVerifiedBank;
 import net.runelite.api.EquipmentInventorySlot;
 import net.runelite.api.Skill;
 import net.runelite.api.WorldView;
@@ -442,7 +444,7 @@ public class KspBryophytaScript extends Script {
                 return;
             }
             int epoch = Rs2Bank.getBankLiveEpoch();
-            boolean opened = Rs2Bank.openBank();
+            boolean opened = KspVerifiedBank.openBank();
             if (opened) bankEpochBeforeOpen = epoch;
             setStatus(opened ? "Bank interaction sent - checking bank widget/container..." : "Waiting for visible Varrock East bank target...");
             return;

@@ -1,5 +1,7 @@
 package net.runelite.client.plugins.microbot.kspaiofighter;
 
+
+import net.runelite.client.plugins.microbot.kspbank.KspVerifiedBank;
 import net.runelite.api.Skill;
 import net.runelite.client.plugins.microbot.Microbot;
 import net.runelite.client.plugins.microbot.util.bank.Rs2Bank;
@@ -53,7 +55,7 @@ final class KspAioFighterInventoryLoader
         if (matchesExactly(setup)) return true;
 
         Microbot.status = "KSP AIO Fighter: loading " + style + " inventory setup";
-        if (!Rs2Bank.walkToBankAndUseBank())
+        if (!KspVerifiedBank.walkToBankAndOpenBank())
         {
             lastError = "Could not open a bank to load the " + style + " inventory setup.";
             return false;
