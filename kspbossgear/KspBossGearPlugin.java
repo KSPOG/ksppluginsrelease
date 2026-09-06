@@ -19,7 +19,7 @@ import net.runelite.client.ui.overlay.OverlayManager;
 
 @PluginDescriptor(
     name = PluginConstants.KSP + "Boss Gear",
-    description = "OSRS Wiki boss equipment finder with live bank and inventory highlights.",
+    description = "OSRS Wiki boss and raid gear/inventory finder with live bank and inventory highlights.",
     tags = {"boss", "gear", "equipment", "bank", "inventory", "wiki", "ksp"},
     authors = {"KSP"},
     version = KspBossGearPlugin.VERSION,
@@ -32,7 +32,7 @@ import net.runelite.client.ui.overlay.OverlayManager;
 @Slf4j
 public class KspBossGearPlugin extends Plugin
 {
-    public static final String VERSION = "1.0.0";
+    public static final String VERSION = "1.1.0";
 
     @Inject private BossGearService gearService;
     @Inject private OverlayManager overlayManager;
@@ -56,7 +56,7 @@ public class KspBossGearPlugin extends Plugin
         overlayManager.add(bankOverlay);
         overlayManager.add(inventoryOverlay);
         addSidePanel();
-        log.info("KSP Boss Gear enabled: Wiki equipment can highlight both bank and inventory items.");
+        log.info("KSP Boss Gear enabled: Wiki boss/raid loadouts can highlight bank and inventory items.");
     }
 
     @Override

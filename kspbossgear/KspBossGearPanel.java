@@ -83,7 +83,7 @@ public final class KspBossGearPanel extends PluginPanel
         content.add(version);
         content.add(Box.createVerticalStrut(4));
 
-        JPanel searchSection = section("Boss search");
+        JPanel searchSection = section("Boss / raid search");
         bossSearch.setFont(FontManager.getRunescapeSmallFont());
         bossSearch.setMaximumSize(new Dimension(Integer.MAX_VALUE, 25));
         bossSearch.setAlignmentX(Component.LEFT_ALIGNMENT);
@@ -122,7 +122,7 @@ public final class KspBossGearPanel extends PluginPanel
         content.add(setup);
         content.add(Box.createVerticalStrut(4));
 
-        JPanel equipment = section("Recommended equipment");
+        JPanel equipment = section("Recommended gear / inventory");
         availabilityLabel.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
         availabilityLabel.setFont(FontManager.getRunescapeSmallFont().deriveFont(Font.BOLD));
         availabilityLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
@@ -140,7 +140,7 @@ public final class KspBossGearPanel extends PluginPanel
         statusLabel.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
         statusLabel.setFont(FontManager.getRunescapeSmallFont());
         statusLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
-        statusLabel.setToolTipText("Equipment is read from the live Old School RuneScape Wiki strategy page.");
+        statusLabel.setToolTipText("Gear and inventory setups are read from the live Old School RuneScape Wiki page.");
         source.add(statusLabel);
         source.add(Box.createVerticalStrut(2));
         configureButton(wikiButton);
@@ -264,7 +264,7 @@ public final class KspBossGearPanel extends PluginPanel
 
         if (rowViews.isEmpty())
         {
-            JLabel empty = new JLabel("No equipment loaded.");
+            JLabel empty = new JLabel("No gear/inventory items loaded.");
             empty.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
             empty.setFont(FontManager.getRunescapeSmallFont());
             gearRows.add(empty);
@@ -314,7 +314,7 @@ public final class KspBossGearPanel extends PluginPanel
         int total = rowViews.size();
         if (total == 0)
         {
-            availabilityLabel.setText(service.getPage() == null ? "No boss loaded" : "No resolvable gear rows");
+            availabilityLabel.setText(service.getPage() == null ? "No boss loaded" : "No resolvable loadout items");
         }
         else
         {
