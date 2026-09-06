@@ -1,5 +1,7 @@
 package net.runelite.client.plugins.microbot.kspf2phighalchtrader;
 
+
+import net.runelite.client.plugins.microbot.kspbank.KspVerifiedBank;
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.Item;
 import net.runelite.api.ItemContainer;
@@ -223,7 +225,7 @@ public class KspHighAlchMuleService
      */
     private long prepareCoinsForTransfer()
     {
-        if (!Rs2Bank.walkToBankAndUseBank()) return -1L;
+        if (!KspVerifiedBank.walkToBankAndOpenBank()) return -1L;
         sleep(400);
 
         long inv = Math.max(0L, Rs2Inventory.itemQuantity(COINS_ID));
@@ -298,8 +300,15 @@ public class KspHighAlchMuleService
                 return;
 
             case COMPLETE:
+                state = MuleState.WAITING_COMPLETE;
+                status = "Transfer complete - acknowledging receiver";
+                if (requestId == null || !client.acknowledgeComplete(config.mulePort(), requestId))
+                {
+                    status = "Transfer complete - waiting for receiver acknowledgement";
+                    return;
+                }
                 state = MuleState.RESTORING;
-                status = "Transfer complete - restoring capital";
+                status = "Transfer acknowledged - restoring capital";
                 restoreTradingCapital();
                 finishSuccess();
                 return;
@@ -527,7 +536,7 @@ public class KspHighAlchMuleService
     private void restoreTradingCapital()
     {
         if (!Microbot.isLoggedIn()) return;
-        if (!Rs2Bank.walkToBankAndUseBank())
+        if (!KspVerifiedBank.walkToBankAndOpenBank())
         {
             status = "Transfer done - could not restore trading capital";
             return;
@@ -631,7 +640,7 @@ public class KspHighAlchMuleService
 
     private static String cleanText(String value)
     {
-        return value == null ? "" : Text.removeTags(Text.unescapeJagex(value)).trim();
+        return value == null ? "" : Text.removeTags(value).trim();
     }
 
     private static String normaliseName(String value)

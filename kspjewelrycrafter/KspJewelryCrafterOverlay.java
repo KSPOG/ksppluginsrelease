@@ -38,6 +38,7 @@ public class KspJewelryCrafterOverlay extends OverlayPanel
             .build());
         line(" ", "");
         line("Status", shorten(script.getStatus(), 40));
+        line("Anti-ban", shorten(script.getAntibanStatus(), 40));
         line("State", prettyState(script.getState()));
         line("Runtime", script.getFormattedRuntime());
 

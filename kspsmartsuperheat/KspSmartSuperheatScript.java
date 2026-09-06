@@ -1,5 +1,7 @@
 package net.runelite.client.plugins.microbot.kspsmartsuperheat;
 
+
+import net.runelite.client.plugins.microbot.kspbank.KspVerifiedBank;
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.GrandExchangeOffer;
 import net.runelite.api.GrandExchangeOfferState;
@@ -682,7 +684,7 @@ public class KspSmartSuperheatScript extends Script
         if (bankOpen()) return true;
         if (Rs2GrandExchange.isOpen()) { Rs2GrandExchange.closeExchange(); return false; }
         status = "Opening bank";
-        if (!Rs2Bank.openBank()) return false;
+        if (!KspVerifiedBank.openBank()) return false;
         return sleepUntil(this::bankOpen, 5000);
     }
 

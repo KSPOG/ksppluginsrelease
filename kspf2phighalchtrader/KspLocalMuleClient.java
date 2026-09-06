@@ -89,6 +89,12 @@ final class KspLocalMuleClient
         call(port, "CANCEL\t" + requestId);
     }
 
+    boolean acknowledgeComplete(int port, String requestId)
+    {
+        return requestId != null && !requestId.isBlank()
+                && "ACKED".equals(call(port, "COMPLETE_ACK\t" + requestId));
+    }
+
     boolean ping(int port)
     {
         return "PONG".equals(call(port, "PING"));

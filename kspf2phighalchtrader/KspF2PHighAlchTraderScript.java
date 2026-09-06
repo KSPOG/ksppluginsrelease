@@ -1,5 +1,7 @@
 package net.runelite.client.plugins.microbot.kspf2phighalchtrader;
 
+
+import net.runelite.client.plugins.microbot.kspbank.KspVerifiedBank;
 import net.runelite.api.GrandExchangeOfferState;
 import net.runelite.api.ItemComposition;
 import net.runelite.api.Skill;
@@ -1596,7 +1598,7 @@ public class KspF2PHighAlchTraderScript extends Script {
         if (!closeGrandExchangeInterface()) {
             return false;
         }
-        return Rs2Bank.openBank();
+        return KspVerifiedBank.openBank();
     }
 
     private void clearPendingPurchase() {

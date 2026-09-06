@@ -4,23 +4,33 @@ import net.runelite.api.ObjectComposition;
 import net.runelite.client.plugins.microbot.api.tileobject.models.Rs2TileObjectModel;
 import net.runelite.client.plugins.microbot.util.misc.Rs2UiHelper;
 
-/** Compatibility helpers for the current tile-object model API. */
+/** Small compatibility helper shared by the Forestry handlers. */
 public final class KspTileObjectSupport {
-    private KspTileObjectSupport() {}
+    private KspTileObjectSupport() {
+    }
 
     public static boolean hasAction(Rs2TileObjectModel object, String expectedAction) {
-        if (object == null || expectedAction == null || expectedAction.isEmpty()) return false;
+        if (object == null || expectedAction == null || expectedAction.trim().isEmpty()) {
+            return false;
+        }
 
         try {
             ObjectComposition composition = object.getObjectComposition();
-            String[] actions = composition == null ? null : composition.getActions();
-            if (actions == null) return false;
+            if (composition == null || composition.getActions() == null) {
+                return false;
+            }
 
-            for (String action : actions) {
-                if (action != null && expectedAction.equalsIgnoreCase(Rs2UiHelper.stripTags(action))) return true;
+            for (String action : composition.getActions()) {
+                if (action != null
+                        && expectedAction.equalsIgnoreCase(Rs2UiHelper.stripTags(action).trim())) {
+                    return true;
+                }
             }
         } catch (Exception ignored) {
+            // Scene cache entries can disappear while being inspected. Treat that
+            // as a non-match and let the next Chopper iteration reacquire it.
         }
+
         return false;
     }
 }

@@ -1,5 +1,7 @@
 package net.runelite.client.plugins.microbot.KspBoneAshPlugin;
 
+
+import net.runelite.client.plugins.microbot.kspbank.KspVerifiedBank;
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.client.plugins.Plugin;
 import net.runelite.client.plugins.microbot.Microbot;
@@ -174,7 +176,7 @@ public class KspBoneAshScript extends Script
             }
 
             Microbot.status = "Opening bank";
-            final boolean opened = Rs2Bank.openBank();
+            final boolean opened = KspVerifiedBank.openBank();
             nextBankAttemptAt = now + BANK_RETRY_DELAY_MS;
 
             if (!opened)

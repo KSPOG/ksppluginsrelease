@@ -23,7 +23,7 @@ import javax.inject.Inject;
 )
 public class KspF2PHighAlchTraderPlugin extends Plugin
 {
-    public static final String VERSION = "0.3.2";
+    public static final String VERSION = "0.3.3";
 
     @Inject private KspF2PHighAlchTraderConfig config;
     @Inject private KspF2PHighAlchTraderScript script;

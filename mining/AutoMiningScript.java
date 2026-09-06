@@ -1,5 +1,7 @@
 package net.runelite.client.plugins.microbot.mining;
 
+
+import net.runelite.client.plugins.microbot.kspbank.KspVerifiedBank;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import net.runelite.api.GameObject;
@@ -319,7 +321,7 @@ public class AutoMiningScript extends Script {
                     case RESETTING:
                         if (config.useBank()) {
                             if (config.clayBracelet() && config.ORE() == MiningOreOption.CLAY) {
-                                if (!Rs2Bank.walkToBankAndUseBank()) {
+                                if (!KspVerifiedBank.walkToBankAndOpenBank()) {
                                     return;
                                 }
 
@@ -361,7 +363,7 @@ public class AutoMiningScript extends Script {
                                 }
                             } else {
                                 if (!Rs2Bank.isOpen()) {
-                                    if (!Rs2Bank.walkToBankAndUseBank()) {
+                                    if (!KspVerifiedBank.walkToBankAndOpenBank()) {
                                         return;
                                     }
                                     return;
@@ -1058,7 +1060,7 @@ public class AutoMiningScript extends Script {
         Microbot.status = "Getting pickaxe";
 
         if (!Rs2Bank.isOpen()) {
-            Rs2Bank.walkToBankAndUseBank();
+            KspVerifiedBank.walkToBankAndOpenBank();
             return false;
         }
 

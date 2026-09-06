@@ -1,5 +1,7 @@
 package net.runelite.client.plugins.microbot.kspf2phighalchtrader;
 
+
+import net.runelite.client.plugins.microbot.kspbank.KspVerifiedBank;
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.client.plugins.microbot.Microbot;
 import net.runelite.client.plugins.microbot.util.bank.Rs2Bank;
@@ -141,7 +143,7 @@ public class KspHighAlchBankReserveGuard
         try
         {
             status = "Normalising protected bank reserve";
-            if (!Rs2Bank.walkToBankAndUseBank())
+            if (!KspVerifiedBank.walkToBankAndOpenBank())
             {
                 status = "Waiting for bank to protect reserve";
                 return;

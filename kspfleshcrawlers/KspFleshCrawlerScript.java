@@ -1,5 +1,7 @@
 package net.runelite.client.plugins.microbot.kspfleshcrawlers;
 
+
+import net.runelite.client.plugins.microbot.kspbank.KspVerifiedBank;
 import net.runelite.api.Actor;
 import net.runelite.api.Skill;
 import net.runelite.api.TileItem;
@@ -214,7 +216,7 @@ public class KspFleshCrawlerScript extends Script {
         state = FleshCrawlerState.BANKING;
         lastAction = "Banking and restocking " + config.foodName();
 
-        if (!Rs2Bank.isOpen() && !Rs2Bank.openBank()) return;
+        if (!Rs2Bank.isOpen() && !KspVerifiedBank.openBank()) return;
 
         List<String> keep = new ArrayList<>();
         keep.add(config.foodName());

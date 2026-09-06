@@ -32,7 +32,9 @@ final class AutoCategorizer
     AutoCategorizer(ItemManager itemManager)
     {
         this.itemManager = itemManager;
-        loadBundledOverrides();
+        // Source-loaded KSP plugins compile Java sources only. The historical
+        // reference_default_overrides.txt resource is not part of this release,
+        // so use the embedded canonical ID defaults directly.
         installCoreIds();
     }
 

@@ -1,5 +1,7 @@
 package net.runelite.client.plugins.microbot.kspbryophyta;
 
+
+import net.runelite.client.plugins.microbot.kspsupport.KspSupportConfig;
 import net.runelite.client.config.Config;
 import net.runelite.client.config.ConfigGroup;
 import net.runelite.client.config.ConfigItem;
@@ -8,7 +10,7 @@ import net.runelite.client.config.Range;
 import net.runelite.client.plugins.microbot.kspmule.KspMuleConfig;
 
 @ConfigGroup("kspbryophyta")
-public interface KspBryophytaConfig extends Config, KspMuleConfig {
+public interface KspBryophytaConfig extends Config, KspMuleConfig, KspSupportConfig {
     @ConfigSection(name = "Strategy", description = "Combat strategy and automatic strategy loadout", position = 0)
     String strategySection = "strategySection";
     @ConfigSection(name = "Banking & restock", description = "Varrock banking, teleport runes and trip supplies", position = 1)

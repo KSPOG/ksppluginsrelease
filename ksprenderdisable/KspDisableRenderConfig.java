@@ -1,5 +1,7 @@
 package net.runelite.client.plugins.microbot.ksprenderdisable;
 
+
+import net.runelite.client.plugins.microbot.kspsupport.KspSupportConfig;
 import net.runelite.client.config.Config;
 import net.runelite.client.config.ConfigGroup;
 import net.runelite.client.config.ConfigInformation;
@@ -13,7 +15,7 @@ import net.runelite.client.config.Range;
         + "Aggressive scene filtering can remove clickboxes, so it is disabled by default."
 )
 @ConfigGroup(KspDisableRenderConfig.GROUP)
-public interface KspDisableRenderConfig extends Config
+public interface KspDisableRenderConfig extends Config, KspSupportConfig
 {
     String GROUP = "kspDisableRender";
 

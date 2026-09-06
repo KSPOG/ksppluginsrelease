@@ -1,5 +1,7 @@
 package net.runelite.client.plugins.microbot.kspsmartsmelter;
 
+
+import net.runelite.client.plugins.microbot.kspsupport.KspSupportConfig;
 import net.runelite.client.config.Config;
 import net.runelite.client.config.ConfigGroup;
 import net.runelite.client.config.ConfigInformation;
@@ -19,7 +21,10 @@ import net.runelite.client.plugins.microbot.kspsmartsmelter.model.RankingMode;
         "Cannonballs require an ammo mould or double ammo mould." +
         "</body></html>"
 )
-public interface KspSmartSmelterConfig extends Config, KspMuleConfig {
+public interface KspSmartSmelterConfig extends Config, KspMuleConfig, KspSupportConfig {
+    @ConfigSection(name = "Anti-ban", description = "Task-aware behavior variation that only runs in safe idle windows", position = 50)
+    String antibanSection = "antiban";
+
     @ConfigSection(name = "Local Mule", description = "Automatic excess-GP transfer to KSP Trade Receiver", position = 90)
     String muleSection = KspMuleConfig.SECTION;
 
@@ -43,14 +48,14 @@ public interface KspSmartSmelterConfig extends Config, KspMuleConfig {
     default boolean autoRestock() { return true; }
     @ConfigItem(keyName = "autoSellOutput", name = "Sell outputs on restock", description = "Sell banked output of the selected route before buying more inputs", position = 10)
     default boolean autoSellOutput() { return true; }
-    @ConfigItem(keyName = "restockCycles", name = "Restock cycles", description = "Target number of production cycles bought per GE restock", position = 11)
-    default int restockCycles() { return 500; }
-    @ConfigItem(keyName = "buyPercent", name = "GE buy %", description = "Percentage above the current GE offer baseline when restocking", position = 12)
-    default int buyPercent() { return 5; }
-    @ConfigItem(keyName = "sellPercent", name = "GE sell %", description = "Percentage adjustment used when selling output; normally negative", position = 13)
-    default int sellPercent() { return -5; }
-    @ConfigItem(keyName = "offerWaitSeconds", name = "GE wait (sec)", description = "How long to wait for restock offers before collecting and rechecking", position = 14)
+    @ConfigItem(keyName = "offerWaitSeconds", name = "GE wait (sec)", description = "How long to wait for restock offers before collecting and rechecking", position = 11)
     default int offerWaitSeconds() { return 15; }
-    @ConfigItem(keyName = "showOverlay", name = "Overlay", description = "Show the Smart Smelter overlay", position = 15)
+    @ConfigItem(keyName = "showOverlay", name = "Overlay", description = "Show the Smart Smelter overlay", position = 12)
     default boolean showOverlay() { return true; }
+
+    @ConfigItem(keyName = "customAntiban", name = "Custom anti-ban", description = "Enable Smart Smelter's safe, task-aware humanization layer", position = 0, section = antibanSection)
+    default boolean customAntiban() { return true; }
+
+    @ConfigItem(keyName = "antibanProfile", name = "Anti-ban profile", description = "Light keeps delays small, Balanced is the default, High adds longer pauses and more mouse-away behavior", position = 1, section = antibanSection)
+    default SmartSmelterAntibanProfile antibanProfile() { return SmartSmelterAntibanProfile.BALANCED; }
 }

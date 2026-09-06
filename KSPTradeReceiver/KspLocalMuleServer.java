@@ -32,6 +32,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
  *
  * READY  <requestId> <base64 account name> <coin amount> <worker world>
  * STATUS <requestId>
+ * COMPLETE_ACK <requestId>
  * CANCEL <requestId>
  * PING
  *
@@ -207,6 +208,13 @@ public final class KspLocalMuleServer implements Closeable
                 }
                 return handleStatus(parts[1]);
 
+            case "COMPLETE_ACK":
+                if (parts.length < 2)
+                {
+                    return "ERROR\tCOMPLETE_ACK_FORMAT";
+                }
+                return handleCompleteAck(parts[1]);
+
             case "CANCEL":
                 if (parts.length < 2)
                 {
@@ -250,6 +258,34 @@ public final class KspLocalMuleServer implements Closeable
         }
         job.touch();
         return statusResponse(job);
+    }
+
+    private String handleCompleteAck(String requestId)
+    {
+        String id = sanitizeRequestId(requestId);
+        MuleJob job = jobs.get(id);
+        if (job == null)
+        {
+            return "UNKNOWN";
+        }
+
+        synchronized (activationLock)
+        {
+            if (job.state != JobState.COMPLETE)
+            {
+                job.touch();
+                return statusResponse(job);
+            }
+
+            job.touch();
+            if (job == activeJob)
+            {
+                activeJob = null;
+            }
+            queue.remove(id);
+            jobs.remove(id, job);
+            return "ACKED";
+        }
     }
 
     private String handleCancel(String requestId)
@@ -339,6 +375,11 @@ public final class KspLocalMuleServer implements Closeable
                 return activeJob;
             }
 
+            if (hasUnacknowledgedCompletionUnsafe())
+            {
+                return null;
+            }
+
             if (muleName == null || muleName.isBlank())
             {
                 return null;
@@ -420,11 +461,14 @@ public final class KspLocalMuleServer implements Closeable
         {
             for (MuleJob job : jobs.values())
             {
-                if ((job.state == JobState.QUEUED || job.state == JobState.ACTIVE)
+                if ((job.state == JobState.QUEUED || job.state == JobState.ACTIVE || job.state == JobState.COMPLETE)
                         && now - job.lastContactAt > staleAfterMs)
                 {
+                    boolean completedAwaitingAck = job.state == JobState.COMPLETE;
                     job.state = JobState.FAILED;
-                    job.failureReason = "Worker stopped contacting mule coordinator";
+                    job.failureReason = completedAwaitingAck
+                            ? "Worker did not acknowledge completed transfer"
+                            : "Worker stopped contacting mule coordinator";
                     if (job == activeJob)
                     {
                         activeJob = null;
@@ -458,12 +502,32 @@ public final class KspLocalMuleServer implements Closeable
         return pendingCount() > 0;
     }
 
+    public boolean hasUnacknowledgedCompletion()
+    {
+        synchronized (activationLock)
+        {
+            return hasUnacknowledgedCompletionUnsafe();
+        }
+    }
+
+    private boolean hasUnacknowledgedCompletionUnsafe()
+    {
+        for (MuleJob job : jobs.values())
+        {
+            if (job.state == JobState.COMPLETE)
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
     public int pendingCount()
     {
         int count = 0;
         for (MuleJob job : jobs.values())
         {
-            if (job.state == JobState.QUEUED || job.state == JobState.ACTIVE)
+            if (job.state == JobState.QUEUED || job.state == JobState.ACTIVE || job.state == JobState.COMPLETE)
             {
                 count++;
             }

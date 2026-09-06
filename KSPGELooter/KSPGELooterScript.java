@@ -1,5 +1,7 @@
 package net.runelite.client.plugins.microbot.KSPGELooter;
 
+
+import net.runelite.client.plugins.microbot.kspbank.KspVerifiedBank;
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.ItemComposition;
 import net.runelite.api.Skill;
@@ -483,7 +485,7 @@ public class KSPGELooterScript extends Script
             status = "Opening GE bank";
             if (!Rs2Bank.isOpen())
             {
-                if (!Rs2Bank.openBank())
+                if (!KspVerifiedBank.openBank())
                 {
                     status = "Unable to open GE bank";
                     return false;

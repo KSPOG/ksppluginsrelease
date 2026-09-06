@@ -1,5 +1,7 @@
 package net.runelite.client.plugins.microbot.f2pprocessingfactory;
 
+
+import net.runelite.client.plugins.microbot.kspbank.KspVerifiedBank;
 import com.google.gson.Gson;
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.GrandExchangeOffer;
@@ -3433,7 +3435,7 @@ public class F2PProcessingFactoryScript extends Script
                 return false;
             }
 
-            if (Rs2Bank.openBank())
+            if (KspVerifiedBank.openBank())
             {
                 boolean opened = sleepUntil(this::isBankRootVisible, BANK_OPEN_TIMEOUT_MILLIS);
                 if (opened)

@@ -1,5 +1,7 @@
 package net.runelite.client.plugins.microbot.kspaiofighter;
 
+
+import net.runelite.client.plugins.microbot.kspbank.KspVerifiedBank;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.EnumSet;
@@ -238,6 +240,11 @@ public class KspAioFighterScript extends Script
 		}
 		catch (Exception ex)
 		{
+			if (isExpectedShutdownInterruption(generation, ex))
+			{
+				return;
+			}
+
 			lastError = ex.getClass().getSimpleName() + ": " + (ex.getMessage() == null ? "<no message>" : ex.getMessage());
 			lastErrorMs = System.currentTimeMillis();
 			lastAction = "Error";
@@ -247,6 +254,30 @@ public class KspAioFighterScript extends Script
 		{
 			loopRunning.set(false);
 		}
+	}
+
+	private boolean isExpectedShutdownInterruption(long generation, Throwable throwable)
+	{
+		if (generation != runGeneration || Thread.currentThread().isInterrupted())
+		{
+			return true;
+		}
+
+		for (Throwable cause = throwable; cause != null; cause = cause.getCause())
+		{
+			if (cause instanceof InterruptedException)
+			{
+				return true;
+			}
+
+			String message = cause.getMessage();
+			if (message != null && message.toLowerCase(Locale.ROOT).contains("interrupted waiting for client thread"))
+			{
+				return true;
+			}
+		}
+
+		return false;
 	}
 
 	private boolean configureStartCameraIfNeeded()
@@ -368,7 +399,7 @@ public class KspAioFighterScript extends Script
 		}
 
 		setStatus("targets reached - walking to bank");
-		if (!Rs2Bank.walkToBankAndUseBank())
+		if (!KspVerifiedBank.walkToBankAndOpenBank())
 		{
 			return;
 		}
@@ -606,7 +637,7 @@ public class KspAioFighterScript extends Script
 		clearPendingLoot();
 		postKillLootUntilMs = 0L;
 
-		if (!Rs2Bank.walkToBankAndUseBank())
+		if (!KspVerifiedBank.walkToBankAndOpenBank())
 		{
 			return;
 		}
@@ -1064,6 +1095,14 @@ public class KspAioFighterScript extends Script
 			return false;
 		}
 
+		// Do not interrupt an active fight just because melee movement temporarily
+		// carried the player outside the configured rectangle. The target itself is
+		// already filtered to the configured attack area before we click Attack.
+		if (Rs2Player.isInCombat() || Rs2Player.isInteracting())
+		{
+			return false;
+		}
+
 		// Safe spot mode intentionally owns the standing tile. Otherwise the script would
 		// bounce between the safe spot and the attack-area center when both are enabled.
 		if (config.useSafeSpot())
@@ -1088,8 +1127,8 @@ public class KspAioFighterScript extends Script
 			return false;
 		}
 
-		WorldPoint center = getAttackAreaCenterFromTiles();
-		if (!isConfiguredTileValid(center))
+		WorldPoint returnPoint = getNearestPointInsideConfiguredArea(playerLocation);
+		if (!isConfiguredTileValid(returnPoint))
 		{
 			return false;
 		}
@@ -1101,9 +1140,28 @@ public class KspAioFighterScript extends Script
 		}
 
 		lastAttackAreaWalkAttemptMs = System.currentTimeMillis();
-		Rs2Walker.walkTo(center, ATTACK_AREA_WALK_DISTANCE);
-		setStatus("walking to attack area " + formatPoint(center) + " distance " + ATTACK_AREA_WALK_DISTANCE);
+		Rs2Walker.walkTo(returnPoint, ATTACK_AREA_WALK_DISTANCE);
+		setStatus("walking to attack area " + formatPoint(returnPoint) + " distance " + ATTACK_AREA_WALK_DISTANCE);
 		return true;
+	}
+
+	private WorldPoint getNearestPointInsideConfiguredArea(WorldPoint playerLocation)
+	{
+		WorldPoint tile1 = getAttackAreaTile1();
+		WorldPoint tile2 = getAttackAreaTile2();
+		if (playerLocation == null || !isConfiguredTileValid(tile1) || !isConfiguredTileValid(tile2)
+				|| tile1.getPlane() != tile2.getPlane())
+		{
+			return getAttackAreaCenterFromTiles();
+		}
+
+		int minX = Math.min(tile1.getX(), tile2.getX());
+		int maxX = Math.max(tile1.getX(), tile2.getX());
+		int minY = Math.min(tile1.getY(), tile2.getY());
+		int maxY = Math.max(tile1.getY(), tile2.getY());
+		int x = Math.max(minX, Math.min(maxX, playerLocation.getX()));
+		int y = Math.max(minY, Math.min(maxY, playerLocation.getY()));
+		return new WorldPoint(x, y, tile1.getPlane());
 	}
 
 	private boolean canRetryWalk(long lastWalkAttemptMs)
@@ -1355,7 +1413,7 @@ public class KspAioFighterScript extends Script
 
 	private void bankForGearSetup(Skill skill, List<String> missingGearBeforeBank)
 	{
-		if (!Rs2Bank.walkToBankAndUseBank())
+		if (!KspVerifiedBank.walkToBankAndOpenBank())
 		{
 			return;
 		}

@@ -1,5 +1,7 @@
 package net.runelite.client.plugins.microbot.KSPTradeReceiver;
 
+
+import net.runelite.client.plugins.microbot.kspbank.KspVerifiedBank;
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.GameState;
 import net.runelite.api.Player;
@@ -192,6 +194,12 @@ public class KspLocalMuleCoordinatorService
             restoreManualTrader();
             activeWorker = "-";
             activeCoins = 0L;
+            if (currentServer.hasUnacknowledgedCompletion())
+            {
+                status = "Transfer complete - waiting for worker acknowledgement";
+                queueEmptySince = 0L;
+                return;
+            }
             maybeLogoutWhenDone(currentServer);
             return;
         }
@@ -385,7 +393,7 @@ public class KspLocalMuleCoordinatorService
         {
             WorldPoint returnTile = tradeTile;
             status = "Transfer complete - banking";
-            if (!Rs2Bank.walkToBankAndUseBank())
+            if (!KspVerifiedBank.walkToBankAndOpenBank())
             {
                 status = "Transfer complete - bank unavailable";
                 return;
