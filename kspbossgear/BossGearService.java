@@ -33,7 +33,7 @@ final class BossGearService
     private volatile GearTier selectedTier = GearTier.MID;
     private volatile Selection selection = Selection.empty();
     private volatile boolean loading;
-    private volatile String status = "Search for a boss to load Wiki equipment.";
+    private volatile String status = "Search for a boss or raid to load Wiki gear/inventory.";
 
     @Inject
     BossGearService(WikiGearService wikiGearService)
@@ -52,7 +52,7 @@ final class BossGearService
         start();
         final long request = requestSequence.incrementAndGet();
         loading = true;
-        status = "Loading OSRS Wiki equipment...";
+        status = "Loading OSRS Wiki loadouts...";
 
         return CompletableFuture.supplyAsync(() -> {
             try
@@ -68,8 +68,8 @@ final class BossGearService
                         rebuildSelection();
                         loading = false;
                         status = selection.getRows().isEmpty()
-                            ? "Wiki page loaded, but no resolvable equipment items were found."
-                            : "Live equipment loaded from the OSRS Wiki.";
+                            ? "Wiki page loaded, but no resolvable loadout items were found."
+                            : "Live gear/inventory loaded from the OSRS Wiki.";
                     }
                 }
                 return loaded;
@@ -344,7 +344,7 @@ final class BossGearService
         while (current.getCause() != null && current.getCause() != current) current = current.getCause();
         String message = current.getMessage();
         return message == null || message.trim().isEmpty()
-            ? "Could not load equipment from the OSRS Wiki."
+            ? "Could not load gear/inventory from the OSRS Wiki."
             : message;
     }
 

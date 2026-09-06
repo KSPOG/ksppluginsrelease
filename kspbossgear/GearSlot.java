@@ -16,7 +16,7 @@ public enum GearSlot
     BOOTS("Feet"),
     RING("Ring"),
     SPECIAL_ATTACK("Spec"),
-    UNKNOWN("Other");
+    UNKNOWN("Item");
 
     private static final GearSlot[] FALLBACK_ORDER = {
         HEAD, AMULET, CAPE, BODY, LEGS, WEAPON, SHIELD, AMMO, GLOVES, BOOTS, RING, SPECIAL_ATTACK
