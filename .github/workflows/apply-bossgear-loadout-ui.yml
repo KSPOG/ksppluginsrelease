@@ -1,0 +1,69 @@
+name: Apply Boss Gear loadout UI
+
+on:
+  push:
+    branches:
+      - feat/bossgear-all-wiki-loadouts
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: ${{ !contains(github.event.head_commit.message, '[bossgear-ui-applied]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/bossgear-all-wiki-loadouts
+      - name: Patch UI and status wording
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          replacements = {
+              'kspbossgear/KspBossGearPanel.java': [
+                  ('section("Boss search")', 'section("Boss / raid search")'),
+                  ('section("Recommended equipment")', 'section("Recommended gear / inventory")'),
+                  ('new JLabel("No equipment loaded.")', 'new JLabel("No gear/inventory items loaded.")'),
+                  ('"No resolvable gear rows"', '"No resolvable loadout items"'),
+                  ('"Equipment is read from the live Old School RuneScape Wiki strategy page."', '"Gear and inventory setups are read from the live Old School RuneScape Wiki page."'),
+              ],
+              'kspbossgear/BossGearService.java': [
+                  ('"Search for a boss to load Wiki equipment."', '"Search for a boss or raid to load Wiki gear/inventory."'),
+                  ('"Loading OSRS Wiki equipment..."', '"Loading OSRS Wiki loadouts..."'),
+                  ('"Wiki page loaded, but no resolvable equipment items were found."', '"Wiki page loaded, but no resolvable loadout items were found."'),
+                  ('"Live equipment loaded from the OSRS Wiki."', '"Live gear/inventory loaded from the OSRS Wiki."'),
+                  ('"Could not load equipment from the OSRS Wiki."', '"Could not load gear/inventory from the OSRS Wiki."'),
+              ],
+              'kspbossgear/KspBossGearPlugin.java': [
+                  ('description = "OSRS Wiki boss equipment finder with live bank and inventory highlights."', 'description = "OSRS Wiki boss and raid gear/inventory finder with live bank and inventory highlights."'),
+                  ('public static final String VERSION = "1.0.0";', 'public static final String VERSION = "1.1.0";'),
+                  ('"KSP Boss Gear enabled: Wiki equipment can highlight both bank and inventory items."', '"KSP Boss Gear enabled: Wiki boss/raid loadouts can highlight bank and inventory items."'),
+              ],
+              'kspbossgear/GearSlot.java': [
+                  ('UNKNOWN("Other")', 'UNKNOWN("Item")'),
+              ],
+          }
+
+          for filename, pairs in replacements.items():
+              path = Path(filename)
+              text = path.read_text(encoding='utf-8')
+              for old, new in pairs:
+                  if old not in text:
+                      raise SystemExit(f'Expected text not found in {filename}: {old}')
+                  text = text.replace(old, new, 1)
+              path.write_text(text, encoding='utf-8')
+          PY
+      - name: Commit UI patch
+        shell: bash
+        run: |
+          git config user.name "KSP Automation"
+          git config user.email "ksp-automation@users.noreply.github.com"
+          git add kspbossgear/KspBossGearPanel.java kspbossgear/BossGearService.java kspbossgear/KspBossGearPlugin.java kspbossgear/GearSlot.java
+          if git diff --cached --quiet; then
+            exit 0
+          fi
+          git commit -m "feat: expose Wiki gear and inventory loadouts [bossgear-ui-applied]"
+          git push origin HEAD:feat/bossgear-all-wiki-loadouts
