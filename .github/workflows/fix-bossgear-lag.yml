@@ -1,0 +1,96 @@
+name: Apply Boss Gear lag fix
+
+on:
+  push:
+    branches:
+      - fix/bossgear-lag
+    paths:
+      - .github/bossgear-lag-trigger.txt
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/bossgear-lag
+      - name: Patch Boss Gear ownership polling
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          service = Path('kspbossgear/BossGearService.java')
+          text = service.read_text(encoding='utf-8')
+
+          if 'import java.util.HashSet;' not in text:
+              text = text.replace('import java.util.Collections;\n', 'import java.util.Collections;\nimport java.util.HashSet;\n', 1)
+          if 'import net.runelite.client.plugins.microbot.util.inventory.Rs2ItemModel;' not in text:
+              text = text.replace(
+                  'import net.runelite.client.plugins.microbot.util.inventory.Rs2Inventory;\n',
+                  'import net.runelite.client.plugins.microbot.util.inventory.Rs2Inventory;\nimport net.runelite.client.plugins.microbot.util.inventory.Rs2ItemModel;\n',
+                  1)
+
+          field_anchor = '    private final Map<String, Integer> itemIdCache = new ConcurrentHashMap<>();\n    private final AtomicLong requestSequence = new AtomicLong();\n'
+          field_replacement = '''    private static final long OWNERSHIP_SNAPSHOT_MS = 1_500L;\n\n    private final Map<String, Integer> itemIdCache = new ConcurrentHashMap<>();\n    private final AtomicLong requestSequence = new AtomicLong();\n    private volatile OwnershipSnapshot ownershipSnapshot = OwnershipSnapshot.empty();\n    private volatile long ownershipSnapshotAt;\n'''
+          if field_anchor not in text:
+              raise SystemExit('BossGearService field anchor missing')
+          text = text.replace(field_anchor, field_replacement, 1)
+
+          old_ownership = '''    OwnershipMatch ownership(ResolvedGearRow row)\n    {\n        if (row == null) return OwnershipMatch.missing();\n        List<Integer> ids = row.getAllIds();\n\n        for (Integer id : ids)\n        {\n            if (id != null && id > 0 && Rs2Equipment.isWearing(id))\n                return new OwnershipMatch(Ownership.EQUIPPED, id == row.getPrimaryId());\n        }\n        for (Integer id : ids)\n        {\n            if (id != null && id > 0 && Rs2Inventory.hasItem(id))\n                return new OwnershipMatch(Ownership.INVENTORY, id == row.getPrimaryId());\n        }\n        for (Integer id : ids)\n        {\n            if (id != null && id > 0 && Rs2Bank.hasItem(id))\n                return new OwnershipMatch(Ownership.BANK, id == row.getPrimaryId());\n        }\n        return OwnershipMatch.missing();\n    }\n'''
+          new_ownership = '''    OwnershipMatch ownership(ResolvedGearRow row)\n    {\n        if (row == null) return OwnershipMatch.missing();\n        OwnershipSnapshot snapshot = getOwnershipSnapshot();\n        List<Integer> ids = row.getAllIds();\n\n        for (Integer id : ids)\n        {\n            if (id != null && id > 0 && snapshot.equippedIds.contains(id))\n                return new OwnershipMatch(Ownership.EQUIPPED, id == row.getPrimaryId());\n        }\n        for (Integer id : ids)\n        {\n            if (id != null && id > 0 && snapshot.inventoryIds.contains(id))\n                return new OwnershipMatch(Ownership.INVENTORY, id == row.getPrimaryId());\n        }\n        for (Integer id : ids)\n        {\n            if (id != null && id > 0 && snapshot.bankIds.contains(id))\n                return new OwnershipMatch(Ownership.BANK, id == row.getPrimaryId());\n        }\n        return OwnershipMatch.missing();\n    }\n\n    private OwnershipSnapshot getOwnershipSnapshot()\n    {\n        long now = System.currentTimeMillis();\n        OwnershipSnapshot cached = ownershipSnapshot;\n        if (now - ownershipSnapshotAt < OWNERSHIP_SNAPSHOT_MS) return cached;\n\n        synchronized (this)\n        {\n            now = System.currentTimeMillis();\n            if (now - ownershipSnapshotAt < OWNERSHIP_SNAPSHOT_MS) return ownershipSnapshot;\n\n            Set<Integer> equipped = new HashSet<>();\n            Set<Integer> inventory = new HashSet<>();\n            Set<Integer> bank = new HashSet<>();\n\n            try\n            {\n                Rs2Equipment.all().forEach(item -> addItemId(equipped, item));\n            }\n            catch (Throwable ignored)\n            {\n                // Keep the previous location empty if the cached equipment view is unavailable.\n            }\n\n            try\n            {\n                List<Rs2ItemModel> items = Rs2Inventory.all();\n                if (items != null) for (Rs2ItemModel item : items) addItemId(inventory, item);\n            }\n            catch (Throwable ignored)\n            {\n                // Inventory cache can briefly invalidate during widget/container rebuilds.\n            }\n\n            try\n            {\n                List<Rs2ItemModel> items = Rs2Bank.bankItems();\n                if (items != null) for (Rs2ItemModel item : items) addItemId(bank, item);\n            }\n            catch (Throwable ignored)\n            {\n                // Bank data is cached by Microbot and can be temporarily unavailable during refresh.\n            }\n\n            OwnershipSnapshot fresh = new OwnershipSnapshot(equipped, inventory, bank);\n            ownershipSnapshot = fresh;\n            ownershipSnapshotAt = now;\n            return fresh;\n        }\n    }\n\n    private static void addItemId(Set<Integer> target, Rs2ItemModel item)\n    {\n        if (item != null && item.getId() > 0) target.add(item.getId());\n    }\n'''
+          if old_ownership not in text:
+              raise SystemExit('BossGearService ownership anchor missing')
+          text = text.replace(old_ownership, new_ownership, 1)
+
+          enum_anchor = '''    enum HighlightKind\n    {\n        NONE,\n        PRIMARY,\n        ALTERNATIVE\n    }\n'''
+          snapshot_class = '''    private static final class OwnershipSnapshot\n    {\n        private final Set<Integer> equippedIds;\n        private final Set<Integer> inventoryIds;\n        private final Set<Integer> bankIds;\n\n        private OwnershipSnapshot(Set<Integer> equippedIds, Set<Integer> inventoryIds, Set<Integer> bankIds)\n        {\n            this.equippedIds = equippedIds;\n            this.inventoryIds = inventoryIds;\n            this.bankIds = bankIds;\n        }\n\n        private static OwnershipSnapshot empty()\n        {\n            return new OwnershipSnapshot(Collections.emptySet(), Collections.emptySet(), Collections.emptySet());\n        }\n    }\n\n'''
+          if enum_anchor not in text:
+              raise SystemExit('BossGearService enum anchor missing')
+          text = text.replace(enum_anchor, snapshot_class + enum_anchor, 1)
+          service.write_text(text, encoding='utf-8')
+
+          panel = Path('kspbossgear/KspBossGearPanel.java')
+          ptext = panel.read_text(encoding='utf-8')
+          timer_old = '        refreshTimer = new Timer(500, e -> refreshStatus());'
+          timer_new = '        refreshTimer = new Timer(1_000, e -> refreshStatus());'
+          if timer_old not in ptext:
+              raise SystemExit('Boss Gear panel timer anchor missing')
+          ptext = ptext.replace(timer_old, timer_new, 1)
+          refresh_old = '''        refreshOwnership();\n    }\n\n    private void refreshOwnership()'''
+          refresh_new = '''        if (isShowing()) refreshOwnership();\n    }\n\n    private void refreshOwnership()'''
+          if refresh_old not in ptext:
+              raise SystemExit('Boss Gear panel refresh anchor missing')
+          ptext = ptext.replace(refresh_old, refresh_new, 1)
+          panel.write_text(ptext, encoding='utf-8')
+
+          plugin = Path('kspbossgear/KspBossGearPlugin.java')
+          vtext = plugin.read_text(encoding='utf-8')
+          old_version = 'public static final String VERSION = "1.1.1";'
+          if old_version not in vtext:
+              raise SystemExit('Boss Gear version anchor missing')
+          vtext = vtext.replace(old_version, 'public static final String VERSION = "1.1.2";', 1)
+          plugin.write_text(vtext, encoding='utf-8')
+          PY
+      - name: Verify patch shape
+        shell: bash
+        run: |
+          grep -q 'OWNERSHIP_SNAPSHOT_MS = 1_500L' kspbossgear/BossGearService.java
+          grep -q 'Rs2Bank.bankItems()' kspbossgear/BossGearService.java
+          grep -q 'new Timer(1_000' kspbossgear/KspBossGearPanel.java
+          grep -q 'if (isShowing()) refreshOwnership();' kspbossgear/KspBossGearPanel.java
+          grep -q 'VERSION = "1.1.2"' kspbossgear/KspBossGearPlugin.java
+      - name: Commit source fix
+        shell: bash
+        run: |
+          git config user.name "KSP Automation"
+          git config user.email "ksp-automation@users.noreply.github.com"
+          git add kspbossgear/BossGearService.java kspbossgear/KspBossGearPanel.java kspbossgear/KspBossGearPlugin.java
+          if git diff --cached --quiet; then
+            exit 0
+          fi
+          git commit -m "fix: reduce Boss Gear ownership polling overhead"
+          git push origin HEAD:fix/bossgear-lag
