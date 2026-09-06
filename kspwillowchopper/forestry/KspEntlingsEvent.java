@@ -76,7 +76,7 @@ public class KspEntlingsEvent implements BlockingEvent {
 
                 long now = System.currentTimeMillis();
                 if (now - lastClickMillis < CLICK_COOLDOWN_MS) {
-                    sleep(Math.min(100L, CLICK_COOLDOWN_MS - (now - lastClickMillis)));
+                    sleep((int) Math.min(100L, CLICK_COOLDOWN_MS - (now - lastClickMillis)));
                     break;
                 }
                 if (Rs2Player.isMoving() || Rs2Player.isAnimating(800)) {
