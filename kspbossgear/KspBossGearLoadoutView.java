@@ -170,6 +170,7 @@ final class KspBossGearLoadoutView extends JPanel
         private final JLabel icon = new JLabel("", SwingConstants.CENTER);
         private final String emptyLabel;
         private BossGearService.ResolvedGearRow row;
+        private String baseTooltip;
 
         private SlotView(String emptyLabel)
         {
@@ -222,8 +223,9 @@ final class KspBossGearLoadoutView extends JPanel
                 }
             }
             tooltip.append("</html>");
-            setToolTipText(tooltip.toString());
-            icon.setToolTipText(tooltip.toString());
+            baseTooltip = tooltip.toString();
+            setToolTipText(baseTooltip);
+            icon.setToolTipText(baseTooltip);
 
             try
             {
@@ -249,16 +251,18 @@ final class KspBossGearLoadoutView extends JPanel
             Color color = match.getOwnership().getColor();
             setBorder(BorderFactory.createLineBorder(color, 2));
 
-            String base = getToolTipText();
-            if (base == null) base = "<html>" + escape(row.getPrimaryName()) + "</html>";
-            String ownership = match.displayText();
-            String updated = base.replace("</html>", "<br><b>Status:</b> " + escape(ownership) + "</html>");
+            String base = baseTooltip == null
+                ? "<html>" + escape(row.getPrimaryName()) + "</html>"
+                : baseTooltip;
+            String updated = base.replace("</html>",
+                "<br><b>Status:</b> " + escape(match.displayText()) + "</html>");
             setToolTipText(updated);
             icon.setToolTipText(updated);
         }
 
         private void showEmpty()
         {
+            baseTooltip = null;
             icon.setIcon(null);
             icon.setText(emptyLabel);
             setToolTipText(emptyLabel.isEmpty() ? "Empty inventory slot" : emptyLabel + " slot");
