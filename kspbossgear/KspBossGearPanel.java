@@ -48,6 +48,7 @@ public final class KspBossGearPanel extends PluginPanel
     private final JList<String> suggestions = new JList<>(suggestionModel);
     private final JScrollPane suggestionScroll = new JScrollPane(suggestions);
     private final JComboBox<String> methodCombo = new JComboBox<>();
+    private final JComboBox<String> inventoryCombo = new JComboBox<>();
     private final JComboBox<GearTier> tierCombo = new JComboBox<>(GearTier.values());
     private final JPanel gearRows = new JPanel();
     private final JLabel availabilityLabel = new JLabel("No boss loaded");
@@ -118,8 +119,11 @@ public final class KspBossGearPanel extends PluginPanel
 
         JPanel setup = section("Setup");
         configureCombo(methodCombo);
+        configureCombo(inventoryCombo);
         configureCombo(tierCombo);
         setup.add(labeledControl("Method", methodCombo));
+        setup.add(Box.createVerticalStrut(2));
+        setup.add(labeledControl("Inventory", inventoryCombo));
         setup.add(Box.createVerticalStrut(2));
         setup.add(labeledControl("Tier", tierCombo));
         content.add(setup);
@@ -178,8 +182,15 @@ public final class KspBossGearPanel extends PluginPanel
             if (selected != null)
             {
                 service.setSelectedMethod(selected.toString());
+                syncInventoryCombo();
                 rebuildGearRows();
             }
+        });
+        inventoryCombo.addActionListener(e -> {
+            if (updatingControls) return;
+            Object selected = inventoryCombo.getSelectedItem();
+            service.setSelectedInventoryMethod(selected == null ? null : selected.toString());
+            rebuildGearRows();
         });
         tierCombo.addActionListener(e -> {
             if (updatingControls) return;
@@ -239,8 +250,12 @@ public final class KspBossGearPanel extends PluginPanel
             List<String> methods = service.getMethodNames();
             methodCombo.setModel(new DefaultComboBoxModel<>(methods.toArray(new String[0])));
             methodCombo.setSelectedItem(service.getSelectedMethod());
+            List<String> inventories = service.getInventoryMethodNames();
+            inventoryCombo.setModel(new DefaultComboBoxModel<>(inventories.toArray(new String[0])));
+            inventoryCombo.setSelectedItem(service.getSelectedInventoryMethod());
             tierCombo.setSelectedItem(service.getSelectedTier());
             methodCombo.setEnabled(!methods.isEmpty());
+            inventoryCombo.setEnabled(!inventories.isEmpty());
             tierCombo.setEnabled(!methods.isEmpty());
         }
         finally
@@ -256,6 +271,23 @@ public final class KspBossGearPanel extends PluginPanel
         refreshOwnership();
     }
 
+    private void syncInventoryCombo()
+    {
+        boolean previous = updatingControls;
+        updatingControls = true;
+        try
+        {
+            List<String> inventories = service.getInventoryMethodNames();
+            inventoryCombo.setModel(new DefaultComboBoxModel<>(inventories.toArray(new String[0])));
+            inventoryCombo.setSelectedItem(service.getSelectedInventoryMethod());
+            inventoryCombo.setEnabled(!inventories.isEmpty());
+        }
+        finally
+        {
+            updatingControls = previous;
+        }
+    }
+
     private void refreshStatus()
     {
         if (!SwingUtilities.isEventDispatchThread())
@@ -267,7 +299,8 @@ public final class KspBossGearPanel extends PluginPanel
         boolean loading = service.isLoading();
         loadButton.setEnabled(!loading);
         refreshButton.setEnabled(!loading);
-        methodCombo.setEnabled(!loading && service.getPage() != null);
+        methodCombo.setEnabled(!loading && service.getPage() != null && !service.getMethodNames().isEmpty());
+        inventoryCombo.setEnabled(!loading && service.getPage() != null && !service.getInventoryMethodNames().isEmpty());
         tierCombo.setEnabled(!loading && service.getPage() != null);
         wikiButton.setEnabled(!loading && service.getPage() != null);
 
@@ -369,7 +402,7 @@ public final class KspBossGearPanel extends PluginPanel
         JLabel label = new JLabel(labelText);
         label.setForeground(Color.WHITE);
         label.setFont(FontManager.getRunescapeSmallFont());
-        label.setPreferredSize(new Dimension(43, 24));
+        label.setPreferredSize(new Dimension(58, 24));
         row.add(label, BorderLayout.WEST);
         row.add(control, BorderLayout.CENTER);
         return row;
