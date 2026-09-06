@@ -1,0 +1,56 @@
+name: Diagnose Boss Gear Wiki HTML
+
+on:
+  push:
+    branches:
+      - fix/bossgear-phosani-parser
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch and inspect Phosani Wiki HTML
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json, re, urllib.parse, urllib.request
+          page = "Phosani's Nightmare/Strategies"
+          q = urllib.parse.urlencode({"action":"parse","format":"json","formatversion":"2","redirects":"1","prop":"text","page":page})
+          req = urllib.request.Request("https://oldschool.runescape.wiki/api.php?" + q, headers={"User-Agent":"KSP-Boss-Gear-Diagnostic/1.0"})
+          with urllib.request.urlopen(req, timeout=20) as r:
+              data = json.load(r)
+          html = data["parse"]["text"]
+          print("TITLE", data["parse"].get("title"))
+          print("HTML_LEN", len(html))
+          print("TABLES", len(re.findall(r"(?is)<table\\b", html)))
+          print("TRS", len(re.findall(r"(?is)<tr\\b", html)))
+          print("TDS", len(re.findall(r"(?is)<td\\b", html)), "THS", len(re.findall(r"(?is)<th\\b", html)))
+          print("TITLE_ATTRS", len(re.findall(r"(?is)<a\\b[^>]*?title\\s*=", html)))
+          print("HREFS", len(re.findall(r"(?is)<a\\b[^>]*?href\\s*=", html)))
+          needle = "Recommended equipment for Melee"
+          i = html.lower().find(needle.lower())
+          print("MELEE_INDEX", i)
+          if i >= 0:
+              print("MELEE_CONTEXT_START")
+              print(html[max(0,i-1500):i+7000])
+              print("MELEE_CONTEXT_END")
+          table_pat = re.compile(r"(?is)<table\\b[^>]*>.*?</table>")
+          row_pat = re.compile(r"(?is)<tr\\b[^>]*>(.*?)</tr>")
+          cell_pat = re.compile(r"(?is)<(td|th)\\b[^>]*>(.*?)</\\1>")
+          link_pat = re.compile(r'''(?is)<a\\b[^>]*?title\\s*=\\s*(["'])(.*?)\\1[^>]*>''')
+          matched = 0
+          for n,m in enumerate(table_pat.finditer(html),1):
+              t=m.group(0)
+              text=re.sub(r"(?is)<[^>]+>"," ",t)
+              text=re.sub(r"\\s+"," ",text)
+              if "most effective" in text.lower() or "recommended equipment" in text.lower():
+                  print("CANDIDATE_TABLE", n, "LEN", len(t), "ROWS", len(row_pat.findall(t)), "LINK_TITLES", len(link_pat.findall(t)))
+                  for ri,rm in enumerate(row_pat.finditer(t)):
+                      cells=[cm.group(2) for cm in cell_pat.finditer(rm.group(1))]
+                      if cells:
+                          print(" ROW",ri,"CELLS",len(cells),"LINKS_PER_CELL",[len(link_pat.findall(c)) for c in cells])
+                          if ri>3: break
+                  matched += 1
+          print("CANDIDATE_TABLES", matched)
+          PY
