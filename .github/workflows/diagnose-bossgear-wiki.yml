@@ -1,68 +1,120 @@
-name: Diagnose Boss Gear Wiki HTML
+name: Fix Boss Gear Wiki item resolution
 
 on:
   push:
     branches:
       - fix/bossgear-phosani-parser
 
+permissions:
+  contents: write
+
 jobs:
-  diagnose:
+  patch:
+    if: ${{ !contains(github.event.head_commit.message, '[bossgear-resolver-fixed]') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Fetch and inspect Phosani Wiki HTML
+        with:
+          ref: fix/bossgear-phosani-parser
+      - name: Patch Boss Gear item resolver
         shell: bash
         run: |
           python - <<'PY'
-          import html as htmlmod, json, re, urllib.parse, urllib.request
-          page = "Phosani's Nightmare/Strategies"
-          q = urllib.parse.urlencode({"action":"parse","format":"json","formatversion":"2","redirects":"1","prop":"text","page":page})
-          req = urllib.request.Request("https://oldschool.runescape.wiki/api.php?" + q, headers={"User-Agent":"KSP-Boss-Gear-Diagnostic/1.0"})
-          with urllib.request.urlopen(req, timeout=20) as r:
-              data = json.load(r)
-          html = data["parse"]["text"]
-          table_pat = re.compile(r"(?is)<table\b[^>]*>.*?</table>")
-          row_pat = re.compile(r"(?is)<tr\b[^>]*>(.*?)</tr>")
-          cell_pat = re.compile(r"(?is)<(td|th)\b[^>]*>(.*?)</\1>")
-          link_pat = re.compile(r'''(?is)<a\b[^>]*?title\s*=\s*(["'])(.*?)\1[^>]*>''')
-          tag_pat = re.compile(r"(?is)<[^>]+>")
-          space_pat = re.compile(r"\s+")
-          def text(x):
-              x=re.sub(r"(?is)<br\s*/?>"," ",x)
-              x=re.sub(r"(?is)</(?:p|div|h[1-6]|li|tr|td|th)>"," ",x)
-              return space_pat.sub(" ", htmlmod.unescape(tag_pat.sub(" ",x))).strip()
-          def titles(x):
-              return list(dict.fromkeys(htmlmod.unescape(m.group(2)).strip() for m in link_pat.finditer(x)))
-          print("TITLE", data["parse"].get("title"))
-          print("HTML_LEN", len(html))
-          print("TABLES", len(table_pat.findall(html)))
-          print("TRS", len(re.findall(r"(?is)<tr\b", html)))
-          print("TDS", len(re.findall(r"(?is)<td\b", html)), "THS", len(re.findall(r"(?is)<th\b", html)))
-          print("TITLE_ATTRS", len(re.findall(r"(?is)<a\b[^>]*?title\s*=", html)))
-          print("HREFS", len(re.findall(r"(?is)<a\b[^>]*?href\s*=", html)))
-          candidate=0
-          for n,m in enumerate(table_pat.finditer(html),1):
-              t=m.group(0)
-              tt=text(t).lower()
-              start=max(0,m.start()-2200)
-              context=text(html[start:m.start()]).lower()
-              recommended_at=context.rfind("recommended equipment for")
-              near=recommended_at >= 0 and len(context)-recommended_at <= 700
-              slot=("equipment-slot" in t.lower()) or ("slot" in tt and "item" in tt)
-              if not near and not slot:
-                  continue
-              rows=[]
-              for rm in row_pat.finditer(t):
-                  cells=[cm.group(2) for cm in cell_pat.finditer(rm.group(1))]
-                  if len(cells)<2: continue
-                  first=text(cells[0]).lower(); rowtext=text(rm.group(1)).lower()
-                  if first=="slot" or first=="equipment slot" or ("slot" in first and "most effective" in rowtext):
-                      continue
-                  cols=[titles(c) for c in cells[1:]]
-                  if any(cols): rows.append((text(cells[0]),cols))
-              if rows:
-                  candidate+=1
-                  print("CANDIDATE",n,"near",near,"slot",slot,"CAPTION",re.findall(r"(?is)<caption\b[^>]*>(.*?)</caption>",t)[:1])
-                  print(" ROWS",len(rows),"FIRST",rows[0][0],rows[0][1][:2])
-          print("PARSED_EQUIPMENT_TABLES", candidate)
+          from pathlib import Path
+
+          service = Path('kspbossgear/BossGearService.java')
+          text = service.read_text(encoding='utf-8')
+
+          old_import = 'import net.runelite.client.plugins.microbot.util.bank.Rs2Bank;'
+          new_import = 'import net.runelite.client.plugins.microbot.Microbot;\nimport net.runelite.client.plugins.microbot.util.bank.Rs2Bank;'
+          if 'import net.runelite.client.plugins.microbot.Microbot;' not in text:
+              if old_import not in text:
+                  raise SystemExit('BossGearService import anchor missing')
+              text = text.replace(old_import, new_import, 1)
+
+          old_resolve_page = '''        for (String name : names)
+        {
+            itemIdCache.computeIfAbsent(normalize(name), key -> resolveExactItemId(name));
+        }
+    }
+
+    private int resolveExactItemId(String itemName)
+    {
+        try
+        {
+            return Rs2ItemManager.getItemIdByName(itemName, false);
+        }
+        catch (Throwable ignored)
+        {
+            return -1;
+        }
+    }
+'''
+          new_resolve_page = '''        for (String name : names)
+        {
+            String key = normalize(name);
+            Integer cached = itemIdCache.get(key);
+            if (cached != null && cached > 0) continue;
+
+            int id = resolveExactItemId(name);
+            // Do not cache failed lookups. The item manager may not be fully populated yet,
+            // and a negative cache entry would blank the loadout for the entire plugin session.
+            if (id > 0) itemIdCache.put(key, id);
+        }
+    }
+
+    private int resolveExactItemId(String itemName)
+    {
+        if (itemName == null || itemName.trim().isEmpty()) return -1;
+
+        String candidate = itemName.trim()
+            .replace('\u2018', '\'')
+            .replace('\u2019', '\'')
+            .replace('\u02BC', '\'');
+
+        try
+        {
+            int id = Rs2ItemManager.getItemIdByName(candidate, false);
+            if (id > 0) return id;
+        }
+        catch (Throwable ignored)
+        {
+            // Fall through to the client-backed item manager used elsewhere in KSP.
+        }
+
+        try
+        {
+            int id = Microbot.getRs2ItemManager().getItemId(candidate);
+            if (id > 0) return id;
+        }
+        catch (Throwable ignored)
+        {
+            // Return unresolved below.
+        }
+        return -1;
+    }
+'''
+          if old_resolve_page not in text:
+              raise SystemExit('BossGearService resolver anchor missing')
+          text = text.replace(old_resolve_page, new_resolve_page, 1)
+          service.write_text(text, encoding='utf-8')
+
+          plugin = Path('kspbossgear/KspBossGearPlugin.java')
+          ptext = plugin.read_text(encoding='utf-8')
+          if 'public static final String VERSION = "1.1.0";' not in ptext:
+              raise SystemExit('Boss Gear version anchor missing')
+          ptext = ptext.replace('public static final String VERSION = "1.1.0";',
+                                'public static final String VERSION = "1.1.1";', 1)
+          plugin.write_text(ptext, encoding='utf-8')
           PY
+      - name: Commit source fix
+        shell: bash
+        run: |
+          git config user.name "KSP Automation"
+          git config user.email "ksp-automation@users.noreply.github.com"
+          git add kspbossgear/BossGearService.java kspbossgear/KspBossGearPlugin.java
+          if git diff --cached --quiet; then
+            exit 0
+          fi
+          git commit -m "fix: resolve Wiki loadout item IDs reliably [bossgear-resolver-fixed]"
+          git push origin HEAD:fix/bossgear-phosani-parser
