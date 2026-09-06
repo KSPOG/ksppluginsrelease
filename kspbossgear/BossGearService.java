@@ -15,6 +15,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicLong;
 import javax.inject.Inject;
+import net.runelite.client.plugins.microbot.Microbot;
 import net.runelite.client.plugins.microbot.util.bank.Rs2Bank;
 import net.runelite.client.plugins.microbot.util.equipment.Rs2Equipment;
 import net.runelite.client.plugins.microbot.util.inventory.Rs2Inventory;
@@ -202,20 +203,41 @@ final class BossGearService
 
         for (String name : names)
         {
-            itemIdCache.computeIfAbsent(normalize(name), key -> resolveExactItemId(name));
+            String key = normalize(name);
+            Integer cached = itemIdCache.get(key);
+            if (cached != null && cached > 0) continue;
+
+            int id = resolveExactItemId(name);
+            // Do not cache failed lookups: the client-backed item manager may still be warming up.
+            if (id > 0) itemIdCache.put(key, id);
         }
     }
 
     private int resolveExactItemId(String itemName)
     {
+        if (itemName == null || itemName.trim().isEmpty()) return -1;
+        String candidate = itemName.trim();
+
         try
         {
-            return Rs2ItemManager.getItemIdByName(itemName, false);
+            int id = Rs2ItemManager.getItemIdByName(candidate, false);
+            if (id > 0) return id;
         }
         catch (Throwable ignored)
         {
-            return -1;
+            // Fall through to the client-backed item manager used by other KSP plugins.
         }
+
+        try
+        {
+            int id = Microbot.getRs2ItemManager().getItemId(candidate);
+            if (id > 0) return id;
+        }
+        catch (Throwable ignored)
+        {
+            // Return unresolved below.
+        }
+        return -1;
     }
 
     private synchronized void rebuildSelection()
