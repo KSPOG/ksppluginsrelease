@@ -1,120 +1,28 @@
-name: Fix Boss Gear Wiki item resolution
+name: Apply Boss Gear resolver fix
 
 on:
   push:
     branches:
       - fix/bossgear-phosani-parser
+    paths:
+      - .github/bossgear-resolver-trigger.txt
 
 permissions:
   contents: write
 
 jobs:
   patch:
-    if: ${{ !contains(github.event.head_commit.message, '[bossgear-resolver-fixed]') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           ref: fix/bossgear-phosani-parser
-      - name: Patch Boss Gear item resolver
-        shell: bash
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-
-          service = Path('kspbossgear/BossGearService.java')
-          text = service.read_text(encoding='utf-8')
-
-          old_import = 'import net.runelite.client.plugins.microbot.util.bank.Rs2Bank;'
-          new_import = 'import net.runelite.client.plugins.microbot.Microbot;\nimport net.runelite.client.plugins.microbot.util.bank.Rs2Bank;'
-          if 'import net.runelite.client.plugins.microbot.Microbot;' not in text:
-              if old_import not in text:
-                  raise SystemExit('BossGearService import anchor missing')
-              text = text.replace(old_import, new_import, 1)
-
-          old_resolve_page = '''        for (String name : names)
-        {
-            itemIdCache.computeIfAbsent(normalize(name), key -> resolveExactItemId(name));
-        }
-    }
-
-    private int resolveExactItemId(String itemName)
-    {
-        try
-        {
-            return Rs2ItemManager.getItemIdByName(itemName, false);
-        }
-        catch (Throwable ignored)
-        {
-            return -1;
-        }
-    }
-'''
-          new_resolve_page = '''        for (String name : names)
-        {
-            String key = normalize(name);
-            Integer cached = itemIdCache.get(key);
-            if (cached != null && cached > 0) continue;
-
-            int id = resolveExactItemId(name);
-            // Do not cache failed lookups. The item manager may not be fully populated yet,
-            // and a negative cache entry would blank the loadout for the entire plugin session.
-            if (id > 0) itemIdCache.put(key, id);
-        }
-    }
-
-    private int resolveExactItemId(String itemName)
-    {
-        if (itemName == null || itemName.trim().isEmpty()) return -1;
-
-        String candidate = itemName.trim()
-            .replace('\u2018', '\'')
-            .replace('\u2019', '\'')
-            .replace('\u02BC', '\'');
-
-        try
-        {
-            int id = Rs2ItemManager.getItemIdByName(candidate, false);
-            if (id > 0) return id;
-        }
-        catch (Throwable ignored)
-        {
-            // Fall through to the client-backed item manager used elsewhere in KSP.
-        }
-
-        try
-        {
-            int id = Microbot.getRs2ItemManager().getItemId(candidate);
-            if (id > 0) return id;
-        }
-        catch (Throwable ignored)
-        {
-            // Return unresolved below.
-        }
-        return -1;
-    }
-'''
-          if old_resolve_page not in text:
-              raise SystemExit('BossGearService resolver anchor missing')
-          text = text.replace(old_resolve_page, new_resolve_page, 1)
-          service.write_text(text, encoding='utf-8')
-
-          plugin = Path('kspbossgear/KspBossGearPlugin.java')
-          ptext = plugin.read_text(encoding='utf-8')
-          if 'public static final String VERSION = "1.1.0";' not in ptext:
-              raise SystemExit('Boss Gear version anchor missing')
-          ptext = ptext.replace('public static final String VERSION = "1.1.0";',
-                                'public static final String VERSION = "1.1.1";', 1)
-          plugin.write_text(ptext, encoding='utf-8')
-          PY
+      - name: Apply resolver patch
+        run: python .github/scripts/fix_bossgear_resolver.py
       - name: Commit source fix
-        shell: bash
         run: |
           git config user.name "KSP Automation"
           git config user.email "ksp-automation@users.noreply.github.com"
           git add kspbossgear/BossGearService.java kspbossgear/KspBossGearPlugin.java
-          if git diff --cached --quiet; then
-            exit 0
-          fi
-          git commit -m "fix: resolve Wiki loadout item IDs reliably [bossgear-resolver-fixed]"
+          git commit -m "fix: resolve Wiki loadout item IDs reliably" || exit 0
           git push origin HEAD:fix/bossgear-phosani-parser
