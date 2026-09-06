@@ -37,6 +37,7 @@ final class BossGearService
 
     private volatile WikiGearPage page;
     private volatile String selectedMethod;
+    private volatile String selectedInventoryMethod;
     private volatile GearTier selectedTier = GearTier.MID;
     private volatile Selection selection = Selection.empty();
     private volatile boolean loading;
@@ -71,7 +72,10 @@ final class BossGearService
                     synchronized (this)
                     {
                         page = loaded;
-                        selectedMethod = loaded.getMethods().isEmpty() ? null : loaded.getMethods().get(0).getName();
+                        List<String> equipmentMethods = getMethodNames();
+                        selectedMethod = equipmentMethods.isEmpty() ? null : equipmentMethods.get(0);
+                        selectedInventoryMethod = null;
+                        ensureSelectedInventoryMethod();
                         rebuildSelection();
                         loading = false;
                         status = selection.getRows().isEmpty()
@@ -96,6 +100,14 @@ final class BossGearService
     synchronized void setSelectedMethod(String method)
     {
         selectedMethod = method;
+        ensureSelectedInventoryMethod();
+        rebuildSelection();
+    }
+
+    synchronized void setSelectedInventoryMethod(String method)
+    {
+        selectedInventoryMethod = method;
+        ensureSelectedInventoryMethod();
         rebuildSelection();
     }
 
@@ -114,6 +126,11 @@ final class BossGearService
     String getSelectedMethod()
     {
         return selectedMethod;
+    }
+
+    String getSelectedInventoryMethod()
+    {
+        return selectedInventoryMethod;
     }
 
     GearTier getSelectedTier()
@@ -140,9 +157,95 @@ final class BossGearService
     {
         WikiGearPage p = page;
         if (p == null) return Collections.emptyList();
-        List<String> result = new ArrayList<>();
-        for (WikiGearPage.GearMethod method : p.getMethods()) result.add(method.getName());
-        return result;
+
+        List<String> equipment = new ArrayList<>();
+        for (WikiGearPage.GearMethod method : p.getMethods())
+        {
+            if (hasEquipmentRows(method)) equipment.add(method.getName());
+        }
+        if (!equipment.isEmpty()) return equipment;
+
+        // Inventory-only pages (some raid/setup pages) still need a primary selector.
+        List<String> fallback = new ArrayList<>();
+        for (WikiGearPage.GearMethod method : p.getMethods()) fallback.add(method.getName());
+        return fallback;
+    }
+
+    List<String> getInventoryMethodNames()
+    {
+        WikiGearPage p = page;
+        if (p == null) return Collections.emptyList();
+
+        WikiGearPage.GearMethod primary = findMethodExact(p, selectedMethod);
+        if (primary == null || !hasEquipmentRows(primary)) return Collections.emptyList();
+
+        String primaryStyle = styleSignature(primary.getName());
+        List<String> specific = new ArrayList<>();
+        List<String> generic = new ArrayList<>();
+        for (WikiGearPage.GearMethod method : p.getMethods())
+        {
+            if (!isInventoryOnly(method)) continue;
+            String inventoryStyle = styleSignature(method.getName());
+            if (!inventoryStyle.isEmpty() && !inventoryStyle.equals(primaryStyle)) continue;
+            if (inventoryStyle.isEmpty()) generic.add(method.getName());
+            else specific.add(method.getName());
+        }
+        specific.addAll(generic);
+        return specific;
+    }
+
+    private void ensureSelectedInventoryMethod()
+    {
+        List<String> choices = getInventoryMethodNames();
+        if (choices.isEmpty())
+        {
+            selectedInventoryMethod = null;
+            return;
+        }
+        if (selectedInventoryMethod != null)
+        {
+            for (String choice : choices)
+                if (choice.equalsIgnoreCase(selectedInventoryMethod)) return;
+        }
+        selectedInventoryMethod = choices.get(0);
+    }
+
+    private static boolean hasEquipmentRows(WikiGearPage.GearMethod method)
+    {
+        if (method == null) return false;
+        for (WikiGearPage.GearRow row : method.getRows())
+            if (row.getSlot() != GearSlot.UNKNOWN) return true;
+        return false;
+    }
+
+    private static boolean isInventoryOnly(WikiGearPage.GearMethod method)
+    {
+        if (method == null || method.getRows().isEmpty()) return false;
+        for (WikiGearPage.GearRow row : method.getRows())
+            if (row.getSlot() != GearSlot.UNKNOWN) return false;
+        return true;
+    }
+
+    private static WikiGearPage.GearMethod findMethodExact(WikiGearPage p, String name)
+    {
+        if (p == null || name == null) return null;
+        for (WikiGearPage.GearMethod method : p.getMethods())
+            if (method.getName().equalsIgnoreCase(name)) return method;
+        return null;
+    }
+
+    private static String styleSignature(String name)
+    {
+        String lower = name == null ? "" : name.toLowerCase(Locale.ROOT);
+        if (lower.contains("tribrid")) return "melee+ranged+magic";
+
+        List<String> styles = new ArrayList<>();
+        if (lower.contains("melee")) styles.add("melee");
+        if (lower.contains("ranged") || lower.contains("range ") || lower.endsWith("range")) styles.add("ranged");
+        if (lower.contains("magic") || lower.contains("mage")) styles.add("magic");
+        if (!styles.isEmpty()) return String.join("+", styles);
+        if (lower.contains("hybrid")) return "hybrid";
+        return "";
     }
 
     HighlightKind classify(int itemId)
@@ -312,32 +415,44 @@ final class BossGearService
             return;
         }
 
-        WikiGearPage.GearMethod method = p.findMethod(selectedMethod);
+        WikiGearPage.GearMethod method = findMethodExact(p, selectedMethod);
         if (method == null)
         {
             selection = Selection.empty();
             return;
         }
         selectedMethod = method.getName();
+        ensureSelectedInventoryMethod();
+
+        List<WikiGearPage.GearMethod> activeMethods = new ArrayList<>();
+        activeMethods.add(method);
+        if (hasEquipmentRows(method) && selectedInventoryMethod != null)
+        {
+            WikiGearPage.GearMethod inventory = findMethodExact(p, selectedInventoryMethod);
+            if (inventory != null && isInventoryOnly(inventory)) activeMethods.add(inventory);
+        }
 
         List<ResolvedGearRow> rows = new ArrayList<>();
         Set<Integer> primary = new LinkedHashSet<>();
         Set<Integer> alternatives = new LinkedHashSet<>();
 
-        for (WikiGearPage.GearRow sourceRow : method.getRows())
+        for (WikiGearPage.GearMethod activeMethod : activeMethods)
         {
-            List<String> names = chooseTierColumn(sourceRow.getColumns(), selectedTier);
-            List<ItemRef> items = resolveCandidates(names);
-            if (items.isEmpty()) continue;
+            for (WikiGearPage.GearRow sourceRow : activeMethod.getRows())
+            {
+                List<String> names = chooseTierColumn(sourceRow.getColumns(), selectedTier);
+                List<ItemRef> items = resolveCandidates(names);
+                if (items.isEmpty()) continue;
 
-            ItemRef first = items.get(0);
-            List<ItemRef> alts = items.size() > 1
-                ? new ArrayList<>(items.subList(1, items.size()))
-                : Collections.emptyList();
-            ResolvedGearRow resolved = new ResolvedGearRow(sourceRow.getSlot(), first, alts);
-            rows.add(resolved);
-            primary.add(first.id);
-            for (ItemRef alt : alts) alternatives.add(alt.id);
+                ItemRef first = items.get(0);
+                List<ItemRef> alts = items.size() > 1
+                    ? new ArrayList<>(items.subList(1, items.size()))
+                    : Collections.emptyList();
+                ResolvedGearRow resolved = new ResolvedGearRow(sourceRow.getSlot(), first, alts);
+                rows.add(resolved);
+                primary.add(first.id);
+                for (ItemRef alt : alts) alternatives.add(alt.id);
+            }
         }
 
         alternatives.removeAll(primary);
