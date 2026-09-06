@@ -144,7 +144,7 @@ final class WikiGearService
         JsonObject root;
         try
         {
-            root = JsonParser.parseString(response.body()).getAsJsonObject();
+            root = new JsonParser().parse(response.body()).getAsJsonObject();
         }
         catch (RuntimeException ex)
         {
