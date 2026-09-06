@@ -1,0 +1,103 @@
+name: Apply Boss Gear visual loadout
+
+on:
+  push:
+    branches:
+      - feat/bossgear-visual-loadout
+    paths:
+      - .github/bossgear-visual-trigger.txt
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/bossgear-visual-loadout
+      - name: Wire visual equipment and inventory view
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          panel = Path('kspbossgear/KspBossGearPanel.java')
+          text = panel.read_text(encoding='utf-8')
+
+          if 'import net.runelite.client.game.ItemManager;' not in text:
+              text = text.replace(
+                  'import net.runelite.client.ui.ColorScheme;\n',
+                  'import net.runelite.client.game.ItemManager;\nimport net.runelite.client.ui.ColorScheme;\n',
+                  1)
+
+          field_anchor = '    private final BossGearService service;\n'
+          field_replacement = '    private final BossGearService service;\n    private final KspBossGearLoadoutView loadoutView;\n'
+          if field_anchor not in text:
+              raise SystemExit('panel service field anchor missing')
+          text = text.replace(field_anchor, field_replacement, 1)
+
+          ctor_anchor = '    KspBossGearPanel(BossGearService service)\n    {\n        super(false);\n        this.service = service;\n'
+          ctor_replacement = '    KspBossGearPanel(BossGearService service, ItemManager itemManager)\n    {\n        super(false);\n        this.service = service;\n        this.loadoutView = new KspBossGearLoadoutView(service, itemManager);\n'
+          if ctor_anchor not in text:
+              raise SystemExit('panel constructor anchor missing')
+          text = text.replace(ctor_anchor, ctor_replacement, 1)
+
+          old_view = '''        gearRows.setLayout(new BoxLayout(gearRows, BoxLayout.Y_AXIS));\n        gearRows.setOpaque(false);\n        gearRows.setAlignmentX(Component.LEFT_ALIGNMENT);\n        equipment.add(gearRows);\n'''
+          new_view = '''        loadoutView.setAlignmentX(Component.LEFT_ALIGNMENT);\n        equipment.add(loadoutView);\n'''
+          if old_view not in text:
+              raise SystemExit('panel gear rows view anchor missing')
+          text = text.replace(old_view, new_view, 1)
+
+          old_rebuild = '''    private void rebuildGearRows()\n    {\n        rowViews.clear();\n        gearRows.removeAll();\n\n        BossGearService.Selection selection = service.getSelection();\n        for (BossGearService.ResolvedGearRow row : selection.getRows())\n        {\n            RowView view = new RowView(row);\n            rowViews.add(view);\n            gearRows.add(view.panel);\n        }\n\n        if (rowViews.isEmpty())\n        {\n            JLabel empty = new JLabel("No gear/inventory items loaded.");\n            empty.setForeground(ColorScheme.LIGHT_GRAY_COLOR);\n            empty.setFont(FontManager.getRunescapeSmallFont());\n            gearRows.add(empty);\n        }\n\n        gearRows.revalidate();\n        gearRows.repaint();\n        refreshOwnership();\n    }\n'''
+          new_rebuild = '''    private void rebuildGearRows()\n    {\n        loadoutView.setSelection(service.getSelection());\n        refreshOwnership();\n    }\n'''
+          if old_rebuild not in text:
+              raise SystemExit('panel rebuild method anchor missing')
+          text = text.replace(old_rebuild, new_rebuild, 1)
+
+          old_refresh = '''    private void refreshOwnership()\n    {\n        int available = 0;\n        for (RowView view : rowViews)\n        {\n            BossGearService.OwnershipMatch match = service.ownership(view.row);\n            view.status.setText(shortOwnership(match));\n            view.status.setForeground(match.getOwnership().getColor());\n            view.status.setToolTipText(match.displayText() + (match.isPrimary() ? "" : " • compatible Wiki alternative"));\n            if (match.getOwnership() != BossGearService.Ownership.MISSING) available++;\n        }\n\n        int total = rowViews.size();\n        if (total == 0)\n        {\n            availabilityLabel.setText(service.getPage() == null ? "No boss loaded" : "No resolvable loadout items");\n        }\n        else\n        {\n            int missing = total - available;\n            availabilityLabel.setText("Available " + available + "/" + total + " • Missing " + missing);\n        }\n    }\n'''
+          new_refresh = '''    private void refreshOwnership()\n    {\n        BossGearService.Selection selection = service.getSelection();\n        int available = 0;\n        for (BossGearService.ResolvedGearRow row : selection.getRows())\n        {\n            BossGearService.OwnershipMatch match = service.ownership(row);\n            if (match.getOwnership() != BossGearService.Ownership.MISSING) available++;\n        }\n\n        int total = selection.getRows().size();\n        if (total == 0)\n        {\n            availabilityLabel.setText(service.getPage() == null ? "No boss loaded" : "No resolvable loadout items");\n        }\n        else\n        {\n            int missing = total - available;\n            availabilityLabel.setText("Available " + available + "/" + total + " • Missing " + missing);\n        }\n        loadoutView.refreshOwnership();\n    }\n'''
+          if old_refresh not in text:
+              raise SystemExit('panel ownership method anchor missing')
+          text = text.replace(old_refresh, new_refresh, 1)
+          panel.write_text(text, encoding='utf-8')
+
+          plugin = Path('kspbossgear/KspBossGearPlugin.java')
+          ptext = plugin.read_text(encoding='utf-8')
+          if 'import net.runelite.client.game.ItemManager;' not in ptext:
+              ptext = ptext.replace(
+                  'import net.runelite.client.config.ConfigManager;\n',
+                  'import net.runelite.client.config.ConfigManager;\nimport net.runelite.client.game.ItemManager;\n',
+                  1)
+          field = '    @Inject private ClientToolbar clientToolbar;\n'
+          if field not in ptext:
+              raise SystemExit('plugin toolbar field anchor missing')
+          ptext = ptext.replace(field, field + '    @Inject private ItemManager itemManager;\n', 1)
+          ctor = '            panel = new KspBossGearPanel(gearService);\n'
+          if ctor not in ptext:
+              raise SystemExit('plugin panel ctor anchor missing')
+          ptext = ptext.replace(ctor, '            panel = new KspBossGearPanel(gearService, itemManager);\n', 1)
+          old_version = 'public static final String VERSION = "1.1.3";'
+          if old_version not in ptext:
+              raise SystemExit('plugin version anchor missing')
+          ptext = ptext.replace(old_version, 'public static final String VERSION = "1.1.4";', 1)
+          plugin.write_text(ptext, encoding='utf-8')
+          PY
+      - name: Verify visual wiring
+        shell: bash
+        run: |
+          grep -q 'KspBossGearLoadoutView loadoutView' kspbossgear/KspBossGearPanel.java
+          grep -q 'new KspBossGearLoadoutView(service, itemManager)' kspbossgear/KspBossGearPanel.java
+          grep -q 'loadoutView.setSelection(service.getSelection())' kspbossgear/KspBossGearPanel.java
+          grep -q 'new KspBossGearPanel(gearService, itemManager)' kspbossgear/KspBossGearPlugin.java
+          grep -q 'VERSION = "1.1.4"' kspbossgear/KspBossGearPlugin.java
+      - name: Commit source wiring
+        shell: bash
+        run: |
+          git config user.name "KSP Automation"
+          git config user.email "ksp-automation@users.noreply.github.com"
+          git add kspbossgear/KspBossGearPanel.java kspbossgear/KspBossGearPlugin.java
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m "feat: show Boss Gear setups as equipment and inventory grids"
+          git push origin HEAD:feat/bossgear-visual-loadout
