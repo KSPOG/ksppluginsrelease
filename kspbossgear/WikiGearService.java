@@ -55,22 +55,26 @@ final class WikiGearService
 
     /** Search suggestions. Arbitrary typed Wiki boss/raid names still work. */
     static final List<String> KNOWN_BOSSES = Collections.unmodifiableList(Arrays.asList(
-        "Abyssal Sire", "Alchemical Hydra", "Amoxliatl", "Araxxor", "Artio", "Barrows",
-        "Bryophyta", "Callisto", "Calvar'ion", "Cerberus", "Chaos Elemental", "Chaos Fanatic",
-        "Chambers of Xeric", "Chambers of Xeric (Challenge Mode)", "Commander Zilyana",
-        "Corporeal Beast", "Crazy Archaeologist", "Crystalline Hunllef", "Corrupted Hunllef",
-        "Dagannoth Kings", "Deranged Archaeologist", "Doom of Mokhaiotl", "Duke Sucellus",
+        "Abyssal Sire", "Akkha", "Alchemical Hydra", "Amoxliatl", "Araxxor", "Artio", "Ba-Ba",
+        "Barrows", "Branda the Fire Queen", "Brutus (Demonic)", "Bryophyta", "Callisto", "Calvar'ion",
+        "Cerberus", "Chaos Elemental", "Chaos Fanatic", "Chambers of Xeric",
+        "Chambers of Xeric (Challenge Mode)", "Commander Zilyana", "Corporeal Beast",
+        "Crazy Archaeologist", "Crystalline Hunllef", "Corrupted Hunllef", "Dagannoth Kings",
+        "Dagannoth Prime", "Dagannoth Rex", "Dagannoth Supreme", "Dawn", "Deranged Archaeologist",
+        "Doom of Mokhaiotl", "Duke Sucellus", "Dusk", "Eldric the Ice King", "Elidinis' Warden",
         "Fight Caves", "Fortis Colosseum", "General Graardor", "Gemstone Crab", "Giant Mole",
-        "Grotesque Guardians", "Hespori", "Inferno", "Kalphite Queen", "King Black Dragon",
-        "Kraken", "Kree'arra", "K'ril Tsutsaroth", "Maggot King", "Mad Angel", "Moons of Peril",
-        "Nex", "Obor", "Phantom Muspah", "Phosani's Nightmare", "Royal Titans", "Sarachnis",
-        "Scorpia", "Scurrius", "Shellbane gryphon", "Skotizo", "Sol Heredit", "The Gauntlet",
-        "The Corrupted Gauntlet", "The Hueycoatl", "The Leviathan", "The Mimic", "The Nightmare",
-        "The Whisperer", "Theatre of Blood", "Theatre of Blood (Entry Mode)",
-        "Theatre of Blood (Hard Mode)", "Thermonuclear smoke devil", "Tombs of Amascut",
-        "Tombs of Amascut (Entry Mode)", "Tombs of Amascut (Normal Mode)",
-        "Tombs of Amascut (Expert Mode)", "TzKal-Zuk", "TzTok-Jad", "Vardorvis", "Venenatis",
-        "Vet'ion", "Vorkath", "Yama", "Zalcano", "Zulrah"
+        "Great Olm", "Grotesque Guardians", "Hespori", "Inferno", "Kalphite Queen", "Kephri",
+        "King Black Dragon", "Kraken", "Kree'arra", "K'ril Tsutsaroth", "Maggot King", "Mad Angel",
+        "Moons of Peril", "Muttadile", "Nex", "Nylocas Vasilias", "Obor", "Pestilent Bloat",
+        "Phantom Muspah", "Phosani's Nightmare", "Revenant maledictus", "Royal Titans", "Sarachnis",
+        "Scorpia", "Scurrius", "Shellbane gryphon", "Skotizo", "Sol Heredit", "Sotetseg", "Spindel",
+        "Tekton", "Tempoross", "The Corrupted Gauntlet", "The Gauntlet", "The Hueycoatl",
+        "The Leviathan", "The Maiden of Sugadinti", "The Mimic", "The Nightmare", "The Whisperer",
+        "Theatre of Blood", "Theatre of Blood (Entry Mode)", "Theatre of Blood (Hard Mode)",
+        "Thermonuclear smoke devil", "Tombs of Amascut", "Tombs of Amascut (Entry Mode)",
+        "Tombs of Amascut (Normal Mode)", "Tombs of Amascut (Expert Mode)", "Tumeken's Warden",
+        "TzKal-Zuk", "TzTok-Jad", "Vanguard", "Vardorvis", "Vasa Nistirio", "Venenatis", "Verzik Vitur",
+        "Vespula", "Vet'ion", "Vorkath", "Wintertodt", "Xarpus", "Yama", "Zalcano", "Zebak", "Zulrah"
     ));
 
     private final HttpClient httpClient;
@@ -191,6 +195,9 @@ final class WikiGearService
         for (WikiGearPage.GearMethod method : parseInventoryTables(html)) addUnique(result, signatures, method);
         for (WikiGearPage.GearMethod method : parseInventorySections(html)) addUnique(result, signatures, method);
 
+        WikiGearPage.GearMethod supplyNotes = parseSupplyRecommendations(html);
+        if (supplyNotes != null) addUnique(result, signatures, supplyNotes);
+
         // Some bosses (for example simple/F2P bosses) publish recommendations in prose
         // rather than the standard recommended-equipment template.
         if (equipment.isEmpty())
@@ -302,6 +309,29 @@ final class WikiGearService
             methods.add(itemsAsMethod("Inventory • " + cleanMethodName(block.name), items));
         }
         return methods;
+    }
+
+    /** Captures Wiki inventory advice embedded in prose/notes when no setup matrix is used. */
+    private static WikiGearPage.GearMethod parseSupplyRecommendations(String html)
+    {
+        Set<String> items = new LinkedHashSet<>();
+        Pattern blocks = Pattern.compile("(?is)<(?:p|li)\\b[^>]*>(.*?)</(?:p|li)>");
+        Matcher matcher = blocks.matcher(html);
+        while (matcher.find())
+        {
+            String blockHtml = matcher.group(1);
+            String text = visibleText(blockHtml).toLowerCase(Locale.ROOT);
+            if (!containsAny(text,
+                "inventory", "supplies", "should bring", "bring ", "bring in", "pre-pot", "prepot",
+                "rune pouch", "food", "potion", "potions", "ammo", "ammunition", "runes"))
+            {
+                continue;
+            }
+            items.addAll(extractLinkTitles(blockHtml));
+        }
+        return items.size() < 2
+            ? null
+            : itemsAsMethod("Inventory • Wiki recommendations", new ArrayList<>(items));
     }
 
     /** Last-resort extractor for prose-based recommendation pages. */
