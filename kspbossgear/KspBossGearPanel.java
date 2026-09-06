@@ -28,6 +28,7 @@ import javax.swing.Timer;
 import javax.swing.border.EmptyBorder;
 import javax.swing.event.DocumentEvent;
 import javax.swing.event.DocumentListener;
+import net.runelite.client.game.ItemManager;
 import net.runelite.client.ui.ColorScheme;
 import net.runelite.client.ui.FontManager;
 import net.runelite.client.ui.PluginPanel;
@@ -39,6 +40,7 @@ public final class KspBossGearPanel extends PluginPanel
     private static final Color ACCENT = new Color(80, 220, 120);
 
     private final BossGearService service;
+    private final KspBossGearLoadoutView loadoutView;
     private final JTextField bossSearch = new JTextField();
     private final JButton loadButton = new JButton("Load Wiki");
     private final JButton refreshButton = new JButton("Refresh");
@@ -56,10 +58,11 @@ public final class KspBossGearPanel extends PluginPanel
 
     private boolean updatingControls;
 
-    KspBossGearPanel(BossGearService service)
+    KspBossGearPanel(BossGearService service, ItemManager itemManager)
     {
         super(false);
         this.service = service;
+        this.loadoutView = new KspBossGearLoadoutView(service, itemManager);
 
         setLayout(new BorderLayout());
         setBackground(ColorScheme.DARK_GRAY_COLOR);
@@ -129,10 +132,8 @@ public final class KspBossGearPanel extends PluginPanel
         equipment.add(availabilityLabel);
         equipment.add(Box.createVerticalStrut(2));
 
-        gearRows.setLayout(new BoxLayout(gearRows, BoxLayout.Y_AXIS));
-        gearRows.setOpaque(false);
-        gearRows.setAlignmentX(Component.LEFT_ALIGNMENT);
-        equipment.add(gearRows);
+        loadoutView.setAlignmentX(Component.LEFT_ALIGNMENT);
+        equipment.add(loadoutView);
         content.add(equipment);
         content.add(Box.createVerticalStrut(4));
 
@@ -251,27 +252,7 @@ public final class KspBossGearPanel extends PluginPanel
 
     private void rebuildGearRows()
     {
-        rowViews.clear();
-        gearRows.removeAll();
-
-        BossGearService.Selection selection = service.getSelection();
-        for (BossGearService.ResolvedGearRow row : selection.getRows())
-        {
-            RowView view = new RowView(row);
-            rowViews.add(view);
-            gearRows.add(view.panel);
-        }
-
-        if (rowViews.isEmpty())
-        {
-            JLabel empty = new JLabel("No gear/inventory items loaded.");
-            empty.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
-            empty.setFont(FontManager.getRunescapeSmallFont());
-            gearRows.add(empty);
-        }
-
-        gearRows.revalidate();
-        gearRows.repaint();
+        loadoutView.setSelection(service.getSelection());
         refreshOwnership();
     }
 
@@ -301,17 +282,15 @@ public final class KspBossGearPanel extends PluginPanel
 
     private void refreshOwnership()
     {
+        BossGearService.Selection selection = service.getSelection();
         int available = 0;
-        for (RowView view : rowViews)
+        for (BossGearService.ResolvedGearRow row : selection.getRows())
         {
-            BossGearService.OwnershipMatch match = service.ownership(view.row);
-            view.status.setText(shortOwnership(match));
-            view.status.setForeground(match.getOwnership().getColor());
-            view.status.setToolTipText(match.displayText() + (match.isPrimary() ? "" : " • compatible Wiki alternative"));
+            BossGearService.OwnershipMatch match = service.ownership(row);
             if (match.getOwnership() != BossGearService.Ownership.MISSING) available++;
         }
 
-        int total = rowViews.size();
+        int total = selection.getRows().size();
         if (total == 0)
         {
             availabilityLabel.setText(service.getPage() == null ? "No boss loaded" : "No resolvable loadout items");
@@ -321,6 +300,7 @@ public final class KspBossGearPanel extends PluginPanel
             int missing = total - available;
             availabilityLabel.setText("Available " + available + "/" + total + " • Missing " + missing);
         }
+        loadoutView.refreshOwnership();
     }
 
     private void updateSuggestions()
