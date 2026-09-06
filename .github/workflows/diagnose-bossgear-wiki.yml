@@ -14,43 +14,55 @@ jobs:
         shell: bash
         run: |
           python - <<'PY'
-          import json, re, urllib.parse, urllib.request
+          import html as htmlmod, json, re, urllib.parse, urllib.request
           page = "Phosani's Nightmare/Strategies"
           q = urllib.parse.urlencode({"action":"parse","format":"json","formatversion":"2","redirects":"1","prop":"text","page":page})
           req = urllib.request.Request("https://oldschool.runescape.wiki/api.php?" + q, headers={"User-Agent":"KSP-Boss-Gear-Diagnostic/1.0"})
           with urllib.request.urlopen(req, timeout=20) as r:
               data = json.load(r)
           html = data["parse"]["text"]
+          table_pat = re.compile(r"(?is)<table\b[^>]*>.*?</table>")
+          row_pat = re.compile(r"(?is)<tr\b[^>]*>(.*?)</tr>")
+          cell_pat = re.compile(r"(?is)<(td|th)\b[^>]*>(.*?)</\1>")
+          link_pat = re.compile(r'''(?is)<a\b[^>]*?title\s*=\s*(["'])(.*?)\1[^>]*>''')
+          tag_pat = re.compile(r"(?is)<[^>]+>")
+          space_pat = re.compile(r"\s+")
+          def text(x):
+              x=re.sub(r"(?is)<br\s*/?>"," ",x)
+              x=re.sub(r"(?is)</(?:p|div|h[1-6]|li|tr|td|th)>"," ",x)
+              return space_pat.sub(" ", htmlmod.unescape(tag_pat.sub(" ",x))).strip()
+          def titles(x):
+              return list(dict.fromkeys(htmlmod.unescape(m.group(2)).strip() for m in link_pat.finditer(x)))
           print("TITLE", data["parse"].get("title"))
           print("HTML_LEN", len(html))
-          print("TABLES", len(re.findall(r"(?is)<table\\b", html)))
-          print("TRS", len(re.findall(r"(?is)<tr\\b", html)))
-          print("TDS", len(re.findall(r"(?is)<td\\b", html)), "THS", len(re.findall(r"(?is)<th\\b", html)))
-          print("TITLE_ATTRS", len(re.findall(r"(?is)<a\\b[^>]*?title\\s*=", html)))
-          print("HREFS", len(re.findall(r"(?is)<a\\b[^>]*?href\\s*=", html)))
-          needle = "Recommended equipment for Melee"
-          i = html.lower().find(needle.lower())
-          print("MELEE_INDEX", i)
-          if i >= 0:
-              print("MELEE_CONTEXT_START")
-              print(html[max(0,i-1500):i+7000])
-              print("MELEE_CONTEXT_END")
-          table_pat = re.compile(r"(?is)<table\\b[^>]*>.*?</table>")
-          row_pat = re.compile(r"(?is)<tr\\b[^>]*>(.*?)</tr>")
-          cell_pat = re.compile(r"(?is)<(td|th)\\b[^>]*>(.*?)</\\1>")
-          link_pat = re.compile(r'''(?is)<a\\b[^>]*?title\\s*=\\s*(["'])(.*?)\\1[^>]*>''')
-          matched = 0
+          print("TABLES", len(table_pat.findall(html)))
+          print("TRS", len(re.findall(r"(?is)<tr\b", html)))
+          print("TDS", len(re.findall(r"(?is)<td\b", html)), "THS", len(re.findall(r"(?is)<th\b", html)))
+          print("TITLE_ATTRS", len(re.findall(r"(?is)<a\b[^>]*?title\s*=", html)))
+          print("HREFS", len(re.findall(r"(?is)<a\b[^>]*?href\s*=", html)))
+          candidate=0
           for n,m in enumerate(table_pat.finditer(html),1):
               t=m.group(0)
-              text=re.sub(r"(?is)<[^>]+>"," ",t)
-              text=re.sub(r"\\s+"," ",text)
-              if "most effective" in text.lower() or "recommended equipment" in text.lower():
-                  print("CANDIDATE_TABLE", n, "LEN", len(t), "ROWS", len(row_pat.findall(t)), "LINK_TITLES", len(link_pat.findall(t)))
-                  for ri,rm in enumerate(row_pat.finditer(t)):
-                      cells=[cm.group(2) for cm in cell_pat.finditer(rm.group(1))]
-                      if cells:
-                          print(" ROW",ri,"CELLS",len(cells),"LINKS_PER_CELL",[len(link_pat.findall(c)) for c in cells])
-                          if ri>3: break
-                  matched += 1
-          print("CANDIDATE_TABLES", matched)
+              tt=text(t).lower()
+              start=max(0,m.start()-2200)
+              context=text(html[start:m.start()]).lower()
+              recommended_at=context.rfind("recommended equipment for")
+              near=recommended_at >= 0 and len(context)-recommended_at <= 700
+              slot=("equipment-slot" in t.lower()) or ("slot" in tt and "item" in tt)
+              if not near and not slot:
+                  continue
+              rows=[]
+              for rm in row_pat.finditer(t):
+                  cells=[cm.group(2) for cm in cell_pat.finditer(rm.group(1))]
+                  if len(cells)<2: continue
+                  first=text(cells[0]).lower(); rowtext=text(rm.group(1)).lower()
+                  if first=="slot" or first=="equipment slot" or ("slot" in first and "most effective" in rowtext):
+                      continue
+                  cols=[titles(c) for c in cells[1:]]
+                  if any(cols): rows.append((text(cells[0]),cols))
+              if rows:
+                  candidate+=1
+                  print("CANDIDATE",n,"near",near,"slot",slot,"CAPTION",re.findall(r"(?is)<caption\b[^>]*>(.*?)</caption>",t)[:1])
+                  print(" ROWS",len(rows),"FIRST",rows[0][0],rows[0][1][:2])
+          print("PARSED_EQUIPMENT_TABLES", candidate)
           PY
