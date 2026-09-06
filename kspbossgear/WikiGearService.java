@@ -195,15 +195,16 @@ final class WikiGearService
         for (WikiGearPage.GearMethod method : parseInventoryTables(html)) addUnique(result, signatures, method);
         for (WikiGearPage.GearMethod method : parseInventorySections(html)) addUnique(result, signatures, method);
 
-        WikiGearPage.GearMethod supplyNotes = parseSupplyRecommendations(html);
-        if (supplyNotes != null) addUnique(result, signatures, supplyNotes);
+        for (WikiGearPage.GearMethod method : parseSupplyRecommendations(html))
+            addUnique(result, signatures, method);
 
         // Some bosses (for example simple/F2P bosses) publish recommendations in prose
-        // rather than the standard recommended-equipment template.
+        // rather than the standard recommended-equipment template. Preserve explicit
+        // Wiki combat-style separation here as well instead of collapsing all styles.
         if (equipment.isEmpty())
         {
-            WikiGearPage.GearMethod prose = parseProseRecommendations(html);
-            if (prose != null) addUnique(result, signatures, prose);
+            for (WikiGearPage.GearMethod method : parseProseRecommendations(html))
+                addUnique(result, signatures, method);
         }
 
         return result;
@@ -247,6 +248,7 @@ final class WikiGearService
                     methodName = sequence == 1 ? "Equipment" : "Equipment " + sequence;
             }
 
+            methodName = applyExplicitStyleContext(html, tables.start(), methodName, false);
             methods.add(new WikiGearPage.GearMethod(cleanMethodName(methodName), rows));
             sequence++;
         }
@@ -277,6 +279,7 @@ final class WikiGearService
             if (looksLikeRecommendedEquipmentTable(tableHtml) && !nearExampleSetup) continue;
 
             String baseName = nearExampleSetup ? "Example setup" : (!caption.isEmpty() ? caption : heading);
+            baseName = applyExplicitStyleContext(html, tables.start(), baseName, true);
             methods.addAll(parseSetupMatrix(tableHtml, baseName));
         }
         return methods;
@@ -306,15 +309,16 @@ final class WikiGearService
             List<String> items = extractLinkTitles(sectionHtml);
             if (items.size() < 2) continue;
 
-            methods.add(itemsAsMethod("Inventory • " + cleanMethodName(block.name), items));
+            String sectionName = applyExplicitStyleContext(html, block.start, block.name, true);
+            methods.add(itemsAsMethod("Inventory • " + cleanMethodName(sectionName), items));
         }
         return methods;
     }
 
     /** Captures Wiki inventory advice embedded in prose/notes when no setup matrix is used. */
-    private static WikiGearPage.GearMethod parseSupplyRecommendations(String html)
+    private static List<WikiGearPage.GearMethod> parseSupplyRecommendations(String html)
     {
-        Set<String> items = new LinkedHashSet<>();
+        Map<String, Set<String>> grouped = new LinkedHashMap<>();
         Pattern blocks = Pattern.compile("(?is)<(?:p|li)\\b[^>]*>(.*?)</(?:p|li)>");
         Matcher matcher = blocks.matcher(html);
         while (matcher.find())
@@ -327,17 +331,32 @@ final class WikiGearService
             {
                 continue;
             }
-            items.addAll(extractLinkTitles(blockHtml));
+
+            List<String> linked = extractLinkTitles(blockHtml);
+            if (linked.isEmpty()) continue;
+
+            // Only use explicit Wiki heading hierarchy for style classification. Do not infer
+            // style from item names such as "Magic shortbow" or from item stats.
+            String style = headingCombatStyleContext(html, matcher.start());
+            grouped.computeIfAbsent(style, key -> new LinkedHashSet<>()).addAll(linked);
         }
-        return items.size() < 2
-            ? null
-            : itemsAsMethod("Inventory • Wiki recommendations", new ArrayList<>(items));
+
+        List<WikiGearPage.GearMethod> methods = new ArrayList<>();
+        for (Map.Entry<String, Set<String>> entry : grouped.entrySet())
+        {
+            if (entry.getValue().size() < 2) continue;
+            String name = entry.getKey().isEmpty()
+                ? "Inventory • Wiki recommendations"
+                : "Inventory • " + entry.getKey() + " • Wiki recommendations";
+            methods.add(itemsAsMethod(name, new ArrayList<>(entry.getValue())));
+        }
+        return methods;
     }
 
     /** Last-resort extractor for prose-based recommendation pages. */
-    private static WikiGearPage.GearMethod parseProseRecommendations(String html)
+    private static List<WikiGearPage.GearMethod> parseProseRecommendations(String html)
     {
-        Set<String> items = new LinkedHashSet<>();
+        Map<String, Set<String>> grouped = new LinkedHashMap<>();
         Matcher paragraphs = PARAGRAPH.matcher(html);
         while (paragraphs.find())
         {
@@ -349,10 +368,23 @@ final class WikiGearService
             {
                 continue;
             }
-            items.addAll(extractLinkTitles(paragraphHtml));
+
+            List<String> linked = extractLinkTitles(paragraphHtml);
+            if (linked.isEmpty()) continue;
+            String style = headingCombatStyleContext(html, paragraphs.start());
+            grouped.computeIfAbsent(style, key -> new LinkedHashSet<>()).addAll(linked);
         }
 
-        return items.isEmpty() ? null : itemsAsMethod("Wiki recommendations", new ArrayList<>(items));
+        List<WikiGearPage.GearMethod> methods = new ArrayList<>();
+        for (Map.Entry<String, Set<String>> entry : grouped.entrySet())
+        {
+            if (entry.getValue().isEmpty()) continue;
+            String name = entry.getKey().isEmpty()
+                ? "Wiki recommendations"
+                : entry.getKey() + " • Wiki recommendations";
+            methods.add(itemsAsMethod(name, new ArrayList<>(entry.getValue())));
+        }
+        return methods;
     }
 
     private static List<WikiGearPage.GearMethod> parseSetupMatrix(String tableHtml, String baseName)
@@ -499,6 +531,91 @@ final class WikiGearService
         if (stop > 0) method = method.substring(0, stop).trim();
         if (method.length() > 70) method = method.substring(0, 70).trim();
         return method.isEmpty() ? "Recommended" : method;
+    }
+
+    /**
+     * Applies a combat style only when the Wiki explicitly supplies one in the method
+     * label or its heading hierarchy. Generic/hybrid raid loadouts remain combined.
+     */
+    private static String applyExplicitStyleContext(String html, int before, String baseName, boolean keepBaseName)
+    {
+        String cleaned = cleanMethodName(baseName);
+        String ownStyle = explicitCombatStyle(cleaned);
+        if (!ownStyle.isEmpty()) return cleaned;
+
+        String parentStyle = headingCombatStyleContext(html, before);
+        if (parentStyle.isEmpty()) return cleaned;
+
+        if (!keepBaseName || isGenericSetupLabel(cleaned)) return parentStyle;
+        return parentStyle + " • " + cleaned;
+    }
+
+    /** Returns the deepest active heading that explicitly names a combat style. */
+    private static String headingCombatStyleContext(String html, int before)
+    {
+        String[] stack = new String[7];
+        Matcher matcher = HEADING.matcher(html);
+        while (matcher.find())
+        {
+            if (matcher.start() >= before) break;
+            int level;
+            try
+            {
+                level = Integer.parseInt(matcher.group(1));
+            }
+            catch (RuntimeException ex)
+            {
+                continue;
+            }
+            if (level < 1 || level > 6) continue;
+            for (int i = level; i <= 6; i++) stack[i] = null;
+            stack[level] = visibleText(matcher.group(2));
+        }
+
+        for (int level = 6; level >= 1; level--)
+        {
+            String style = explicitCombatStyle(stack[level]);
+            if (!style.isEmpty()) return style;
+        }
+        return "";
+    }
+
+    /**
+     * Detects only explicit style words. Multiple styles stay combined because the Wiki
+     * explicitly described the setup that way. No item-content inference is performed.
+     */
+    private static String explicitCombatStyle(String value)
+    {
+        if (value == null || value.trim().isEmpty()) return "";
+        String lower = value.toLowerCase(Locale.ROOT);
+
+        if (containsWord(lower, "tribrid") || containsWord(lower, "tri-brid")) return "Tribrid";
+        if (containsWord(lower, "hybrid")) return "Hybrid";
+
+        List<String> styles = new ArrayList<>();
+        if (containsWord(lower, "melee")) styles.add("Melee");
+        if (containsWord(lower, "ranged") || containsWord(lower, "range") || containsWord(lower, "ranging"))
+            styles.add("Ranged");
+        if (containsWord(lower, "magic") || containsWord(lower, "mage") || containsWord(lower, "maging"))
+            styles.add("Magic");
+
+        return styles.isEmpty() ? "" : String.join(" + ", styles);
+    }
+
+    private static boolean containsWord(String text, String word)
+    {
+        return Pattern.compile("(?i)(?:^|[^a-z0-9])" + Pattern.quote(word) + "(?:$|[^a-z0-9])")
+            .matcher(text == null ? "" : text).find();
+    }
+
+    private static boolean isGenericSetupLabel(String value)
+    {
+        if (value == null) return true;
+        String lower = value.trim().toLowerCase(Locale.ROOT);
+        return lower.isEmpty() || lower.equals("recommended") || lower.equals("equipment")
+            || lower.equals("inventory") || lower.equals("inventories") || lower.equals("supplies")
+            || lower.equals("loadout") || lower.equals("setup") || lower.equals("set-up")
+            || lower.equals("example setup") || lower.equals("example setups");
     }
 
     private static String nearestHeading(String html, int before)
