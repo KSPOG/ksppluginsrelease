@@ -1,0 +1,90 @@
+name: Apply Boss Gear combat style separation
+
+on:
+  push:
+    branches:
+      - fix/bossgear-style-separation
+    paths:
+      - .github/bossgear-style-separation-trigger.txt
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/bossgear-style-separation
+      - name: Patch Boss Gear combat style grouping
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('kspbossgear/WikiGearService.java')
+          text = path.read_text(encoding='utf-8')
+
+          old_all = '''        WikiGearPage.GearMethod supplyNotes = parseSupplyRecommendations(html);\n        if (supplyNotes != null) addUnique(result, signatures, supplyNotes);\n\n        // Some bosses (for example simple/F2P bosses) publish recommendations in prose\n        // rather than the standard recommended-equipment template.\n        if (equipment.isEmpty())\n        {\n            WikiGearPage.GearMethod prose = parseProseRecommendations(html);\n            if (prose != null) addUnique(result, signatures, prose);\n        }\n'''
+          new_all = '''        for (WikiGearPage.GearMethod method : parseSupplyRecommendations(html))\n            addUnique(result, signatures, method);\n\n        // Some bosses (for example simple/F2P bosses) publish recommendations in prose\n        // rather than the standard recommended-equipment template. Preserve explicit\n        // Wiki combat-style separation here as well instead of collapsing all styles.\n        if (equipment.isEmpty())\n        {\n            for (WikiGearPage.GearMethod method : parseProseRecommendations(html))\n                addUnique(result, signatures, method);\n        }\n'''
+          if old_all not in text:
+              raise SystemExit('parseAllLoadouts anchor missing')
+          text = text.replace(old_all, new_all, 1)
+
+          old_equipment_name = '''            methods.add(new WikiGearPage.GearMethod(cleanMethodName(methodName), rows));\n            sequence++;\n'''
+          new_equipment_name = '''            methodName = applyExplicitStyleContext(html, tables.start(), methodName, false);\n            methods.add(new WikiGearPage.GearMethod(cleanMethodName(methodName), rows));\n            sequence++;\n'''
+          if old_equipment_name not in text:
+              raise SystemExit('equipment method-name anchor missing')
+          text = text.replace(old_equipment_name, new_equipment_name, 1)
+
+          old_inventory_table = '''            String baseName = nearExampleSetup ? "Example setup" : (!caption.isEmpty() ? caption : heading);\n            methods.addAll(parseSetupMatrix(tableHtml, baseName));\n'''
+          new_inventory_table = '''            String baseName = nearExampleSetup ? "Example setup" : (!caption.isEmpty() ? caption : heading);\n            baseName = applyExplicitStyleContext(html, tables.start(), baseName, true);\n            methods.addAll(parseSetupMatrix(tableHtml, baseName));\n'''
+          if old_inventory_table not in text:
+              raise SystemExit('inventory table anchor missing')
+          text = text.replace(old_inventory_table, new_inventory_table, 1)
+
+          old_inventory_section = '''            methods.add(itemsAsMethod("Inventory • " + cleanMethodName(block.name), items));\n'''
+          new_inventory_section = '''            String sectionName = applyExplicitStyleContext(html, block.start, block.name, true);\n            methods.add(itemsAsMethod("Inventory • " + cleanMethodName(sectionName), items));\n'''
+          if old_inventory_section not in text:
+              raise SystemExit('inventory section anchor missing')
+          text = text.replace(old_inventory_section, new_inventory_section, 1)
+
+          start = text.index('    /** Captures Wiki inventory advice embedded in prose/notes when no setup matrix is used. */')
+          end = text.index('    private static List<WikiGearPage.GearMethod> parseSetupMatrix', start)
+          if start < 0 or end < 0:
+              raise SystemExit('supply/prose block anchors missing')
+
+          replacement = '''    /** Captures Wiki inventory advice embedded in prose/notes when no setup matrix is used. */\n    private static List<WikiGearPage.GearMethod> parseSupplyRecommendations(String html)\n    {\n        Map<String, Set<String>> grouped = new LinkedHashMap<>();\n        Pattern blocks = Pattern.compile("(?is)<(?:p|li)\\\\b[^>]*>(.*?)</(?:p|li)>");\n        Matcher matcher = blocks.matcher(html);\n        while (matcher.find())\n        {\n            String blockHtml = matcher.group(1);\n            String text = visibleText(blockHtml).toLowerCase(Locale.ROOT);\n            if (!containsAny(text,\n                "inventory", "supplies", "should bring", "bring ", "bring in", "pre-pot", "prepot",\n                "rune pouch", "food", "potion", "potions", "ammo", "ammunition", "runes"))\n            {\n                continue;\n            }\n\n            List<String> linked = extractLinkTitles(blockHtml);\n            if (linked.isEmpty()) continue;\n\n            // Only use explicit Wiki heading hierarchy for style classification. Do not infer\n            // style from item names such as "Magic shortbow" or from item stats.\n            String style = headingCombatStyleContext(html, matcher.start());\n            grouped.computeIfAbsent(style, key -> new LinkedHashSet<>()).addAll(linked);\n        }\n\n        List<WikiGearPage.GearMethod> methods = new ArrayList<>();\n        for (Map.Entry<String, Set<String>> entry : grouped.entrySet())\n        {\n            if (entry.getValue().size() < 2) continue;\n            String name = entry.getKey().isEmpty()\n                ? "Inventory • Wiki recommendations"\n                : "Inventory • " + entry.getKey() + " • Wiki recommendations";\n            methods.add(itemsAsMethod(name, new ArrayList<>(entry.getValue())));\n        }\n        return methods;\n    }\n\n    /** Last-resort extractor for prose-based recommendation pages. */\n    private static List<WikiGearPage.GearMethod> parseProseRecommendations(String html)\n    {\n        Map<String, Set<String>> grouped = new LinkedHashMap<>();\n        Matcher paragraphs = PARAGRAPH.matcher(html);\n        while (paragraphs.find())\n        {\n            String paragraphHtml = paragraphs.group(1);\n            String text = visibleText(paragraphHtml).toLowerCase(Locale.ROOT);\n            if (!containsAny(text,\n                "recommended", "ideal setup", "ideal equipment", "best-in-slot", "best in slot",\n                "should bring", "should have", "is recommended", "are recommended"))\n            {\n                continue;\n            }\n\n            List<String> linked = extractLinkTitles(paragraphHtml);\n            if (linked.isEmpty()) continue;\n            String style = headingCombatStyleContext(html, paragraphs.start());\n            grouped.computeIfAbsent(style, key -> new LinkedHashSet<>()).addAll(linked);\n        }\n\n        List<WikiGearPage.GearMethod> methods = new ArrayList<>();\n        for (Map.Entry<String, Set<String>> entry : grouped.entrySet())\n        {\n            if (entry.getValue().isEmpty()) continue;\n            String name = entry.getKey().isEmpty()\n                ? "Wiki recommendations"\n                : entry.getKey() + " • Wiki recommendations";\n            methods.add(itemsAsMethod(name, new ArrayList<>(entry.getValue())));\n        }\n        return methods;\n    }\n\n'''
+          text = text[:start] + replacement + text[end:]
+
+          helper_anchor = '''    private static String nearestHeading(String html, int before)\n    {\n'''
+          helper = '''    /**\n     * Applies a combat style only when the Wiki explicitly supplies one in the method\n     * label or its heading hierarchy. Generic/hybrid raid loadouts remain combined.\n     */\n    private static String applyExplicitStyleContext(String html, int before, String baseName, boolean keepBaseName)\n    {\n        String cleaned = cleanMethodName(baseName);\n        String ownStyle = explicitCombatStyle(cleaned);\n        if (!ownStyle.isEmpty()) return cleaned;\n\n        String parentStyle = headingCombatStyleContext(html, before);\n        if (parentStyle.isEmpty()) return cleaned;\n\n        if (!keepBaseName || isGenericSetupLabel(cleaned)) return parentStyle;\n        return parentStyle + " • " + cleaned;\n    }\n\n    /** Returns the deepest active heading that explicitly names a combat style. */\n    private static String headingCombatStyleContext(String html, int before)\n    {\n        String[] stack = new String[7];\n        Matcher matcher = HEADING.matcher(html);\n        while (matcher.find())\n        {\n            if (matcher.start() >= before) break;\n            int level;\n            try\n            {\n                level = Integer.parseInt(matcher.group(1));\n            }\n            catch (RuntimeException ex)\n            {\n                continue;\n            }\n            if (level < 1 || level > 6) continue;\n            for (int i = level; i <= 6; i++) stack[i] = null;\n            stack[level] = visibleText(matcher.group(2));\n        }\n\n        for (int level = 6; level >= 1; level--)\n        {\n            String style = explicitCombatStyle(stack[level]);\n            if (!style.isEmpty()) return style;\n        }\n        return "";\n    }\n\n    /**\n     * Detects only explicit style words. Multiple styles stay combined because the Wiki\n     * explicitly described the setup that way. No item-content inference is performed.\n     */\n    private static String explicitCombatStyle(String value)\n    {\n        if (value == null || value.trim().isEmpty()) return "";\n        String lower = value.toLowerCase(Locale.ROOT);\n\n        if (containsWord(lower, "tribrid") || containsWord(lower, "tri-brid")) return "Tribrid";\n        if (containsWord(lower, "hybrid")) return "Hybrid";\n\n        List<String> styles = new ArrayList<>();\n        if (containsWord(lower, "melee")) styles.add("Melee");\n        if (containsWord(lower, "ranged") || containsWord(lower, "range") || containsWord(lower, "ranging"))\n            styles.add("Ranged");\n        if (containsWord(lower, "magic") || containsWord(lower, "mage") || containsWord(lower, "maging"))\n            styles.add("Magic");\n\n        return styles.isEmpty() ? "" : String.join(" + ", styles);\n    }\n\n    private static boolean containsWord(String text, String word)\n    {\n        return Pattern.compile("(?i)(?:^|[^a-z0-9])" + Pattern.quote(word) + "(?:$|[^a-z0-9])")\n            .matcher(text == null ? "" : text).find();\n    }\n\n    private static boolean isGenericSetupLabel(String value)\n    {\n        if (value == null) return true;\n        String lower = value.trim().toLowerCase(Locale.ROOT);\n        return lower.isEmpty() || lower.equals("recommended") || lower.equals("equipment")\n            || lower.equals("inventory") || lower.equals("inventories") || lower.equals("supplies")\n            || lower.equals("loadout") || lower.equals("setup") || lower.equals("set-up")\n            || lower.equals("example setup") || lower.equals("example setups");\n    }\n\n'''
+          if helper_anchor not in text:
+              raise SystemExit('helper anchor missing')
+          text = text.replace(helper_anchor, helper + helper_anchor, 1)
+          path.write_text(text, encoding='utf-8')
+
+          plugin = Path('kspbossgear/KspBossGearPlugin.java')
+          ptext = plugin.read_text(encoding='utf-8')
+          old_version = 'public static final String VERSION = "1.1.2";'
+          if old_version not in ptext:
+              raise SystemExit('Boss Gear version anchor missing')
+          ptext = ptext.replace(old_version, 'public static final String VERSION = "1.1.3";', 1)
+          plugin.write_text(ptext, encoding='utf-8')
+          PY
+      - name: Verify patch shape
+        shell: bash
+        run: |
+          grep -q 'headingCombatStyleContext' kspbossgear/WikiGearService.java
+          grep -q 'explicitCombatStyle' kspbossgear/WikiGearService.java
+          grep -q 'VERSION = "1.1.3"' kspbossgear/KspBossGearPlugin.java
+      - name: Commit source fix
+        shell: bash
+        run: |
+          git config user.name "KSP Automation"
+          git config user.email "ksp-automation@users.noreply.github.com"
+          git add kspbossgear/WikiGearService.java kspbossgear/KspBossGearPlugin.java
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m "fix: preserve Wiki combat style separation in Boss Gear"
+          git push origin HEAD:fix/bossgear-style-separation
