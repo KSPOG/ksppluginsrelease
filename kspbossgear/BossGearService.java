@@ -3,6 +3,7 @@ package net.runelite.client.plugins.microbot.kspbossgear;
 import java.awt.Color;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
@@ -19,6 +20,7 @@ import net.runelite.client.plugins.microbot.Microbot;
 import net.runelite.client.plugins.microbot.util.bank.Rs2Bank;
 import net.runelite.client.plugins.microbot.util.equipment.Rs2Equipment;
 import net.runelite.client.plugins.microbot.util.inventory.Rs2Inventory;
+import net.runelite.client.plugins.microbot.util.inventory.Rs2ItemModel;
 import net.runelite.client.plugins.microbot.util.item.Rs2ItemManager;
 
 /** Owns the selected Wiki loadout and exposes thread-safe highlight state. */
@@ -26,8 +28,12 @@ final class BossGearService
 {
     private final WikiGearService wikiGearService;
     private volatile ExecutorService executor;
+    private static final long OWNERSHIP_SNAPSHOT_MS = 1_500L;
+
     private final Map<String, Integer> itemIdCache = new ConcurrentHashMap<>();
     private final AtomicLong requestSequence = new AtomicLong();
+    private volatile OwnershipSnapshot ownershipSnapshot = OwnershipSnapshot.empty();
+    private volatile long ownershipSnapshotAt;
 
     private volatile WikiGearPage page;
     private volatile String selectedMethod;
@@ -150,24 +156,81 @@ final class BossGearService
     OwnershipMatch ownership(ResolvedGearRow row)
     {
         if (row == null) return OwnershipMatch.missing();
+        OwnershipSnapshot snapshot = getOwnershipSnapshot();
         List<Integer> ids = row.getAllIds();
 
         for (Integer id : ids)
         {
-            if (id != null && id > 0 && Rs2Equipment.isWearing(id))
+            if (id != null && id > 0 && snapshot.equippedIds.contains(id))
                 return new OwnershipMatch(Ownership.EQUIPPED, id == row.getPrimaryId());
         }
         for (Integer id : ids)
         {
-            if (id != null && id > 0 && Rs2Inventory.hasItem(id))
+            if (id != null && id > 0 && snapshot.inventoryIds.contains(id))
                 return new OwnershipMatch(Ownership.INVENTORY, id == row.getPrimaryId());
         }
         for (Integer id : ids)
         {
-            if (id != null && id > 0 && Rs2Bank.hasItem(id))
+            if (id != null && id > 0 && snapshot.bankIds.contains(id))
                 return new OwnershipMatch(Ownership.BANK, id == row.getPrimaryId());
         }
         return OwnershipMatch.missing();
+    }
+
+    private OwnershipSnapshot getOwnershipSnapshot()
+    {
+        long now = System.currentTimeMillis();
+        OwnershipSnapshot cached = ownershipSnapshot;
+        if (now - ownershipSnapshotAt < OWNERSHIP_SNAPSHOT_MS) return cached;
+
+        synchronized (this)
+        {
+            now = System.currentTimeMillis();
+            if (now - ownershipSnapshotAt < OWNERSHIP_SNAPSHOT_MS) return ownershipSnapshot;
+
+            Set<Integer> equipped = new HashSet<>();
+            Set<Integer> inventory = new HashSet<>();
+            Set<Integer> bank = new HashSet<>();
+
+            try
+            {
+                Rs2Equipment.all().forEach(item -> addItemId(equipped, item));
+            }
+            catch (Throwable ignored)
+            {
+                // Keep the previous location empty if the cached equipment view is unavailable.
+            }
+
+            try
+            {
+                List<Rs2ItemModel> items = Rs2Inventory.all();
+                if (items != null) for (Rs2ItemModel item : items) addItemId(inventory, item);
+            }
+            catch (Throwable ignored)
+            {
+                // Inventory cache can briefly invalidate during widget/container rebuilds.
+            }
+
+            try
+            {
+                List<Rs2ItemModel> items = Rs2Bank.bankItems();
+                if (items != null) for (Rs2ItemModel item : items) addItemId(bank, item);
+            }
+            catch (Throwable ignored)
+            {
+                // Bank data is cached by Microbot and can be temporarily unavailable during refresh.
+            }
+
+            OwnershipSnapshot fresh = new OwnershipSnapshot(equipped, inventory, bank);
+            ownershipSnapshot = fresh;
+            ownershipSnapshotAt = now;
+            return fresh;
+        }
+    }
+
+    private static void addItemId(Set<Integer> target, Rs2ItemModel item)
+    {
+        if (item != null && item.getId() > 0) target.add(item.getId());
     }
 
     synchronized void shutdown()
@@ -368,6 +431,25 @@ final class BossGearService
         return message == null || message.trim().isEmpty()
             ? "Could not load gear/inventory from the OSRS Wiki."
             : message;
+    }
+
+    private static final class OwnershipSnapshot
+    {
+        private final Set<Integer> equippedIds;
+        private final Set<Integer> inventoryIds;
+        private final Set<Integer> bankIds;
+
+        private OwnershipSnapshot(Set<Integer> equippedIds, Set<Integer> inventoryIds, Set<Integer> bankIds)
+        {
+            this.equippedIds = equippedIds;
+            this.inventoryIds = inventoryIds;
+            this.bankIds = bankIds;
+        }
+
+        private static OwnershipSnapshot empty()
+        {
+            return new OwnershipSnapshot(Collections.emptySet(), Collections.emptySet(), Collections.emptySet());
+        }
     }
 
     enum HighlightKind

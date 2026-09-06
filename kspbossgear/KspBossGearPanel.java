@@ -196,7 +196,7 @@ public final class KspBossGearPanel extends PluginPanel
                 LinkBrowser.browse(selection.getSourceUrl());
         });
 
-        refreshTimer = new Timer(500, e -> refreshStatus());
+        refreshTimer = new Timer(1_000, e -> refreshStatus());
         refreshTimer.start();
         updateSuggestions();
         refreshStatus();
@@ -296,7 +296,7 @@ public final class KspBossGearPanel extends PluginPanel
         statusLabel.setForeground(looksLikeError(status)
             ? new Color(245, 105, 105)
             : ColorScheme.LIGHT_GRAY_COLOR);
-        refreshOwnership();
+        if (isShowing()) refreshOwnership();
     }
 
     private void refreshOwnership()

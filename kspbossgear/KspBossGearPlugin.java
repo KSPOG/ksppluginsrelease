@@ -32,7 +32,7 @@ import net.runelite.client.ui.overlay.OverlayManager;
 @Slf4j
 public class KspBossGearPlugin extends Plugin
 {
-    public static final String VERSION = "1.1.1";
+    public static final String VERSION = "1.1.2";
 
     @Inject private BossGearService gearService;
     @Inject private OverlayManager overlayManager;
