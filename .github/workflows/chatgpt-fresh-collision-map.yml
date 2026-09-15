@@ -1,0 +1,222 @@
+name: ChatGPT Fresh Collision Map
+
+on:
+  push:
+    branches:
+      - chatgpt-collision-bundle-20260916
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout helper repository
+        uses: actions/checkout@v4
+
+      - name: Checkout collision tooling
+        uses: actions/checkout@v4
+        with:
+          repository: osrs-pathfinding/shortest-path-tooling
+          path: tooling
+
+      - name: Checkout RuneLite
+        uses: actions/checkout@v4
+        with:
+          repository: runelite/runelite
+          path: runelite
+
+      - name: Set up JDK 11
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '11'
+
+      - name: Download latest OSRS cache and XTEAs
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./tooling/collision-map-update/download-latest-cache.sh
+          sed -i 's/mapsquare/region/g' keys.json
+          sed -i 's/key/keys/g' keys.json
+
+      - name: Build collision dumper
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp ./tooling/collision-map-update/CollisionMapDumper.java runelite/cache/src/main/java/net/runelite/cache/CollisionMapDumper.java
+          cp ./tooling/collision-map-update/build.gradle.kts.patch runelite/cache/build.gradle.kts.patch
+          cd runelite/cache
+          git apply build.gradle.kts.patch
+          cd ..
+          ./gradlew :cache:shadowJar -x test --dependency-verification=off
+          find cache/build/libs -name '*-all.jar' -exec cp {} ../cache.jar \;
+          test -f ../cache.jar
+
+      - name: Extract collision map from latest cache
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf output bundle
+          mkdir -p output bundle/validation
+          java -jar cache.jar --cachedir ./cache --xteapath ./keys.json --outputdir ./output
+          test -s output/58_88
+          test -s output/48_152
+          (cd output && zip -q -r ../collision-map.zip .)
+          unzip -tq collision-map.zip
+
+      - name: Render atlas and region previews
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --disable-pip-version-check pillow
+          cat > render_collision.py <<'PY'
+          from pathlib import Path
+          from PIL import Image, ImageDraw, ImageFont
+          import hashlib, math, re
+
+          SRC = Path('output')
+          VAL = Path('bundle/validation')
+          VAL.mkdir(parents=True, exist_ok=True)
+          REGION = 64
+          BLUE = (12, 73, 126)
+          BLACK = (0, 0, 0)
+          WHITE = (255, 255, 255)
+          RED = (235, 50, 45)
+          YELLOW = (255, 220, 35)
+          GREY = (150, 150, 150)
+
+          def bit(data, i):
+              j = i >> 3
+              return j < len(data) and ((data[j] >> (i & 7)) & 1) != 0
+
+          def flag(data, x, y, z, f):
+              if x < 0 or x >= REGION or y < 0 or y >= REGION or z < 0:
+                  return False
+              i = (z * REGION * REGION + y * REGION + x) * 2 + f
+              return bit(data, i)
+
+          def n(data, x, y, z=0): return flag(data, x, y, z, 0)
+          def e(data, x, y, z=0): return flag(data, x, y, z, 1)
+          def s(data, x, y, z=0): return n(data, x, y-1, z)
+          def w(data, x, y, z=0): return e(data, x-1, y, z)
+          def blocked(data, x, y, z=0):
+              return not (n(data,x,y,z) or s(data,x,y,z) or e(data,x,y,z) or w(data,x,y,z))
+
+          def render_region(name, title, outline):
+              data = (SRC/name).read_bytes()
+              scale = 8
+              margin = 34
+              im = Image.new('RGB', (REGION*scale, REGION*scale + margin), BLUE)
+              d = ImageDraw.Draw(im)
+              for y in range(REGION):
+                  for x in range(REGION):
+                      if blocked(data, x, y, 0):
+                          # north-up display
+                          yy = (REGION - 1 - y) * scale + margin
+                          d.rectangle((x*scale, yy, x*scale+scale-1, yy+scale-1), fill=BLACK)
+              # faint region grid
+              for i in range(0, REGION+1, 8):
+                  xx=i*scale
+                  yy=margin+i*scale
+                  d.line((xx, margin, xx, margin+REGION*scale), fill=(40,95,140))
+                  d.line((0, yy, REGION*scale, yy), fill=(40,95,140))
+              d.rectangle((0, margin, REGION*scale-1, margin+REGION*scale-1), outline=outline, width=3)
+              digest = hashlib.sha256(data).hexdigest()[:16]
+              d.text((8,8), f'{title} | {name} | plane 0 | sha256 {digest}', fill=WHITE)
+              out = VAL/(name + '.png')
+              im.save(out)
+              return digest, len(data)
+
+          dr_hash, dr_size = render_region('48_152', 'Draynor Manor basement', RED)
+          ml_hash, ml_size = render_region('58_88', 'Motherlode Mine', YELLOW)
+
+          entries=[]
+          for p in SRC.iterdir():
+              m=re.fullmatch(r'(\d+)_(\d+)', p.name)
+              if m:
+                  entries.append((int(m.group(1)), int(m.group(2)), p))
+          minx=min(x for x,y,p in entries); maxx=max(x for x,y,p in entries)
+          miny=min(y for x,y,p in entries); maxy=max(y for x,y,p in entries)
+
+          # One pixel per tile first, then thumbnail for manageable preview size.
+          W=(maxx-minx+1)*REGION
+          H=(maxy-miny+1)*REGION
+          atlas=Image.new('RGB',(W,H),BLUE)
+          pix=atlas.load()
+          for rx,ry,p in entries:
+              data=p.read_bytes()
+              ox=(rx-minx)*REGION
+              oy=(maxy-ry)*REGION
+              for y in range(REGION):
+                  for x in range(REGION):
+                      if blocked(data,x,y,0):
+                          pix[ox+x, oy+(REGION-1-y)] = BLACK
+
+          d=ImageDraw.Draw(atlas)
+          for rx,ry,color in [(48,152,RED),(58,88,YELLOW)]:
+              x0=(rx-minx)*REGION; y0=(maxy-ry)*REGION
+              d.rectangle((x0,y0,x0+REGION-1,y0+REGION-1), outline=color, width=8)
+
+          max_preview=(1800,1100)
+          preview=atlas.copy()
+          preview.thumbnail(max_preview, Image.Resampling.NEAREST)
+          preview.save(VAL/'collision-atlas.png')
+
+          with open(VAL/'validation.txt','w',encoding='utf-8') as f:
+              f.write(f'collision regions: {len(entries)}\n')
+              f.write(f'extents: x={minx}..{maxx}, y={miny}..{maxy}\n')
+              f.write(f'Draynor Manor basement: 48_152, bytes={dr_size}, sha256_prefix={dr_hash}\n')
+              f.write(f'Motherlode Mine: 58_88, bytes={ml_size}, sha256_prefix={ml_hash}\n')
+              f.write(f'payloads_distinct: {dr_hash != ml_hash}\n')
+          if dr_hash == ml_hash:
+              raise SystemExit('ERROR: Draynor and Motherlode payloads are identical')
+          PY
+          python render_collision.py
+
+      - name: Build replacement file bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="$PWD/bundle/KSP_Microbot_CollisionMap_Fresh"
+          RES="$ROOT/runelite-client/src/main/resources/net/runelite/client/plugins/microbot/shortestpath"
+          mkdir -p "$RES"
+          cp collision-map.zip "$RES/collision-map.zip"
+          for f in blocked_edges.tsv restrictions.tsv spirit_trees.tsv teleportation_items.tsv transports.tsv; do
+            curl -fL --retry 3 "https://raw.githubusercontent.com/chsami/Microbot/main/runelite-client/src/main/resources/net/runelite/client/plugins/microbot/shortestpath/$f" -o "$RES/$f"
+          done
+          cp -r bundle/validation "$ROOT/validation"
+          cat > "$ROOT/README.txt" <<'EOF'
+          KSP Microbot Fresh Collision Map
+          =================================
+          This bundle contains actual replacement files, generated from the latest OSRS cache at build time.
+
+          Replace the matching runelite-client folder in the Microbot source tree and rebuild.
+
+          Validation images:
+            validation/48_152.png       Draynor Manor basement
+            validation/58_88.png        Motherlode Mine
+            validation/collision-atlas.png  complete plane-0 collision atlas
+            validation/validation.txt
+          EOF
+          (cd bundle && zip -q -r KSP_Microbot_CollisionMap_Fresh.zip KSP_Microbot_CollisionMap_Fresh)
+          sha256sum bundle/KSP_Microbot_CollisionMap_Fresh.zip
+
+      - name: Upload actual replacement bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: KSP_Microbot_CollisionMap_Fresh
+          path: bundle/KSP_Microbot_CollisionMap_Fresh.zip
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload previews separately
+        uses: actions/upload-artifact@v4
+        with:
+          name: KSP_Collision_Map_Previews
+          path: bundle/validation/*
+          if-no-files-found: error
+          retention-days: 7
