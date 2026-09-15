@@ -1,0 +1,100 @@
+name: ChatGPT Collision Map Bundle
+
+on:
+  push:
+    branches:
+      - chatgpt-collision-bundle-20260916
+
+permissions:
+  contents: read
+
+jobs:
+  bundle:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build actual updated file bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="$PWD/out/KSP_Microbot_CollisionMap_Full_Update"
+          RES="$ROOT/runelite-client/src/main/resources/net/runelite/client/plugins/microbot/shortestpath"
+          mkdir -p "$RES"
+
+          # Latest collision-map generated from the OSRS cache as of 2026-09-10.
+          curl -fL --retry 3 \
+            "https://raw.githubusercontent.com/Skretzo/shortest-path/7e76a5e2cda3da3c772ddd347d75d89eae0139eb/src/main/resources/collision-map.zip" \
+            -o "$RES/collision-map.zip"
+
+          # Companion Microbot routing resources updated alongside the collision-map work.
+          for f in blocked_edges.tsv restrictions.tsv spirit_trees.tsv teleportation_items.tsv transports.tsv; do
+            curl -fL --retry 3 \
+              "https://raw.githubusercontent.com/chsami/Microbot/main/runelite-client/src/main/resources/net/runelite/client/plugins/microbot/shortestpath/$f" \
+              -o "$RES/$f"
+          done
+
+          unzip -t "$RES/collision-map.zip"
+
+          # Verify the Motherlode Mine map squares exist and are distinct from Draynor Manor basement.
+          TMP="$PWD/mapcheck"
+          mkdir -p "$TMP"
+          unzip -q "$RES/collision-map.zip" -d "$TMP"
+          DRAYNOR="48_152"
+          test -f "$TMP/$DRAYNOR"
+          for r in 57_87 57_88 57_89 58_87 58_88 58_89 59_87 59_88 59_89; do
+            test -f "$TMP/$r"
+            if cmp -s "$TMP/$DRAYNOR" "$TMP/$r"; then
+              echo "ERROR: Motherlode region $r is byte-identical to Draynor $DRAYNOR" >&2
+              exit 1
+            fi
+          done
+
+          MAP_SHA256=$(sha256sum "$RES/collision-map.zip" | awk '{print $1}')
+          cat > "$ROOT/README.txt" <<EOF
+          KSP Microbot Collision Map Full Update
+          ======================================
+
+          This archive contains the actual replacement files, not an apply-patch/downloader.
+
+          Collision map source:
+            Skretzo/shortest-path commit 7e76a5e2cda3da3c772ddd347d75d89eae0139eb
+            Generated from the OSRS cache on 2026-09-10.
+
+          collision-map.zip SHA-256:
+            $MAP_SHA256
+
+          Verified Motherlode map squares:
+            57_87, 57_88, 57_89
+            58_87, 58_88, 58_89
+            59_87, 59_88, 59_89
+
+          Verified Draynor Manor basement map square:
+            48_152
+
+          Every Motherlode square above was checked to ensure it is not byte-identical
+          to the Draynor Manor basement payload.
+
+          Included companion Microbot resources:
+            blocked_edges.tsv
+            restrictions.tsv
+            spirit_trees.tsv
+            teleportation_items.tsv
+            transports.tsv
+
+          Copy the runelite-client folder over your Microbot source tree, preserving paths,
+          then rebuild the client normally.
+          EOF
+
+          cd "$PWD/out"
+          zip -qr "$PWD/KSP_Microbot_CollisionMap_Full_Update_2026-09-10.zip" KSP_Microbot_CollisionMap_Full_Update
+          sha256sum "$PWD/KSP_Microbot_CollisionMap_Full_Update_2026-09-10.zip"
+
+      - name: Upload completed ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: KSP_Microbot_CollisionMap_Full_Update_2026-09-10
+          path: KSP_Microbot_CollisionMap_Full_Update_2026-09-10.zip
+          if-no-files-found: error
+          retention-days: 7
