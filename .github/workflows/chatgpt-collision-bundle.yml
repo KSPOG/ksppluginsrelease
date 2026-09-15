@@ -19,26 +19,24 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          ROOT="$PWD/out/KSP_Microbot_CollisionMap_Full_Update"
+          REPO="$PWD"
+          ROOT="$REPO/out/KSP_Microbot_CollisionMap_Full_Update"
           RES="$ROOT/runelite-client/src/main/resources/net/runelite/client/plugins/microbot/shortestpath"
           mkdir -p "$RES"
 
-          # Canonical collision map generated from the OSRS cache on 2026-09-10.
           curl -fL --retry 3 \
             "https://raw.githubusercontent.com/Skretzo/shortest-path/7e76a5e2cda3da3c772ddd347d75d89eae0139eb/src/main/resources/collision-map.zip" \
             -o "$RES/collision-map.zip"
 
-          # Companion Microbot routing resources kept alongside collision-map.zip.
           for f in blocked_edges.tsv restrictions.tsv spirit_trees.tsv teleportation_items.tsv transports.tsv; do
             curl -fL --retry 3 \
               "https://raw.githubusercontent.com/chsami/Microbot/main/runelite-client/src/main/resources/net/runelite/client/plugins/microbot/shortestpath/$f" \
               -o "$RES/$f"
           done
 
-          # Validate complete ZIP integrity before packaging it.
           unzip -tq "$RES/collision-map.zip"
 
-          TMP="$PWD/mapcheck"
+          TMP="$REPO/mapcheck"
           mkdir -p "$TMP"
           unzip -q "$RES/collision-map.zip" -d "$TMP"
 
@@ -48,8 +46,6 @@ jobs:
             exit 1
           fi
 
-          # RuneLite's Motherlode plugin identifies these nine world regions. The compressed
-          # collision archive is sparse, so only regions with stored collision flags are present.
           MOTHERLODE=(57_87 57_88 57_89 58_87 58_88 58_89 59_87 59_88 59_89)
           FOUND=()
           for r in "${MOTHERLODE[@]}"; do
@@ -62,8 +58,6 @@ jobs:
             echo "ERROR: No Motherlode Mine collision payload is present in the map." >&2
             exit 1
           fi
-
-          # 58_88 (region ID 14936) is the core Motherlode map square and must be present.
           if [ ! -f "$TMP/58_88" ]; then
             echo "ERROR: Core Motherlode Mine region 58_88 is missing." >&2
             exit 1
@@ -81,7 +75,6 @@ jobs:
           done
 
           MAP_SHA256=$(sha256sum "$RES/collision-map.zip" | awk '{print $1}')
-          BUNDLE_DATE="2026-09-10"
           FOUND_TEXT=$(printf '%s ' "${FOUND[@]}")
 
           cat > "$ROOT/README.txt" <<EOF
@@ -124,9 +117,9 @@ jobs:
             source tree, preserving the directory structure, then rebuild Microbot normally.
           EOF
 
-          cd "$PWD/out"
-          zip -qr "$PWD/KSP_Microbot_CollisionMap_Full_Update_${BUNDLE_DATE}.zip" KSP_Microbot_CollisionMap_Full_Update
-          sha256sum "$PWD/KSP_Microbot_CollisionMap_Full_Update_${BUNDLE_DATE}.zip"
+          cd "$REPO/out"
+          zip -qr "$REPO/KSP_Microbot_CollisionMap_Full_Update_2026-09-10.zip" KSP_Microbot_CollisionMap_Full_Update
+          sha256sum "$REPO/KSP_Microbot_CollisionMap_Full_Update_2026-09-10.zip"
 
       - name: Upload completed ZIP
         uses: actions/upload-artifact@v4
