@@ -235,6 +235,13 @@ public class KspSmartSmelterScript extends Script {
 
         depositProductionInventory(route);
 
+        // Do not continue into withdrawal while the previous batch output is
+        // still occupying inventory slots. Retry banking on the next tick instead.
+        if (Rs2Inventory.itemQuantity(route.getOutputId()) > 0) {
+            Microbot.status = "Waiting for previous batch to bank";
+            return;
+        }
+
         int availableCycles = bankCycles(route);
         if (completedTrips > antibanHandledTrips) {
             antibanHandledTrips = completedTrips;
@@ -244,6 +251,17 @@ public class KspSmartSmelterScript extends Script {
             }
         }
         if (availableCycles <= 0) {
+            // The first reliable zero-stock observation after a completed batch is
+            // made with the bank open. Give the smart selector one chance to rescan
+            // before committing to a GE restock of the previous route.
+            if (bankAfterCompletedTrip) {
+                bankAfterCompletedTrip = false;
+                lastPriceScan = 0L;
+                state = SmartSmelterState.SCANNING;
+                Microbot.status = "Inputs exhausted - rescanning routes";
+                return;
+            }
+
             Rs2Bank.closeBank();
 
             if (!config.autoRestock()) {
@@ -279,7 +297,10 @@ public class KspSmartSmelterScript extends Script {
             }
             final int itemId = ids[i];
             final int wanted = amount;
-            sleepUntil(() -> Rs2Inventory.itemQuantity(itemId) >= wanted, 3000);
+            if (!sleepUntil(() -> Rs2Inventory.itemQuantity(itemId) >= wanted, 3000)) {
+                Microbot.status = "Waiting for " + itemName(itemId) + " withdrawal";
+                return;
+            }
         }
 
         Rs2Bank.closeBank();
