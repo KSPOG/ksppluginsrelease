@@ -61,6 +61,8 @@ public class KspSmartSmelterScript extends Script {
     private volatile long bankInteractionSentAt;
     private volatile long furnaceInteractionSentAt;
     private volatile int antibanHandledTrips;
+    /** Force the first tick after a completed production batch through banking. */
+    private volatile boolean bankAfterCompletedTrip;
 
     private final Object productionStatsLock = new Object();
     private SmeltRoute trackedProductionRoute;
@@ -87,6 +89,7 @@ public class KspSmartSmelterScript extends Script {
         bankInteractionSentAt = 0L;
         furnaceInteractionSentAt = 0L;
         antibanHandledTrips = 0;
+        bankAfterCompletedTrip = false;
         synchronized (productionStatsLock) {
             clearProductionTrackingLocked();
         }
@@ -100,6 +103,20 @@ public class KspSmartSmelterScript extends Script {
 
                 if (antiban.beforeTick(state)) {
                     return;
+                }
+
+                // Cannonball batches are long enough to cross the market refresh timer.
+                // Always bank a genuinely completed batch before considering a rescan so
+                // stale/temporarily unavailable bank state cannot derail the next trip.
+                if (bankAfterCompletedTrip) {
+                    RouteQuote completedQuote = selectedQuote;
+                    SmeltRoute completedRoute = completedQuote == null ? null : completedQuote.getRoute();
+                    if (completedQuote == null || completedRoute == null) {
+                        bankAfterCompletedTrip = false;
+                    } else {
+                        prepareNextTrip(completedRoute);
+                        return;
+                    }
                 }
 
                 if (shouldScanPrices()) {
@@ -218,6 +235,13 @@ public class KspSmartSmelterScript extends Script {
 
         depositProductionInventory(route);
 
+        // Do not continue into withdrawal while the previous batch output is
+        // still occupying inventory slots. Retry banking on the next tick instead.
+        if (Rs2Inventory.itemQuantity(route.getOutputId()) > 0) {
+            Microbot.status = "Waiting for previous batch to bank";
+            return;
+        }
+
         int availableCycles = bankCycles(route);
         if (completedTrips > antibanHandledTrips) {
             antibanHandledTrips = completedTrips;
@@ -227,6 +251,17 @@ public class KspSmartSmelterScript extends Script {
             }
         }
         if (availableCycles <= 0) {
+            // The first reliable zero-stock observation after a completed batch is
+            // made with the bank open. Give the smart selector one chance to rescan
+            // before committing to a GE restock of the previous route.
+            if (bankAfterCompletedTrip) {
+                bankAfterCompletedTrip = false;
+                lastPriceScan = 0L;
+                state = SmartSmelterState.SCANNING;
+                Microbot.status = "Inputs exhausted - rescanning routes";
+                return;
+            }
+
             Rs2Bank.closeBank();
 
             if (!config.autoRestock()) {
@@ -262,7 +297,10 @@ public class KspSmartSmelterScript extends Script {
             }
             final int itemId = ids[i];
             final int wanted = amount;
-            sleepUntil(() -> Rs2Inventory.itemQuantity(itemId) >= wanted, 3000);
+            if (!sleepUntil(() -> Rs2Inventory.itemQuantity(itemId) >= wanted, 3000)) {
+                Microbot.status = "Waiting for " + itemName(itemId) + " withdrawal";
+                return;
+            }
         }
 
         Rs2Bank.closeBank();
@@ -270,10 +308,17 @@ public class KspSmartSmelterScript extends Script {
 
         if (!hasOneCycleInInventory(route)) {
             Microbot.status = "Inventory setup failed";
+            return;
         }
+
+        bankAfterCompletedTrip = false;
+        furnaceInteractionSentAt = 0L;
     }
 
     private void depositProductionInventory(SmeltRoute route) {
+        int outputId = route.getOutputId();
+        boolean hadOutput = Rs2Inventory.itemQuantity(outputId) > 0;
+
         if (route.isCannonballs()) {
             int keepId = Rs2Inventory.hasItem(ItemID.DOUBLE_AMMO_MOULD)
                     ? ItemID.DOUBLE_AMMO_MOULD
@@ -287,7 +332,12 @@ public class KspSmartSmelterScript extends Script {
         } else {
             Rs2Bank.depositAll();
         }
-        sleep(150, 300);
+
+        if (hadOutput) {
+            sleepUntil(() -> Rs2Inventory.itemQuantity(outputId) == 0, 3000);
+        } else {
+            sleep(150, 300);
+        }
     }
 
     private boolean ensureMouldInInventory() {
@@ -528,14 +578,27 @@ public class KspSmartSmelterScript extends Script {
         }
         antiban.onProductionStarted();
 
-        long timeout = Math.max(30_000L, route.getMaxCyclesPerTrip() * (route.isCannonballs() ? 7_000L : 4_000L));
-        sleepUntil(() -> !hasOneCycleInInventory(route), (int) Math.min(timeout, 180_000L));
+        long perCycleTimeout = route.isCannonballs() ? 7_500L : 4_000L;
+        long timeout = Math.max(30_000L, route.getMaxCyclesPerTrip() * perCycleTimeout);
+        int timeoutCap = route.isCannonballs() ? 210_000 : 180_000;
+        boolean completed = sleepUntil(
+                () -> !hasOneCycleInInventory(route),
+                (int) Math.min(timeout, timeoutCap));
+
+        // Do not declare a cannonball trip complete just because the wait expired.
+        // If bars remain, leave the route armed and let the next tick retry/recover.
+        if (!completed && hasOneCycleInInventory(route)) {
+            finishProductionTracking();
+            Microbot.status = "Production stalled - retrying " + route.getOutputName();
+            return;
+        }
 
         // Inventory-change events update output/profit continuously while the
         // production interface is running. Take one final snapshot to catch the last
         // change before disarming the monitor, then only finalize the trip counter.
         finishProductionTracking();
         completedTrips++;
+        bankAfterCompletedTrip = true;
 
         Microbot.status = "Trip complete: " + route.getOutputName();
     }
@@ -1064,6 +1127,7 @@ public class KspSmartSmelterScript extends Script {
         lastQuotes = Collections.emptyList();
         bankInteractionSentAt = 0L;
         furnaceInteractionSentAt = 0L;
+        bankAfterCompletedTrip = false;
         super.shutdown();
     }
 }
