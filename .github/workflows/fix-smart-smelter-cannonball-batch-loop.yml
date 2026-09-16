@@ -1,0 +1,94 @@
+name: Patch Smart Smelter cannonball batch loop
+
+on:
+  push:
+    branches:
+      - fix/smart-smelter-cannonball-batch-loop
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/smart-smelter-cannonball-batch-loop
+          fetch-depth: 0
+
+      - name: Patch Smart Smelter
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          script = Path('kspsmartsmelter/KspSmartSmelterScript.java')
+          text = script.read_text(encoding='utf-8')
+
+          field_old = '''    private volatile long bankInteractionSentAt;\n    private volatile long furnaceInteractionSentAt;\n    private volatile int antibanHandledTrips;\n'''
+          field_new = '''    private volatile long bankInteractionSentAt;\n    private volatile long furnaceInteractionSentAt;\n    private volatile int antibanHandledTrips;\n    /** Force the first tick after a completed production batch through banking. */\n    private volatile boolean bankAfterCompletedTrip;\n'''
+
+          reset_old = '''        bankInteractionSentAt = 0L;\n        furnaceInteractionSentAt = 0L;\n        antibanHandledTrips = 0;\n'''
+          reset_new = '''        bankInteractionSentAt = 0L;\n        furnaceInteractionSentAt = 0L;\n        antibanHandledTrips = 0;\n        bankAfterCompletedTrip = false;\n'''
+
+          loop_old = '''                if (antiban.beforeTick(state)) {\n                    return;\n                }\n\n                if (shouldScanPrices()) {\n                    refreshRoute();\n                }\n\n                RouteQuote quoteSnapshot = selectedQuote;\n                SmeltRoute routeSnapshot = quoteSnapshot == null ? null : quoteSnapshot.getRoute();\n'''
+          loop_new = '''                if (antiban.beforeTick(state)) {\n                    return;\n                }\n\n                // Cannonball batches are long enough to cross the market refresh timer.\n                // Always bank a genuinely completed batch before considering a rescan so\n                // stale/temporarily unavailable bank state cannot derail the next trip.\n                if (bankAfterCompletedTrip) {\n                    RouteQuote completedQuote = selectedQuote;\n                    SmeltRoute completedRoute = completedQuote == null ? null : completedQuote.getRoute();\n                    if (completedQuote == null || completedRoute == null) {\n                        bankAfterCompletedTrip = false;\n                    } else {\n                        prepareNextTrip(completedRoute);\n                        return;\n                    }\n                }\n\n                if (shouldScanPrices()) {\n                    refreshRoute();\n                }\n\n                RouteQuote quoteSnapshot = selectedQuote;\n                SmeltRoute routeSnapshot = quoteSnapshot == null ? null : quoteSnapshot.getRoute();\n'''
+
+          deposit_old = '''    private void depositProductionInventory(SmeltRoute route) {\n        if (route.isCannonballs()) {\n            int keepId = Rs2Inventory.hasItem(ItemID.DOUBLE_AMMO_MOULD)\n                    ? ItemID.DOUBLE_AMMO_MOULD\n                    : (Rs2Inventory.hasItem(ItemID.AMMO_MOULD) ? ItemID.AMMO_MOULD : -1);\n\n            if (keepId > 0) {\n                Rs2Bank.depositAllExcept(keepId);\n            } else {\n                Rs2Bank.depositAll();\n            }\n        } else {\n            Rs2Bank.depositAll();\n        }\n        sleep(150, 300);\n    }\n'''
+          deposit_new = '''    private void depositProductionInventory(SmeltRoute route) {\n        int outputId = route.getOutputId();\n        boolean hadOutput = Rs2Inventory.itemQuantity(outputId) > 0;\n\n        if (route.isCannonballs()) {\n            int keepId = Rs2Inventory.hasItem(ItemID.DOUBLE_AMMO_MOULD)\n                    ? ItemID.DOUBLE_AMMO_MOULD\n                    : (Rs2Inventory.hasItem(ItemID.AMMO_MOULD) ? ItemID.AMMO_MOULD : -1);\n\n            if (keepId > 0) {\n                Rs2Bank.depositAllExcept(keepId);\n            } else {\n                Rs2Bank.depositAll();\n            }\n        } else {\n            Rs2Bank.depositAll();\n        }\n\n        if (hadOutput) {\n            sleepUntil(() -> Rs2Inventory.itemQuantity(outputId) == 0, 3000);\n        } else {\n            sleep(150, 300);\n        }\n    }\n'''
+
+          close_old = '''        Rs2Bank.closeBank();\n        sleepUntil(() -> !Rs2Bank.isOpen(), 3000);\n\n        if (!hasOneCycleInInventory(route)) {\n            Microbot.status = "Inventory setup failed";\n        }\n    }\n'''
+          close_new = '''        Rs2Bank.closeBank();\n        sleepUntil(() -> !Rs2Bank.isOpen(), 3000);\n\n        if (!hasOneCycleInInventory(route)) {\n            Microbot.status = "Inventory setup failed";\n            return;\n        }\n\n        bankAfterCompletedTrip = false;\n        furnaceInteractionSentAt = 0L;\n    }\n'''
+
+          smelt_old = '''        long timeout = Math.max(30_000L, route.getMaxCyclesPerTrip() * (route.isCannonballs() ? 7_000L : 4_000L));\n        sleepUntil(() -> !hasOneCycleInInventory(route), (int) Math.min(timeout, 180_000L));\n\n        // Inventory-change events update output/profit continuously while the\n        // production interface is running. Take one final snapshot to catch the last\n        // change before disarming the monitor, then only finalize the trip counter.\n        finishProductionTracking();\n        completedTrips++;\n\n        Microbot.status = "Trip complete: " + route.getOutputName();\n'''
+          smelt_new = '''        long perCycleTimeout = route.isCannonballs() ? 7_500L : 4_000L;\n        long timeout = Math.max(30_000L, route.getMaxCyclesPerTrip() * perCycleTimeout);\n        int timeoutCap = route.isCannonballs() ? 210_000 : 180_000;\n        boolean completed = sleepUntil(\n                () -> !hasOneCycleInInventory(route),\n                (int) Math.min(timeout, timeoutCap));\n\n        // Do not declare a cannonball trip complete just because the wait expired.\n        // If bars remain, leave the route armed and let the next tick retry/recover.\n        if (!completed && hasOneCycleInInventory(route)) {\n            finishProductionTracking();\n            Microbot.status = "Production stalled - retrying " + route.getOutputName();\n            return;\n        }\n\n        // Inventory-change events update output/profit continuously while the\n        // production interface is running. Take one final snapshot to catch the last\n        // change before disarming the monitor, then only finalize the trip counter.\n        finishProductionTracking();\n        completedTrips++;\n        bankAfterCompletedTrip = true;\n\n        Microbot.status = "Trip complete: " + route.getOutputName();\n'''
+
+          shutdown_old = '''        bankInteractionSentAt = 0L;\n        furnaceInteractionSentAt = 0L;\n        super.shutdown();\n'''
+          shutdown_new = '''        bankInteractionSentAt = 0L;\n        furnaceInteractionSentAt = 0L;\n        bankAfterCompletedTrip = false;\n        super.shutdown();\n'''
+
+          replacements = [
+              (field_old, field_new, 'field'),
+              (reset_old, reset_new, 'run reset'),
+              (loop_old, loop_new, 'main loop'),
+              (deposit_old, deposit_new, 'deposit'),
+              (close_old, close_new, 'bank close'),
+              (smelt_old, smelt_new, 'smelt completion'),
+              (shutdown_old, shutdown_new, 'shutdown reset'),
+          ]
+
+          changed = False
+          for old, new, label in replacements:
+              if new in text:
+                  continue
+              if old not in text:
+                  raise SystemExit(f'Expected Smart Smelter block not found: {label}')
+              text = text.replace(old, new, 1)
+              changed = True
+
+          if changed:
+              script.write_text(text, encoding='utf-8')
+
+          plugin = Path('kspsmartsmelter/KspSmartSmelterPlugin.java')
+          plugin_text = plugin.read_text(encoding='utf-8')
+          if 'public static final String VERSION = "0.0.12";' in plugin_text:
+              plugin.write_text(plugin_text.replace(
+                  'public static final String VERSION = "0.0.12";',
+                  'public static final String VERSION = "0.0.13";',
+                  1), encoding='utf-8')
+          elif 'public static final String VERSION = "0.0.13";' not in plugin_text:
+              raise SystemExit('Unexpected Smart Smelter version')
+          PY
+
+      - name: Commit patch
+        shell: bash
+        run: |
+          if git diff --quiet; then
+            echo "Patch already applied"
+            exit 0
+          fi
+          git config user.name "KSP Automation"
+          git config user.email "ksp-automation@users.noreply.github.com"
+          git add kspsmartsmelter/KspSmartSmelterScript.java kspsmartsmelter/KspSmartSmelterPlugin.java
+          git commit -m "Fix Smart Smelter cannonball batch recovery"
+          git push origin HEAD:fix/smart-smelter-cannonball-batch-loop
