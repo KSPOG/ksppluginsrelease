@@ -1,0 +1,68 @@
+name: Refine Smart Smelter cannonball batch loop
+
+on:
+  push:
+    branches:
+      - fix/smart-smelter-cannonball-batch-loop
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/smart-smelter-cannonball-batch-loop
+          fetch-depth: 0
+
+      - name: Refine Smart Smelter batch transition
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('kspsmartsmelter/KspSmartSmelterScript.java')
+          text = path.read_text(encoding='utf-8')
+
+          deposit_old = '''        depositProductionInventory(route);\n\n        int availableCycles = bankCycles(route);\n'''
+          deposit_new = '''        depositProductionInventory(route);\n\n        // Do not continue into withdrawal while the previous batch output is\n        // still occupying inventory slots. Retry banking on the next tick instead.\n        if (Rs2Inventory.itemQuantity(route.getOutputId()) > 0) {\n            Microbot.status = "Waiting for previous batch to bank";\n            return;\n        }\n\n        int availableCycles = bankCycles(route);\n'''
+
+          exhausted_old = '''        if (availableCycles <= 0) {\n            Rs2Bank.closeBank();\n\n            if (!config.autoRestock()) {\n'''
+          exhausted_new = '''        if (availableCycles <= 0) {\n            // The first reliable zero-stock observation after a completed batch is\n            // made with the bank open. Give the smart selector one chance to rescan\n            // before committing to a GE restock of the previous route.\n            if (bankAfterCompletedTrip) {\n                bankAfterCompletedTrip = false;\n                lastPriceScan = 0L;\n                state = SmartSmelterState.SCANNING;\n                Microbot.status = "Inputs exhausted - rescanning routes";\n                return;\n            }\n\n            Rs2Bank.closeBank();\n\n            if (!config.autoRestock()) {\n'''
+
+          withdraw_old = '''            final int itemId = ids[i];\n            final int wanted = amount;\n            sleepUntil(() -> Rs2Inventory.itemQuantity(itemId) >= wanted, 3000);\n'''
+          withdraw_new = '''            final int itemId = ids[i];\n            final int wanted = amount;\n            if (!sleepUntil(() -> Rs2Inventory.itemQuantity(itemId) >= wanted, 3000)) {\n                Microbot.status = "Waiting for " + itemName(itemId) + " withdrawal";\n                return;\n            }\n'''
+
+          replacements = [
+              (deposit_old, deposit_new, 'post-deposit guard'),
+              (exhausted_old, exhausted_new, 'exhausted stock rescan'),
+              (withdraw_old, withdraw_new, 'withdraw verification'),
+          ]
+
+          changed = False
+          for old, new, label in replacements:
+              if new in text:
+                  continue
+              if old not in text:
+                  raise SystemExit(f'Expected block not found: {label}')
+              text = text.replace(old, new, 1)
+              changed = True
+
+          if changed:
+              path.write_text(text, encoding='utf-8')
+          PY
+
+      - name: Commit refinement
+        shell: bash
+        run: |
+          if git diff --quiet; then
+            echo "Refinement already applied"
+            exit 0
+          fi
+          git config user.name "KSP Automation"
+          git config user.email "ksp-automation@users.noreply.github.com"
+          git add kspsmartsmelter/KspSmartSmelterScript.java
+          git commit -m "Preserve Smart Smelter route rescans after batches"
+          git push origin HEAD:fix/smart-smelter-cannonball-batch-loop
