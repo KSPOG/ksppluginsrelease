@@ -1,0 +1,61 @@
+name: Temporary AIO Fighter Loot Area Fix
+
+on:
+  push:
+    branches:
+      - fix/aio-fighter-loot-outside-area
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/aio-fighter-loot-outside-area
+          fetch-depth: 0
+
+      - name: Patch AIO Fighter loot-area behavior
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          script = Path('kspaiofighter/KspAioFighterScript.java')
+          text = script.read_text()
+
+          loot_filter = '\t\t\t\t.where(this::isLootInsideAttackArea)\n'
+          if text.count(loot_filter) != 1:
+              raise SystemExit(f'Expected exactly one loot area filter, found {text.count(loot_filter)}')
+          text = text.replace(loot_filter, '', 1)
+
+          method = '''\n\tprivate boolean isLootInsideAttackArea(Rs2TileItemModel item)\n\t{\n\t\tif (!config.useAttackArea())\n\t\t{\n\t\t\treturn true;\n\t\t}\n\n\t\treturn isInsideConfiguredArea(item.getWorldLocation());\n\t}\n'''
+          if text.count(method) != 1:
+              raise SystemExit(f'Expected exactly one isLootInsideAttackArea method, found {text.count(method)}')
+          text = text.replace(method, '', 1)
+          script.write_text(text)
+
+          plugin = Path('kspaiofighter/KspAioFighterPlugin.java')
+          ptext = plugin.read_text()
+          old = 'static final String version = "1.9.19";'
+          new = 'static final String version = "1.9.20";'
+          if ptext.count(old) != 1:
+              raise SystemExit(f'Expected version 1.9.19 once, found {ptext.count(old)}')
+          plugin.write_text(ptext.replace(old, new, 1))
+          PY
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add kspaiofighter/KspAioFighterScript.java kspaiofighter/KspAioFighterPlugin.java
+          git commit -m "Allow AIO Fighter to loot outside attack area"
+          git push origin HEAD:fix/aio-fighter-loot-outside-area
+
+      - name: Remove temporary workflow
+        shell: bash
+        run: |
+          git rm .github/workflows/temp-aio-fighter-loot-area.yml
+          git commit -m "Remove temporary AIO Fighter loot-area workflow"
+          git push origin HEAD:fix/aio-fighter-loot-outside-area
