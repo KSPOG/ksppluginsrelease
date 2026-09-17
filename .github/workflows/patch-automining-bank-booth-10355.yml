@@ -18,53 +18,55 @@ jobs:
           fetch-depth: 0
 
       - name: Patch AutoMining banking
-        shell: python
+        shell: bash
         run: |
+          python - <<'PY'
           from pathlib import Path
 
           script_path = Path('mining/AutoMiningScript.java')
           text = script_path.read_text(encoding='utf-8')
 
-          text = text.replace('import net.runelite.client.plugins.microbot.kspbank.KspVerifiedBank;\n', '')
+          if 'BANK_BOOTH_OBJECT_ID = 10355' not in text:
+              text = text.replace('import net.runelite.client.plugins.microbot.kspbank.KspVerifiedBank;\n', '')
 
-          marker = '    private static final Logger log = LoggerFactory.getLogger(AutoMiningScript.class);\n\n'
-          addition = (
-              '    private static final Logger log = LoggerFactory.getLogger(AutoMiningScript.class);\n'
-              '    private static final int BANK_BOOTH_OBJECT_ID = 10355;\n'
-              '    private static final long BANK_BOOTH_INTERACTION_COOLDOWN_MS = 2_500L;\n\n'
-          )
-          if marker not in text:
-              raise SystemExit('logger marker not found')
-          text = text.replace(marker, addition, 1)
+              marker = '    private static final Logger log = LoggerFactory.getLogger(AutoMiningScript.class);\n\n'
+              addition = (
+                  '    private static final Logger log = LoggerFactory.getLogger(AutoMiningScript.class);\n'
+                  '    private static final int BANK_BOOTH_OBJECT_ID = 10355;\n'
+                  '    private static final long BANK_BOOTH_INTERACTION_COOLDOWN_MS = 2_500L;\n\n'
+              )
+              if marker not in text:
+                  raise SystemExit('logger marker not found')
+              text = text.replace(marker, addition, 1)
 
-          marker = '    private volatile boolean playerAnimatingSnapshot;\n    private volatile WorldPoint playerLocationSnapshot;\n'
-          addition = (
-              '    private volatile boolean playerAnimatingSnapshot;\n'
-              '    private volatile WorldPoint playerLocationSnapshot;\n'
-              '    private volatile long lastBankBoothInteractionAt;\n'
-          )
-          if marker not in text:
-              raise SystemExit('snapshot marker not found')
-          text = text.replace(marker, addition, 1)
+              marker = '    private volatile boolean playerAnimatingSnapshot;\n    private volatile WorldPoint playerLocationSnapshot;\n'
+              addition = (
+                  '    private volatile boolean playerAnimatingSnapshot;\n'
+                  '    private volatile WorldPoint playerLocationSnapshot;\n'
+                  '    private volatile long lastBankBoothInteractionAt;\n'
+              )
+              if marker not in text:
+                  raise SystemExit('snapshot marker not found')
+              text = text.replace(marker, addition, 1)
 
-          marker = '        playerAnimatingSnapshot = false;\n        playerLocationSnapshot = null;\n        miningLoopRunning.set(false);\n'
-          addition = (
-              '        playerAnimatingSnapshot = false;\n'
-              '        playerLocationSnapshot = null;\n'
-              '        lastBankBoothInteractionAt = 0L;\n'
-              '        miningLoopRunning.set(false);\n'
-          )
-          if marker not in text:
-              raise SystemExit('run reset marker not found')
-          text = text.replace(marker, addition, 1)
+              marker = '        playerAnimatingSnapshot = false;\n        playerLocationSnapshot = null;\n        miningLoopRunning.set(false);\n'
+              addition = (
+                  '        playerAnimatingSnapshot = false;\n'
+                  '        playerLocationSnapshot = null;\n'
+                  '        lastBankBoothInteractionAt = 0L;\n'
+                  '        miningLoopRunning.set(false);\n'
+              )
+              if marker not in text:
+                  raise SystemExit('run reset marker not found')
+              text = text.replace(marker, addition, 1)
 
-          expected_calls = text.count('KspVerifiedBank.walkToBankAndOpenBank()')
-          if expected_calls != 3:
-              raise SystemExit(f'expected 3 KspVerifiedBank calls, found {expected_calls}')
-          text = text.replace('KspVerifiedBank.walkToBankAndOpenBank()', 'walkToBankBoothAndOpenBank()')
+              expected_calls = text.count('KspVerifiedBank.walkToBankAndOpenBank()')
+              if expected_calls != 3:
+                  raise SystemExit(f'expected 3 KspVerifiedBank calls, found {expected_calls}')
+              text = text.replace('KspVerifiedBank.walkToBankAndOpenBank()', 'walkToBankBoothAndOpenBank()')
 
-          marker = '    @Override\n    public void shutdown() {\n'
-          helper = '''    /**
+              marker = '    @Override\n    public void shutdown() {\n'
+              helper = '''    /**
      * AutoMining-specific banking: never clicks a Banker NPC. Travel uses the
      * nearest-bank route, but the final interaction is restricted to bank booth
      * object 10355. The cooldown prevents the 50 ms mining loop from repeatedly
@@ -122,36 +124,33 @@ jobs:
     }
 
 '''
-          if marker not in text:
-              raise SystemExit('shutdown marker not found')
-          text = text.replace(marker, helper + marker, 1)
+              if marker not in text:
+                  raise SystemExit('shutdown marker not found')
+              text = text.replace(marker, helper + marker, 1)
 
-          marker = '        playerAnimatingSnapshot = false;\n        playerLocationSnapshot = null;\n        miningLoopRunning.set(false);\n'
-          # Replace the remaining shutdown occurrence only.
-          if marker not in text:
-              raise SystemExit('shutdown reset marker not found')
-          text = text.replace(marker,
-              '        playerAnimatingSnapshot = false;\n'
-              '        playerLocationSnapshot = null;\n'
-              '        lastBankBoothInteractionAt = 0L;\n'
-              '        miningLoopRunning.set(false);\n', 1)
+              marker = '        playerAnimatingSnapshot = false;\n        playerLocationSnapshot = null;\n        miningLoopRunning.set(false);\n'
+              if marker not in text:
+                  raise SystemExit('shutdown reset marker not found')
+              text = text.replace(marker,
+                  '        playerAnimatingSnapshot = false;\n'
+                  '        playerLocationSnapshot = null;\n'
+                  '        lastBankBoothInteractionAt = 0L;\n'
+                  '        miningLoopRunning.set(false);\n', 1)
 
           if 'KspVerifiedBank' in text:
               raise SystemExit('KspVerifiedBank still referenced by AutoMining')
-          if text.count('walkToBankBoothAndOpenBank()') != 4:  # declaration + 3 calls
+          if text.count('walkToBankBoothAndOpenBank()') != 4:
               raise SystemExit('unexpected booth helper call count')
-          if 'BANK_BOOTH_OBJECT_ID = 10355' not in text:
-              raise SystemExit('bank booth object id missing')
-
           script_path.write_text(text, encoding='utf-8')
 
           plugin_path = Path('mining/AutoMiningPlugin.java')
           plugin = plugin_path.read_text(encoding='utf-8')
-          old_version = 'public static final String version = "1.0.33";'
-          new_version = 'public static final String version = "1.0.34";'
-          if old_version not in plugin:
-              raise SystemExit('AutoMining version marker not found')
-          plugin_path.write_text(plugin.replace(old_version, new_version, 1), encoding='utf-8')
+          if 'version = "1.0.33"' in plugin:
+              plugin = plugin.replace('version = "1.0.33"', 'version = "1.0.34"', 1)
+          if 'version = "1.0.34"' not in plugin:
+              raise SystemExit('AutoMining version update failed')
+          plugin_path.write_text(plugin, encoding='utf-8')
+          PY
 
       - name: Verify patch
         shell: bash
