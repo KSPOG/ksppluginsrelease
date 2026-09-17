@@ -345,7 +345,6 @@ public class KspF2pGatheringProfitScript extends Script
         {
             Rs2NpcModel spot = Microbot.getRs2NpcCache().query()
                     .withName(method.nodeName)
-                    .where(npc -> hasAction(npc.getActions(), method.action))
                     .nearestOnClientThread();
             clicked = spot != null && spot.click(method.action);
         }
@@ -353,7 +352,6 @@ public class KspF2pGatheringProfitScript extends Script
         {
             Rs2TileObjectModel node = Microbot.getRs2TileObjectCache().query()
                     .withName(method.nodeName)
-                    .where(object -> hasAction(object.getActions(), method.action))
                     .nearestOnClientThread(20);
             clicked = node != null && node.click(method.action);
         }
@@ -367,14 +365,6 @@ public class KspF2pGatheringProfitScript extends Script
         noNodeSince = 0L;
         failures = 0;
         Rs2Player.waitForXpDrop(method.skill, 12_000, true);
-    }
-
-    private boolean hasAction(String[] actions, String wanted)
-    {
-        if (actions == null || wanted == null) return false;
-        for (String action : actions)
-            if (action != null && action.equalsIgnoreCase(wanted)) return true;
-        return false;
     }
 
     private void handleMissingNode()
