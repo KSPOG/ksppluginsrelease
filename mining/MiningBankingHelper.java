@@ -7,11 +7,10 @@ import net.runelite.client.plugins.microbot.util.inventory.Rs2Inventory;
 /**
  * Deterministic banking flow for Auto Mining.
  *
- * The normal bank path intentionally clicks the bank's Deposit inventory button
- * instead of depositing configured item names one by one. A carried pickaxe is
- * equipped first when possible, so the button leaves it outside the inventory.
- * The pickaxe helper then upgrades/re-equips the best available pickaxe and
- * deposits the displaced outdated tool.
+ * Mining level determines the best usable pickaxe. Attack level only controls
+ * whether that pickaxe can be equipped. If the best carried mining pickaxe
+ * cannot be equipped, banking preserves it in inventory instead of depositing
+ * it and downgrading to an Attack-compatible tool.
  */
 public final class MiningBankingHelper
 {
@@ -33,11 +32,14 @@ public final class MiningBankingHelper
 
         final long deadline = System.currentTimeMillis() + Math.max(3_000L, timeoutMs);
 
-        // Keep a carried pickaxe out of the inventory before the raw bank button
-        // is clicked whenever the account has the Attack level to wield it.
+        // Decide what must remain in inventory before attempting to equip a
+        // lower Attack-compatible pickaxe. Example: 41 Mining / 1 Attack keeps
+        // a Rune pickaxe in inventory even though it cannot be wielded.
+        final String retainedPickaxe = PickaxeUpgradeHelper.bestCarriedPickaxeToKeepInInventory();
+
         PickaxeUpgradeHelper.equipBestCarriedPickaxeIfPossible();
 
-        if (!clickDepositInventoryUntilEmpty(deadline))
+        if (!depositInventoryUntilReady(deadline, retainedPickaxe))
         {
             Microbot.status = "Deposit inventory failed";
             return false;
@@ -50,12 +52,12 @@ public final class MiningBankingHelper
             return false;
         }
 
-        // The final inventory may contain a pickaxe only when it cannot be
-        // equipped. No ore, gems, clues, or other mined items may remain.
+        // A final inventory pickaxe is expected when Mining permits a stronger
+        // pickaxe than Attack permits the account to equip.
         return !hasNonPickaxeInventoryItems();
     }
 
-    private static boolean clickDepositInventoryUntilEmpty(long deadline)
+    private static boolean depositInventoryUntilReady(long deadline, String retainedPickaxe)
     {
         while (System.currentTimeMillis() < deadline)
         {
@@ -64,25 +66,38 @@ public final class MiningBankingHelper
                 return false;
             }
 
-            if (Rs2Inventory.isEmpty())
+            if (!hasNonPickaxeInventoryItems())
             {
                 return true;
             }
 
-            Microbot.status = "Clicking Deposit inventory...";
             final int beforeSlots = inventorySlotCount();
 
-            // Rs2Bank.depositAll() locates BANK_DEPOSIT_INVENTORY and clicks the
-            // actual Deposit inventory button in the bank widget.
-            Rs2Bank.depositAll();
+            if (retainedPickaxe != null && Rs2Inventory.hasItem(retainedPickaxe))
+            {
+                final var keepItem = Rs2Inventory.get(retainedPickaxe);
+                if (keepItem != null)
+                {
+                    Microbot.status = "Depositing inventory - keeping " + retainedPickaxe;
+                    Rs2Bank.depositAllExcept(keepItem.getId());
+                }
+                else
+                {
+                    Microbot.status = "Clicking Deposit inventory...";
+                    Rs2Bank.depositAll();
+                }
+            }
+            else
+            {
+                Microbot.status = "Clicking Deposit inventory...";
+                Rs2Bank.depositAll();
+            }
 
-            if (waitUntil(Rs2Inventory::isEmpty, 1_800L))
+            if (waitUntil(() -> !hasNonPickaxeInventoryItems(), 1_800L))
             {
                 return true;
             }
 
-            // A partial inventory change still counts as progress; immediately
-            // click the button again instead of falling back to per-item menus.
             if (inventorySlotCount() < beforeSlots)
             {
                 continue;
@@ -91,7 +106,7 @@ public final class MiningBankingHelper
             sleep(180L);
         }
 
-        return Rs2Inventory.isEmpty();
+        return !hasNonPickaxeInventoryItems();
     }
 
     private static boolean hasNonPickaxeInventoryItems()
