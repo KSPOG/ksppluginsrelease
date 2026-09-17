@@ -35,6 +35,10 @@ public class KspF2pGatheringProfitScript extends Script
     private static final WorldPoint KARAMJA_DOCK = new WorldPoint(2956, 3146, 0);
     private static final String[] KARAMJA_SAILORS = {"Seaman Lorris", "Seaman Thresnor", "Captain Tobias"};
     private static final String COINS = "Coins";
+    private static final int KARAMJA_MIN_DEPARTURE_COINS = 60;
+    private static final int KARAMJA_MIN_RETURN_COINS = 30;
+    private static final int KARAMJA_COIN_TARGET = 1_000;
+    private static final int FEATHER_RESTOCK_THRESHOLD = 100;
 
     private static final ToolTier[] MINING_TOOLS = {
             new ToolTier("Rune pickaxe", 41), new ToolTier("Adamant pickaxe", 31),
@@ -51,6 +55,7 @@ public class KspF2pGatheringProfitScript extends Script
 
     private KspF2pGatheringProfitConfig config;
     private volatile GatheringMethod method;
+    private volatile GatheringMethod preparedMethod;
     private volatile WorldPoint location;
     private volatile String status = "Starting";
     private volatile EscapeState escape = EscapeState.SAFE;
@@ -64,6 +69,7 @@ public class KspF2pGatheringProfitScript extends Script
     {
         this.config = config;
         method = null;
+        preparedMethod = null;
         location = null;
         status = "Starting";
         escape = EscapeState.SAFE;
@@ -99,7 +105,8 @@ public class KspF2pGatheringProfitScript extends Script
                 halt("No unlocked method");
                 return;
             }
-            if (!ensureToolAndSupplies()) return;
+
+            if (!ensureMethodLoadout()) return;
 
             if (method.karamjaFishing())
             {
@@ -122,6 +129,7 @@ public class KspF2pGatheringProfitScript extends Script
                 Rs2Walker.walkTo(location, 4);
                 return;
             }
+
             gather();
         }
         catch (Exception ex)
@@ -135,10 +143,20 @@ public class KspF2pGatheringProfitScript extends Script
     {
         GatheringMethod best = null;
         double bestScore = -1.0;
+
         for (GatheringMethod candidate : GatheringMethod.values())
         {
-            int level = config.progressive() ? Rs2Player.getRealSkillLevel(candidate.skill) : startingLevel(candidate.skill);
-            if (!allowed(candidate) || (candidate.wilderness() && config.avoidWilderness()) || level < candidate.level) continue;
+            int level = config.progressive()
+                    ? Rs2Player.getRealSkillLevel(candidate.skill)
+                    : startingLevel(candidate.skill);
+
+            if (!allowed(candidate)
+                    || (candidate.wilderness() && config.avoidWilderness())
+                    || level < candidate.level)
+            {
+                continue;
+            }
+
             int gp = estimate(candidate);
             double candidateScore = score(gp, candidate.xpHour);
             if (candidateScore > bestScore)
@@ -150,6 +168,8 @@ public class KspF2pGatheringProfitScript extends Script
 
         boolean changed = best != method;
         method = best;
+        if (changed) preparedMethod = null;
+
         if (best != null)
         {
             location = chooseLocation(best, Rs2Player.getWorldLocation());
@@ -160,6 +180,7 @@ public class KspF2pGatheringProfitScript extends Script
             failures = 0;
             status = (changed && config.progressive() ? "Progressed/selected: " : "Selected: ") + best.name();
         }
+
         lastEval = System.currentTimeMillis();
     }
 
@@ -186,12 +207,14 @@ public class KspF2pGatheringProfitScript extends Script
         if (config.skillMode() == KspF2pGatheringProfitConfig.SkillMode.MINING && candidate.skill != Skill.MINING) return false;
         if (config.skillMode() == KspF2pGatheringProfitConfig.SkillMode.WOODCUTTING && candidate.skill != Skill.WOODCUTTING) return false;
         if (config.skillMode() == KspF2pGatheringProfitConfig.SkillMode.FISHING && candidate.skill != Skill.FISHING) return false;
+
         if (candidate.skill == Skill.MINING && config.miningTarget() != KspF2pGatheringProfitConfig.MiningTarget.AUTO)
             return candidate.name().equals(config.miningTarget().name());
         if (candidate.skill == Skill.WOODCUTTING && config.woodcuttingTarget() != KspF2pGatheringProfitConfig.WoodcuttingTarget.AUTO)
             return candidate.name().equals(config.woodcuttingTarget().name());
         if (candidate.skill == Skill.FISHING && config.fishingTarget() != KspF2pGatheringProfitConfig.FishingTarget.AUTO)
             return candidate.name().equals(config.fishingTarget().name());
+
         return true;
     }
 
@@ -205,7 +228,8 @@ public class KspF2pGatheringProfitScript extends Script
             case XP_PRIORITY: return gp * .25 + xp * .75;
             default:
                 int total = Math.max(1, config.gpWeight() + config.xpWeight());
-                return gp * (config.gpWeight() / (double) total) + xp * (config.xpWeight() / (double) total);
+                return gp * (config.gpWeight() / (double) total)
+                        + xp * (config.xpWeight() / (double) total);
         }
     }
 
@@ -213,6 +237,7 @@ public class KspF2pGatheringProfitScript extends Script
     {
         WikiPrice price = Rs2GrandExchange.getRealTimePrices(candidate.productId);
         if (price == null) return 0;
+
         int sell = Math.min(price.buyPrice, price.sellPrice);
         if (sell <= 0) sell = Math.max(price.buyPrice, price.sellPrice);
         return Math.max(0, sell - (int) Math.floor(sell * .02));
@@ -226,9 +251,11 @@ public class KspF2pGatheringProfitScript extends Script
     private void trackYield()
     {
         if (method == null) return;
+
         int quantity = productQuantity(method);
         if (quantity > lastInventoryQuantity) gathered += quantity - lastInventoryQuantity;
         lastInventoryQuantity = quantity;
+
         long elapsed = Math.max(1L, System.currentTimeMillis() - start);
         realGpHour = (int) ((long) gathered * lastUnitValue * 3_600_000L / elapsed);
     }
@@ -252,29 +279,227 @@ public class KspF2pGatheringProfitScript extends Script
         return method.productName.equalsIgnoreCase(name);
     }
 
-    private boolean ensureToolAndSupplies()
+    private boolean ensureMethodLoadout()
     {
-        if (method.skill == Skill.MINING)
+        if (preparedMethod == method && loadoutReady()) return true;
+
+        if (method.karamjaFishing() && isKaramja())
         {
-            int level = Rs2Player.getRealSkillLevel(Skill.MINING);
-            return hasUsableTool(MINING_TOOLS, level) || withdrawBestUsable(MINING_TOOLS, level);
-        }
-        if (method.skill == Skill.WOODCUTTING)
-        {
-            int level = Rs2Player.getRealSkillLevel(Skill.WOODCUTTING);
-            return hasUsableTool(WOODCUTTING_TOOLS, level) || withdrawBestUsable(WOODCUTTING_TOOLS, level);
+            if (loadoutReady())
+            {
+                preparedMethod = method;
+                return true;
+            }
+
+            if (coinCount() < KARAMJA_MIN_RETURN_COINS)
+            {
+                halt("Missing inputs on Karamja and no return fare");
+                return false;
+            }
+
+            status = "Returning to bank for inputs";
+            returnToPortSarim();
+            return false;
         }
 
-        if (method.tool != null && !hasTool(method.tool) && !withdraw(method.tool, false)) return false;
-        if (method == GatheringMethod.TROUT_SALMON && !Rs2Inventory.hasItem("Feather") && !withdraw("Feather", true)) return false;
-        return !method.karamjaFishing() || ensureKaramjaTravelCoins();
+        return prepareMethodLoadoutAtBank();
+    }
+
+    private boolean loadoutReady()
+    {
+        if (method == null) return false;
+
+        if (method.skill == Skill.MINING)
+            return hasUsableTool(MINING_TOOLS, Rs2Player.getRealSkillLevel(Skill.MINING));
+
+        if (method.skill == Skill.WOODCUTTING)
+            return hasUsableTool(WOODCUTTING_TOOLS, Rs2Player.getRealSkillLevel(Skill.WOODCUTTING));
+
+        if (method.tool != null && !hasTool(method.tool)) return false;
+        if (method == GatheringMethod.TROUT_SALMON && Rs2Inventory.itemQuantity("Feather") <= 0) return false;
+
+        if (method.karamjaFishing())
+        {
+            int minimum = isKaramja() ? KARAMJA_MIN_RETURN_COINS : KARAMJA_MIN_DEPARTURE_COINS;
+            return coinCount() >= minimum;
+        }
+
+        return true;
+    }
+
+    private boolean prepareMethodLoadoutAtBank()
+    {
+        status = "Banking for " + method.name() + " inputs";
+        if (!KspVerifiedBank.walkToBankAndOpenBank())
+        {
+            recover("Bank/loadout");
+            return false;
+        }
+
+        depositUnneededAtOpenBank();
+
+        if (!ensureRequiredToolAtOpenBank())
+        {
+            Rs2Bank.closeBank();
+            return false;
+        }
+
+        // A better tool may just have been withdrawn. Run the keep-filter again so
+        // lower-tier duplicate tools are banked while the best usable one is kept.
+        depositUnneededAtOpenBank();
+
+        if (!ensureConsumablesAtOpenBank())
+        {
+            Rs2Bank.closeBank();
+            return false;
+        }
+
+        Rs2Bank.closeBank();
+
+        if (!loadoutReady())
+        {
+            halt("Could not prepare " + missingInputDescription());
+            return false;
+        }
+
+        preparedMethod = method;
+        failures = 0;
+        status = "Inputs ready: " + method.name();
+        return true;
+    }
+
+    private boolean ensureRequiredToolAtOpenBank()
+    {
+        if (method.skill == Skill.MINING)
+            return ensureBestUsableToolAtOpenBank(MINING_TOOLS, Rs2Player.getRealSkillLevel(Skill.MINING));
+
+        if (method.skill == Skill.WOODCUTTING)
+            return ensureBestUsableToolAtOpenBank(WOODCUTTING_TOOLS, Rs2Player.getRealSkillLevel(Skill.WOODCUTTING));
+
+        if (method.tool == null || hasTool(method.tool)) return true;
+
+        if (!Rs2Bank.hasItem(method.tool))
+        {
+            halt("Missing " + method.tool);
+            return false;
+        }
+
+        status = "Withdrawing " + method.tool;
+        boolean started = Rs2Bank.withdrawX(method.tool, 1, true);
+        return started && sleepUntil(() -> Rs2Inventory.hasItem(method.tool), 2_500);
+    }
+
+    private boolean ensureBestUsableToolAtOpenBank(ToolTier[] tools, int skillLevel)
+    {
+        for (ToolTier tool : tools)
+        {
+            if (skillLevel < tool.level) continue;
+
+            if (hasTool(tool.name))
+            {
+                status = "Using " + tool.name;
+                return true;
+            }
+
+            if (!Rs2Bank.hasItem(tool.name)) continue;
+
+            status = "Withdrawing " + tool.name;
+            boolean started = Rs2Bank.withdrawX(tool.name, 1, true);
+            if (started && sleepUntil(() -> Rs2Inventory.hasItem(tool.name), 2_500)) return true;
+        }
+
+        halt("No suitable " + (tools == MINING_TOOLS ? "pickaxe" : "axe") + " available");
+        return false;
+    }
+
+    private boolean ensureConsumablesAtOpenBank()
+    {
+        if (method == GatheringMethod.TROUT_SALMON)
+        {
+            int feathers = Rs2Inventory.itemQuantity("Feather");
+            if (feathers < FEATHER_RESTOCK_THRESHOLD && Rs2Bank.hasItem("Feather"))
+            {
+                status = "Withdrawing feathers";
+                int before = feathers;
+                Rs2Bank.withdrawAll("Feather");
+                sleepUntil(() -> Rs2Inventory.itemQuantity("Feather") > before, 2_500);
+            }
+
+            if (Rs2Inventory.itemQuantity("Feather") <= 0)
+            {
+                halt("Missing Feather");
+                return false;
+            }
+        }
+
+        if (method.karamjaFishing())
+        {
+            int coins = coinCount();
+            if (coins < KARAMJA_COIN_TARGET && Rs2Bank.hasItem(COINS))
+            {
+                status = "Withdrawing Karamja ferry coins";
+                int request = Math.max(1, KARAMJA_COIN_TARGET - coins);
+                Rs2Bank.withdrawX(COINS, request, true);
+                sleepUntil(() -> coinCount() > coins, 2_500);
+            }
+
+            if (coinCount() < KARAMJA_MIN_DEPARTURE_COINS)
+            {
+                halt("Need at least 60 coins for Karamja ferry");
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private void depositUnneededAtOpenBank()
+    {
+        Set<Integer> keep = new HashSet<>();
+        for (Rs2ItemModel item : Rs2Inventory.all())
+        {
+            String name = item.getName();
+            if (name != null && shouldKeepForMethod(name)) keep.add(item.getId());
+        }
+
+        if (keep.isEmpty()) Rs2Bank.depositAll();
+        else Rs2Bank.depositAllExcept(keep.toArray(new Integer[0]));
+
+        Rs2Inventory.waitForInventoryChanges(1_200);
+    }
+
+    private boolean shouldKeepForMethod(String itemName)
+    {
+        if (method == null || itemName == null) return false;
+        String name = itemName.toLowerCase(Locale.ROOT);
+
+        if (method.skill == Skill.MINING)
+        {
+            String bestHeld = bestHeldToolName(MINING_TOOLS, Rs2Player.getRealSkillLevel(Skill.MINING));
+            return bestHeld != null && name.equals(bestHeld.toLowerCase(Locale.ROOT));
+        }
+
+        if (method.skill == Skill.WOODCUTTING)
+        {
+            String bestHeld = bestHeldToolName(WOODCUTTING_TOOLS, Rs2Player.getRealSkillLevel(Skill.WOODCUTTING));
+            return bestHeld != null && name.equals(bestHeld.toLowerCase(Locale.ROOT));
+        }
+
+        if (method.tool != null && name.equals(method.tool.toLowerCase(Locale.ROOT))) return true;
+        if (method == GatheringMethod.TROUT_SALMON && name.equals("feather")) return true;
+        return method.karamjaFishing() && name.equals("coins");
+    }
+
+    private String bestHeldToolName(ToolTier[] tools, int skillLevel)
+    {
+        for (ToolTier tool : tools)
+            if (skillLevel >= tool.level && hasTool(tool.name)) return tool.name;
+        return null;
     }
 
     private boolean hasUsableTool(ToolTier[] tools, int skillLevel)
     {
-        for (ToolTier tool : tools)
-            if (skillLevel >= tool.level && hasTool(tool.name)) return true;
-        return false;
+        return bestHeldToolName(tools, skillLevel) != null;
     }
 
     private boolean hasTool(String name)
@@ -282,65 +507,25 @@ public class KspF2pGatheringProfitScript extends Script
         return Rs2Inventory.hasItem(name) || Rs2Equipment.isWearing(name);
     }
 
-    private boolean withdrawBestUsable(ToolTier[] tools, int skillLevel)
+    private String missingInputDescription()
     {
-        if (!KspVerifiedBank.walkToBankAndOpenBank())
-        {
-            recover("Bank/tool");
-            return false;
-        }
-        for (ToolTier tool : tools)
-        {
-            if (skillLevel < tool.level || !Rs2Bank.hasItem(tool.name)) continue;
-            status = "Withdrawing " + tool.name;
-            boolean started = Rs2Bank.withdrawX(tool.name, 1, true);
-            if (started) started = sleepUntil(() -> Rs2Inventory.hasItem(tool.name), 2_500);
-            Rs2Bank.closeBank();
-            return started;
-        }
-        Rs2Bank.closeBank();
-        halt("No suitable tool in bank");
-        return false;
-    }
-
-    private boolean withdraw(String name, boolean all)
-    {
-        if (name == null || name.isBlank()) return true;
-        if (!KspVerifiedBank.walkToBankAndOpenBank())
-        {
-            recover("Bank/tool");
-            return false;
-        }
-        if (!Rs2Bank.hasItem(name))
-        {
-            Rs2Bank.closeBank();
-            halt("Missing " + name);
-            return false;
-        }
-
-        boolean started;
-        if (all)
-        {
-            int before = Rs2Inventory.itemQuantity(name);
-            Rs2Bank.withdrawAll(name);
-            started = sleepUntil(() -> Rs2Inventory.itemQuantity(name) > before, 2_500);
-        }
-        else
-        {
-            started = Rs2Bank.withdrawX(name, 1, true);
-            if (started) started = sleepUntil(() -> Rs2Inventory.hasItem(name), 2_500);
-        }
-        Rs2Bank.closeBank();
-        return started;
+        if (method == null) return "inputs";
+        if (method.skill == Skill.MINING) return "pickaxe";
+        if (method.skill == Skill.WOODCUTTING) return "axe";
+        if (method.tool != null && !hasTool(method.tool)) return method.tool;
+        if (method == GatheringMethod.TROUT_SALMON && Rs2Inventory.itemQuantity("Feather") <= 0) return "Feather";
+        if (method.karamjaFishing() && coinCount() < KARAMJA_MIN_DEPARTURE_COINS) return "Karamja ferry coins";
+        return "inputs";
     }
 
     private void gather()
     {
         if (Rs2Player.isMoving() || Rs2Player.isAnimating() || Rs2Player.isInteracting()) return;
         if (System.currentTimeMillis() - lastGatherClick < 1_200L) return;
-        status = "Gathering: " + method.name();
 
+        status = "Gathering: " + method.name();
         boolean clicked;
+
         if (method.skill == Skill.FISHING)
         {
             Rs2NpcModel spot = Microbot.getRs2NpcCache().query()
@@ -361,6 +546,7 @@ public class KspF2pGatheringProfitScript extends Script
             handleMissingNode();
             return;
         }
+
         lastGatherClick = System.currentTimeMillis();
         noNodeSince = 0L;
         failures = 0;
@@ -370,10 +556,13 @@ public class KspF2pGatheringProfitScript extends Script
     private void handleMissingNode()
     {
         if (noNodeSince == 0L) noNodeSince = System.currentTimeMillis();
+
         long waited = (System.currentTimeMillis() - noNodeSince) / 1_000L;
         int grace = method.skill == Skill.MINING ? config.respawnGraceSeconds() : config.competitionSeconds();
         int nearby = nearbyPlayers(config.playerCompetitionRadius());
+
         status = "Waiting respawn " + waited + "s; players=" + nearby;
+
         if (config.worldHop() && waited >= grace && nearby > 0) hop("Competition");
         else if (config.worldHop() && waited >= Math.max(grace, config.competitionSeconds()) * 2L) hop("Depleted");
     }
@@ -381,11 +570,17 @@ public class KspF2pGatheringProfitScript extends Script
     private int nearbyPlayers(int radius)
     {
         return Microbot.getClientThread().runOnClientThreadOptional(() -> {
-            if (Microbot.getClient() == null || Microbot.getClient().getLocalPlayer() == null
-                    || Microbot.getClient().getTopLevelWorldView() == null) return 0;
+            if (Microbot.getClient() == null
+                    || Microbot.getClient().getLocalPlayer() == null
+                    || Microbot.getClient().getTopLevelWorldView() == null)
+            {
+                return 0;
+            }
+
             Player localPlayer = Microbot.getClient().getLocalPlayer();
             WorldPoint local = localPlayer.getWorldLocation();
             if (local == null) return 0;
+
             return (int) Microbot.getClient().getTopLevelWorldView().players().stream()
                     .filter(Objects::nonNull)
                     .filter(player -> player != localPlayer && player.getWorldLocation() != null)
@@ -401,14 +596,17 @@ public class KspF2pGatheringProfitScript extends Script
         int max = Rs2Player.getRealSkillLevel(Skill.HITPOINTS);
         int percent = max <= 0 ? 100 : hp * 100 / max;
         int threats = nearbyPlayers(config.wildernessThreatRadius());
+
         if (threats <= 0 && percent > config.wildernessEscapeHp())
         {
-            if (escape != EscapeState.SAFE && System.currentTimeMillis() - lastHop > 8_000L) escape = EscapeState.SAFE;
+            if (escape != EscapeState.SAFE && System.currentTimeMillis() - lastHop > 8_000L)
+                escape = EscapeState.SAFE;
             return false;
         }
 
         escape = EscapeState.THREAT;
         status = "Wilderness threat: " + threats + " player(s), HP " + percent + "%";
+
         WorldPoint player = Rs2Player.getWorldLocation();
         if (player != null && player.getY() > 3520)
         {
@@ -416,6 +614,7 @@ public class KspF2pGatheringProfitScript extends Script
             Rs2Walker.walkTo(new WorldPoint(player.getX(), 3520, player.getPlane()), 4);
             return true;
         }
+
         escape = EscapeState.HOPPING;
         hop("Wilderness safety");
         return true;
@@ -424,54 +623,53 @@ public class KspF2pGatheringProfitScript extends Script
     private void hop(String reason)
     {
         if (!config.worldHop() || System.currentTimeMillis() - lastHop < 12_000L) return;
+
         int world = Login.getRandomWorld(false);
         if (world <= 0)
         {
             recover("No F2P world available");
             return;
         }
+
         status = "World hop: " + reason + " -> " + world;
         if (method != null && method.wilderness()) escape = EscapeState.HOPPING;
+
         if (!Microbot.hopToWorld(world))
         {
             recover("World hop failed");
             return;
         }
+
         hops++;
         lastHop = System.currentTimeMillis();
         noNodeSince = 0L;
         failures = 0;
         sleepUntil(() -> !Microbot.isHopping(), 10_000);
+
         if (method != null) location = chooseLocation(method, Rs2Player.getWorldLocation());
         escape = EscapeState.COOLDOWN;
     }
 
     private void bank()
     {
-        status = "Banking";
+        status = "Banking gathered resources";
         if (!KspVerifiedBank.walkToBankAndOpenBank())
         {
             recover("Bank");
             return;
         }
-        Set<Integer> keep = new HashSet<>();
-        for (Rs2ItemModel item : Rs2Inventory.all())
+
+        depositUnneededAtOpenBank();
+        if (!ensureConsumablesAtOpenBank())
         {
-            String name = item.getName() == null ? "" : item.getName().toLowerCase(Locale.ROOT);
-            if (isGatheringTool(name) || name.equals("feather") || name.equals("coins")) keep.add(item.getId());
+            Rs2Bank.closeBank();
+            return;
         }
-        if (keep.isEmpty()) Rs2Bank.depositAll();
-        else Rs2Bank.depositAllExcept(keep.toArray(new Integer[0]));
-        Rs2Inventory.waitForInventoryChanges(1_200);
+
         Rs2Bank.closeBank();
         lastInventoryQuantity = 0;
         failures = 0;
-    }
-
-    private boolean isGatheringTool(String name)
-    {
-        return name.contains("pickaxe") || name.endsWith(" axe") || name.equals("harpoon")
-                || name.equals("lobster pot") || name.equals("fly fishing rod");
+        status = "Banked; returning to " + method.name();
     }
 
     private void handleKaramjaFishing()
@@ -481,13 +679,24 @@ public class KspF2pGatheringProfitScript extends Script
             depositKaramjaFish();
             return;
         }
+
         if (Rs2Inventory.isFull())
         {
-            if (!config.bankWhenFull()) Rs2Inventory.dropAll(item -> item != null && isKaramjaFish(item.getName()));
-            else if (isKaramja()) returnToPortSarim();
-            else usePortSarimDepositBox();
+            if (!config.bankWhenFull())
+            {
+                Rs2Inventory.dropAll(item -> item != null && isKaramjaFish(item.getName()));
+            }
+            else if (isKaramja())
+            {
+                returnToPortSarim();
+            }
+            else
+            {
+                usePortSarimDepositBox();
+            }
             return;
         }
+
         if (isKaramja())
         {
             WorldPoint player = Rs2Player.getWorldLocation();
@@ -496,9 +705,20 @@ public class KspF2pGatheringProfitScript extends Script
                 status = "Walking: " + method.name();
                 Rs2Walker.walkTo(location, 4);
             }
-            else gather();
+            else
+            {
+                gather();
+            }
             return;
         }
+
+        if (coinCount() < KARAMJA_MIN_DEPARTURE_COINS)
+        {
+            preparedMethod = null;
+            prepareMethodLoadoutAtBank();
+            return;
+        }
+
         if (isPortSarim()) travelToMusaPoint();
         else
         {
@@ -507,38 +727,15 @@ public class KspF2pGatheringProfitScript extends Script
         }
     }
 
-    private boolean ensureKaramjaTravelCoins()
-    {
-        if (coinCount() >= 60) return true;
-        if (isKaramja())
-        {
-            halt("Not enough coins to leave Karamja");
-            return false;
-        }
-        if (!KspVerifiedBank.walkToBankAndOpenBank())
-        {
-            recover("Bank/coins");
-            return false;
-        }
-        int need = Math.max(0, 1_000 - coinCount());
-        if (need > 0 && (!Rs2Bank.hasItem(COINS) || !Rs2Bank.withdrawX(COINS, need, true)))
-        {
-            Rs2Bank.closeBank();
-            halt("Need coins for Karamja ferry");
-            return false;
-        }
-        sleepUntil(() -> coinCount() >= 60, 2_500);
-        Rs2Bank.closeBank();
-        return coinCount() >= 60;
-    }
-
     private void travelToMusaPoint()
     {
-        if (coinCount() < 30)
+        if (coinCount() < KARAMJA_MIN_DEPARTURE_COINS)
         {
-            ensureKaramjaTravelCoins();
+            preparedMethod = null;
+            prepareMethodLoadoutAtBank();
             return;
         }
+
         Rs2NpcModel sailor = findNpc(KARAMJA_SAILORS);
         if (sailor == null)
         {
@@ -546,17 +743,20 @@ public class KspF2pGatheringProfitScript extends Script
             Rs2Walker.walkTo(PORT_SARIM_DOCK, 4);
             return;
         }
+
         status = "Travelling to Musa Point";
-        if (clickAny(sailor, "Musa Point", "Travel", "Pay-fare", "Pay-Fare")) sleepUntil(this::isKaramja, 15_000);
+        if (clickAny(sailor, "Musa Point", "Travel", "Pay-fare", "Pay-Fare"))
+            sleepUntil(this::isKaramja, 15_000);
     }
 
     private void returnToPortSarim()
     {
-        if (coinCount() < 30)
+        if (coinCount() < KARAMJA_MIN_RETURN_COINS)
         {
             halt("Need 30 coins to return from Karamja");
             return;
         }
+
         WorldPoint player = Rs2Player.getWorldLocation();
         if (player == null || player.distanceTo(KARAMJA_DOCK) > 12)
         {
@@ -564,14 +764,17 @@ public class KspF2pGatheringProfitScript extends Script
             Rs2Walker.walkTo(KARAMJA_DOCK, 4);
             return;
         }
+
         Rs2NpcModel officer = findNpc("Customs officer");
         if (officer == null)
         {
             status = "Finding Customs officer";
             return;
         }
+
         status = "Travelling to Port Sarim";
-        if (clickAny(officer, "Port Sarim", "Travel", "Pay-fare", "Pay-Fare")) sleepUntil(this::isPortSarim, 15_000);
+        if (clickAny(officer, "Port Sarim", "Travel", "Pay-fare", "Pay-Fare"))
+            sleepUntil(this::isPortSarim, 15_000);
     }
 
     private void usePortSarimDepositBox()
@@ -583,7 +786,12 @@ public class KspF2pGatheringProfitScript extends Script
     private void depositKaramjaFish()
     {
         status = "Depositing fish";
-        Rs2DepositBox.depositAllExcept("Harpoon", "Lobster pot", "Coins");
+
+        if (method == GatheringMethod.LOBSTER)
+            Rs2DepositBox.depositAllExcept("Lobster pot", "Coins");
+        else
+            Rs2DepositBox.depositAllExcept("Harpoon", "Coins");
+
         sleepUntil(() -> karamjaFishCount() == 0, 3_000);
         Rs2DepositBox.closeDepositBox();
         lastInventoryQuantity = 0;
@@ -593,25 +801,30 @@ public class KspF2pGatheringProfitScript extends Script
 
     private int karamjaFishCount()
     {
-        return Rs2Inventory.count("Raw lobster") + Rs2Inventory.count("Raw tuna") + Rs2Inventory.count("Raw swordfish");
+        return Rs2Inventory.count("Raw lobster")
+                + Rs2Inventory.count("Raw tuna")
+                + Rs2Inventory.count("Raw swordfish");
     }
 
     private boolean isKaramjaFish(String name)
     {
-        return name != null && (name.equalsIgnoreCase("Raw lobster") || name.equalsIgnoreCase("Raw tuna")
+        return name != null && (name.equalsIgnoreCase("Raw lobster")
+                || name.equalsIgnoreCase("Raw tuna")
                 || name.equalsIgnoreCase("Raw swordfish"));
     }
 
     private Rs2NpcModel findNpc(String... names)
     {
         return Microbot.getRs2NpcCache().query()
-                .where(npc -> npc.getName() != null && Arrays.stream(names).anyMatch(name -> name.equalsIgnoreCase(npc.getName())))
+                .where(npc -> npc.getName() != null
+                        && Arrays.stream(names).anyMatch(name -> name.equalsIgnoreCase(npc.getName())))
                 .nearestOnClientThread();
     }
 
     private boolean clickAny(Rs2NpcModel npc, String... actions)
     {
-        for (String action : actions) if (npc.click(action)) return true;
+        for (String action : actions)
+            if (npc.click(action)) return true;
         return false;
     }
 
@@ -630,7 +843,8 @@ public class KspF2pGatheringProfitScript extends Script
     private boolean isPortSarim()
     {
         WorldPoint point = Rs2Player.getWorldLocation();
-        return point != null && point.getX() >= 3000 && point.getX() < 3075 && point.getY() >= 3180 && point.getY() < 3260;
+        return point != null && point.getX() >= 3000 && point.getX() < 3075
+                && point.getY() >= 3180 && point.getY() < 3260;
     }
 
     private int skillXp(Skill skill)
@@ -680,6 +894,7 @@ public class KspF2pGatheringProfitScript extends Script
     public void shutdown()
     {
         method = null;
+        preparedMethod = null;
         location = null;
         status = "Stopped";
         gpHour = xpHour = realGpHour = failures = hops = gathered = 0;
@@ -692,6 +907,7 @@ public class KspF2pGatheringProfitScript extends Script
     {
         private final String name;
         private final int level;
+
         private ToolTier(String name, int level)
         {
             this.name = name;
