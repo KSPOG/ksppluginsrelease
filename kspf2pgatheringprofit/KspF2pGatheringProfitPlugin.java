@@ -11,13 +11,12 @@ import javax.inject.Inject;
 import java.time.Instant;
 
 @PluginDescriptor(
-        name = PluginDescriptor.Mocrosoft + "F2P Gathering Profit",
+        name = PluginConstants.KSP + "F2P Gathering Profit",
         description = "F2P Mining, Woodcutting and Fishing profit/XP optimizer.",
         tags = {"ksp", "f2p", "skiller", "profit", "mining", "woodcutting", "fishing"},
+        authors = {"KSP"},
         version = KspF2pGatheringProfitPlugin.VERSION,
         minClientVersion = "2.0.13",
-        cardUrl = "",
-        iconUrl = "",
         enabledByDefault = PluginConstants.DEFAULT_ENABLED,
         isExternal = PluginConstants.IS_EXTERNAL
 )
@@ -36,31 +35,22 @@ public class KspF2pGatheringProfitPlugin extends Plugin
     protected void startUp()
     {
         started = Instant.now();
-        if (overlayManager != null && overlay != null)
-        {
-            overlayManager.add(overlay);
-        }
+        overlayManager.add(overlay);
         script.run(config);
     }
 
     @Override
     protected void shutDown()
     {
-        if (script != null)
-        {
-            script.shutdown();
-        }
-        if (overlayManager != null && overlay != null)
-        {
-            overlayManager.remove(overlay);
-        }
+        script.shutdown();
+        overlayManager.remove(overlay);
         started = null;
     }
 
     @Provides
-    KspF2pGatheringProfitConfig provideConfig(ConfigManager configManager)
+    KspF2pGatheringProfitConfig provideConfig(ConfigManager manager)
     {
-        return configManager.getConfig(KspF2pGatheringProfitConfig.class);
+        return manager.getConfig(KspF2pGatheringProfitConfig.class);
     }
 
     public KspF2pGatheringProfitScript getScript()
