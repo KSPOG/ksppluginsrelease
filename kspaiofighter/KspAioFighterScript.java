@@ -2140,7 +2140,6 @@ public class KspAioFighterScript extends Script
 				.where(item -> !item.isDespawned())
 				.where(Rs2TileItemModel::isLootAble)
 				.where(this::matchesLootOwnership)
-				.where(this::isLootInsideAttackArea)
 				.where(this::canStoreLoot)
 				.where(item -> matchesConfiguredLoot(item, configuredNames))
 				.within(searchRadius)
@@ -2150,16 +2149,6 @@ public class KspAioFighterScript extends Script
 	private boolean matchesLootOwnership(Rs2TileItemModel item)
 	{
 		return !lootOwnOnly() || item.isOwned();
-	}
-
-	private boolean isLootInsideAttackArea(Rs2TileItemModel item)
-	{
-		if (!config.useAttackArea())
-		{
-			return true;
-		}
-
-		return isInsideConfiguredArea(item.getWorldLocation());
 	}
 
 	private boolean canStoreLoot(Rs2TileItemModel item)
