@@ -1070,6 +1070,15 @@ public class KspAioFighterScript extends Script
 			return true;
 		}
 
+		// The attack area is the hard movement boundary. Safe-spot mode may choose the
+		// standing tile, but it must never pull the player back outside the configured
+		// rectangle after an out-of-area loot pickup. Clamp an external safe spot to the
+		// nearest tile inside the attack area instead.
+		if (config.useAttackArea() && hasCompleteAttackArea() && !isInsideConfiguredArea(safeSpot))
+		{
+			safeSpot = getNearestPointInsideConfiguredArea(safeSpot);
+		}
+
 		WorldPoint playerLocation = Rs2Player.getWorldLocation();
 		if (playerLocation == null || playerLocation.equals(safeSpot))
 		{
