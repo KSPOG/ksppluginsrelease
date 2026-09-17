@@ -1,4 +1,4 @@
-# KSP F2P Gathering Profit v0.0.3
+# KSP F2P Gathering Profit v0.0.5
 
 Repository-compatible source for `KSPOG/ksppluginsrelease`.
 
@@ -11,6 +11,11 @@ Repository-compatible source for `KSPOG/ksppluginsrelease`.
 - Wilderness Runite retreat/hop state machine
 - Mining/Woodcutting tool selection respects the relevant gathering skill level
 - Repository-standard verified banking through `KspVerifiedBank`
+- Explicit bank loadout preparation whenever a method is first selected or changes
+- Automatically withdraws the best usable Mining pickaxe or Woodcutting axe
+- Automatically withdraws Fly fishing rod + feathers, Lobster pot, or Harpoon as required
+- Karamja methods automatically maintain ferry coins, targeting 1,000 coins with at least 60 before departure and 30 reserved for the return trip
+- Method banking keeps only the currently required tool/supplies and deposits gathered resources/unrelated inventory
 - Karamja Lobster and Tuna/Swordfish transport + Port Sarim deposit-box banking
 
 ## Supported targets
