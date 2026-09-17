@@ -98,6 +98,7 @@ public class KspAioFighterScript extends Script
 	private final AtomicBoolean missingGearDialogShown = new AtomicBoolean(false);
 	private final AtomicBoolean missingRuneDialogShown = new AtomicBoolean(false);
 	private int lastFoodRestockCount = 0;
+	private boolean lootCollectedSinceBank = false;
 	private static volatile long overlayStartedAtMs = 0L;
 	private long startedAtMs = 0L;
 	private boolean wasInCombatOrInteracting = false;
@@ -137,6 +138,7 @@ public class KspAioFighterScript extends Script
 		startCameraConfigured = false;
 		startCameraAttempts = 0;
 		lastFoodRestockCount = 0;
+		lootCollectedSinceBank = false;
 		lastGearBankAttemptMs = 0L;
 		lastGearBankSkill = null;
 		unavailableGearThisRun.clear();
@@ -609,20 +611,28 @@ public class KspAioFighterScript extends Script
 			return false;
 		}
 
-		// If the inventory is full directly after a gear/supply restock, it is full because of
-		// configured supplies, not because loot filled the bag. Banking here caused a loop:
-		// restock food -> walk to fight area -> see full inventory -> bank -> deposit all -> repeat.
-		if (config.useHealing()
-				&& !config.foodName().trim().isEmpty()
-				&& lastFoodRestockCount > 0
-				&& getConfiguredFoodCount() >= lastFoodRestockCount)
+		// Bury first when a full inventory contains buryable bones. The next loop then
+		// sees the freed slot and can continue looting instead of making a needless bank trip.
+		if (config.buryBones() && getBuryableInventoryBone() != null)
 		{
 			return false;
 		}
 
-		// Match the working jar flow: when burying is enabled, a full inventory
-		// containing buryable bones should bury first instead of banking immediately.
-		if (config.buryBones() && getBuryableInventoryBone() != null)
+		// Once this run has successfully clicked an eligible ground drop, a full inventory
+		// is no longer treated as a deliberate full supply setup. Bank it immediately.
+		// This fixes the old food-count heuristic which could suppress banking forever
+		// when loot filled the final free slots but the configured food count had not changed.
+		if (lootCollectedSinceBank)
+		{
+			return true;
+		}
+
+		// Preserve the anti-loop guard only for a genuinely full startup/restock inventory
+		// before any loot has been collected since the last bank trip.
+		if (config.useHealing()
+				&& !config.foodName().trim().isEmpty()
+				&& lastFoodRestockCount > 0
+				&& getConfiguredFoodCount() >= lastFoodRestockCount)
 		{
 			return false;
 		}
@@ -643,6 +653,7 @@ public class KspAioFighterScript extends Script
 		}
 
 		depositAllExceptProtectedRunes();
+		lootCollectedSinceBank = false;
 		Skill gearSkill = currentTrainingSkill != null ? currentTrainingSkill : selectTrainingSkill().orElse(null);
 		if (gearSkill != null)
 		{
@@ -1437,6 +1448,7 @@ public class KspAioFighterScript extends Script
 		}
 
 		Rs2Bank.depositAll();
+		lootCollectedSinceBank = false;
 		sleepUntil(() -> Rs2Inventory.isEmpty(), 1_800);
 		depositEquippedItemsFromBank();
 		equipGearFromOpenBank(skill);
@@ -2067,6 +2079,7 @@ public class KspAioFighterScript extends Script
 		boolean clicked = KspLootingHelper.take(loot, log, false, "KSP AIO Fighter loot");
 		if (clicked)
 		{
+			lootCollectedSinceBank = true;
 			markLootPickupPending(loot);
 			postKillLootUntilMs = Math.max(postKillLootUntilMs, System.currentTimeMillis() + 350L);
 			sleepUntil(() -> Rs2Player.isMoving() || Rs2Player.isInteracting() || findNextLoot() == null, 450);
