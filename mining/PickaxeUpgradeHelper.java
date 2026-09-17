@@ -47,30 +47,30 @@ public final class PickaxeUpgradeHelper
 
     /**
      * Withdraws the best banked pickaxe the account can use for mining.
-     * Equipment is preferred when the Attack requirement is met; otherwise
-     * one pickaxe is withdrawn and retained in inventory.
+     * Mining level selects the pickaxe. Attack level only decides whether the
+     * selected pickaxe is equipped or kept in inventory.
      */
     public static boolean withdrawBestPickaxeForMining()
     {
         try
         {
-            if (hasPickaxeEquippedOrInInventory())
-            {
-                return true;
-            }
-
             if (!Rs2Bank.isOpen())
             {
-                return false;
+                return hasPickaxeEquippedOrInInventory();
             }
 
             final int miningLevel = Rs2Player.getRealSkillLevel(Skill.MINING);
             final int attackLevel = Rs2Player.getRealSkillLevel(Skill.ATTACK);
-            final Pickaxe best = bestAvailableMiningPickaxeInBank(miningLevel);
+            final Pickaxe best = bestAvailableMiningPickaxe(miningLevel, true);
 
             if (best == null)
             {
                 return false;
+            }
+
+            if (Rs2Equipment.isWearing(best.name) || Rs2Inventory.hasItem(best.name))
+            {
+                return true;
             }
 
             Microbot.status = "Withdrawing " + best.name + "...";
@@ -96,9 +96,36 @@ public final class PickaxeUpgradeHelper
     }
 
     /**
+     * Returns the best carried mining-usable pickaxe that must stay in inventory
+     * because the account does not have the Attack level required to equip it.
+     */
+    public static String bestCarriedPickaxeToKeepInInventory()
+    {
+        try
+        {
+            final int miningLevel = Rs2Player.getRealSkillLevel(Skill.MINING);
+            final int attackLevel = Rs2Player.getRealSkillLevel(Skill.ATTACK);
+            final Pickaxe best = bestAvailableMiningPickaxe(miningLevel, false);
+
+            if (best == null
+                    || !Rs2Inventory.hasItem(best.name)
+                    || attackLevel >= best.attackLevel)
+            {
+                return null;
+            }
+
+            return best.name;
+        }
+        catch (Throwable ignored)
+        {
+            return null;
+        }
+    }
+
+    /**
      * Equips the best pickaxe already carried in inventory when possible.
-     * This is called before clicking Deposit inventory so the active tool is
-     * normally preserved by being in the weapon slot.
+     * Attack level is only relevant for equipping; it does not determine the
+     * best pickaxe the account can use for mining.
      */
     public static void equipBestCarriedPickaxeIfPossible()
     {
@@ -109,7 +136,7 @@ public final class PickaxeUpgradeHelper
 
         final int miningLevel = Rs2Player.getRealSkillLevel(Skill.MINING);
         final int attackLevel = Rs2Player.getRealSkillLevel(Skill.ATTACK);
-        final Pickaxe carried = bestAvailablePickaxe(miningLevel, attackLevel, false);
+        final Pickaxe carried = bestEquippableCarriedPickaxe(miningLevel, attackLevel);
 
         if (carried == null || Rs2Equipment.isWearing(carried.name))
         {
@@ -125,12 +152,9 @@ public final class PickaxeUpgradeHelper
     }
 
     /**
-     * After Deposit inventory, selects the highest-level pickaxe that exists in
-     * the bank/equipment and can actually be equipped by this account.
-     *
-     * When an upgrade is equipped, the previous weapon is moved to inventory;
-     * every inventory pickaxe is then deposited, leaving only the upgraded tool
-     * equipped.
+     * After banking, selects the highest-level pickaxe allowed by Mining level.
+     * If Attack is high enough it is equipped; otherwise one copy is kept in
+     * inventory. Attack level never causes a lower-tier mining pickaxe to win.
      */
     public static boolean ensureBestPickaxeAfterDeposit()
     {
@@ -143,41 +167,60 @@ public final class PickaxeUpgradeHelper
 
             final int miningLevel = Rs2Player.getRealSkillLevel(Skill.MINING);
             final int attackLevel = Rs2Player.getRealSkillLevel(Skill.ATTACK);
-            final Pickaxe best = bestAvailablePickaxe(miningLevel, attackLevel, true);
+            final Pickaxe best = bestAvailableMiningPickaxe(miningLevel, true);
 
             if (best == null)
             {
                 return false;
             }
 
-            if (!Rs2Equipment.isWearing(best.name))
+            final boolean canEquip = attackLevel >= best.attackLevel;
+
+            if (canEquip)
             {
-                Microbot.status = "Upgrading to " + best.name + "...";
-
-                boolean equipped = false;
-                if (Rs2Inventory.hasItem(best.name))
+                if (!Rs2Equipment.isWearing(best.name))
                 {
-                    equipped = Rs2Bank.wearItem(best.name, true);
-                }
-                else if (Rs2Bank.hasBankItem(best.name, true))
-                {
-                    equipped = Rs2Bank.withdrawAndEquip(best.name);
+                    Microbot.status = "Upgrading to " + best.name + "...";
+
+                    boolean equipped = false;
+                    if (Rs2Inventory.hasItem(best.name))
+                    {
+                        equipped = Rs2Bank.wearItem(best.name, true);
+                    }
+                    else if (Rs2Bank.hasBankItem(best.name, true))
+                    {
+                        equipped = Rs2Bank.withdrawAndEquip(best.name);
+                    }
+
+                    if (!equipped || !waitUntil(() -> Rs2Equipment.isWearing(best.name), 2_400L))
+                    {
+                        return false;
+                    }
                 }
 
-                if (!equipped || !waitUntil(() -> Rs2Equipment.isWearing(best.name), 2_400L))
+                // The best pickaxe is safely equipped, so any inventory pickaxes
+                // are lower-tier/displaced tools and can be banked.
+                depositInventoryPickaxesExcept(null);
+
+                return waitUntil(() -> Rs2Equipment.isWearing(best.name)
+                                && !hasInventoryPickaxe(),
+                        2_400L);
+            }
+
+            // The pickaxe is usable for Mining but cannot be wielded. Keep one in
+            // inventory rather than downgrading based on Attack level.
+            if (!Rs2Inventory.hasItem(best.name))
+            {
+                if (!Rs2Bank.hasBankItem(best.name, true)
+                        || !Rs2Bank.withdrawOne(best.name, true)
+                        || !waitUntil(() -> Rs2Inventory.hasItem(best.name), 2_400L))
                 {
                     return false;
                 }
             }
 
-            // Equipping the upgrade displaces the obsolete pickaxe into the
-            // inventory. Deposit every inventory pickaxe now that the retained
-            // best pickaxe is safely equipped.
-            depositAllInventoryPickaxes();
-
-            return waitUntil(() -> Rs2Equipment.isWearing(best.name)
-                            && !hasInventoryPickaxe(),
-                    2_400L);
+            depositInventoryPickaxesExcept(best.name);
+            return waitUntil(() -> Rs2Inventory.hasItem(best.name), 2_400L);
         }
         catch (Throwable throwable)
         {
@@ -210,35 +253,13 @@ public final class PickaxeUpgradeHelper
         return normalized.contains("pickaxe");
     }
 
-    private static Pickaxe bestAvailableMiningPickaxeInBank(int miningLevel)
+    private static Pickaxe bestAvailableMiningPickaxe(int miningLevel, boolean includeBank)
     {
         Pickaxe best = null;
 
         for (Pickaxe pickaxe : PICKAXES)
         {
             if (pickaxe.miningLevel > miningLevel
-                    || (pickaxe.membersOnly && !isMembersWorld()))
-            {
-                continue;
-            }
-
-            if (Rs2Bank.hasBankItem(pickaxe.name, true))
-            {
-                best = pickaxe;
-            }
-        }
-
-        return best;
-    }
-
-    private static Pickaxe bestAvailablePickaxe(int miningLevel, int attackLevel, boolean includeBank)
-    {
-        Pickaxe best = null;
-
-        for (Pickaxe pickaxe : PICKAXES)
-        {
-            if (pickaxe.miningLevel > miningLevel
-                    || pickaxe.attackLevel > attackLevel
                     || (pickaxe.membersOnly && !isMembersWorld()))
             {
                 continue;
@@ -257,9 +278,41 @@ public final class PickaxeUpgradeHelper
         return best;
     }
 
-    private static void depositAllInventoryPickaxes()
+    private static Pickaxe bestEquippableCarriedPickaxe(int miningLevel, int attackLevel)
+    {
+        Pickaxe best = null;
+
+        for (Pickaxe pickaxe : PICKAXES)
+        {
+            if (pickaxe.miningLevel > miningLevel
+                    || pickaxe.attackLevel > attackLevel
+                    || (pickaxe.membersOnly && !isMembersWorld()))
+            {
+                continue;
+            }
+
+            if (Rs2Equipment.isWearing(pickaxe.name) || Rs2Inventory.hasItem(pickaxe.name))
+            {
+                best = pickaxe;
+            }
+        }
+
+        return best;
+    }
+
+    private static void depositInventoryPickaxesExcept(String keepName)
     {
         if (!hasInventoryPickaxe())
+        {
+            return;
+        }
+
+        final boolean hasOtherPickaxe = Rs2Inventory.items().anyMatch(item -> item != null
+                && item.getName() != null
+                && isPickaxeName(item.getName())
+                && (keepName == null || !item.getName().equalsIgnoreCase(keepName)));
+
+        if (!hasOtherPickaxe)
         {
             return;
         }
@@ -267,7 +320,8 @@ public final class PickaxeUpgradeHelper
         Microbot.status = "Depositing outdated pickaxe...";
         Rs2Bank.depositAll(item -> item != null
                 && item.getName() != null
-                && isPickaxeName(item.getName()));
+                && isPickaxeName(item.getName())
+                && (keepName == null || !item.getName().equalsIgnoreCase(keepName)));
         Rs2Inventory.waitForInventoryChanges(1_800);
     }
 
