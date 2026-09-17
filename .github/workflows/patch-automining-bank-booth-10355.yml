@@ -1,0 +1,177 @@
+name: Patch AutoMining bank booth 10355
+
+on:
+  push:
+    branches:
+      - fix/automining-bank-booth-10355
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/automining-bank-booth-10355
+          fetch-depth: 0
+
+      - name: Patch AutoMining banking
+        shell: python
+        run: |
+          from pathlib import Path
+
+          script_path = Path('mining/AutoMiningScript.java')
+          text = script_path.read_text(encoding='utf-8')
+
+          text = text.replace('import net.runelite.client.plugins.microbot.kspbank.KspVerifiedBank;\n', '')
+
+          marker = '    private static final Logger log = LoggerFactory.getLogger(AutoMiningScript.class);\n\n'
+          addition = (
+              '    private static final Logger log = LoggerFactory.getLogger(AutoMiningScript.class);\n'
+              '    private static final int BANK_BOOTH_OBJECT_ID = 10355;\n'
+              '    private static final long BANK_BOOTH_INTERACTION_COOLDOWN_MS = 2_500L;\n\n'
+          )
+          if marker not in text:
+              raise SystemExit('logger marker not found')
+          text = text.replace(marker, addition, 1)
+
+          marker = '    private volatile boolean playerAnimatingSnapshot;\n    private volatile WorldPoint playerLocationSnapshot;\n'
+          addition = (
+              '    private volatile boolean playerAnimatingSnapshot;\n'
+              '    private volatile WorldPoint playerLocationSnapshot;\n'
+              '    private volatile long lastBankBoothInteractionAt;\n'
+          )
+          if marker not in text:
+              raise SystemExit('snapshot marker not found')
+          text = text.replace(marker, addition, 1)
+
+          marker = '        playerAnimatingSnapshot = false;\n        playerLocationSnapshot = null;\n        miningLoopRunning.set(false);\n'
+          addition = (
+              '        playerAnimatingSnapshot = false;\n'
+              '        playerLocationSnapshot = null;\n'
+              '        lastBankBoothInteractionAt = 0L;\n'
+              '        miningLoopRunning.set(false);\n'
+          )
+          if marker not in text:
+              raise SystemExit('run reset marker not found')
+          text = text.replace(marker, addition, 1)
+
+          expected_calls = text.count('KspVerifiedBank.walkToBankAndOpenBank()')
+          if expected_calls != 3:
+              raise SystemExit(f'expected 3 KspVerifiedBank calls, found {expected_calls}')
+          text = text.replace('KspVerifiedBank.walkToBankAndOpenBank()', 'walkToBankBoothAndOpenBank()')
+
+          marker = '    @Override\n    public void shutdown() {\n'
+          helper = '''    /**
+     * AutoMining-specific banking: never clicks a Banker NPC. Travel uses the
+     * nearest-bank route, but the final interaction is restricted to bank booth
+     * object 10355. The cooldown prevents the 50 ms mining loop from repeatedly
+     * invoking Bank while the player is already moving or the interface is opening.
+     */
+    private boolean walkToBankBoothAndOpenBank() {
+        if (Rs2Bank.isOpen()) {
+            lastBankBoothInteractionAt = 0L;
+            return true;
+        }
+
+        GameObject booth = Microbot.getClientThread().runOnClientThreadOptional(
+                () -> Rs2GameObject.getGameObject(BANK_BOOTH_OBJECT_ID)).orElse(null);
+        WorldPoint player = getPlayerLocationSnapshot();
+
+        if (booth == null || booth.getWorldLocation() == null) {
+            lastBankBoothInteractionAt = 0L;
+            Microbot.status = "Walking to bank booth...";
+            Rs2Bank.walkToBank();
+            return false;
+        }
+
+        WorldPoint boothLocation = booth.getWorldLocation();
+        if (player == null
+                || player.getPlane() != boothLocation.getPlane()
+                || player.distanceTo(boothLocation) > 4) {
+            lastBankBoothInteractionAt = 0L;
+            Microbot.status = "Walking to bank booth...";
+            if (!Rs2Player.isMoving()) {
+                Rs2Walker.walkTo(boothLocation, 3);
+            }
+            return false;
+        }
+
+        long now = System.currentTimeMillis();
+        if (lastBankBoothInteractionAt > 0L
+                && now - lastBankBoothInteractionAt < BANK_BOOTH_INTERACTION_COOLDOWN_MS) {
+            Microbot.status = "Waiting for bank booth...";
+            return false;
+        }
+
+        lastBankBoothInteractionAt = now;
+        Microbot.status = "Opening bank booth...";
+        if (!Rs2GameObject.interact(booth, "Bank")) {
+            return false;
+        }
+
+        if (sleepUntil(Rs2Bank::isOpen, 2_500)) {
+            lastBankBoothInteractionAt = 0L;
+            return true;
+        }
+
+        Microbot.status = "Waiting for bank booth...";
+        return false;
+    }
+
+'''
+          if marker not in text:
+              raise SystemExit('shutdown marker not found')
+          text = text.replace(marker, helper + marker, 1)
+
+          marker = '        playerAnimatingSnapshot = false;\n        playerLocationSnapshot = null;\n        miningLoopRunning.set(false);\n'
+          # Replace the remaining shutdown occurrence only.
+          if marker not in text:
+              raise SystemExit('shutdown reset marker not found')
+          text = text.replace(marker,
+              '        playerAnimatingSnapshot = false;\n'
+              '        playerLocationSnapshot = null;\n'
+              '        lastBankBoothInteractionAt = 0L;\n'
+              '        miningLoopRunning.set(false);\n', 1)
+
+          if 'KspVerifiedBank' in text:
+              raise SystemExit('KspVerifiedBank still referenced by AutoMining')
+          if text.count('walkToBankBoothAndOpenBank()') != 4:  # declaration + 3 calls
+              raise SystemExit('unexpected booth helper call count')
+          if 'BANK_BOOTH_OBJECT_ID = 10355' not in text:
+              raise SystemExit('bank booth object id missing')
+
+          script_path.write_text(text, encoding='utf-8')
+
+          plugin_path = Path('mining/AutoMiningPlugin.java')
+          plugin = plugin_path.read_text(encoding='utf-8')
+          old_version = 'public static final String version = "1.0.33";'
+          new_version = 'public static final String version = "1.0.34";'
+          if old_version not in plugin:
+              raise SystemExit('AutoMining version marker not found')
+          plugin_path.write_text(plugin.replace(old_version, new_version, 1), encoding='utf-8')
+
+      - name: Verify patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -q 'BANK_BOOTH_OBJECT_ID = 10355' mining/AutoMiningScript.java
+          grep -q 'version = "1.0.34"' mining/AutoMiningPlugin.java
+          ! grep -q 'KspVerifiedBank' mining/AutoMiningScript.java
+          test "$(grep -c 'walkToBankBoothAndOpenBank()' mining/AutoMiningScript.java)" -eq 4
+
+      - name: Commit patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- mining/AutoMiningScript.java mining/AutoMiningPlugin.java; then
+            echo 'No patch changes to commit.'
+            exit 0
+          fi
+          git config user.name 'KSP Automation'
+          git config user.email 'ksp-automation@users.noreply.github.com'
+          git add mining/AutoMiningScript.java mining/AutoMiningPlugin.java
+          git commit -m 'Fix AutoMining bank booth interaction'
+          git push origin HEAD:fix/automining-bank-booth-10355
