@@ -13,6 +13,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
 import javax.swing.JOptionPane;
@@ -92,6 +93,7 @@ public class KspAioFighterScript extends Script
 	private long lastErrorMs = 0L;
 	private long lastSafeSpotWalkAttemptMs = 0L;
 	private long lastAttackAreaWalkAttemptMs = 0L;
+	private WorldPoint attackAreaReturnTarget;
 	private long lastGearBankAttemptMs = 0L;
 	private Skill lastGearBankSkill;
 	private final Set<String> unavailableGearThisRun = new HashSet<>();
@@ -140,6 +142,7 @@ public class KspAioFighterScript extends Script
 		lastFoodRestockCount = 0;
 		lootCollectedSinceBank = false;
 		lastGearBankAttemptMs = 0L;
+		attackAreaReturnTarget = null;
 		lastGearBankSkill = null;
 		unavailableGearThisRun.clear();
 		missingGearDialogShown.set(false);
@@ -1144,10 +1147,19 @@ public class KspAioFighterScript extends Script
 
 		if (isInsideConfiguredArea(playerLocation))
 		{
+			attackAreaReturnTarget = null;
 			return false;
 		}
 
-		WorldPoint returnPoint = getNearestPointInsideConfiguredArea(playerLocation);
+		// Pick one random tile inside the configured rectangle for this return trip.
+		// Keep the same destination across walker retries so the player does not zig-zag
+		// between different random targets while returning from a bank/loot excursion.
+		if (!isConfiguredTileValid(attackAreaReturnTarget) || !isInsideConfiguredArea(attackAreaReturnTarget))
+		{
+			attackAreaReturnTarget = getRandomPointInsideConfiguredArea();
+		}
+
+		WorldPoint returnPoint = attackAreaReturnTarget;
 		if (!isConfiguredTileValid(returnPoint))
 		{
 			return false;
@@ -1155,14 +1167,32 @@ public class KspAioFighterScript extends Script
 
 		if (!canRetryWalk(lastAttackAreaWalkAttemptMs))
 		{
-			setStatus("walking to attack area");
+			setStatus("walking to random attack-area tile " + formatPoint(returnPoint));
 			return true;
 		}
 
 		lastAttackAreaWalkAttemptMs = System.currentTimeMillis();
 		Rs2Walker.walkTo(returnPoint, ATTACK_AREA_WALK_DISTANCE);
-		setStatus("walking to attack area " + formatPoint(returnPoint) + " distance " + ATTACK_AREA_WALK_DISTANCE);
+		setStatus("walking to random attack-area tile " + formatPoint(returnPoint));
 		return true;
+	}
+
+	private WorldPoint getRandomPointInsideConfiguredArea()
+	{
+		WorldPoint tile1 = getAttackAreaTile1();
+		WorldPoint tile2 = getAttackAreaTile2();
+		if (!isConfiguredTileValid(tile1) || !isConfiguredTileValid(tile2) || tile1.getPlane() != tile2.getPlane())
+		{
+			return getAttackAreaCenterFromTiles();
+		}
+
+		int minX = Math.min(tile1.getX(), tile2.getX());
+		int maxX = Math.max(tile1.getX(), tile2.getX());
+		int minY = Math.min(tile1.getY(), tile2.getY());
+		int maxY = Math.max(tile1.getY(), tile2.getY());
+		int x = ThreadLocalRandom.current().nextInt(minX, maxX + 1);
+		int y = ThreadLocalRandom.current().nextInt(minY, maxY + 1);
+		return new WorldPoint(x, y, tile1.getPlane());
 	}
 
 	private WorldPoint getNearestPointInsideConfiguredArea(WorldPoint playerLocation)
