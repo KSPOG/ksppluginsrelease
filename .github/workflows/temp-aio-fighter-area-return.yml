@@ -1,0 +1,53 @@
+name: Temporary AIO Fighter Area Return Fix
+
+on:
+  push:
+    branches:
+      - fix/aio-fighter-area-return
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/aio-fighter-area-return
+          fetch-depth: 0
+
+      - name: Patch AIO Fighter area return
+        shell: python
+        run: |
+          from pathlib import Path
+
+          script_path = Path("kspaiofighter/KspAioFighterScript.java")
+          script = script_path.read_text(encoding="utf-8")
+          old_distance = "private static final int ATTACK_AREA_WALK_DISTANCE = 1;"
+          new_distance = "private static final int ATTACK_AREA_WALK_DISTANCE = 0;"
+          if old_distance not in script:
+              raise SystemExit("Expected attack-area walk-distance constant was not found")
+          script = script.replace(old_distance, new_distance, 1)
+          script_path.write_text(script, encoding="utf-8")
+
+          plugin_path = Path("kspaiofighter/KspAioFighterPlugin.java")
+          plugin = plugin_path.read_text(encoding="utf-8")
+          old_version = 'static final String version = "1.9.18";'
+          new_version = 'static final String version = "1.9.19";'
+          if old_version not in plugin:
+              raise SystemExit("Expected AIO Fighter version was not found")
+          plugin = plugin.replace(old_version, new_version, 1)
+          plugin_path.write_text(plugin, encoding="utf-8")
+
+          workflow = Path(".github/workflows/temp-aio-fighter-area-return.yml")
+          if workflow.exists():
+              workflow.unlink()
+
+      - name: Commit patch and remove temporary workflow
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Fix AIO Fighter return into configured attack area"
+          git push origin HEAD:fix/aio-fighter-area-return
