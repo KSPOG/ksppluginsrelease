@@ -1070,6 +1070,15 @@ public class KspAioFighterScript extends Script
 			return true;
 		}
 
+		// The attack area is the hard movement boundary. Safe-spot mode may choose the
+		// standing tile, but it must never pull the player back outside the configured
+		// rectangle after an out-of-area loot pickup. Clamp an external safe spot to the
+		// nearest tile inside the attack area instead.
+		if (config.useAttackArea() && hasCompleteAttackArea() && !isInsideConfiguredArea(safeSpot))
+		{
+			safeSpot = getNearestPointInsideConfiguredArea(safeSpot);
+		}
+
 		WorldPoint playerLocation = Rs2Player.getWorldLocation();
 		if (playerLocation == null || playerLocation.equals(safeSpot))
 		{
@@ -2140,7 +2149,6 @@ public class KspAioFighterScript extends Script
 				.where(item -> !item.isDespawned())
 				.where(Rs2TileItemModel::isLootAble)
 				.where(this::matchesLootOwnership)
-				.where(this::isLootInsideAttackArea)
 				.where(this::canStoreLoot)
 				.where(item -> matchesConfiguredLoot(item, configuredNames))
 				.within(searchRadius)
@@ -2150,16 +2158,6 @@ public class KspAioFighterScript extends Script
 	private boolean matchesLootOwnership(Rs2TileItemModel item)
 	{
 		return !lootOwnOnly() || item.isOwned();
-	}
-
-	private boolean isLootInsideAttackArea(Rs2TileItemModel item)
-	{
-		if (!config.useAttackArea())
-		{
-			return true;
-		}
-
-		return isInsideConfiguredArea(item.getWorldLocation());
 	}
 
 	private boolean canStoreLoot(Rs2TileItemModel item)
