@@ -74,7 +74,7 @@ public class KspAioFighterScript extends Script
 
 	private static final long WALK_RETRY_MS = 1_800L;
 	private static final long GEAR_BANK_RETRY_MS = 60_000L;
-	private static final int ATTACK_AREA_WALK_DISTANCE = 1;
+	private static final int ATTACK_AREA_WALK_DISTANCE = 0;
 	private static final long POST_KILL_LOOT_WINDOW_MS = 350L;
 	private static final long LOOT_CLICK_COOLDOWN_MS = 650L;
 	private static final int START_CAMERA_PITCH = 280;
