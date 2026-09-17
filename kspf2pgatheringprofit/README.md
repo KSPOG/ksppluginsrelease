@@ -1,24 +1,39 @@
 # KSP F2P Gathering Profit v0.0.3
 
-Repository-compatible version of the uploaded v0.0.2 source.
+Repository-compatible source for `KSPOG/ksppluginsrelease`.
 
-## Compatibility changes
-- Uses the repository's `PluginDescriptor.Mocrosoft` naming prefix.
-- Uses shared `KspVerifiedBank` banking, including the booth-first banking behavior.
-- Fixes current Microbot `Rs2Equipment.all()` stream usage.
-- Uses current world-view player access for competition/threat checks.
-- Makes pickaxe/axe selection respect Mining/Woodcutting requirements instead of blindly withdrawing the highest tier in the bank.
-- Stores the plugin as flat Java sources under `kspf2pgatheringprofit/`, matching `ksppluginsrelease` layout.
+## Features
+- Automatic F2P Mining/Woodcutting/Fishing method selection by GP/XP objective
+- Progressive method re-evaluation as skill levels increase
+- Competition/depletion world hopping using the repository-compatible `Login.getRandomWorld(false)` flow
+- Respawn-aware mining grace period
+- Measured GP/h and XP/h overlay
+- Wilderness Runite retreat/hop state machine
+- Mining/Woodcutting tool selection respects the relevant gathering skill level
+- Repository-standard verified banking through `KspVerifiedBank`
+- Karamja Lobster and Tuna/Swordfish transport + Port Sarim deposit-box banking
 
 ## Supported targets
-- Mining: Iron, Coal, Mithril, Adamantite, Runite
-- Woodcutting: Oak, Willow, Yew
-- Fishing: Trout/Salmon, Lobster, Tuna/Swordfish
+Mining: Iron, Coal, Mithril, Adamantite, Runite
 
-## Build
+Woodcutting: Oak, Willow, Yew
 
+Fishing: Trout/Salmon, Lobster, Tuna/Swordfish
+
+## Repository layout
+These files intentionally live directly under:
+
+`kspf2pgatheringprofit/`
+
+The Java package remains:
+
+`net.runelite.client.plugins.microbot.kspf2pgatheringprofit`
+
+This matches the raw source layout used by the KSP release/source-loader repository.
+
+## Local Microbot-Hub build
 ```powershell
 .\gradlew.bat build -PpluginList=KspF2pGatheringProfitPlugin
 ```
 
-A live in-game test is still required for route quality and resource-specific timing.
+The release repository itself does not contain the complete Microbot Gradle project, so a full Java compile still needs the matching local Microbot-Hub checkout.
