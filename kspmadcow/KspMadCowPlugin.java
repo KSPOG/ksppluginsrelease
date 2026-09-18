@@ -37,7 +37,7 @@ import org.slf4j.LoggerFactory;
 )
 public class KspMadCowPlugin extends Plugin {
     private static final Logger log = LoggerFactory.getLogger(KspMadCowPlugin.class);
-    public static final String VERSION = "0.1.55";
+    public static final String VERSION = "0.1.56";
 
     @Inject private KspMadCowConfig config;
     @Inject private KspMadCowScript script;
