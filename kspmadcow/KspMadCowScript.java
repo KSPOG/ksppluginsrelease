@@ -171,6 +171,8 @@ public class KspMadCowScript extends Script {
     private static final long FEROX_MOVEMENT_STOP_RETRY_MS = 600L;
     /** After one direct Ferox bank-chest click, wait for the bank to open before retrying. */
     private static final long FEROX_BANK_OPEN_RETRY_MS = 4_000L;
+    /** Bank inventory actions must either change the inventory or be retried. */
+    private static final long BANK_ACTION_TIMEOUT_MS = 3_500L;
     /** Retry interval for the emergency Death's Office exit portal. */
     private static final int DEATHS_OFFICE_EXIT_RETRY_TICKS = 3;
     /**
@@ -349,6 +351,7 @@ public class KspMadCowScript extends Script {
     private boolean altarInteractionIssued;
     private boolean bankActionPending;
     private long bankActionInventoryRevision;
+    private long bankActionStartedAtMs;
     private String bankActionDescription = "";
     private BooleanSupplier bankActionComplete;
     /** A direct click on Ferox bank chest 26711 was issued; do not spam it while the player approaches/opens it. */
@@ -540,6 +543,7 @@ public class KspMadCowScript extends Script {
         quickLeaveLastAttemptAtMs = 0L;
         altarInteractionIssued = false;
         bankActionPending = false;
+        bankActionStartedAtMs = 0L;
         bankActionDescription = "";
         bankActionComplete = null;
         resetFeroxBankOpenState();
@@ -1216,10 +1220,18 @@ public class KspMadCowScript extends Script {
                 .findFirst()
                 .orElse(null);
         if (unwanted != null) {
-            setState(KspMadCowState.BANKING, "Depositing " + unwanted.getName());
-            if (Rs2Bank.depositAll(unwanted.getId())) {
-                final int unwantedId = unwanted.getId();
-                markBankAction("deposit " + unwanted.getName(), () -> !Rs2Inventory.hasItem(unwantedId));
+            final int unwantedId = unwanted.getId();
+            final int beforeQuantity = Rs2Inventory.itemQuantity(unwantedId);
+            final String unwantedName = unwanted.getName() == null ? "item " + unwantedId : unwanted.getName();
+            setState(KspMadCowState.BANKING, "Depositing unneeded " + unwantedName);
+            visibleDebug("Bank", "Depositing unneeded inventory item name="
+                    + unwantedName + " id=" + unwantedId + " quantity=" + beforeQuantity);
+            if (Rs2Bank.depositAll(unwantedId)) {
+                markBankAction("deposit " + unwantedName,
+                        () -> Rs2Inventory.itemQuantity(unwantedId) < beforeQuantity);
+            } else {
+                visibleDebug("Bank", "Deposit-All was not issued for "
+                        + unwantedName + " id=" + unwantedId + "; retrying");
             }
             return;
         }
@@ -2378,23 +2390,30 @@ public class KspMadCowScript extends Script {
         if (item == null) {
             return false;
         }
+
         int id = item.getId();
+
+        // Keep only supplies that are actually required by the active setup.
+        // Generic loot (for example Raw t-bone steak) must never survive this pass
+        // merely because it was picked up during the previous Brutus trip.
         if (id == config.food().getId()
                 || id == AIR_RUNE_ID
                 || id == COWBELL_EMPTY_ID
                 || id == COWBELL_CHARGED_ID
                 || (config.demonicBrutus() && id == ABYSSAL_POTATO_ID)
-                || id == MOOLETA_ID
-                || id == trackedRangedAmmoId
+                || (config.equipMooleta() && combatMode == CombatMode.MELEE && id == MOOLETA_ID)
+                || (combatMode == CombatMode.RANGED && trackedRangedAmmoId > 0 && id == trackedRangedAmmoId)
                 || isConfiguredMagicSupply(id)) {
             return true;
         }
+
         return config.useStatBoostingPotions() && isKnownStatPotion(item.getName());
     }
 
     private void markBankAction(String description, BooleanSupplier completionCondition) {
         bankActionPending = true;
         bankActionInventoryRevision = inventoryRevision.get();
+        bankActionStartedAtMs = System.currentTimeMillis();
         bankActionDescription = description;
         bankActionComplete = completionCondition;
     }
@@ -2403,15 +2422,30 @@ public class KspMadCowScript extends Script {
         if (!bankActionPending) {
             return false;
         }
+
         boolean completed = bankActionComplete != null && bankActionComplete.getAsBoolean();
         if (completed || inventoryRevision.get() != bankActionInventoryRevision) {
-            bankActionPending = false;
-            bankActionDescription = "";
-            bankActionComplete = null;
+            clearPendingBankAction();
             return false;
         }
+
+        long elapsed = System.currentTimeMillis() - bankActionStartedAtMs;
+        if (bankActionStartedAtMs > 0L && elapsed >= BANK_ACTION_TIMEOUT_MS) {
+            visibleDebug("Bank", "Bank action timed out after " + elapsed
+                    + "ms: " + bankActionDescription + "; retrying");
+            clearPendingBankAction();
+            return false;
+        }
+
         setState(KspMadCowState.BANKING, "Waiting for inventory update: " + bankActionDescription);
         return true;
+    }
+
+    private void clearPendingBankAction() {
+        bankActionPending = false;
+        bankActionStartedAtMs = 0L;
+        bankActionDescription = "";
+        bankActionComplete = null;
     }
 
     public void onInventoryChanged() {
