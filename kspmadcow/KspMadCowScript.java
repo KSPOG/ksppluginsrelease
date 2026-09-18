@@ -5810,9 +5810,14 @@ public class KspMadCowScript extends Script {
     }
 
     /**
-     * Opens only the Ferox Enclave bank chest identified by the user's Object ID
-     * Examiner (26711). No generic bank lookup, camera dependency, or walker call
-     * is permitted here.
+     * Opens the Ferox Enclave bank chest without using the transport-aware global
+     * walker. Prefer the known cache id, but fall back to the live "Bank chest"
+     * name inside the Ferox bank area so cache/id changes do not deadlock banking.
+     *
+     * If LMS lands the player too far away for a reliable direct interaction, make
+     * a local-only canvas/minimap approach toward the known bank tile/chest first.
+     * This never calls Rs2Walker.walkTo(), so it cannot select Death's Domain as a
+     * transport while inside Ferox.
      */
     private boolean openFeroxBankChestDirectly() {
         if (Rs2Bank.isOpen()) {
@@ -5824,9 +5829,6 @@ public class KspMadCowScript extends Script {
         if (feroxBankOpenPending) {
             long elapsed = now - feroxBankOpenIssuedAtMs;
             if (elapsed < FEROX_BANK_OPEN_RETRY_MS) {
-                // One click is enough. The game may spend several client cycles walking
-                // the final tile(s) and opening the interface. Re-clicking every 100 ms
-                // cancels/restarts that interaction and is exactly what caused the spam.
                 setState(KspMadCowState.BANKING,
                         "Waiting for Ferox bank chest interaction to finish");
                 return true;
@@ -5837,32 +5839,112 @@ public class KspMadCowScript extends Script {
             resetFeroxBankOpenState();
         }
 
-        Rs2TileObjectModel bankChest = Microbot.getRs2TileObjectCache().query()
-                .withId(FEROX_BANK_CHEST_ID)
-                .where(this::isObjectInPlayerWorldView)
-                .nearestOnClientThread();
+        Rs2TileObjectModel bankChest = findFeroxBankChest();
         if (bankChest == null) {
+            if (moveLocallyTowardFeroxBank(FEROX_BANK_LOCATION)) {
+                return true;
+            }
             setState(KspMadCowState.BANKING,
                     "At Ferox Enclave; waiting for bank chest");
             return false;
         }
 
+        WorldPoint chestLocation = bankChest.getWorldLocation();
+        WorldPoint playerLocation = Rs2Player.getWorldLocation();
+        if (playerLocation != null
+                && chestLocation != null
+                && playerLocation.getPlane() == chestLocation.getPlane()
+                && playerLocation.distanceTo(chestLocation) > 7) {
+            if (moveLocallyTowardFeroxBank(chestLocation)) {
+                return true;
+            }
+        }
+
+        // Ferox bank chests normally expose Use. matchingAction() still accepts
+        // Bank/Open variants, but a cache composition hiccup should not prevent the
+        // model itself from resolving the canonical Use interaction.
         String bankAction = matchingAction(bankChest, FEROX_BANK_CHEST_ACTIONS);
         if (bankAction == null) {
-            setState(KspMadCowState.BANKING,
-                    "Ferox bank chest found; waiting for bank action");
-            return false;
+            bankAction = "Use";
         }
 
         setState(KspMadCowState.BANKING,
-                "At Ferox Enclave; clicking bank chest once");
+                "At Ferox Enclave; using bank chest");
         boolean issued = invokeSceneObjectActionDirect(bankChest, bankAction, "Ferox bank chest");
         if (issued) {
             feroxBankOpenPending = true;
             feroxBankOpenIssuedAtMs = now;
-            visibleDebug("Bank", "Direct Ferox bank chest interaction issued id="
-                    + FEROX_BANK_CHEST_ID + " action=" + bankAction
+            visibleDebug("Bank", "Ferox bank chest interaction issued id="
+                    + bankChest.getId() + " action=" + bankAction
+                    + " location=" + chestLocation
                     + "; waiting for bank interface before any retry");
+        } else {
+            visibleDebug("Bank", "Ferox bank chest click failed id="
+                    + bankChest.getId() + " action=" + bankAction
+                    + " location=" + chestLocation);
+        }
+        return issued;
+    }
+
+    private Rs2TileObjectModel findFeroxBankChest() {
+        Rs2TileObjectModel byId = Microbot.getRs2TileObjectCache().query()
+                .withId(FEROX_BANK_CHEST_ID)
+                .where(this::isObjectInPlayerWorldView)
+                .nearestOnClientThread();
+        if (byId != null) {
+            return byId;
+        }
+
+        return Microbot.getRs2TileObjectCache().query()
+                .withName("Bank chest")
+                .where(this::isObjectInPlayerWorldView)
+                .where(object -> {
+                    WorldPoint location = object.getWorldLocation();
+                    return location != null
+                            && location.getPlane() == 0
+                            && FEROX_BANK_AREA.contains(location);
+                })
+                .nearestOnClientThread();
+    }
+
+    /**
+     * Local Ferox movement only. walkFastCanvas/walkMiniMap issue ordinary scene
+     * movement toward the exact bank tile and do not invoke the transport-aware
+     * shortest-path planner used by Rs2Walker.walkTo().
+     */
+    private boolean moveLocallyTowardFeroxBank(WorldPoint destination) {
+        WorldPoint playerLocation = Rs2Player.getWorldLocation();
+        if (playerLocation == null
+                || destination == null
+                || !FEROX_ENCLAVE_AREA.contains(playerLocation)
+                || playerLocation.getPlane() != destination.getPlane()) {
+            return false;
+        }
+
+        if (playerLocation.distanceTo(destination) <= 6) {
+            return false;
+        }
+
+        clearWalkerRouteIfActive("brutus-ferox-local-bank-approach");
+
+        if (Rs2Player.isMoving()) {
+            setState(KspMadCowState.BANKING,
+                    "Approaching Ferox bank chest");
+            return true;
+        }
+
+        boolean issued = Rs2Walker.walkFastCanvas(destination);
+        if (!issued) {
+            issued = Rs2Walker.walkMiniMap(destination);
+        }
+
+        if (issued) {
+            setState(KspMadCowState.BANKING,
+                    "Walking locally to Ferox bank chest");
+            visibleDebug("Bank", "Local Ferox bank approach issued target=" + destination);
+        } else {
+            setState(KspMadCowState.BANKING,
+                    "Ferox bank chest too far; retrying local approach");
         }
         return issued;
     }
