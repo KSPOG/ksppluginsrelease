@@ -45,7 +45,7 @@ import net.runelite.client.ui.overlay.OverlayManager;
 )
 public class KspRobesOfRuinPlugin extends Plugin
 {
-    public static final String VERSION = "0.0.4";
+    public static final String VERSION = "0.0.5";
 
     // RuneLite's Water Altar world-map/object location is 3185,3165. The solved
     // Robes of Ruin instruction is the tile immediately east of that entrance.
@@ -154,7 +154,6 @@ public class KspRobesOfRuinPlugin extends Plugin
     private static final String PROGRESS_EMOTE = "_progressEmote";
     private static final String PROGRESS_VAULT = "_progressVault";
     private static final String PROGRESS_REWARDS = "_progressRewards";
-    private static final long PATH_REFRESH_MS = 4_000L;
 
     @Inject private Client client;
     @Inject private EventBus eventBus;
@@ -179,8 +178,6 @@ public class KspRobesOfRuinPlugin extends Plugin
     private volatile int cachedInventoryRequiredCount;
     private volatile int cachedRewardCount;
     private WorldPoint lastPathTarget;
-    private WorldPoint lastPathStart;
-    private long lastPathUpdateMs;
 
     enum GuideStage
     {
@@ -790,19 +787,17 @@ public class KspRobesOfRuinPlugin extends Plugin
             return;
         }
 
-        WorldPoint start = playerLocation();
-        if (start == null)
+        // Quest Helper-style ownership: submit the route once for a destination.
+        // Reposting shortestpath/path cancels and restarts Shortest Path's pathfinder,
+        // so player movement and elapsed time must NOT trigger another request.
+        boolean targetChanged = !target.equals(lastPathTarget);
+        if (!force && !targetChanged)
         {
             return;
         }
 
-        long now = System.currentTimeMillis();
-        boolean targetChanged = !target.equals(lastPathTarget);
-        boolean playerMoved = lastPathStart == null
-                || start.getPlane() != lastPathStart.getPlane()
-                || start.distanceTo(lastPathStart) >= 4;
-
-        if (!force && !targetChanged && !playerMoved && now - lastPathUpdateMs < PATH_REFRESH_MS)
+        WorldPoint start = playerLocation();
+        if (start == null)
         {
             return;
         }
@@ -819,8 +814,6 @@ public class KspRobesOfRuinPlugin extends Plugin
 
         eventBus.post(new PluginMessage("shortestpath", "path", data));
         lastPathTarget = target;
-        lastPathStart = start;
-        lastPathUpdateMs = now;
     }
 
     private WorldPoint getRouteTarget()
@@ -856,8 +849,6 @@ public class KspRobesOfRuinPlugin extends Plugin
 
         eventBus.post(new PluginMessage("shortestpath", "clear", Collections.emptyMap()));
         lastPathTarget = null;
-        lastPathStart = null;
-        lastPathUpdateMs = 0L;
     }
 
     private static String clean(String message)
