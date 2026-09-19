@@ -195,15 +195,15 @@ public class KspKebabBuyerScript extends Script
     {
         int kebabsBefore = kebabCount();
 
-        if (!Rs2Inventory.isEmpty())
+        if (hasNonCoinInventory())
         {
-            status = "Depositing inventory";
-            if (!Rs2Bank.depositAll())
+            status = "Depositing non-coin items";
+            if (!Rs2Bank.depositAllExcept(true, COINS_NAME))
             {
                 return;
             }
 
-            if (!sleepUntil(Rs2Inventory::isEmpty, INVENTORY_TIMEOUT_MS))
+            if (!sleepUntil(() -> !hasNonCoinInventory(), INVENTORY_TIMEOUT_MS))
             {
                 status = "Waiting for bank deposit";
                 return;
@@ -215,28 +215,33 @@ public class KspKebabBuyerScript extends Script
             }
         }
 
-        if (!Rs2Bank.setWithdrawAsItem())
+        // Keep coins in the inventory between bank trips. Only withdraw from
+        // the bank when the inventory actually has no coins left.
+        if (coinCount() <= 0)
         {
-            status = "Setting unnoted withdraw mode";
-            return;
-        }
+            if (!Rs2Bank.setWithdrawAsItem())
+            {
+                status = "Setting unnoted withdraw mode";
+                return;
+            }
 
-        int bankCoins = Rs2Bank.count(COINS_NAME, true);
-        if (bankCoins <= 0)
-        {
-            status = "Out of coins - stopping";
-            log.info("KSP Kebab Buyer stopped: no coins remain in inventory or bank");
-            Microbot.showMessage("KSP Kebab Buyer: out of coins - stopping.");
-            Microbot.stopPlugin(plugin);
-            return;
-        }
+            int bankCoins = Rs2Bank.count(COINS_NAME, true);
+            if (bankCoins <= 0)
+            {
+                status = "Out of coins - stopping";
+                log.info("KSP Kebab Buyer stopped: no coins remain in inventory or bank");
+                Microbot.showMessage("KSP Kebab Buyer: out of coins - stopping.");
+                Microbot.stopPlugin(plugin);
+                return;
+            }
 
-        status = "Withdrawing all " + String.format("%,d", bankCoins) + " coins";
-        if (!Rs2Bank.withdrawAll(COINS_NAME, true)
-                || !sleepUntil(() -> coinCount() >= bankCoins, INVENTORY_TIMEOUT_MS))
-        {
-            status = "Waiting for all coins";
-            return;
+            status = "Withdrawing all " + String.format("%,d", bankCoins) + " coins";
+            if (!Rs2Bank.withdrawAll(COINS_NAME, true)
+                    || !sleepUntil(() -> coinCount() >= bankCoins, INVENTORY_TIMEOUT_MS))
+            {
+                status = "Waiting for all coins";
+                return;
+            }
         }
 
         refreshSnapshot();
@@ -246,6 +251,12 @@ public class KspKebabBuyerScript extends Script
         sleepUntil(() -> !Rs2Bank.isOpen(), 1_500);
         nextBankAttemptAt = 0L;
         status = "Walking to Karim";
+    }
+
+    private boolean hasNonCoinInventory()
+    {
+        return Rs2Inventory.all().stream()
+                .anyMatch(item -> item != null && !COINS_NAME.equalsIgnoreCase(item.getName()));
     }
 
     private void refreshSnapshot()
