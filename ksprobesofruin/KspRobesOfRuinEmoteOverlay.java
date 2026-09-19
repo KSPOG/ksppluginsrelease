@@ -110,7 +110,8 @@ public class KspRobesOfRuinEmoteOverlay extends Overlay
 
     private void scrollTo(Widget widget)
     {
-        Widget parent = client.getWidget(InterfaceID.Emote.SCROLLABLE);
+        // Match Microbot Quest Helper's current EmoteStep scrollbar handling.
+        Widget parent = client.getWidget(InterfaceID.Emote.CONTENTS);
         if (parent == null || widget == null)
         {
             return;
@@ -123,7 +124,7 @@ public class KspRobesOfRuinEmoteOverlay extends Overlay
         client.runScript(
                 ScriptID.UPDATE_SCROLLBAR,
                 InterfaceID.Emote.SCROLLBAR,
-                InterfaceID.Emote.SCROLLABLE,
+                InterfaceID.Emote.CONTENTS,
                 newScroll
         );
     }
