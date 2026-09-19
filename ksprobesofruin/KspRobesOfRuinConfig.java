@@ -10,6 +10,27 @@ public interface KspRobesOfRuinConfig extends Config
 {
     String GROUP = "ksprobesofruin";
 
+    enum KspRobesOfRuinPhase
+    {
+        AUTO("Automatic"),
+        LUMBRIDGE_DIG("Lumbridge Swamp dig"),
+        VARROCK_EMOTES("Varrock vault emotes"),
+        REWARD_CHESTS("Reward chests");
+
+        private final String display;
+
+        KspRobesOfRuinPhase(String display)
+        {
+            this.display = display;
+        }
+
+        @Override
+        public String toString()
+        {
+            return display;
+        }
+    }
+
     @ConfigSection(
             name = "Guide",
             description = "Robes of Ruin helper settings",
@@ -75,26 +96,5 @@ public interface KspRobesOfRuinConfig extends Config
     default boolean resetProgress()
     {
         return false;
-    }
-}
-
-enum KspRobesOfRuinPhase
-{
-    AUTO("Automatic"),
-    LUMBRIDGE_DIG("Lumbridge Swamp dig"),
-    VARROCK_EMOTES("Varrock vault emotes"),
-    REWARD_CHESTS("Reward chests");
-
-    private final String display;
-
-    KspRobesOfRuinPhase(String display)
-    {
-        this.display = display;
-    }
-
-    @Override
-    public String toString()
-    {
-        return display;
     }
 }
