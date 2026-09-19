@@ -131,6 +131,7 @@ public class KspRobesOfRuinPlugin extends Plugin
 
     private boolean digComplete;
     private boolean awaitingDigContinue;
+    private boolean digContinueSeen;
     private boolean vaultUnlocked;
     private boolean rewardsComplete;
     private int emoteIndex;
@@ -186,11 +187,16 @@ public class KspRobesOfRuinPlugin extends Plugin
             return;
         }
 
-        if (awaitingDigContinue && !Rs2Dialogue.isInDialogue())
+        if (awaitingDigContinue)
         {
-            awaitingDigContinue = false;
-            setDigComplete(true);
-            feedback = "Lumbridge clue confirmed - go to Varrock west bank basement";
+            if (Rs2Dialogue.isInDialogue())
+            {
+                digContinueSeen = true;
+            }
+            else if (digContinueSeen)
+            {
+                completeLumbridgeDigStep();
+            }
         }
 
         String dialogue = clean(Rs2Dialogue.getDialogueText());
@@ -231,6 +237,7 @@ public class KspRobesOfRuinPlugin extends Plugin
                 && message.contains("magical force prevents you"))
         {
             awaitingDigContinue = true;
+            digContinueSeen = false;
             feedback = "Clue found - click Continue so the step counts";
             return;
         }
@@ -244,6 +251,12 @@ public class KspRobesOfRuinPlugin extends Plugin
     @Subscribe
     public void onMenuOptionClicked(MenuOptionClicked event)
     {
+        if (awaitingDigContinue && "continue".equalsIgnoreCase(event.getMenuOption()))
+        {
+            completeLumbridgeDigStep();
+            return;
+        }
+
         if (event.getParam1() != ComponentID.EMOTES_EMOTE_CONTAINER
                 || resolveStage() != GuideStage.EMOTE_SEQUENCE
                 || !isAtVaultGate())
@@ -613,6 +626,7 @@ public class KspRobesOfRuinPlugin extends Plugin
     {
         digComplete = false;
         awaitingDigContinue = false;
+        digContinueSeen = false;
         vaultUnlocked = false;
         rewardsComplete = false;
         setEmoteIndex(0);
@@ -621,6 +635,15 @@ public class KspRobesOfRuinPlugin extends Plugin
         configManager.setConfiguration(KspRobesOfRuinConfig.GROUP, PROGRESS_REWARDS, false);
         feedback = "Saved guide progress reset";
         clearShortestPath();
+    }
+
+    private void completeLumbridgeDigStep()
+    {
+        awaitingDigContinue = false;
+        digContinueSeen = false;
+        setDigComplete(true);
+        feedback = "Lumbridge clue confirmed - go to Varrock west bank basement";
+        updateShortestPath(true);
     }
 
     private void unlockVault()
