@@ -1,5 +1,9 @@
 name: Temporary Robes of Ruin Compile Check
 
+concurrency:
+  group: robes-of-ruin-compile
+  cancel-in-progress: true
+
 on:
   push:
     branches:
