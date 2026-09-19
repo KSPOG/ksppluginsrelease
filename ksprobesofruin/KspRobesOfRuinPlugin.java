@@ -45,7 +45,7 @@ import net.runelite.client.ui.overlay.OverlayManager;
 )
 public class KspRobesOfRuinPlugin extends Plugin
 {
-    public static final String VERSION = "0.0.6";
+    public static final String VERSION = "0.0.7";
 
     // Exact first Robes of Ruin dig tile confirmed in-game.
     static final WorldPoint LUMBRIDGE_DIG_TILE = new WorldPoint(3190, 3165, 0);
@@ -139,6 +139,29 @@ public class KspRobesOfRuinPlugin extends Plugin
             Emote.ANGRY
     );
 
+    // Authoritative player animation ids for the emotes used by this puzzle.
+    // The helper advances from the actual animation played by the local player,
+    // not from widget/menu metadata.
+    private static final Map<Integer, Emote> EMOTE_BY_ANIMATION = Map.ofEntries(
+            Map.entry(2105, Emote.PANIC),
+            Map.entry(856, Emote.NO),
+            Map.entry(864, Emote.BECKON),
+            Map.entry(861, Emote.LAUGH),
+            Map.entry(2113, Emote.SHRUG),
+            Map.entry(860, Emote.CRY),
+            Map.entry(2107, Emote.SPIN),
+            Map.entry(855, Emote.YES),
+            Map.entry(857, Emote.THINK),
+            Map.entry(866, Emote.DANCE),
+            Map.entry(5316, Emote.DANCE),
+            Map.entry(1368, Emote.BLOW_KISS),
+            Map.entry(863, Emote.WAVE),
+            Map.entry(858, Emote.BOW),
+            Map.entry(2108, Emote.HEADBANG),
+            Map.entry(2109, Emote.JUMP_FOR_JOY),
+            Map.entry(859, Emote.ANGRY)
+    );
+
     static final List<String> REWARD_ITEMS = List.of(
             "Hood of ruin",
             "Robe top of ruin",
@@ -169,6 +192,7 @@ public class KspRobesOfRuinPlugin extends Plugin
     private boolean vaultUnlocked;
     private boolean rewardsComplete;
     private int emoteIndex;
+    private int lastObservedAnimation = -1;
     private String feedback = "Ready";
     private volatile WorldPoint cachedPlayerLocation;
     private volatile List<String> cachedMissingItems = List.copyOf(REQUIRED_DIG_ITEMS);
@@ -214,6 +238,7 @@ public class KspRobesOfRuinPlugin extends Plugin
         overlayManager.remove(sceneOverlay);
         overlayManager.remove(overlay);
         awaitingDigContinue = false;
+        lastObservedAnimation = -1;
         cachedPlayerLocation = null;
         cachedMissingItems = List.copyOf(REQUIRED_DIG_ITEMS);
         cachedEquippedRequiredItems = Collections.emptyList();
@@ -237,6 +262,7 @@ public class KspRobesOfRuinPlugin extends Plugin
         // Player#getWorldLocation() from Swing's AWT thread.
         cachedPlayerLocation = client.getLocalPlayer().getWorldLocation();
         refreshItemSnapshot();
+        trackEmoteAnimation();
 
         if (awaitingDigContinue)
         {
@@ -308,27 +334,50 @@ public class KspRobesOfRuinPlugin extends Plugin
             return;
         }
 
-        if (event.getParam1() != ComponentID.EMOTES_EMOTE_CONTAINER
+        // Emote progression is intentionally not handled from MenuOptionClicked.
+        // Widget ids/menu params vary between client revisions and caused the guide
+        // to stay on Panic. GameTick tracks the local player's actual animation instead.
+    }
+
+    private void trackEmoteAnimation()
+    {
+        if (client.getLocalPlayer() == null)
+        {
+            lastObservedAnimation = -1;
+            return;
+        }
+
+        int animation = client.getLocalPlayer().getAnimation();
+
+        // Reset the latch only after the previous animation has actually ended.
+        // This prevents a 2-4 tick emote animation from advancing multiple steps.
+        if (animation == -1)
+        {
+            lastObservedAnimation = -1;
+            return;
+        }
+
+        if (animation == lastObservedAnimation
                 || resolveStage() != GuideStage.EMOTE_SEQUENCE
-                || !isAtVaultGate())
+                || !isAtVaultGate()
+                || emoteIndex >= EMOTE_SEQUENCE.size())
         {
             return;
         }
 
-        Widget clickedWidget = event.getWidget();
-        int spriteId = clickedWidget != null && clickedWidget.getSpriteId() > 0
-                ? clickedWidget.getSpriteId()
-                : spriteForEmoteGridIndex(event.getParam0());
-        if (spriteId < 0 || emoteIndex >= EMOTE_SEQUENCE.size())
+        lastObservedAnimation = animation;
+        Emote performed = EMOTE_BY_ANIMATION.get(animation);
+        if (performed == null)
         {
             return;
         }
 
         Emote expected = EMOTE_SEQUENCE.get(emoteIndex);
-        if (spriteId == expected.getSpriteId())
+        if (performed == expected)
         {
             int completed = emoteIndex + 1;
             setEmoteIndex(completed);
+
             if (completed >= EMOTE_SEQUENCE.size())
             {
                 feedback = "17/17 complete - waiting for the vault teleport";
@@ -341,13 +390,13 @@ public class KspRobesOfRuinPlugin extends Plugin
             return;
         }
 
-        // The in-game puzzle restarts on a wrong emote. If the wrong click itself
-        // is Panic, it also serves as the first input of a fresh sequence.
-        int restartedAt = spriteId == EMOTE_SEQUENCE.get(0).getSpriteId() ? 1 : 0;
+        // Match the puzzle's reset behavior. A Panic performed out of sequence is
+        // simultaneously the first input of a fresh attempt.
+        int restartedAt = performed == Emote.PANIC ? 1 : 0;
         setEmoteIndex(restartedAt);
         feedback = restartedAt == 1
                 ? "Wrong emote - sequence restarted at 1/17 Panic"
-                : "Wrong emote - sequence reset to Panic";
+                : "Wrong emote (" + performed.getName() + ") - sequence reset to Panic";
     }
 
     @Subscribe
@@ -742,6 +791,7 @@ public class KspRobesOfRuinPlugin extends Plugin
         digComplete = false;
         awaitingDigContinue = false;
         digContinueSeen = false;
+        lastObservedAnimation = -1;
         vaultUnlocked = false;
         rewardsComplete = false;
         setEmoteIndex(0);
