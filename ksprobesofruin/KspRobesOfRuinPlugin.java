@@ -138,6 +138,11 @@ public class KspRobesOfRuinPlugin extends Plugin
     private int emoteIndex;
     private String feedback = "Ready";
     private volatile WorldPoint cachedPlayerLocation;
+    private volatile List<String> cachedMissingItems = List.copyOf(REQUIRED_DIG_ITEMS);
+    private volatile List<String> cachedEquippedRequiredItems = Collections.emptyList();
+    private volatile List<String> cachedExtraInventoryItems = Collections.emptyList();
+    private volatile int cachedInventoryRequiredCount;
+    private volatile int cachedRewardCount;
     private WorldPoint lastPathTarget;
     private WorldPoint lastPathStart;
     private long lastPathUpdateMs;
@@ -179,6 +184,11 @@ public class KspRobesOfRuinPlugin extends Plugin
         overlayManager.remove(overlay);
         awaitingDigContinue = false;
         cachedPlayerLocation = null;
+        cachedMissingItems = List.copyOf(REQUIRED_DIG_ITEMS);
+        cachedEquippedRequiredItems = Collections.emptyList();
+        cachedExtraInventoryItems = Collections.emptyList();
+        cachedInventoryRequiredCount = 0;
+        cachedRewardCount = 0;
         feedback = "Stopped";
     }
 
@@ -195,6 +205,7 @@ public class KspRobesOfRuinPlugin extends Plugin
         // WorldPoint here so startup/config/overlay helpers never call
         // Player#getWorldLocation() from Swing's AWT thread.
         cachedPlayerLocation = client.getLocalPlayer().getWorldLocation();
+        refreshItemSnapshot();
 
         if (awaitingDigContinue)
         {
@@ -466,82 +477,67 @@ public class KspRobesOfRuinPlugin extends Plugin
 
     int getRewardCount()
     {
-        int count = 0;
-        for (String reward : REWARD_ITEMS)
-        {
-            if (Rs2Inventory.hasItem(reward, true))
-            {
-                count++;
-            }
-        }
-        return count;
+        return cachedRewardCount;
     }
 
     int getPresentRequiredCount()
     {
-        return REQUIRED_DIG_ITEMS.size() - getMissingItems().size();
+        return REQUIRED_DIG_ITEMS.size() - cachedMissingItems.size();
     }
 
     int getInventoryRequiredCount()
     {
-        int count = 0;
-        if (!Microbot.isLoggedIn())
-        {
-            return count;
-        }
-
-        for (String item : REQUIRED_DIG_ITEMS)
-        {
-            if (Rs2Inventory.hasItem(item, true))
-            {
-                count++;
-            }
-        }
-        return count;
+        return cachedInventoryRequiredCount;
     }
 
     List<String> getEquippedRequiredItems()
     {
-        List<String> equipped = new ArrayList<>();
-        if (!Microbot.isLoggedIn())
-        {
-            return equipped;
-        }
-
-        for (String item : REQUIRED_DIG_ITEMS)
-        {
-            if (Rs2Equipment.isWearing(item, true))
-            {
-                equipped.add(item);
-            }
-        }
-        return equipped;
+        return new ArrayList<>(cachedEquippedRequiredItems);
     }
 
     List<String> getMissingItems()
     {
-        List<String> missing = new ArrayList<>();
-        if (!Microbot.isLoggedIn())
-        {
-            missing.addAll(REQUIRED_DIG_ITEMS);
-            return missing;
-        }
-
-        for (String item : REQUIRED_DIG_ITEMS)
-        {
-            if (!Rs2Inventory.hasItem(item, true) && !Rs2Equipment.isWearing(item, true))
-            {
-                missing.add(item);
-            }
-        }
-        return missing;
+        return new ArrayList<>(cachedMissingItems);
     }
 
     List<String> getExtraInventoryItems()
     {
+        return new ArrayList<>(cachedExtraInventoryItems);
+    }
+
+    private void refreshItemSnapshot()
+    {
         if (!Microbot.isLoggedIn())
         {
-            return Collections.emptyList();
+            cachedMissingItems = List.copyOf(REQUIRED_DIG_ITEMS);
+            cachedEquippedRequiredItems = Collections.emptyList();
+            cachedExtraInventoryItems = Collections.emptyList();
+            cachedInventoryRequiredCount = 0;
+            cachedRewardCount = 0;
+            return;
+        }
+
+        List<String> missing = new ArrayList<>();
+        List<String> equipped = new ArrayList<>();
+        int inventoryRequired = 0;
+
+        for (String item : REQUIRED_DIG_ITEMS)
+        {
+            boolean inInventory = Rs2Inventory.hasItem(item, true);
+            boolean isEquipped = Rs2Equipment.isWearing(item, true);
+
+            if (inInventory)
+            {
+                inventoryRequired++;
+            }
+            if (isEquipped)
+            {
+                equipped.add(item);
+            }
+            if (!inInventory && !isEquipped)
+            {
+                missing.add(item);
+            }
         }
 
         Set<String> required = new LinkedHashSet<>();
@@ -559,7 +555,21 @@ public class KspRobesOfRuinPlugin extends Plugin
                 extras.add(name);
             }
         });
-        return new ArrayList<>(extras);
+
+        int rewards = 0;
+        for (String reward : REWARD_ITEMS)
+        {
+            if (Rs2Inventory.hasItem(reward, true))
+            {
+                rewards++;
+            }
+        }
+
+        cachedMissingItems = List.copyOf(missing);
+        cachedEquippedRequiredItems = List.copyOf(equipped);
+        cachedExtraInventoryItems = List.copyOf(extras);
+        cachedInventoryRequiredCount = inventoryRequired;
+        cachedRewardCount = rewards;
     }
 
     boolean isAtVaultGate()
