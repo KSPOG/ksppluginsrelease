@@ -43,7 +43,7 @@ import net.runelite.client.ui.overlay.OverlayManager;
 )
 public class KspRobesOfRuinPlugin extends Plugin
 {
-    public static final String VERSION = "0.0.2";
+    public static final String VERSION = "0.0.3";
 
     // RuneLite's Water Altar world-map/object location is 3185,3165. The solved
     // Robes of Ruin instruction is the tile immediately east of that entrance.
@@ -136,6 +136,7 @@ public class KspRobesOfRuinPlugin extends Plugin
     private boolean rewardsComplete;
     private int emoteIndex;
     private String feedback = "Ready";
+    private volatile WorldPoint cachedPlayerLocation;
     private WorldPoint lastPathTarget;
     private WorldPoint lastPathStart;
     private long lastPathUpdateMs;
@@ -164,8 +165,8 @@ public class KspRobesOfRuinPlugin extends Plugin
         overlayManager.add(overlay);
         overlayManager.add(sceneOverlay);
         overlayManager.add(emoteOverlay);
-        feedback = "Guide started";
-        updateShortestPath(true);
+        cachedPlayerLocation = null;
+        feedback = "Guide started - waiting for client tick";
     }
 
     @Override
@@ -176,6 +177,7 @@ public class KspRobesOfRuinPlugin extends Plugin
         overlayManager.remove(sceneOverlay);
         overlayManager.remove(overlay);
         awaitingDigContinue = false;
+        cachedPlayerLocation = null;
         feedback = "Stopped";
     }
 
@@ -184,8 +186,14 @@ public class KspRobesOfRuinPlugin extends Plugin
     {
         if (client.getLocalPlayer() == null)
         {
+            cachedPlayerLocation = null;
             return;
         }
+
+        // GameTick is delivered on RuneLite's client thread. Cache the immutable
+        // WorldPoint here so startup/config/overlay helpers never call
+        // Player#getWorldLocation() from Swing's AWT thread.
+        cachedPlayerLocation = client.getLocalPlayer().getWorldLocation();
 
         if (awaitingDigContinue)
         {
@@ -565,7 +573,7 @@ public class KspRobesOfRuinPlugin extends Plugin
 
     private WorldPoint playerLocation()
     {
-        return client.getLocalPlayer() == null ? null : client.getLocalPlayer().getWorldLocation();
+        return cachedPlayerLocation;
     }
 
     private int spriteForEmoteGridIndex(int gridIndex)
@@ -658,11 +666,6 @@ public class KspRobesOfRuinPlugin extends Plugin
 
     private void updateShortestPath(boolean force)
     {
-        if (client.getLocalPlayer() == null)
-        {
-            return;
-        }
-
         if (!config.useShortestPath())
         {
             clearShortestPath();
