@@ -15,8 +15,6 @@ import net.runelite.api.coords.WorldPoint;
 import net.runelite.api.events.ChatMessage;
 import net.runelite.api.events.GameTick;
 import net.runelite.api.events.MenuOptionClicked;
-import net.runelite.api.widgets.ComponentID;
-import net.runelite.api.widgets.Widget;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.eventbus.EventBus;
 import net.runelite.client.eventbus.Subscribe;
@@ -730,35 +728,6 @@ public class KspRobesOfRuinPlugin extends Plugin
     private WorldPoint playerLocation()
     {
         return cachedPlayerLocation;
-    }
-
-    private int spriteForEmoteGridIndex(int gridIndex)
-    {
-        Widget container = client.getWidget(ComponentID.EMOTES_EMOTE_CONTAINER);
-        if (container == null)
-        {
-            return -1;
-        }
-
-        Widget[] children = container.getDynamicChildren();
-        if (children == null)
-        {
-            return -1;
-        }
-
-        for (Widget widget : children)
-        {
-            if (widget == null)
-            {
-                continue;
-            }
-            int index = widget.getOriginalX() / 42 + ((widget.getOriginalY() - 6) / 49) * 4;
-            if (index == gridIndex)
-            {
-                return widget.getSpriteId();
-            }
-        }
-        return -1;
     }
 
     private void loadProgress()
