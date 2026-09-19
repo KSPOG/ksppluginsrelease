@@ -37,7 +37,7 @@ public class KspMugFillerScript extends Script
 
     private static final long LOOP_DELAY_MS = 80L;
     private static final long BANK_RETRY_DELAY_MS = 750L;
-    private static final long INVENTORY_CHANGE_TIMEOUT_MS = 2_500L;
+    private static final int INVENTORY_CHANGE_TIMEOUT_MS = 2_500;
     private static final long PRICE_REFRESH_MS = 30_000L;
 
     private final Random random = new Random();
