@@ -10,6 +10,7 @@ import net.runelite.api.Client;
 import net.runelite.api.ScriptID;
 import net.runelite.api.gameval.InterfaceID;
 import net.runelite.api.widgets.Widget;
+import net.runelite.client.callback.ClientThread;
 import net.runelite.client.plugins.cluescrolls.clues.emote.Emote;
 import net.runelite.client.ui.overlay.Overlay;
 import net.runelite.client.ui.overlay.OverlayLayer;
@@ -21,14 +22,17 @@ public class KspRobesOfRuinEmoteOverlay extends Overlay
     private static final Color FILL = new Color(0, 255, 120, 65);
 
     private final Client client;
+    private final ClientThread clientThread;
     private final KspRobesOfRuinPlugin plugin;
     private final KspRobesOfRuinConfig config;
     private int lastScrolledIndex = -1;
 
     @Inject
-    KspRobesOfRuinEmoteOverlay(Client client, KspRobesOfRuinPlugin plugin, KspRobesOfRuinConfig config)
+    KspRobesOfRuinEmoteOverlay(Client client, ClientThread clientThread,
+                                KspRobesOfRuinPlugin plugin, KspRobesOfRuinConfig config)
     {
         this.client = client;
+        this.clientThread = clientThread;
         this.plugin = plugin;
         this.config = config;
         setPosition(OverlayPosition.DYNAMIC);
@@ -80,7 +84,8 @@ public class KspRobesOfRuinEmoteOverlay extends Overlay
         int currentIndex = plugin.getEmoteIndex();
         if (lastScrolledIndex != currentIndex)
         {
-            scrollTo(target);
+            final int spriteId = expected.getSpriteId();
+            clientThread.invokeLater(() -> scrollToSprite(spriteId));
             lastScrolledIndex = currentIndex;
         }
 
@@ -108,16 +113,36 @@ public class KspRobesOfRuinEmoteOverlay extends Overlay
         return null;
     }
 
-    private void scrollTo(Widget widget)
+    private void scrollToSprite(int spriteId)
     {
-        // Match Microbot Quest Helper's current EmoteStep scrollbar handling.
+        // Match Microbot Quest Helper's EmoteStep logic, but resolve and mutate
+        // widgets on ClientThread rather than from the overlay render thread.
         Widget parent = client.getWidget(InterfaceID.Emote.CONTENTS);
-        if (parent == null || widget == null)
+        if (parent == null || parent.isHidden())
         {
             return;
         }
 
-        int centerY = widget.getRelativeY() + widget.getHeight() / 2;
+        Widget target = null;
+        Widget[] children = parent.getDynamicChildren();
+        if (children != null)
+        {
+            for (Widget widget : children)
+            {
+                if (widget != null && widget.getSpriteId() == spriteId)
+                {
+                    target = widget;
+                    break;
+                }
+            }
+        }
+
+        if (target == null)
+        {
+            return;
+        }
+
+        int centerY = target.getRelativeY() + target.getHeight() / 2;
         int newScroll = Math.max(0, Math.min(parent.getScrollHeight(),
                 centerY - parent.getHeight() / 2));
 
