@@ -29,6 +29,7 @@ public class KspRobesOfRuinOverlay extends OverlayPanel
     @Override
     public Dimension render(Graphics2D graphics)
     {
+        panelComponent.getChildren().clear();
         KspRobesOfRuinPlugin.GuideStage stage = plugin.resolveStage();
         panelComponent.setPreferredSize(new Dimension(WIDTH, 0));
 
