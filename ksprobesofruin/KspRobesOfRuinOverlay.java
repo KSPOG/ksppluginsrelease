@@ -50,7 +50,14 @@ public class KspRobesOfRuinOverlay extends OverlayPanel
             case DIG_LUMBRIDGE:
             case CONFIRM_DIG:
                 line("Dig tile", format(KspRobesOfRuinPlugin.LUMBRIDGE_DIG_TILE));
-                line("Inventory", plugin.getPresentRequiredCount() + "/28 required");
+                line("Required on person", plugin.getPresentRequiredCount() + "/28");
+                line("In inventory", plugin.getInventoryRequiredCount() + "/28");
+                List<String> equipped = plugin.getEquippedRequiredItems();
+                line("Equipped required", Integer.toString(equipped.size()));
+                if (!equipped.isEmpty())
+                {
+                    line("Unequip", shorten(String.join(", ", equipped), 58));
+                }
                 break;
             case TRAVEL_VARROCK:
                 line("Destination", "Varrock west bank basement");
@@ -84,7 +91,9 @@ public class KspRobesOfRuinOverlay extends OverlayPanel
         List<String> missing = plugin.getMissingItems();
         List<String> extras = plugin.getExtraInventoryItems();
 
-        line("Required", plugin.getPresentRequiredCount() + "/28");
+        line("Required on person", plugin.getPresentRequiredCount() + "/28");
+        line("In inventory", plugin.getInventoryRequiredCount() + "/28");
+        line("Equipped required", Integer.toString(plugin.getEquippedRequiredItems().size()));
         line("Extra item types", Integer.toString(extras.size()));
 
         if (!missing.isEmpty())
