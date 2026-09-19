@@ -28,7 +28,9 @@ import net.runelite.client.plugins.cluescrolls.clues.emote.Emote;
 import net.runelite.client.plugins.microbot.Microbot;
 import net.runelite.client.plugins.microbot.api.tileobject.models.Rs2TileObjectModel;
 import net.runelite.client.plugins.microbot.util.dialogues.Rs2Dialogue;
+import net.runelite.client.plugins.microbot.util.equipment.Rs2Equipment;
 import net.runelite.client.plugins.microbot.util.inventory.Rs2Inventory;
+import net.runelite.client.plugins.microbot.util.inventory.Rs2ItemModel;
 import net.runelite.client.ui.overlay.OverlayManager;
 
 @PluginDescriptor(
@@ -43,7 +45,7 @@ import net.runelite.client.ui.overlay.OverlayManager;
 )
 public class KspRobesOfRuinPlugin extends Plugin
 {
-    public static final String VERSION = "0.0.3";
+    public static final String VERSION = "0.0.4";
 
     // RuneLite's Water Altar world-map/object location is 3185,3165. The solved
     // Robes of Ruin instruction is the tile immediately east of that entrance.
@@ -82,6 +84,40 @@ public class KspRobesOfRuinPlugin extends Plugin
             "Steel scimitar",
             "Tin ore",
             "Water rune"
+    );
+
+    // Quantity-aware by design. The current Crack the Clue III solution requires
+    // one of each listed item, but keeping quantities explicit makes stackable
+    // requirements (coins/runes/arrows/etc.) correct if a future step needs more.
+    private static final Map<String, Integer> REQUIRED_DIG_QUANTITIES = Map.ofEntries(
+            Map.entry("Spade", 1),
+            Map.entry("Amulet of defence", 1),
+            Map.entry("Blue dye", 1),
+            Map.entry("Bowl", 1),
+            Map.entry("Chaos rune", 1),
+            Map.entry("Emerald amulet", 1),
+            Map.entry("Feather", 1),
+            Map.entry("Fire tiara", 1),
+            Map.entry("Fish food", 1),
+            Map.entry("Hammer", 1),
+            Map.entry("Iron chainbody", 1),
+            Map.entry("Leather cowl", 1),
+            Map.entry("Mind tiara", 1),
+            Map.entry("Pie shell", 1),
+            Map.entry("Poisoned fish food", 1),
+            Map.entry("Potato", 1),
+            Map.entry("Purple dye", 1),
+            Map.entry("Raw beef", 1),
+            Map.entry("Raw rat meat", 1),
+            Map.entry("Raw sardine", 1),
+            Map.entry("Red bead", 1),
+            Map.entry("Redberries", 1),
+            Map.entry("Redberry pie", 1),
+            Map.entry("Shrimps", 1),
+            Map.entry("Steel arrow", 1),
+            Map.entry("Steel scimitar", 1),
+            Map.entry("Tin ore", 1),
+            Map.entry("Water rune", 1)
     );
 
     static final List<Emote> EMOTE_SEQUENCE = List.of(
@@ -137,6 +173,11 @@ public class KspRobesOfRuinPlugin extends Plugin
     private int emoteIndex;
     private String feedback = "Ready";
     private volatile WorldPoint cachedPlayerLocation;
+    private volatile List<String> cachedMissingItems = List.copyOf(REQUIRED_DIG_ITEMS);
+    private volatile List<String> cachedEquippedRequiredItems = Collections.emptyList();
+    private volatile List<String> cachedExtraInventoryItems = Collections.emptyList();
+    private volatile int cachedInventoryRequiredCount;
+    private volatile int cachedRewardCount;
     private WorldPoint lastPathTarget;
     private WorldPoint lastPathStart;
     private long lastPathUpdateMs;
@@ -178,6 +219,11 @@ public class KspRobesOfRuinPlugin extends Plugin
         overlayManager.remove(overlay);
         awaitingDigContinue = false;
         cachedPlayerLocation = null;
+        cachedMissingItems = List.copyOf(REQUIRED_DIG_ITEMS);
+        cachedEquippedRequiredItems = Collections.emptyList();
+        cachedExtraInventoryItems = Collections.emptyList();
+        cachedInventoryRequiredCount = 0;
+        cachedRewardCount = 0;
         feedback = "Stopped";
     }
 
@@ -194,6 +240,7 @@ public class KspRobesOfRuinPlugin extends Plugin
         // WorldPoint here so startup/config/overlay helpers never call
         // Player#getWorldLocation() from Swing's AWT thread.
         cachedPlayerLocation = client.getLocalPlayer().getWorldLocation();
+        refreshItemSnapshot();
 
         if (awaitingDigContinue)
         {
@@ -404,9 +451,13 @@ public class KspRobesOfRuinPlugin extends Plugin
             case PREPARE_ITEMS:
                 return "Put the exact 28 required items in your inventory.";
             case DIG_LUMBRIDGE:
+                if (!getEquippedRequiredItems().isEmpty())
+                {
+                    return "Follow the route. Before digging, unequip every required item so all 28 are in your inventory.";
+                }
                 return getExtraInventoryItems().isEmpty()
                         ? "Follow the route, stand on the highlighted tile east of the Water Altar, then dig."
-                        : "Follow the route. Before digging, remove every extra item so only the 28 required item types remain.";
+                        : "Follow the route. Before digging, remove every extra inventory item so only the 28 required item types remain.";
             case CONFIRM_DIG:
                 return "Click Continue on the clue message. The step does not count until it is dismissed.";
             case TRAVEL_VARROCK:
@@ -461,46 +512,73 @@ public class KspRobesOfRuinPlugin extends Plugin
 
     int getRewardCount()
     {
-        int count = 0;
-        for (String reward : REWARD_ITEMS)
-        {
-            if (Rs2Inventory.hasItem(reward, true))
-            {
-                count++;
-            }
-        }
-        return count;
+        return cachedRewardCount;
     }
 
     int getPresentRequiredCount()
     {
-        return REQUIRED_DIG_ITEMS.size() - getMissingItems().size();
+        return REQUIRED_DIG_ITEMS.size() - cachedMissingItems.size();
+    }
+
+    int getInventoryRequiredCount()
+    {
+        return cachedInventoryRequiredCount;
+    }
+
+    List<String> getEquippedRequiredItems()
+    {
+        return new ArrayList<>(cachedEquippedRequiredItems);
     }
 
     List<String> getMissingItems()
     {
-        List<String> missing = new ArrayList<>();
-        if (!Microbot.isLoggedIn())
-        {
-            missing.addAll(REQUIRED_DIG_ITEMS);
-            return missing;
-        }
-
-        for (String item : REQUIRED_DIG_ITEMS)
-        {
-            if (!Rs2Inventory.hasItem(item, true))
-            {
-                missing.add(item);
-            }
-        }
-        return missing;
+        return new ArrayList<>(cachedMissingItems);
     }
 
     List<String> getExtraInventoryItems()
     {
+        return new ArrayList<>(cachedExtraInventoryItems);
+    }
+
+    private void refreshItemSnapshot()
+    {
         if (!Microbot.isLoggedIn())
         {
-            return Collections.emptyList();
+            cachedMissingItems = List.copyOf(REQUIRED_DIG_ITEMS);
+            cachedEquippedRequiredItems = Collections.emptyList();
+            cachedExtraInventoryItems = Collections.emptyList();
+            cachedInventoryRequiredCount = 0;
+            cachedRewardCount = 0;
+            return;
+        }
+
+        List<String> missing = new ArrayList<>();
+        List<String> equipped = new ArrayList<>();
+        int inventoryRequired = 0;
+
+        for (String item : REQUIRED_DIG_ITEMS)
+        {
+            int requiredQuantity = REQUIRED_DIG_QUANTITIES.getOrDefault(item, 1);
+            int inventoryQuantity = Math.max(0, Rs2Inventory.itemQuantity(item, true));
+
+            Rs2ItemModel equippedItem = Rs2Equipment.get(item);
+            int equippedQuantity = equippedItem == null ? 0 : Math.max(1, equippedItem.getQuantity());
+            int onPersonQuantity = inventoryQuantity + equippedQuantity;
+
+            if (inventoryQuantity >= requiredQuantity)
+            {
+                inventoryRequired++;
+            }
+
+            if (equippedQuantity > 0)
+            {
+                equipped.add(formatQuantity(item, equippedQuantity));
+            }
+
+            if (onPersonQuantity < requiredQuantity)
+            {
+                missing.add(formatMissingQuantity(item, requiredQuantity, onPersonQuantity));
+            }
         }
 
         Set<String> required = new LinkedHashSet<>();
@@ -509,16 +587,47 @@ public class KspRobesOfRuinPlugin extends Plugin
             required.add(item.toLowerCase(Locale.ROOT));
         }
 
-        Set<String> extras = new LinkedHashSet<>();
+        Map<String, Integer> extras = new java.util.LinkedHashMap<>();
         Rs2Inventory.all().forEach(item ->
         {
             String name = item == null ? null : item.getName();
             if (name != null && !required.contains(name.toLowerCase(Locale.ROOT)))
             {
-                extras.add(name);
+                extras.merge(name, Math.max(1, item.getQuantity()), Integer::sum);
             }
         });
-        return new ArrayList<>(extras);
+
+        List<String> extraDisplay = new ArrayList<>();
+        extras.forEach((name, quantity) -> extraDisplay.add(formatQuantity(name, quantity)));
+
+        int rewards = 0;
+        for (String reward : REWARD_ITEMS)
+        {
+            if (Rs2Inventory.hasItem(reward, true))
+            {
+                rewards++;
+            }
+        }
+
+        cachedMissingItems = List.copyOf(missing);
+        cachedEquippedRequiredItems = List.copyOf(equipped);
+        cachedExtraInventoryItems = List.copyOf(extraDisplay);
+        cachedInventoryRequiredCount = inventoryRequired;
+        cachedRewardCount = rewards;
+    }
+
+    private static String formatQuantity(String name, int quantity)
+    {
+        return quantity > 1 ? name + " x" + quantity : name;
+    }
+
+    private static String formatMissingQuantity(String name, int required, int present)
+    {
+        if (required <= 1)
+        {
+            return name;
+        }
+        return name + " x" + required + " (have " + present + ")";
     }
 
     boolean isAtVaultGate()
@@ -555,6 +664,8 @@ public class KspRobesOfRuinPlugin extends Plugin
 
     private boolean hasRequiredDigItems()
     {
+        // Required pieces may be equipped while travelling/preparing. The overlay
+        // separately warns that all 28 must be moved back into the inventory before digging.
         return getMissingItems().isEmpty();
     }
 
