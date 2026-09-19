@@ -2,20 +2,19 @@ package net.runelite.client.plugins.microbot.kspkebabbuyer;
 
 import net.runelite.client.plugins.Plugin;
 import net.runelite.client.plugins.PluginDescriptor;
-import net.runelite.client.plugins.microbot.PluginConstants;
 import net.runelite.client.ui.overlay.OverlayManager;
 
 import javax.inject.Inject;
 
 @PluginDescriptor(
-        name = PluginConstants.KSP + "Kebab Buyer",
+        name = "<html>[<font color=#b8f704>KSP</font>] Kebab Buyer",
         description = "Buys kebabs from Karim in Al Kharid and banks them automatically.",
         tags = {"ksp", "kebab", "karim", "al kharid", "money making", "f2p"},
         authors = {"KSP"},
         version = KspKebabBuyerPlugin.VERSION,
         minClientVersion = "2.6.19",
-        enabledByDefault = PluginConstants.DEFAULT_ENABLED,
-        isExternal = PluginConstants.IS_EXTERNAL
+        enabledByDefault = false,
+        isExternal = true
 )
 public class KspKebabBuyerPlugin extends Plugin
 {
