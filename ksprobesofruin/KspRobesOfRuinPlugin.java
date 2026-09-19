@@ -209,7 +209,7 @@ public class KspRobesOfRuinPlugin extends Plugin
             feedback = "All Robes of Ruin rewards detected";
         }
 
-        if (emoteIndex > 0 && emoteIndex < EMOTE_SEQUENCE.size()
+        if (emoteIndex > 0 && !vaultUnlocked
                 && digComplete && !isInVarrockWestBankBasement())
         {
             setEmoteIndex(0);
