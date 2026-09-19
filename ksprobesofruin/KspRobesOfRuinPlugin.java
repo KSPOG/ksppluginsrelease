@@ -117,6 +117,7 @@ public class KspRobesOfRuinPlugin extends Plugin
 
     private static final String PROGRESS_DIG = "_progressDig";
     private static final String PROGRESS_EMOTE = "_progressEmote";
+    private static final String PROGRESS_VAULT = "_progressVault";
     private static final String PROGRESS_REWARDS = "_progressRewards";
     private static final long PATH_REFRESH_MS = 4_000L;
 
@@ -131,6 +132,7 @@ public class KspRobesOfRuinPlugin extends Plugin
 
     private boolean digComplete;
     private boolean awaitingDigContinue;
+    private boolean vaultUnlocked;
     private boolean rewardsComplete;
     private int emoteIndex;
     private String feedback = "Ready";
@@ -192,6 +194,14 @@ public class KspRobesOfRuinPlugin extends Plugin
             feedback = "Lumbridge clue confirmed - go to Varrock west bank basement";
         }
 
+        String dialogue = clean(Rs2Dialogue.getDialogueText());
+        if (!dialogue.isEmpty()
+                && dialogue.contains("well done")
+                && dialogue.contains("time to take your reward"))
+        {
+            unlockVault();
+        }
+
         if (getRewardCount() >= REWARD_ITEMS.size() && !rewardsComplete)
         {
             rewardsComplete = true;
@@ -228,9 +238,7 @@ public class KspRobesOfRuinPlugin extends Plugin
 
         if (message.contains("well done") && message.contains("time to take your reward"))
         {
-            setDigComplete(true);
-            setEmoteIndex(EMOTE_SEQUENCE.size());
-            feedback = "Vault unlocked - search the highlighted chests";
+            unlockVault();
         }
     }
 
@@ -304,9 +312,11 @@ public class KspRobesOfRuinPlugin extends Plugin
         }
         if (phase == KspRobesOfRuinPhase.VARROCK_EMOTES)
         {
-            return emoteIndex >= EMOTE_SEQUENCE.size()
-                    ? GuideStage.SEARCH_REWARDS
-                    : (isAtVaultGate() ? GuideStage.EMOTE_SEQUENCE : GuideStage.TRAVEL_VARROCK);
+            if (vaultUnlocked)
+            {
+                return GuideStage.SEARCH_REWARDS;
+            }
+            return isAtVaultGate() ? GuideStage.EMOTE_SEQUENCE : GuideStage.TRAVEL_VARROCK;
         }
         if (phase == KspRobesOfRuinPhase.LUMBRIDGE_DIG)
         {
@@ -321,7 +331,7 @@ public class KspRobesOfRuinPlugin extends Plugin
         {
             return GuideStage.COMPLETE;
         }
-        if (emoteIndex >= EMOTE_SEQUENCE.size())
+        if (vaultUnlocked)
         {
             return GuideStage.SEARCH_REWARDS;
         }
@@ -379,7 +389,7 @@ public class KspRobesOfRuinPlugin extends Plugin
             case EMOTE_SEQUENCE:
                 Emote emote = getExpectedEmote();
                 return emote == null
-                        ? "Wait for the vault to open."
+                        ? "17/17 entered. Wait for the Mysterious Old Man to confirm and teleport you."
                         : "Perform " + emote.getName() + " (" + (emoteIndex + 1) + "/17).";
             case SEARCH_REWARDS:
                 return "Search the highlighted chests inside the vault until all rewards are collected.";
@@ -577,6 +587,8 @@ public class KspRobesOfRuinPlugin extends Plugin
         Integer savedEmote = configManager.getConfiguration(
                 KspRobesOfRuinConfig.GROUP, PROGRESS_EMOTE, Integer.class);
         emoteIndex = savedEmote == null ? 0 : Math.max(0, Math.min(EMOTE_SEQUENCE.size(), savedEmote));
+        vaultUnlocked = Boolean.TRUE.equals(configManager.getConfiguration(
+                KspRobesOfRuinConfig.GROUP, PROGRESS_VAULT, Boolean.class));
         rewardsComplete = Boolean.TRUE.equals(configManager.getConfiguration(
                 KspRobesOfRuinConfig.GROUP, PROGRESS_REWARDS, Boolean.class));
     }
@@ -597,11 +609,23 @@ public class KspRobesOfRuinPlugin extends Plugin
     {
         digComplete = false;
         awaitingDigContinue = false;
+        vaultUnlocked = false;
         rewardsComplete = false;
         setEmoteIndex(0);
         configManager.setConfiguration(KspRobesOfRuinConfig.GROUP, PROGRESS_DIG, false);
+        configManager.setConfiguration(KspRobesOfRuinConfig.GROUP, PROGRESS_VAULT, false);
         configManager.setConfiguration(KspRobesOfRuinConfig.GROUP, PROGRESS_REWARDS, false);
         feedback = "Saved guide progress reset";
+        clearShortestPath();
+    }
+
+    private void unlockVault()
+    {
+        setDigComplete(true);
+        setEmoteIndex(EMOTE_SEQUENCE.size());
+        vaultUnlocked = true;
+        configManager.setConfiguration(KspRobesOfRuinConfig.GROUP, PROGRESS_VAULT, true);
+        feedback = "Vault unlocked - search the highlighted chests";
         clearShortestPath();
     }
 
