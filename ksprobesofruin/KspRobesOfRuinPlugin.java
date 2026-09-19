@@ -152,7 +152,7 @@ public class KspRobesOfRuinPlugin extends Plugin
             Map.entry(857, Emote.THINK),
             Map.entry(866, Emote.DANCE),
             Map.entry(5316, Emote.DANCE),
-            Map.entry(1368, Emote.BLOW_KISS),
+            Map.entry(1374, Emote.BLOW_KISS),
             Map.entry(863, Emote.WAVE),
             Map.entry(858, Emote.BOW),
             Map.entry(2108, Emote.HEADBANG),
