@@ -251,7 +251,10 @@ public class KspRobesOfRuinPlugin extends Plugin
             return;
         }
 
-        int spriteId = spriteForEmoteGridIndex(event.getParam0());
+        Widget clickedWidget = event.getWidget();
+        int spriteId = clickedWidget != null && clickedWidget.getSpriteId() > 0
+                ? clickedWidget.getSpriteId()
+                : spriteForEmoteGridIndex(event.getParam0());
         if (spriteId < 0 || emoteIndex >= EMOTE_SEQUENCE.size())
         {
             return;
@@ -330,7 +333,7 @@ public class KspRobesOfRuinPlugin extends Plugin
         {
             return GuideStage.COMPLETE;
         }
-        if (vaultUnlocked)
+        if (vaultUnlocked || emoteIndex >= EMOTE_SEQUENCE.size())
         {
             return GuideStage.SEARCH_REWARDS;
         }
@@ -517,7 +520,7 @@ public class KspRobesOfRuinPlugin extends Plugin
             return Microbot.getRs2TileObjectCache().query()
                     .where(object -> object != null
                             && object.getName() != null
-                            && "Chest".equalsIgnoreCase(object.getName())
+                            && object.getName().toLowerCase(Locale.ROOT).contains("chest")
                             && object.getWorldLocation() != null
                             && isInVarrockWestBankBasement(object.getWorldLocation()))
                     .within(30)
