@@ -30,6 +30,7 @@ import net.runelite.client.plugins.microbot.api.tileobject.models.Rs2TileObjectM
 import net.runelite.client.plugins.microbot.util.dialogues.Rs2Dialogue;
 import net.runelite.client.plugins.microbot.util.equipment.Rs2Equipment;
 import net.runelite.client.plugins.microbot.util.inventory.Rs2Inventory;
+import net.runelite.client.plugins.microbot.util.inventory.Rs2ItemModel;
 import net.runelite.client.ui.overlay.OverlayManager;
 
 @PluginDescriptor(
@@ -83,6 +84,40 @@ public class KspRobesOfRuinPlugin extends Plugin
             "Steel scimitar",
             "Tin ore",
             "Water rune"
+    );
+
+    // Quantity-aware by design. The current Crack the Clue III solution requires
+    // one of each listed item, but keeping quantities explicit makes stackable
+    // requirements (coins/runes/arrows/etc.) correct if a future step needs more.
+    private static final Map<String, Integer> REQUIRED_DIG_QUANTITIES = Map.ofEntries(
+            Map.entry("Spade", 1),
+            Map.entry("Amulet of defence", 1),
+            Map.entry("Blue dye", 1),
+            Map.entry("Bowl", 1),
+            Map.entry("Chaos rune", 1),
+            Map.entry("Emerald amulet", 1),
+            Map.entry("Feather", 1),
+            Map.entry("Fire tiara", 1),
+            Map.entry("Fish food", 1),
+            Map.entry("Hammer", 1),
+            Map.entry("Iron chainbody", 1),
+            Map.entry("Leather cowl", 1),
+            Map.entry("Mind tiara", 1),
+            Map.entry("Pie shell", 1),
+            Map.entry("Poisoned fish food", 1),
+            Map.entry("Potato", 1),
+            Map.entry("Purple dye", 1),
+            Map.entry("Raw beef", 1),
+            Map.entry("Raw rat meat", 1),
+            Map.entry("Raw sardine", 1),
+            Map.entry("Red bead", 1),
+            Map.entry("Redberries", 1),
+            Map.entry("Redberry pie", 1),
+            Map.entry("Shrimps", 1),
+            Map.entry("Steel arrow", 1),
+            Map.entry("Steel scimitar", 1),
+            Map.entry("Tin ore", 1),
+            Map.entry("Water rune", 1)
     );
 
     static final List<Emote> EMOTE_SEQUENCE = List.of(
@@ -523,20 +558,26 @@ public class KspRobesOfRuinPlugin extends Plugin
 
         for (String item : REQUIRED_DIG_ITEMS)
         {
-            boolean inInventory = Rs2Inventory.hasItem(item, true);
-            boolean isEquipped = Rs2Equipment.isWearing(item, true);
+            int requiredQuantity = REQUIRED_DIG_QUANTITIES.getOrDefault(item, 1);
+            int inventoryQuantity = Math.max(0, Rs2Inventory.itemQuantity(item, true));
 
-            if (inInventory)
+            Rs2ItemModel equippedItem = Rs2Equipment.get(item);
+            int equippedQuantity = equippedItem == null ? 0 : Math.max(1, equippedItem.getQuantity());
+            int onPersonQuantity = inventoryQuantity + equippedQuantity;
+
+            if (inventoryQuantity >= requiredQuantity)
             {
                 inventoryRequired++;
             }
-            if (isEquipped)
+
+            if (equippedQuantity > 0)
             {
-                equipped.add(item);
+                equipped.add(formatQuantity(item, equippedQuantity));
             }
-            if (!inInventory && !isEquipped)
+
+            if (onPersonQuantity < requiredQuantity)
             {
-                missing.add(item);
+                missing.add(formatMissingQuantity(item, requiredQuantity, onPersonQuantity));
             }
         }
 
@@ -546,15 +587,18 @@ public class KspRobesOfRuinPlugin extends Plugin
             required.add(item.toLowerCase(Locale.ROOT));
         }
 
-        Set<String> extras = new LinkedHashSet<>();
+        Map<String, Integer> extras = new java.util.LinkedHashMap<>();
         Rs2Inventory.all().forEach(item ->
         {
             String name = item == null ? null : item.getName();
             if (name != null && !required.contains(name.toLowerCase(Locale.ROOT)))
             {
-                extras.add(name);
+                extras.merge(name, Math.max(1, item.getQuantity()), Integer::sum);
             }
         });
+
+        List<String> extraDisplay = new ArrayList<>();
+        extras.forEach((name, quantity) -> extraDisplay.add(formatQuantity(name, quantity)));
 
         int rewards = 0;
         for (String reward : REWARD_ITEMS)
@@ -567,9 +611,23 @@ public class KspRobesOfRuinPlugin extends Plugin
 
         cachedMissingItems = List.copyOf(missing);
         cachedEquippedRequiredItems = List.copyOf(equipped);
-        cachedExtraInventoryItems = List.copyOf(extras);
+        cachedExtraInventoryItems = List.copyOf(extraDisplay);
         cachedInventoryRequiredCount = inventoryRequired;
         cachedRewardCount = rewards;
+    }
+
+    private static String formatQuantity(String name, int quantity)
+    {
+        return quantity > 1 ? name + " x" + quantity : name;
+    }
+
+    private static String formatMissingQuantity(String name, int required, int present)
+    {
+        if (required <= 1)
+        {
+            return name;
+        }
+        return name + " x" + required + " (have " + present + ")";
     }
 
     boolean isAtVaultGate()
