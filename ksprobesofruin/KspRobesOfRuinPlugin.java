@@ -26,21 +26,20 @@ import net.runelite.client.plugins.Plugin;
 import net.runelite.client.plugins.PluginDescriptor;
 import net.runelite.client.plugins.cluescrolls.clues.emote.Emote;
 import net.runelite.client.plugins.microbot.Microbot;
-import net.runelite.client.plugins.microbot.PluginConstants;
 import net.runelite.client.plugins.microbot.api.tileobject.models.Rs2TileObjectModel;
 import net.runelite.client.plugins.microbot.util.dialogues.Rs2Dialogue;
 import net.runelite.client.plugins.microbot.util.inventory.Rs2Inventory;
 import net.runelite.client.ui.overlay.OverlayManager;
 
 @PluginDescriptor(
-        name = PluginConstants.KSP + "Robes of Ruin Helper",
+        name = "<html>[<font color=#b8f704>KSP</font>] Robes of Ruin Helper",
         description = "Quest-Helper-style guide for obtaining the full Robes of Ruin set.",
         tags = {"microbot", "ksp", "robes of ruin", "crack the clue", "guide", "shortest path", "emotes"},
         authors = {"KSP"},
         version = KspRobesOfRuinPlugin.VERSION,
         minClientVersion = "2.6.19",
-        enabledByDefault = PluginConstants.DEFAULT_ENABLED,
-        isExternal = PluginConstants.IS_EXTERNAL
+        enabledByDefault = false,
+        isExternal = true
 )
 public class KspRobesOfRuinPlugin extends Plugin
 {
@@ -324,7 +323,7 @@ public class KspRobesOfRuinPlugin extends Plugin
             {
                 return GuideStage.CONFIRM_DIG;
             }
-            return hasExactDigInventory() ? GuideStage.DIG_LUMBRIDGE : GuideStage.PREPARE_ITEMS;
+            return hasRequiredDigItems() ? GuideStage.DIG_LUMBRIDGE : GuideStage.PREPARE_ITEMS;
         }
 
         if (rewardsComplete)
@@ -341,7 +340,7 @@ public class KspRobesOfRuinPlugin extends Plugin
             {
                 return GuideStage.CONFIRM_DIG;
             }
-            return hasExactDigInventory() ? GuideStage.DIG_LUMBRIDGE : GuideStage.PREPARE_ITEMS;
+            return hasRequiredDigItems() ? GuideStage.DIG_LUMBRIDGE : GuideStage.PREPARE_ITEMS;
         }
         return isAtVaultGate() ? GuideStage.EMOTE_SEQUENCE : GuideStage.TRAVEL_VARROCK;
     }
@@ -381,7 +380,9 @@ public class KspRobesOfRuinPlugin extends Plugin
             case PREPARE_ITEMS:
                 return "Put the exact 28 required items in your inventory.";
             case DIG_LUMBRIDGE:
-                return "Follow the route, stand on the highlighted tile east of the Water Altar, then dig.";
+                return getExtraInventoryItems().isEmpty()
+                        ? "Follow the route, stand on the highlighted tile east of the Water Altar, then dig."
+                        : "Follow the route. Before digging, remove every extra item so only the 28 required item types remain.";
             case CONFIRM_DIG:
                 return "Click Continue on the clue message. The step does not count until it is dismissed.";
             case TRAVEL_VARROCK:
@@ -528,9 +529,9 @@ public class KspRobesOfRuinPlugin extends Plugin
         }
     }
 
-    private boolean hasExactDigInventory()
+    private boolean hasRequiredDigItems()
     {
-        return getMissingItems().isEmpty() && getExtraInventoryItems().isEmpty();
+        return getMissingItems().isEmpty();
     }
 
     private boolean isInVarrockWestBankBasement()
