@@ -43,7 +43,7 @@ import net.runelite.client.ui.overlay.OverlayManager;
 )
 public class KspRobesOfRuinPlugin extends Plugin
 {
-    public static final String VERSION = "0.0.1";
+    public static final String VERSION = "0.0.2";
 
     // RuneLite's Water Altar world-map/object location is 3185,3165. The solved
     // Robes of Ruin instruction is the tile immediately east of that entrance.
@@ -320,12 +320,12 @@ public class KspRobesOfRuinPlugin extends Plugin
 
     GuideStage resolveStage()
     {
-        KspRobesOfRuinPhase phase = config.phase();
-        if (phase == KspRobesOfRuinPhase.REWARD_CHESTS)
+        KspRobesOfRuinConfig.KspRobesOfRuinPhase phase = config.phase();
+        if (phase == KspRobesOfRuinConfig.KspRobesOfRuinPhase.REWARD_CHESTS)
         {
             return rewardsComplete ? GuideStage.COMPLETE : GuideStage.SEARCH_REWARDS;
         }
-        if (phase == KspRobesOfRuinPhase.VARROCK_EMOTES)
+        if (phase == KspRobesOfRuinConfig.KspRobesOfRuinPhase.VARROCK_EMOTES)
         {
             if (vaultUnlocked)
             {
@@ -333,7 +333,7 @@ public class KspRobesOfRuinPlugin extends Plugin
             }
             return isAtVaultGate() ? GuideStage.EMOTE_SEQUENCE : GuideStage.TRAVEL_VARROCK;
         }
-        if (phase == KspRobesOfRuinPhase.LUMBRIDGE_DIG)
+        if (phase == KspRobesOfRuinConfig.KspRobesOfRuinPhase.LUMBRIDGE_DIG)
         {
             if (awaitingDigContinue)
             {
