@@ -55,7 +55,6 @@ public class KspMugFillerScript extends Script
 
     private int slotCursor;
     private boolean awaitingInventoryChange;
-    private int pendingSlot = -1;
     private int pendingGlassCount;
     private long pendingInteractionAt;
     private long nextInventoryInteractionAt;
@@ -291,7 +290,6 @@ public class KspMugFillerScript extends Script
         // do not advance to the next shuffled slot until this Beer glass has
         // actually disappeared from the Beer-glass count.
         awaitingInventoryChange = true;
-        pendingSlot = targetSlot;
         pendingGlassCount = before;
         pendingInteractionAt = now;
         state = RuntimeState.WAITING_FOR_INVENTORY_CHANGE;
@@ -308,8 +306,7 @@ public class KspMugFillerScript extends Script
             filledCount += confirmed;
 
             awaitingInventoryChange = false;
-            pendingSlot = -1;
-            pendingGlassCount = 0;
+                pendingGlassCount = 0;
             pendingInteractionAt = 0L;
             slotCursor++;
             nextInventoryInteractionAt = System.currentTimeMillis() + 40L;
@@ -337,7 +334,6 @@ public class KspMugFillerScript extends Script
         }
 
         awaitingInventoryChange = false;
-        pendingSlot = -1;
         pendingGlassCount = 0;
         pendingInteractionAt = 0L;
         nextInventoryInteractionAt = System.currentTimeMillis() + 200L;
@@ -352,7 +348,7 @@ public class KspMugFillerScript extends Script
             Rs2TileObjectModel barrel = Microbot.getRs2TileObjectCache()
                     .query()
                     .withId(BARREL_ID)
-                    .within(BARREL_TILE, 0)
+                    .within(BARREL_TILE, 1)
                     .nearestOnClientThread();
 
             if (barrel == null)
@@ -406,7 +402,6 @@ public class KspMugFillerScript extends Script
         state = RuntimeState.BANKING;
         bankDepositComplete = false;
         awaitingInventoryChange = false;
-        pendingSlot = -1;
         pendingGlassCount = 0;
         pendingInteractionAt = 0L;
         nextInventoryInteractionAt = 0L;
@@ -450,7 +445,6 @@ public class KspMugFillerScript extends Script
         shuffledGlassSlots.clear();
         slotCursor = 0;
         awaitingInventoryChange = false;
-        pendingSlot = -1;
         pendingGlassCount = 0;
         pendingInteractionAt = 0L;
         nextInventoryInteractionAt = 0L;
