@@ -13,6 +13,7 @@ import net.runelite.client.plugins.microbot.util.npc.Rs2Npc;
 import net.runelite.client.plugins.microbot.util.player.Rs2Player;
 import net.runelite.client.plugins.microbot.util.walker.Rs2Walker;
 
+import javax.inject.Inject;
 import java.awt.event.KeyEvent;
 import java.util.concurrent.TimeUnit;
 
@@ -21,6 +22,14 @@ import static net.runelite.client.plugins.microbot.util.Global.sleepUntil;
 @Slf4j
 public class KspKebabBuyerScript extends Script
 {
+    private final KspKebabBuyerPlugin plugin;
+
+    @Inject
+    public KspKebabBuyerScript(KspKebabBuyerPlugin plugin)
+    {
+        this.plugin = plugin;
+    }
+
     // OSRS Wiki / cache data:
     // Karim = NPC 2877 @ 3274,3181,0. Kebab = item 1971. Price from Karim = 1 coin.
     private static final int KARIM_ID = 2877;
@@ -29,7 +38,6 @@ public class KspKebabBuyerScript extends Script
     private static final WorldPoint KARIM_TILE = new WorldPoint(3274, 3181, 0);
 
     private static final int KEBAB_BUY_PRICE = 1;
-    private static final int COIN_RESTOCK_AMOUNT = 10_000;
     private static final int DIALOGUE_TIMEOUT_MS = 2_500;
     private static final int INVENTORY_TIMEOUT_MS = 2_500;
     private static final long LOOP_DELAY_MS = 120L;
@@ -216,20 +224,18 @@ public class KspKebabBuyerScript extends Script
         int bankCoins = Rs2Bank.count(COINS_NAME, true);
         if (bankCoins <= 0)
         {
-            status = "Out of coins";
+            status = "Out of coins - stopping";
+            log.info("KSP Kebab Buyer stopped: no coins remain in inventory or bank");
+            Microbot.showMessage("KSP Kebab Buyer: out of coins - stopping.");
+            Microbot.stopPlugin(plugin);
             return;
         }
 
-        int withdraw = Math.min(COIN_RESTOCK_AMOUNT, bankCoins);
-        status = "Withdrawing " + String.format("%,d", withdraw) + " coins";
-
-        boolean issued = bankCoins <= COIN_RESTOCK_AMOUNT
-                ? Rs2Bank.withdrawAll(COINS_NAME, true)
-                : Rs2Bank.withdrawX(COINS_NAME, withdraw, true);
-
-        if (!issued || !sleepUntil(() -> coinCount() > 0, INVENTORY_TIMEOUT_MS))
+        status = "Withdrawing all " + String.format("%,d", bankCoins) + " coins";
+        if (!Rs2Bank.withdrawAll(COINS_NAME, true)
+                || !sleepUntil(() -> coinCount() >= bankCoins, INVENTORY_TIMEOUT_MS))
         {
-            status = "Waiting for coin withdrawal";
+            status = "Waiting for all coins";
             return;
         }
 
