@@ -45,11 +45,10 @@ import net.runelite.client.ui.overlay.OverlayManager;
 )
 public class KspRobesOfRuinPlugin extends Plugin
 {
-    public static final String VERSION = "0.0.5";
+    public static final String VERSION = "0.0.6";
 
-    // RuneLite's Water Altar world-map/object location is 3185,3165. The solved
-    // Robes of Ruin instruction is the tile immediately east of that entrance.
-    static final WorldPoint LUMBRIDGE_DIG_TILE = new WorldPoint(3186, 3165, 0);
+    // Exact first Robes of Ruin dig tile confirmed in-game.
+    static final WorldPoint LUMBRIDGE_DIG_TILE = new WorldPoint(3190, 3165, 0);
 
     // RuneLite's hard cryptic clue uses this exact gate-adjacent basement tile:
     // "Dig by the gate in the basement of the West Varrock bank."
