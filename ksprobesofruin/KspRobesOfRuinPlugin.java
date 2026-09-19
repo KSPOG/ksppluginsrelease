@@ -28,6 +28,7 @@ import net.runelite.client.plugins.cluescrolls.clues.emote.Emote;
 import net.runelite.client.plugins.microbot.Microbot;
 import net.runelite.client.plugins.microbot.api.tileobject.models.Rs2TileObjectModel;
 import net.runelite.client.plugins.microbot.util.dialogues.Rs2Dialogue;
+import net.runelite.client.plugins.microbot.util.equipment.Rs2Equipment;
 import net.runelite.client.plugins.microbot.util.inventory.Rs2Inventory;
 import net.runelite.client.ui.overlay.OverlayManager;
 
@@ -43,7 +44,7 @@ import net.runelite.client.ui.overlay.OverlayManager;
 )
 public class KspRobesOfRuinPlugin extends Plugin
 {
-    public static final String VERSION = "0.0.3";
+    public static final String VERSION = "0.0.4";
 
     // RuneLite's Water Altar world-map/object location is 3185,3165. The solved
     // Robes of Ruin instruction is the tile immediately east of that entrance.
@@ -404,9 +405,13 @@ public class KspRobesOfRuinPlugin extends Plugin
             case PREPARE_ITEMS:
                 return "Put the exact 28 required items in your inventory.";
             case DIG_LUMBRIDGE:
+                if (!getEquippedRequiredItems().isEmpty())
+                {
+                    return "Follow the route. Before digging, unequip every required item so all 28 are in your inventory.";
+                }
                 return getExtraInventoryItems().isEmpty()
                         ? "Follow the route, stand on the highlighted tile east of the Water Altar, then dig."
-                        : "Follow the route. Before digging, remove every extra item so only the 28 required item types remain.";
+                        : "Follow the route. Before digging, remove every extra inventory item so only the 28 required item types remain.";
             case CONFIRM_DIG:
                 return "Click Continue on the clue message. The step does not count until it is dismissed.";
             case TRAVEL_VARROCK:
@@ -477,6 +482,42 @@ public class KspRobesOfRuinPlugin extends Plugin
         return REQUIRED_DIG_ITEMS.size() - getMissingItems().size();
     }
 
+    int getInventoryRequiredCount()
+    {
+        int count = 0;
+        if (!Microbot.isLoggedIn())
+        {
+            return count;
+        }
+
+        for (String item : REQUIRED_DIG_ITEMS)
+        {
+            if (Rs2Inventory.hasItem(item, true))
+            {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    List<String> getEquippedRequiredItems()
+    {
+        List<String> equipped = new ArrayList<>();
+        if (!Microbot.isLoggedIn())
+        {
+            return equipped;
+        }
+
+        for (String item : REQUIRED_DIG_ITEMS)
+        {
+            if (Rs2Equipment.isWearing(item, true))
+            {
+                equipped.add(item);
+            }
+        }
+        return equipped;
+    }
+
     List<String> getMissingItems()
     {
         List<String> missing = new ArrayList<>();
@@ -488,7 +529,7 @@ public class KspRobesOfRuinPlugin extends Plugin
 
         for (String item : REQUIRED_DIG_ITEMS)
         {
-            if (!Rs2Inventory.hasItem(item, true))
+            if (!Rs2Inventory.hasItem(item, true) && !Rs2Equipment.isWearing(item, true))
             {
                 missing.add(item);
             }
@@ -555,6 +596,8 @@ public class KspRobesOfRuinPlugin extends Plugin
 
     private boolean hasRequiredDigItems()
     {
+        // Required pieces may be equipped while travelling/preparing. The overlay
+        // separately warns that all 28 must be moved back into the inventory before digging.
         return getMissingItems().isEmpty();
     }
 
