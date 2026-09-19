@@ -33,4 +33,4 @@ jobs:
 
       - name: Compile RuneLite client
         working-directory: microbot
-        run: ./gradlew :runelite-client:compileJava --no-daemon
+        run: ./gradlew :client:compileJava --no-daemon
