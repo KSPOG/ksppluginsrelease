@@ -10,7 +10,7 @@ import net.runelite.client.plugins.microbot.PluginConstants;
 import net.runelite.client.ui.overlay.OverlayManager;
 
 @PluginDescriptor(
-        name = PluginConstants.KSP + "Bones to Bananas",
+        name = "<html>[<font color=#b8f704>KSP</font>] Bones to Bananas",
         description = "Profit-aware Bones to Bananas with GE restocking, equipped-staff detection and anti-ban.",
         tags = {"bones to bananas", "magic", "grand exchange", "money making", "profit", "antiban"},
         authors = {"KSP"},
