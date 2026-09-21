@@ -6,7 +6,6 @@ import lombok.extern.slf4j.Slf4j;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.plugins.Plugin;
 import net.runelite.client.plugins.PluginDescriptor;
-import net.runelite.client.plugins.microbot.PluginConstants;
 import net.runelite.client.ui.overlay.OverlayManager;
 
 @PluginDescriptor(
@@ -16,8 +15,8 @@ import net.runelite.client.ui.overlay.OverlayManager;
         authors = {"KSP"},
         version = KspBonesToBananasPlugin.VERSION,
         minClientVersion = "2.6.19",
-        enabledByDefault = PluginConstants.DEFAULT_ENABLED,
-        isExternal = PluginConstants.IS_EXTERNAL
+        enabledByDefault = false,
+        isExternal = true
 )
 @Slf4j
 public class KspBonesToBananasPlugin extends Plugin
