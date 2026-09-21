@@ -493,6 +493,17 @@ public class KspBonesToBananasScript extends Script
         GeOrder order = geOrder;
         if (order == null || !ensureGeOverview()) return;
 
+        if (order.abortRequested)
+        {
+            if (!orderSlotCleared(order))
+            {
+                status = "Waiting for aborted offer collection: " + order.itemName;
+                return;
+            }
+            replanAfterAbort(order);
+            return;
+        }
+
         if (!order.placed)
         {
             placeOrder(order);
@@ -570,6 +581,14 @@ public class KspBonesToBananasScript extends Script
         }
         else
         {
+            // SELL ignores request.slot in Microbot, but remembering the first free slot
+            // gives us a strong expected-slot hint before falling back to exact matching.
+            order.slot = firstFreeGeSlot();
+            if (order.slot == null)
+            {
+                status = "Waiting for a free GE slot";
+                return;
+            }
             request = GrandExchangeRequest.builder()
                     .action(order.action)
                     .itemName(order.itemName)
@@ -626,21 +645,32 @@ public class KspBonesToBananasScript extends Script
 
     private void retryStalledOrder(GeOrder order)
     {
+        if (order == null || order.abortRequested) return;
         status = "Repricing stalled " + order.itemName;
         if (!Rs2GrandExchange.abortOffer(order.itemName, true)) return;
 
+        // Microbot's abortOffer(..., true) only initiates Collect-to-bank. Do not
+        // replan against stale bank quantities until the tracked GE slot is cleared.
+        order.abortRequested = true;
+        status = "Waiting for aborted offer collection: " + order.itemName;
+    }
+
+    private void replanAfterAbort(GeOrder order)
+    {
         if (order.action == GrandExchangeAction.BUY)
         {
             buyRetryLevel = Math.min(MAX_GE_RETRIES, buyRetryLevel + 1);
             buyQueue.clear();
             geOrder = null;
             state = KspBonesToBananasState.RESTOCKING;
+            status = "Partial buy reconciled - rebuilding input orders";
         }
         else
         {
             sellRetryLevel = Math.min(MAX_GE_RETRIES, sellRetryLevel + 1);
             geOrder = null;
             state = KspBonesToBananasState.SELLING_OUTPUT;
+            status = "Partial sale reconciled - rebuilding Banana offer";
         }
     }
 
@@ -726,12 +756,16 @@ public class KspBonesToBananasScript extends Script
     {
         if (order == null || order.slot == null) return false;
         if (!Rs2GrandExchange.collectAllToBank()) return false;
-        return sleepUntil(() -> {
-            OfferSnapshot current = offer(order.slot);
-            return current == null
-                    || current.state == GrandExchangeOfferState.EMPTY
-                    || current.itemId != order.itemId;
-        }, 5000);
+        return sleepUntil(() -> orderSlotCleared(order), 5000);
+    }
+
+    private boolean orderSlotCleared(GeOrder order)
+    {
+        if (order == null || order.slot == null) return true;
+        OfferSnapshot current = offer(order.slot);
+        return current == null
+                || current.state == GrandExchangeOfferState.EMPTY
+                || current.itemId != order.itemId;
     }
 
     private boolean ensureGeOverview()
@@ -962,7 +996,7 @@ public class KspBonesToBananasScript extends Script
         final int itemId, quantity, price;
         final String itemName;
         GrandExchangeSlots slot;
-        boolean placed;
+        boolean placed, abortRequested;
         long placedAt;
 
         GeOrder(GrandExchangeAction action, int itemId, String itemName, int quantity, int price)
