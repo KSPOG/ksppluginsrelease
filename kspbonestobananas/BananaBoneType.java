@@ -10,8 +10,8 @@ public enum BananaBoneType
 {
     BONES(ItemID.BONES, "Bones", false),
     BURNT_BONES(ItemID.BONES_BURNT, "Burnt bones", false),
-    BAT_BONES(ItemID.BAT_BONES, "Bat bones", false),
-    WOLF_BONES(ItemID.WOLF_BONES, "Wolf bones", false),
+    BAT_BONES(ItemID.BAT_BONES, "Bat bones", true),
+    WOLF_BONES(ItemID.WOLF_BONES, "Wolf bones", true),
     MONKEY_BONES(ItemID.MM_NORMAL_MONKEY_BONES, "Monkey bones", true),
     JOGRE_BONES(ItemID.TBWT_JOGRE_BONES, "Jogre bones", true),
     BIG_BONES(ItemID.BIG_BONES, "Big bones", false);
