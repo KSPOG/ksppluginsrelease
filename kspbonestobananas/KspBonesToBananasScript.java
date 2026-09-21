@@ -16,6 +16,7 @@ import net.runelite.client.plugins.microbot.util.bank.Rs2Bank;
 import net.runelite.client.plugins.microbot.util.equipment.Rs2Equipment;
 import net.runelite.client.plugins.microbot.util.grandexchange.GrandExchangeAction;
 import net.runelite.client.plugins.microbot.util.grandexchange.GrandExchangeRequest;
+import net.runelite.client.plugins.microbot.util.grandexchange.GrandExchangeSlots;
 import net.runelite.client.plugins.microbot.util.grandexchange.Rs2GrandExchange;
 import net.runelite.client.plugins.microbot.util.inventory.Rs2Inventory;
 import net.runelite.client.plugins.microbot.util.inventory.Rs2ItemModel;
@@ -157,7 +158,10 @@ public class KspBonesToBananasScript extends Script
             if (!q.meets(config)) continue;
 
             int owned = Math.max(0, Rs2Bank.count(bone.getItemId())) + Math.max(0, Rs2Inventory.itemQuantity(bone.getItemId()));
-            if (owned > 0 && (bestBanked == null || q.getProjectedGpHour() > bestBanked.getProjectedGpHour()))
+            int ownedBatch = Math.min(q.getBatchSize(), owned);
+            if (ownedBatch > 0
+                    && q.meetsForQuantity(config, ownedBatch)
+                    && (bestBanked == null || q.getProjectedGpHour() > bestBanked.getProjectedGpHour()))
             {
                 bestBanked = q;
             }
@@ -249,7 +253,8 @@ public class KspBonesToBananasScript extends Script
         }
         if (!activeQuote.meetsForQuantity(config, batch))
         {
-            status = "Current inventory size would make this cast unprofitable";
+            state = KspBonesToBananasState.RESTOCKING;
+            status = "Topping up inputs for a profitable cast";
             return;
         }
 
@@ -345,10 +350,17 @@ public class KspBonesToBananasScript extends Script
         cleanInventoryForBatch();
         refreshBananaStock();
 
-        if (Rs2Bank.count(activeBone.getItemId()) > 0)
+        int ownedBones = totalSupply(activeBone.getItemId());
+        int ownedBatch = Math.min(activeQuote.getBatchSize(), ownedBones);
+        boolean ownedBatchProfitable = ownedBatch > 0 && activeQuote.meetsForQuantity(config, ownedBatch);
+        boolean runesReady = hasRuneSupply(ItemID.NATURERUNE, 1)
+                && (freeWater || hasRuneSupply(ItemID.WATERRUNE, 2))
+                && (freeEarth || hasRuneSupply(ItemID.EARTHRUNE, 2));
+
+        if (ownedBatchProfitable && runesReady)
         {
             state = KspBonesToBananasState.PREPARING_BATCH;
-            status = "Using existing profitable bone stock";
+            status = "Using existing profitable input stock";
             return;
         }
         if (bankedBananas >= config.sellThreshold())
@@ -362,14 +374,24 @@ public class KspBonesToBananasScript extends Script
         long spendable = Math.max(0L, coins - config.cashReserve());
         spendableCoins = (int) Math.min(Integer.MAX_VALUE, spendable);
         long budget = spendable * config.maxSpendPercent() / 100L;
-        double averageCost = Math.max(1D, activeQuote.getAverageInputCostPerBone());
-        int affordable = (int) Math.min(Integer.MAX_VALUE, Math.floor(budget / averageCost));
-        int targetBones = Math.min(config.restockBones(), affordable);
 
-        if (targetBones < activeQuote.getBatchSize())
+        int minimumProfitableBones = minimumProfitableBones(activeQuote);
+        if (minimumProfitableBones <= 0)
+        {
+            state = KspBonesToBananasState.SCANNING_MARKET;
+            status = "No profitable cast size at current prices";
+            return;
+        }
+
+        int minimumTarget = Math.max(ownedBones, minimumProfitableBones);
+        long maximumTargetLong = (long) ownedBones + Math.max(1, config.restockBones());
+        int maximumTarget = (int) Math.min(Integer.MAX_VALUE, maximumTargetLong);
+        int targetBones = affordableRestockTarget(minimumTarget, maximumTarget, budget);
+
+        if (targetBones < minimumTarget)
         {
             state = KspBonesToBananasState.WAITING_FOR_PROFIT;
-            status = "Not enough spendable cash for one profitable batch";
+            status = "Not enough spendable cash to top up a profitable cast";
             nextScanAt = System.currentTimeMillis() + 10_000L;
             return;
         }
@@ -471,36 +493,53 @@ public class KspBonesToBananasScript extends Script
         GeOrder order = geOrder;
         if (order == null || !ensureGeOverview()) return;
 
-        OfferSnapshot offer = findOffer(order.itemId, order.action);
         if (!order.placed)
         {
-            if (offer != null)
-            {
-                order.placed = true;
-                order.placedAt = System.currentTimeMillis();
-            }
-            else
-            {
-                placeOrder(order);
-                return;
-            }
+            placeOrder(order);
+            return;
         }
 
-        offer = findOffer(order.itemId, order.action);
-        if (offer != null)
+        if (order.slot == null)
         {
-            boolean complete = (order.action == GrandExchangeAction.BUY && offer.state == GrandExchangeOfferState.BOUGHT)
-                    || (order.action == GrandExchangeAction.SELL && offer.state == GrandExchangeOfferState.SOLD);
-            if (complete)
+            order.slot = findOfferSlot(order);
+            if (order.slot == null)
             {
-                if (!Rs2GrandExchange.collectAllToBank()) return;
-                sleep(250, 450);
-                finishOrder(order);
+                status = "Waiting for GE offer confirmation: " + order.itemName;
                 return;
             }
         }
 
-        status = (order.action == GrandExchangeAction.BUY ? "Buying " : "Selling ") + order.itemName;
+        OfferSnapshot offer = offer(order.slot);
+        if (!matchesOrder(offer, order))
+        {
+            GrandExchangeSlots recovered = findOfferSlot(order);
+            if (recovered == null)
+            {
+                status = "Waiting for tracked GE offer: " + order.itemName;
+                return;
+            }
+            order.slot = recovered;
+            offer = offer(recovered);
+        }
+
+        boolean complete = offer != null
+                && offer.filled >= order.quantity
+                && offer.total == order.quantity
+                && ((order.action == GrandExchangeAction.BUY && offer.state == GrandExchangeOfferState.BOUGHT)
+                || (order.action == GrandExchangeAction.SELL && offer.state == GrandExchangeOfferState.SOLD));
+
+        if (complete)
+        {
+            status = (order.action == GrandExchangeAction.BUY ? "Bought " : "Sold ")
+                    + order.quantity + " x " + order.itemName + " - collecting";
+            if (!collectCompletedOrder(order)) return;
+            finishOrder(order);
+            return;
+        }
+
+        int filled = offer == null ? 0 : Math.max(0, offer.filled);
+        status = (order.action == GrandExchangeAction.BUY ? "Buying " : "Selling ")
+                + order.itemName + " (" + filled + "/" + order.quantity + ")";
         if (order.placedAt > 0
                 && System.currentTimeMillis() - order.placedAt >= config.geOfferTimeoutSeconds() * 1000L)
         {
@@ -510,14 +549,36 @@ public class KspBonesToBananasScript extends Script
 
     private void placeOrder(GeOrder order)
     {
-        GrandExchangeRequest request = GrandExchangeRequest.builder()
-                .action(order.action)
-                .itemName(order.itemName)
-                .exact(true)
-                .quantity(order.quantity)
-                .price(order.price)
-                .closeAfterCompletion(false)
-                .build();
+        GrandExchangeRequest request;
+        if (order.action == GrandExchangeAction.BUY)
+        {
+            order.slot = firstFreeGeSlot();
+            if (order.slot == null)
+            {
+                status = "Waiting for a free GE slot";
+                return;
+            }
+            request = GrandExchangeRequest.builder()
+                    .slot(order.slot)
+                    .action(order.action)
+                    .itemName(order.itemName)
+                    .exact(true)
+                    .quantity(order.quantity)
+                    .price(order.price)
+                    .closeAfterCompletion(false)
+                    .build();
+        }
+        else
+        {
+            request = GrandExchangeRequest.builder()
+                    .action(order.action)
+                    .itemName(order.itemName)
+                    .exact(true)
+                    .quantity(order.quantity)
+                    .price(order.price)
+                    .closeAfterCompletion(false)
+                    .build();
+        }
 
         status = (order.action == GrandExchangeAction.BUY ? "Placing buy: " : "Placing sell: ") + order.itemName;
         boolean placed;
@@ -533,6 +594,19 @@ public class KspBonesToBananasScript extends Script
 
         if (!placed)
         {
+            GrandExchangeSlots recovered = order.slot != null && matchesOrder(offer(order.slot), order)
+                    ? order.slot
+                    : findOfferSlot(order);
+            if (recovered != null)
+            {
+                order.slot = recovered;
+                order.placed = true;
+                order.placedAt = System.currentTimeMillis();
+                status = "GE offer confirmed after UI recovery: " + order.itemName;
+                return;
+            }
+
+            order.slot = null;
             if (Rs2GrandExchange.isOfferScreenOpen()) Rs2GrandExchange.backToOverview();
             status = "GE placement failed - retrying " + order.itemName;
             return;
@@ -540,6 +614,14 @@ public class KspBonesToBananasScript extends Script
 
         order.placed = true;
         order.placedAt = System.currentTimeMillis();
+        if (order.slot == null)
+        {
+            sleepUntil(() -> findOfferSlot(order) != null || !Rs2GrandExchange.isOpen(), 3000);
+            order.slot = findOfferSlot(order);
+        }
+        status = order.slot == null
+                ? "Waiting for GE offer confirmation: " + order.itemName
+                : "GE offer active: " + order.itemName;
     }
 
     private void retryStalledOrder(GeOrder order)
@@ -585,24 +667,71 @@ public class KspBonesToBananasScript extends Script
         }
     }
 
-    private OfferSnapshot findOffer(int itemId, GrandExchangeAction action)
+    private GrandExchangeSlots findOfferSlot(GeOrder order)
     {
+        if (order == null) return null;
         return Microbot.getClientThread().runOnClientThreadOptional(() -> {
             GrandExchangeOffer[] offers = Microbot.getClient().getGrandExchangeOffers();
             if (offers == null) return null;
-            for (GrandExchangeOffer offer : offers)
+            int max = Math.min(offers.length, GrandExchangeSlots.values().length);
+            for (int i = 0; i < max; i++)
             {
-                if (offer == null || offer.getItemId() != itemId) continue;
-                GrandExchangeOfferState s = offer.getState();
-                if (action == GrandExchangeAction.BUY
-                        && (s == GrandExchangeOfferState.BUYING || s == GrandExchangeOfferState.BOUGHT))
-                    return new OfferSnapshot(s, offer.getQuantitySold());
-                if (action == GrandExchangeAction.SELL
-                        && (s == GrandExchangeOfferState.SELLING || s == GrandExchangeOfferState.SOLD))
-                    return new OfferSnapshot(s, offer.getQuantitySold());
+                GrandExchangeOffer ge = offers[i];
+                if (ge == null || ge.getItemId() != order.itemId) continue;
+                GrandExchangeOfferState s = ge.getState();
+                boolean correctSide = order.action == GrandExchangeAction.BUY
+                        ? s == GrandExchangeOfferState.BUYING || s == GrandExchangeOfferState.BOUGHT
+                        : s == GrandExchangeOfferState.SELLING || s == GrandExchangeOfferState.SOLD;
+                if (!correctSide) continue;
+                if (ge.getTotalQuantity() != order.quantity || ge.getPrice() != order.price) continue;
+                return GrandExchangeSlots.values()[i];
             }
             return null;
         }).orElse(null);
+    }
+
+    private OfferSnapshot offer(GrandExchangeSlots slot)
+    {
+        if (slot == null) return null;
+        return Microbot.getClientThread().runOnClientThreadOptional(() -> {
+            GrandExchangeOffer[] offers = Microbot.getClient().getGrandExchangeOffers();
+            int index = slot.ordinal();
+            if (offers == null || index >= offers.length || offers[index] == null)
+                return new OfferSnapshot(0, GrandExchangeOfferState.EMPTY, 0, 0, 0);
+            GrandExchangeOffer ge = offers[index];
+            return new OfferSnapshot(ge.getItemId(), ge.getState(), ge.getQuantitySold(),
+                    ge.getTotalQuantity(), ge.getPrice());
+        }).orElse(null);
+    }
+
+    private boolean matchesOrder(OfferSnapshot offer, GeOrder order)
+    {
+        if (offer == null || order == null) return false;
+        boolean correctSide = order.action == GrandExchangeAction.BUY
+                ? offer.state == GrandExchangeOfferState.BUYING || offer.state == GrandExchangeOfferState.BOUGHT
+                : offer.state == GrandExchangeOfferState.SELLING || offer.state == GrandExchangeOfferState.SOLD;
+        return correctSide
+                && offer.itemId == order.itemId
+                && offer.total == order.quantity
+                && offer.price == order.price;
+    }
+
+    private GrandExchangeSlots firstFreeGeSlot()
+    {
+        GrandExchangeSlots[] slots = Rs2GrandExchange.getAvailableSlots();
+        return slots == null || slots.length == 0 ? null : slots[0];
+    }
+
+    private boolean collectCompletedOrder(GeOrder order)
+    {
+        if (order == null || order.slot == null) return false;
+        if (!Rs2GrandExchange.collectAllToBank()) return false;
+        return sleepUntil(() -> {
+            OfferSnapshot current = offer(order.slot);
+            return current == null
+                    || current.state == GrandExchangeOfferState.EMPTY
+                    || current.itemId != order.itemId;
+        }, 5000);
     }
 
     private boolean ensureGeOverview()
@@ -662,7 +791,72 @@ public class KspBonesToBananasScript extends Script
 
     private boolean hasRuneSupply(int id, int needed)
     {
-        return Math.max(0, Rs2Inventory.itemQuantity(id)) + Math.max(0, Rs2Bank.count(id)) >= needed;
+        return totalSupply(id) >= needed;
+    }
+
+    private int totalSupply(int id)
+    {
+        long total = Math.max(0, Rs2Inventory.itemQuantity(id)) + (long) Math.max(0, Rs2Bank.count(id));
+        return (int) Math.min(Integer.MAX_VALUE, total);
+    }
+
+    private int minimumProfitableBones(BonesToBananasQuote quote)
+    {
+        if (quote == null || !quote.isValid()) return -1;
+        for (int bones = 1; bones <= quote.getBatchSize(); bones++)
+        {
+            if (quote.meetsForQuantity(config, bones)) return bones;
+        }
+        return -1;
+    }
+
+    private int affordableRestockTarget(int minimumTarget, int maximumTarget, long budget)
+    {
+        if (minimumTarget <= 0 || maximumTarget < minimumTarget || budget < 0) return -1;
+        if (estimatedRestockCost(minimumTarget) > budget) return -1;
+
+        int low = minimumTarget;
+        int high = maximumTarget;
+        int best = minimumTarget;
+        while (low <= high)
+        {
+            int mid = low + (high - low) / 2;
+            long cost = estimatedRestockCost(mid);
+            if (cost <= budget)
+            {
+                best = mid;
+                low = mid + 1;
+            }
+            else
+            {
+                high = mid - 1;
+            }
+        }
+        return best;
+    }
+
+    private long estimatedRestockCost(int targetBones)
+    {
+        if (activeQuote == null || activeBone == null || targetBones <= 0) return Long.MAX_VALUE;
+
+        int castsNeeded = (targetBones + activeQuote.getBatchSize() - 1) / activeQuote.getBatchSize();
+        long cost = (long) Math.max(0, targetBones - totalSupply(activeBone.getItemId()))
+                * Math.max(0, activeQuote.getBoneBuyPrice());
+
+        cost += (long) Math.max(0, castsNeeded - totalSupply(ItemID.NATURERUNE))
+                * Math.max(0, activeQuote.getNatureBuyPrice());
+
+        if (!freeWater)
+        {
+            cost += (long) Math.max(0, castsNeeded * 2 - totalSupply(ItemID.WATERRUNE))
+                    * Math.max(0, activeQuote.getWaterBuyPrice());
+        }
+        if (!freeEarth)
+        {
+            cost += (long) Math.max(0, castsNeeded * 2 - totalSupply(ItemID.EARTHRUNE))
+                    * Math.max(0, activeQuote.getEarthBuyPrice());
+        }
+        return cost;
     }
 
     private boolean ensureRune(int id, String name, int needed)
@@ -767,6 +961,7 @@ public class KspBonesToBananasScript extends Script
         final GrandExchangeAction action;
         final int itemId, quantity, price;
         final String itemName;
+        GrandExchangeSlots slot;
         boolean placed;
         long placedAt;
 
@@ -782,12 +977,16 @@ public class KspBonesToBananasScript extends Script
 
     private static final class OfferSnapshot
     {
+        final int itemId, filled, total, price;
         final GrandExchangeOfferState state;
-        final int filled;
-        OfferSnapshot(GrandExchangeOfferState state, int filled)
+
+        OfferSnapshot(int itemId, GrandExchangeOfferState state, int filled, int total, int price)
         {
+            this.itemId = itemId;
             this.state = state;
             this.filled = filled;
+            this.total = total;
+            this.price = price;
         }
     }
 }
