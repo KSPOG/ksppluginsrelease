@@ -645,7 +645,8 @@ public class KspBonesToBananasScript extends Script
         if (!Rs2Bank.isOpen()) return false;
         if (Rs2Bank.hasWithdrawAsItem() == itemMode) return true;
         status = itemMode ? "Setting item withdrawal" : "Setting noted withdrawal";
-        return Rs2Bank.setWithdrawAsItem(itemMode) && sleepUntil(() -> Rs2Bank.hasWithdrawAsItem() == itemMode, 2500);
+        boolean changed = itemMode ? Rs2Bank.setWithdrawAsItem() : Rs2Bank.setWithdrawAsNote();
+        return changed && sleepUntil(() -> Rs2Bank.hasWithdrawAsItem() == itemMode, 2500);
     }
 
     private void cleanInventoryForBatch()
