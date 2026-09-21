@@ -633,7 +633,7 @@ public class KspBonesToBananasScript extends Script
         }
 
         status = "Opening bank";
-        if (KspVerifiedBank.openBank()) return sleepUntil(Rs2Bank::isOpen, 5000);
+        if (Rs2Bank.openBank()) return sleepUntil(Rs2Bank::isOpen, 5000);
 
         status = "Walking to Grand Exchange bank";
         Rs2GrandExchange.walkToGrandExchange();
