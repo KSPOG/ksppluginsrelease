@@ -82,6 +82,7 @@ public class KspKebabBuyerScript extends Script
     private long lastNavigationProgressAt;
     private long nextNavigationClickAt;
     private long nextDoorAttemptAt;
+    private long bankOpenStartedAt;
 
     public boolean run()
     {
@@ -332,7 +333,21 @@ public class KspKebabBuyerScript extends Script
         if (player.getPlane() != AL_KHARID_BANK_TILE.getPlane()
                 || player.distanceTo(AL_KHARID_BANK_TILE) > 3)
         {
+            bankOpenStartedAt = 0L;
             navigate(player, true);
+            return;
+        }
+
+        if (bankOpenStartedAt == 0L)
+        {
+            bankOpenStartedAt = now;
+        }
+        if (now - bankOpenStartedAt > 45_000L)
+        {
+            status = "Bank failed to open - stopped";
+            log.error("Bank widget did not open within 45s at {}", player);
+            Microbot.showMessage("KSP Kebab Buyer: bank failed to open; check client log.");
+            Microbot.stopPlugin(plugin);
             return;
         }
 
@@ -360,10 +375,11 @@ public class KspKebabBuyerScript extends Script
         if (!clicked)
         {
             diagnostic("Bank interaction failed at " + player);
-            if (player.distanceTo(AL_KHARID_BANK_TILE) >= 2)
-            {
-                navigate(player, true);
-            }
+        }
+        if (now - bankOpenStartedAt >= 5_000L
+                && player.distanceTo(AL_KHARID_BANK_TILE) >= 2)
+        {
+            navigate(player, true);
         }
     }
 
@@ -514,6 +530,7 @@ public class KspKebabBuyerScript extends Script
         nextNavigationClickAt = 0L;
         nextDoorAttemptAt = 0L;
         navigationDetails = "";
+        bankOpenStartedAt = 0L;
     }
 
     private void handleOpenBank()
