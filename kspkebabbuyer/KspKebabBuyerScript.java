@@ -87,6 +87,7 @@ public class KspKebabBuyerScript extends Script
     private long bankOpenStartedAt;
     private int bankClickAttempts;
     private long staleDialogueStartedAt;
+    private int staleDialogueContinueAttempts;
 
     public boolean run()
     {
@@ -285,6 +286,7 @@ public class KspKebabBuyerScript extends Script
             }
 
             staleDialogueStartedAt = 0L;
+            staleDialogueContinueAttempts = 0;
             status = "Buying kebab: " + label;
             if (Rs2Dialogue.keyPressForDialogueOption(i + 1))
             {
@@ -325,14 +327,16 @@ public class KspKebabBuyerScript extends Script
         }
         diagnostic("Resetting unrecognized Karim dialogue after "
                 + (now - staleDialogueStartedAt) + "ms: " + labels);
-        if (Rs2Dialogue.hasContinue())
+        if (Rs2Dialogue.hasContinue() && staleDialogueContinueAttempts < 2)
         {
             status = "Continuing stalled dialogue";
+            staleDialogueContinueAttempts++;
             Rs2Dialogue.clickContinue();
         }
         else
         {
             status = "Restarting stalled Karim dialogue";
+            staleDialogueContinueAttempts = 0;
             Rs2Keyboard.keyPress(KeyEvent.VK_ESCAPE);
             nextTalkAttemptAt = now + TALK_RETRY_MS;
             purchaseOptionSelectedAt = 0L;
@@ -352,6 +356,7 @@ public class KspKebabBuyerScript extends Script
             nextTalkAttemptAt = 0L;
             nextDialogueActionAt = 0L;
             staleDialogueStartedAt = 0L;
+            staleDialogueContinueAttempts = 0;
             status = Rs2Inventory.isFull() ? "Inventory full - banking"
                     : "Purchased " + bought + " kebab" + (bought == 1 ? "" : "s");
         }
@@ -731,6 +736,7 @@ public class KspKebabBuyerScript extends Script
         nextDialogueActionAt = 0L;
         purchaseOptionSelectedAt = 0L;
         staleDialogueStartedAt = 0L;
+        staleDialogueContinueAttempts = 0;
         lastObservedKebabCount = kebabCount();
     }
 
@@ -790,6 +796,7 @@ public class KspKebabBuyerScript extends Script
         lastDiagnosticAt = 0L;
         lastObservedKebabCount = -1;
         staleDialogueStartedAt = 0L;
+        staleDialogueContinueAttempts = 0;
         resetNavigation();
         status = "Starting";
     }
