@@ -18,7 +18,7 @@ import javax.inject.Inject;
 )
 public class KspKebabBuyerPlugin extends Plugin
 {
-    public static final String VERSION = "0.0.4";
+    public static final String VERSION = "0.0.5";
 
     @Inject
     private KspKebabBuyerScript script;
