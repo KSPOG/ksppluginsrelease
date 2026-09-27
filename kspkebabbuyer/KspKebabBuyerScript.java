@@ -1,13 +1,14 @@
 package net.runelite.client.plugins.microbot.kspkebabbuyer;
 
 import lombok.extern.slf4j.Slf4j;
+import net.runelite.api.GameObject;
 import net.runelite.api.coords.WorldPoint;
 import net.runelite.api.widgets.Widget;
 import net.runelite.client.plugins.microbot.Microbot;
 import net.runelite.client.plugins.microbot.Script;
-import net.runelite.client.plugins.microbot.kspbank.KspVerifiedBank;
 import net.runelite.client.plugins.microbot.util.bank.Rs2Bank;
 import net.runelite.client.plugins.microbot.util.dialogues.Rs2Dialogue;
+import net.runelite.client.plugins.microbot.util.gameobject.Rs2GameObject;
 import net.runelite.client.plugins.microbot.util.inventory.Rs2Inventory;
 import net.runelite.client.plugins.microbot.util.keyboard.Rs2Keyboard;
 import net.runelite.client.plugins.microbot.util.npc.Rs2Npc;
@@ -20,8 +21,6 @@ import java.awt.event.KeyEvent;
 import java.util.List;
 import java.util.Locale;
 import java.util.concurrent.TimeUnit;
-
-import static net.runelite.client.plugins.microbot.util.Global.sleepUntil;
 
 @Slf4j
 public class KspKebabBuyerScript extends Script
@@ -40,14 +39,18 @@ public class KspKebabBuyerScript extends Script
     private static final int KEBAB_ID = 1971;
     private static final String COINS_NAME = "Coins";
     private static final WorldPoint KARIM_TILE = new WorldPoint(3274, 3181, 0);
+    private static final WorldPoint AL_KHARID_BANK_TILE = new WorldPoint(3270, 3166, 0);
 
     private static final int KEBAB_BUY_PRICE = 1;
-    private static final int INVENTORY_TIMEOUT_MS = 2_500;
-    private static final long TALK_RETRY_MS = 4_000L;
-    private static final long OPTION_CONFIRM_TIMEOUT_MS = 4_500L;
-    private static final long DIALOGUE_ACTION_DELAY_MS = 650L;
-    private static final long LOOP_DELAY_MS = 120L;
-    private static final long BANK_RETRY_MS = 900L;
+    private static final long TALK_RETRY_MS = 1_300L;
+    private static final long OPTION_CONFIRM_TIMEOUT_MS = 2_400L;
+    private static final long DIALOGUE_ACTION_DELAY_MS = 180L;
+    private static final long LOOP_DELAY_MS = 100L;
+    private static final long BANK_WALK_RETRY_MS = 1_250L;
+    private static final long BANK_INTERACTION_RETRY_MS = 1_450L;
+    private static final long DEPOSIT_RETRY_MS = 900L;
+    private static final long WITHDRAW_RETRY_MS = 1_000L;
+    private static final long BANK_CLOSE_RETRY_MS = 600L;
     private static final long PRICE_REFRESH_MS = 30_000L;
 
     private volatile String status = "Starting";
@@ -59,6 +62,10 @@ public class KspKebabBuyerScript extends Script
     private volatile int kebabGePrice;
 
     private long nextBankAttemptAt;
+    private long nextDepositAttemptAt;
+    private long nextWithdrawAttemptAt;
+    private long nextBankCloseAttemptAt;
+    private boolean bankTripHadKebabs;
     private long lastPriceRefreshAt;
     private long nextTalkAttemptAt;
     private long nextDialogueActionAt;
@@ -100,6 +107,11 @@ public class KspKebabBuyerScript extends Script
         {
             handleOpenBank();
             return;
+        }
+
+        if (nextBankCloseAttemptAt > 0L)
+        {
+            resetBankInteractionState();
         }
 
         if (coinsRemaining <= 0 || Rs2Inventory.isFull())
@@ -279,6 +291,7 @@ public class KspKebabBuyerScript extends Script
             kebabsBought += bought;
             purchaseOptionSelectedAt = 0L;
             nextTalkAttemptAt = 0L;
+            nextDialogueActionAt = 0L;
             status = Rs2Inventory.isFull() ? "Inventory full - banking"
                     : "Purchased " + bought + " kebab" + (bought == 1 ? "" : "s");
         }
@@ -298,47 +311,100 @@ public class KspKebabBuyerScript extends Script
     private void openBank()
     {
         long now = System.currentTimeMillis();
-        if (now < nextBankAttemptAt)
+        WorldPoint player = Rs2Player.getWorldLocation();
+        if (player == null)
         {
+            status = "Waiting for player location";
             return;
         }
 
-        status = Rs2Inventory.isFull() ? "Walking to bank - inventory full" : "Walking to bank - restocking coins";
-        KspVerifiedBank.walkToBankAndOpenBank();
-        nextBankAttemptAt = now + BANK_RETRY_MS;
+        // A fixed, verified Al Kharid bank tile avoids the expensive nearest-bank
+        // discovery and blocking 2.5-second waits inside KspVerifiedBank.
+        if (player.getPlane() != AL_KHARID_BANK_TILE.getPlane()
+                || player.distanceTo(AL_KHARID_BANK_TILE) > 5)
+        {
+            status = "Walking directly to Al Kharid bank";
+            if (!Rs2Player.isMoving() && now >= nextBankAttemptAt)
+            {
+                Rs2Walker.walkTo(AL_KHARID_BANK_TILE, 2);
+                nextBankAttemptAt = now + BANK_WALK_RETRY_MS;
+            }
+            return;
+        }
+
+        if (Rs2Player.isMoving())
+        {
+            status = "Approaching Al Kharid bank";
+            return;
+        }
+
+        if (now < nextBankAttemptAt)
+        {
+            status = "Waiting for bank to open";
+            return;
+        }
+
+        // Prefer a visible bank booth; only use a Banker when booths are absent.
+        // Do not sleep after clicking: the next 100-ms loop checks the bank widget.
+        GameObject booth = Rs2GameObject.get("Bank booth", true);
+        boolean clicked = booth != null && Rs2GameObject.interact(booth, "Bank");
+        if (!clicked)
+        {
+            Rs2NpcModel banker = Rs2Npc.getBankerNPC();
+            clicked = banker != null && Rs2Npc.interact(banker, "Bank");
+        }
+
+        status = clicked ? "Opening Al Kharid bank" : "Bank target not available - retrying";
+        nextBankAttemptAt = now + (clicked ? BANK_INTERACTION_RETRY_MS : 600L);
+        if (!clicked)
+        {
+            diagnostic("Cannot interact with Al Kharid bank booth or Banker at " + player);
+        }
     }
 
     private void handleOpenBank()
     {
-        int kebabsBefore = kebabCount();
+        long now = System.currentTimeMillis();
+        if (kebabCount() > 0)
+        {
+            bankTripHadKebabs = true;
+        }
 
         if (hasNonCoinInventory())
         {
-            status = "Depositing non-coin items";
-            if (!Rs2Bank.depositAllExcept(true, COINS_NAME))
+            status = "Depositing everything except coins";
+            if (now >= nextDepositAttemptAt)
             {
-                return;
+                boolean clicked = Rs2Bank.depositAllExcept(true, COINS_NAME);
+                nextDepositAttemptAt = now + (clicked ? DEPOSIT_RETRY_MS : 400L);
+                if (!clicked)
+                {
+                    diagnostic("Bank deposit failed; retrying");
+                }
             }
-
-            if (!sleepUntil(() -> !hasNonCoinInventory(), INVENTORY_TIMEOUT_MS))
-            {
-                status = "Waiting for bank deposit";
-                return;
-            }
-
-            if (kebabsBefore > 0)
-            {
-                bankTrips++;
-            }
+            return;
         }
 
-        // Keep coins in the inventory between bank trips. Only withdraw from
-        // the bank when the inventory actually has no coins left.
+        if (bankTripHadKebabs)
+        {
+            bankTrips++;
+            bankTripHadKebabs = false;
+        }
+
+        // The coin stack stays in inventory across ordinary bank trips.
+        // Only withdraw when it actually ran out; verify on later loops rather
+        // than blocking the script for a 2.5-second inventory wait.
         if (coinCount() <= 0)
         {
+            status = "Restocking coins";
+            if (now < nextWithdrawAttemptAt)
+            {
+                return;
+            }
+
             if (!Rs2Bank.setWithdrawAsItem())
             {
-                status = "Setting unnoted withdraw mode";
+                nextWithdrawAttemptAt = now + 500L;
                 return;
             }
 
@@ -352,26 +418,42 @@ public class KspKebabBuyerScript extends Script
                 return;
             }
 
-            status = "Withdrawing all " + String.format("%,d", bankCoins) + " coins";
-            if (!Rs2Bank.withdrawAll(COINS_NAME, true)
-                    || !sleepUntil(() -> coinCount() >= bankCoins, INVENTORY_TIMEOUT_MS))
+            if (Rs2Bank.withdrawAll(COINS_NAME, true))
             {
-                status = "Waiting for all coins";
-                return;
+                status = "Withdrawing all coins";
+                nextWithdrawAttemptAt = now + WITHDRAW_RETRY_MS;
             }
+            else
+            {
+                status = "Coin withdrawal failed - retrying";
+                nextWithdrawAttemptAt = now + 500L;
+            }
+            return;
         }
 
-        refreshSnapshot();
-
         status = "Closing bank";
-        Rs2Bank.closeBank();
-        sleepUntil(() -> !Rs2Bank.isOpen(), 1_500);
+        if (now >= nextBankCloseAttemptAt)
+        {
+            Rs2Bank.closeBank();
+            nextBankCloseAttemptAt = now + BANK_CLOSE_RETRY_MS;
+        }
+        if (!Rs2Bank.isOpen())
+        {
+            resetBankInteractionState();
+            status = "Returning to Karim";
+        }
+    }
+
+    private void resetBankInteractionState()
+    {
         nextBankAttemptAt = 0L;
+        nextDepositAttemptAt = 0L;
+        nextWithdrawAttemptAt = 0L;
+        nextBankCloseAttemptAt = 0L;
         nextTalkAttemptAt = 0L;
         nextDialogueActionAt = 0L;
         purchaseOptionSelectedAt = 0L;
         lastObservedKebabCount = kebabCount();
-        status = "Walking to Karim";
     }
 
     private boolean hasNonCoinInventory()
@@ -419,6 +501,10 @@ public class KspKebabBuyerScript extends Script
         coinsRemaining = 0;
         kebabGePrice = 0;
         nextBankAttemptAt = 0L;
+        nextDepositAttemptAt = 0L;
+        nextWithdrawAttemptAt = 0L;
+        nextBankCloseAttemptAt = 0L;
+        bankTripHadKebabs = false;
         lastPriceRefreshAt = 0L;
         nextTalkAttemptAt = 0L;
         nextDialogueActionAt = 0L;
