@@ -32,7 +32,7 @@ public class KspKebabBuyerOverlay extends OverlayPanel
         }
 
         panelComponent.getChildren().clear();
-        panelComponent.setPreferredSize(new Dimension(245, 205));
+        panelComponent.setPreferredSize(new Dimension(260, 220));
         panelComponent.setBackgroundColor(new Color(0, 0, 0, 175));
 
         panelComponent.getChildren().add(TitleComponent.builder()
@@ -41,6 +41,10 @@ public class KspKebabBuyerOverlay extends OverlayPanel
                 .build());
 
         addLine("Status:", shorten(script.getStatus(), 27));
+        if (!script.getNavigationDetails().isEmpty())
+        {
+            addLine("Route:", script.getNavigationDetails());
+        }
         addLine("Time running:", formatDuration(script.getRuntimeMs()));
         addLine("Bought:", formatNumber(script.getKebabsBought())
                 + " / " + formatNumber(script.getKebabsPerHour()) + " ph");
