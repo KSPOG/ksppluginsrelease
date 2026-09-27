@@ -50,7 +50,9 @@ public class KspKebabBuyerScript extends Script
     private static final long DIALOGUE_ACTION_DELAY_MS = 180L;
     private static final long LOOP_DELAY_MS = 100L;
     private static final long BANK_WALK_RETRY_MS = 1_250L;
-    private static final long BANK_INTERACTION_RETRY_MS = 1_450L;
+    private static final long BANK_INTERACTION_RETRY_MS = 2_200L;
+    private static final long BANK_OPEN_TIMEOUT_MS = 45_000L;
+    private static final long DIALOGUE_STALL_MS = 5_000L;
     private static final long DEPOSIT_RETRY_MS = 900L;
     private static final long WITHDRAW_RETRY_MS = 1_000L;
     private static final long BANK_CLOSE_RETRY_MS = 600L;
@@ -83,6 +85,9 @@ public class KspKebabBuyerScript extends Script
     private long nextNavigationClickAt;
     private long nextDoorAttemptAt;
     private long bankOpenStartedAt;
+    private int bankClickAttempts;
+    private long staleDialogueStartedAt;
+    private int staleDialogueContinueAttempts;
 
     public boolean run()
     {
@@ -104,6 +109,17 @@ public class KspKebabBuyerScript extends Script
             }
             catch (Exception ex)
             {
+                // Source Loader can interrupt a script while unloading it.
+                // ActorModel.getWorldLocation() then wraps InterruptedException.
+                for (Throwable cause = ex; cause != null; cause = cause.getCause())
+                {
+                    if (cause instanceof InterruptedException)
+                    {
+                        Thread.currentThread().interrupt();
+                        log.debug("KSP Kebab Buyer interrupted during plugin reload/shutdown");
+                        return;
+                    }
+                }
                 status = "Error - check client log";
                 log.error("KSP Kebab Buyer loop error", ex);
             }
@@ -116,6 +132,11 @@ public class KspKebabBuyerScript extends Script
     {
         if (Rs2Bank.isOpen())
         {
+            if (bankOpenStartedAt > 0L)
+            {
+                log.info("KSP Kebab Buyer: bank widget verified open after {}ms and {} attempted clicks",
+                        System.currentTimeMillis() - bankOpenStartedAt, bankClickAttempts);
+            }
             resetNavigation();
             handleOpenBank();
             return;
@@ -264,6 +285,8 @@ public class KspKebabBuyerScript extends Script
                 continue;
             }
 
+            staleDialogueStartedAt = 0L;
+            staleDialogueContinueAttempts = 0;
             status = "Buying kebab: " + label;
             if (Rs2Dialogue.keyPressForDialogueOption(i + 1))
             {
@@ -279,19 +302,47 @@ public class KspKebabBuyerScript extends Script
             return;
         }
 
-        status = "Karim option not recognized";
-        if (now - lastDiagnosticAt >= 4_000L)
+        // A stale option widget can survive after selecting "Yes" while the
+        // actual choice is replaced by "Please wait...". Previously this
+        // branch returned forever because hasSelectAnOption() stayed true.
+        if (staleDialogueStartedAt == 0L)
         {
-            StringBuilder labels = new StringBuilder();
-            for (Widget option : options)
-            {
-                if (option != null)
-                {
-                    labels.append('[').append(option.getText()).append("] ");
-                }
-            }
-            diagnostic("Unexpected Karim dialogue options: " + labels);
+            staleDialogueStartedAt = now;
         }
+        status = "Waiting for Karim dialogue";
+        if (now - staleDialogueStartedAt < DIALOGUE_STALL_MS
+                || (purchaseOptionSelectedAt > 0L
+                    && now - purchaseOptionSelectedAt < OPTION_CONFIRM_TIMEOUT_MS))
+        {
+            return;
+        }
+
+        StringBuilder labels = new StringBuilder();
+        for (Widget option : options)
+        {
+            if (option != null)
+            {
+                labels.append('[').append(option.getText()).append("] ");
+            }
+        }
+        diagnostic("Resetting unrecognized Karim dialogue after "
+                + (now - staleDialogueStartedAt) + "ms: " + labels);
+        if (Rs2Dialogue.hasContinue() && staleDialogueContinueAttempts < 2)
+        {
+            status = "Continuing stalled dialogue";
+            staleDialogueContinueAttempts++;
+            Rs2Dialogue.clickContinue();
+        }
+        else
+        {
+            status = "Restarting stalled Karim dialogue";
+            staleDialogueContinueAttempts = 0;
+            Rs2Keyboard.keyPress(KeyEvent.VK_ESCAPE);
+            nextTalkAttemptAt = now + TALK_RETRY_MS;
+            purchaseOptionSelectedAt = 0L;
+        }
+        nextDialogueActionAt = now + 750L;
+        staleDialogueStartedAt = 0L;
     }
 
     private void recordPurchasedKebabs()
@@ -304,6 +355,8 @@ public class KspKebabBuyerScript extends Script
             purchaseOptionSelectedAt = 0L;
             nextTalkAttemptAt = 0L;
             nextDialogueActionAt = 0L;
+            staleDialogueStartedAt = 0L;
+            staleDialogueContinueAttempts = 0;
             status = Rs2Inventory.isFull() ? "Inventory full - banking"
                     : "Purchased " + bought + " kebab" + (bought == 1 ? "" : "s");
         }
@@ -334,6 +387,7 @@ public class KspKebabBuyerScript extends Script
                 || player.distanceTo(AL_KHARID_BANK_TILE) > 3)
         {
             bankOpenStartedAt = 0L;
+            bankClickAttempts = 0;
             navigate(player, true);
             return;
         }
@@ -342,16 +396,19 @@ public class KspKebabBuyerScript extends Script
         {
             bankOpenStartedAt = now;
         }
-        if (now - bankOpenStartedAt > 45_000L)
+        if (now - bankOpenStartedAt >= BANK_OPEN_TIMEOUT_MS)
         {
-            status = "Bank failed to open - stopped";
-            log.error("Bank widget did not open within 45s at {}", player);
-            Microbot.showMessage("KSP Kebab Buyer: bank failed to open; check client log.");
+            status = "Bank interface unavailable - stopped";
+            log.error("KSP Kebab Buyer: bank widget never opened after {} click attempts at {}",
+                    bankClickAttempts, player);
+            Microbot.showMessage("KSP Kebab Buyer: bank did not open. Check client log.");
             Microbot.stopPlugin(plugin);
             return;
         }
 
-        navigationDetails = "At bank: " + player.getX() + "," + player.getY();
+        navigationDetails = "Bank@" + player.getX() + "," + player.getY()
+                + " attempts=" + bankClickAttempts;
+
         if (Rs2Player.isMoving())
         {
             status = "Approaching Al Kharid bank";
@@ -359,27 +416,80 @@ public class KspKebabBuyerScript extends Script
         }
         if (now < nextBankAttemptAt)
         {
-            status = "Waiting for bank to open";
+            // A click is not proof that the bank opened. Check the widget in
+            // process() on every iteration and wait for it before trying again.
             return;
         }
 
-        GameObject booth = Rs2GameObject.get("Bank booth", true);
-        boolean clicked = booth != null && Rs2GameObject.interact(booth, "Bank");
-        if (!clicked)
+        if (Rs2Inventory.isItemSelected())
+        {
+            status = "Clearing selected item";
+            Rs2Keyboard.keyPress(KeyEvent.VK_ESCAPE);
+            nextBankAttemptAt = now + 500L;
+            return;
+        }
+
+        // The previous code always clicked the first Bank booth. A successful
+        // click result did not mean the interface opened, so it retried that
+        // same (possibly unreachable) booth indefinitely. Prefer a Banker,
+        // verify the widget after the click, and alternate with a reachable
+        // booth when an interaction does not open it.
+        boolean preferBanker = (bankClickAttempts / 2) % 2 == 0;
+        boolean clicked = false;
+        String target = "none";
+        if (preferBanker)
         {
             Rs2NpcModel banker = Rs2Npc.getBankerNPC();
-            clicked = banker != null && Rs2Npc.interact(banker, "Bank");
+            if (banker != null && banker.getWorldLocation() != null
+                    && player.distanceTo(banker.getWorldLocation()) <= 10)
+            {
+                clicked = Rs2Npc.interact(banker, "Bank");
+                if (clicked)
+                {
+                    target = "Banker";
+                }
+            }
         }
-        status = clicked ? "Opening Al Kharid bank" : "Bank unavailable - retrying";
-        nextBankAttemptAt = now + (clicked ? BANK_INTERACTION_RETRY_MS : 600L);
+
         if (!clicked)
         {
-            diagnostic("Bank interaction failed at " + player);
+            GameObject booth = Rs2GameObject.findReachableObject(
+                    "Bank booth", true, 10, player, true, "Bank");
+            if (booth != null && booth.getWorldLocation() != null
+                    && player.distanceTo(booth.getWorldLocation()) <= 10)
+            {
+                clicked = Rs2GameObject.interact(booth, "Bank");
+                if (clicked)
+                {
+                    target = "reachable booth";
+                }
+            }
         }
-        if (now - bankOpenStartedAt >= 5_000L
-                && player.distanceTo(AL_KHARID_BANK_TILE) >= 2)
+
+        if (!clicked && !preferBanker)
         {
-            navigate(player, true);
+            Rs2NpcModel banker = Rs2Npc.getBankerNPC();
+            if (banker != null && banker.getWorldLocation() != null
+                    && player.distanceTo(banker.getWorldLocation()) <= 10)
+            {
+                clicked = Rs2Npc.interact(banker, "Bank");
+                if (clicked)
+                {
+                    target = "Banker fallback";
+                }
+            }
+        }
+
+        bankClickAttempts++;
+        status = clicked ? "Waiting for bank widget" : "No reachable bank target";
+        navigationDetails = target + "@" + player.getX() + "," + player.getY()
+                + " try " + bankClickAttempts;
+        nextBankAttemptAt = now + (clicked ? BANK_INTERACTION_RETRY_MS : 900L);
+
+        if (!clicked || bankClickAttempts % 2 == 0)
+        {
+            log.warn("KSP Kebab Buyer: bank still closed after attempt {} at {}, target={}, clickIssued={}",
+                    bankClickAttempts, player, target, clicked);
         }
     }
 
@@ -531,6 +641,7 @@ public class KspKebabBuyerScript extends Script
         nextDoorAttemptAt = 0L;
         navigationDetails = "";
         bankOpenStartedAt = 0L;
+        bankClickAttempts = 0;
     }
 
     private void handleOpenBank()
@@ -624,6 +735,8 @@ public class KspKebabBuyerScript extends Script
         nextTalkAttemptAt = 0L;
         nextDialogueActionAt = 0L;
         purchaseOptionSelectedAt = 0L;
+        staleDialogueStartedAt = 0L;
+        staleDialogueContinueAttempts = 0;
         lastObservedKebabCount = kebabCount();
     }
 
@@ -682,6 +795,8 @@ public class KspKebabBuyerScript extends Script
         purchaseOptionSelectedAt = 0L;
         lastDiagnosticAt = 0L;
         lastObservedKebabCount = -1;
+        staleDialogueStartedAt = 0L;
+        staleDialogueContinueAttempts = 0;
         resetNavigation();
         status = "Starting";
     }
