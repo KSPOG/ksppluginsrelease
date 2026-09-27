@@ -20,6 +20,11 @@ import javax.inject.Inject;
 import java.awt.event.KeyEvent;
 import java.util.List;
 import java.util.Locale;
+import java.util.concurrent.CancellationException;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 
 @Slf4j
@@ -40,16 +45,17 @@ public class KspKebabBuyerScript extends Script
     private static final String COINS_NAME = "Coins";
     private static final WorldPoint KARIM_TILE = new WorldPoint(3274, 3181, 0);
     private static final WorldPoint AL_KHARID_BANK_TILE = new WorldPoint(3270, 3166, 0);
-    private static final WorldPoint KARIM_EXIT_TILE = new WorldPoint(3281, 3180, 0);
-    private static final WorldPoint WALKWAY_TILE = new WorldPoint(3276, 3175, 0);
-    private static final WorldPoint BANK_ENTRANCE_TILE = new WorldPoint(3274, 3170, 0);
 
     private static final int KEBAB_BUY_PRICE = 1;
     private static final long TALK_RETRY_MS = 1_300L;
     private static final long OPTION_CONFIRM_TIMEOUT_MS = 2_400L;
     private static final long DIALOGUE_ACTION_DELAY_MS = 180L;
     private static final long LOOP_DELAY_MS = 100L;
-    private static final long BANK_WALK_RETRY_MS = 1_250L;
+    private static final long WEBWALK_RETRY_MS = 3_000L;
+    private static final long WEBWALK_STALL_MS = 30_000L;
+    private static final int WEBWALK_MAX_STALL_RECOVERIES = 3;
+    private static final int KARIM_REACHED_DISTANCE = 4;
+    private static final int BANK_REACHED_DISTANCE = 2;
     private static final long BANK_INTERACTION_RETRY_MS = 2_200L;
     private static final long BANK_OPEN_TIMEOUT_MS = 45_000L;
     private static final long DIALOGUE_STALL_MS = 5_000L;
@@ -78,12 +84,15 @@ public class KspKebabBuyerScript extends Script
     private long purchaseOptionSelectedAt;
     private long lastDiagnosticAt;
     private int lastObservedKebabCount = -1;
-    private boolean navigationActive;
-    private boolean navigationToBank;
+    // Rs2Walker.walkTo is blocking: run a single webwalk off the 100ms buyer loop.
+    private ExecutorService webWalkExecutor;
+    private Future<Boolean> webWalkTask;
+    private WorldPoint webWalkTarget;
+    private boolean webWalkToBank;
     private WorldPoint lastNavigationPosition;
     private long lastNavigationProgressAt;
-    private long nextNavigationClickAt;
-    private long nextDoorAttemptAt;
+    private long nextWebWalkAttemptAt;
+    private int webWalkStallRecoveries;
     private long bankOpenStartedAt;
     private int bankClickAttempts;
     private long staleDialogueStartedAt;
@@ -91,6 +100,15 @@ public class KspKebabBuyerScript extends Script
 
     public boolean run()
     {
+        if (webWalkExecutor == null || webWalkExecutor.isShutdown())
+        {
+            webWalkExecutor = Executors.newSingleThreadExecutor(task ->
+            {
+                Thread worker = new Thread(task, "KspKebabBuyer-Webwalker");
+                worker.setDaemon(true);
+                return worker;
+            });
+        }
         resetSession();
 
         mainScheduledFuture = scheduledExecutorService.scheduleWithFixedDelay(() ->
@@ -176,10 +194,13 @@ public class KspKebabBuyerScript extends Script
             }
             if (player != null)
             {
-                navigate(player, false);
+                webWalk(player, destination == null ? KARIM_TILE : destination,
+                        KARIM_REACHED_DISTANCE, false);
             }
             return;
         }
+
+        cancelWebWalk("arrived at Karim");
 
         // Karim's dialogue can start with either a continue widget or the
         // purchase options. Resume whichever stage the game is actually showing.
@@ -384,13 +405,14 @@ public class KspKebabBuyerScript extends Script
         }
 
         if (player.getPlane() != AL_KHARID_BANK_TILE.getPlane()
-                || player.distanceTo(AL_KHARID_BANK_TILE) > 3)
+                || player.distanceTo(AL_KHARID_BANK_TILE) > BANK_REACHED_DISTANCE)
         {
             bankOpenStartedAt = 0L;
             bankClickAttempts = 0;
-            navigate(player, true);
+            webWalk(player, AL_KHARID_BANK_TILE, BANK_REACHED_DISTANCE, true);
             return;
         }
+        cancelWebWalk("arrived at Al Kharid bank");
 
         if (bankOpenStartedAt == 0L)
         {
@@ -494,151 +516,150 @@ public class KspKebabBuyerScript extends Script
     }
 
     /**
-     * Non-blocking local waypoint clicks leave the scheduled loop free to
-     * detect and recover from closed doors or failed walking commands.
+     * Both directions use Microbot's actual webwalker (Rs2Walker.walkTo).
+     * One dedicated worker owns a route until arrival, failure, or stall; the
+     * buying/banking scheduled loop remains responsive while it runs.
      */
-    private void navigate(WorldPoint player, boolean toBank)
+    private void webWalk(WorldPoint player, WorldPoint target, int reachedDistance, boolean toBank)
     {
         long now = System.currentTimeMillis();
-        if (!navigationActive || navigationToBank != toBank)
+        if (webWalkExecutor == null || webWalkExecutor.isShutdown())
         {
-            navigationActive = true;
-            navigationToBank = toBank;
-            lastNavigationPosition = player;
-            lastNavigationProgressAt = now;
-            nextNavigationClickAt = 0L;
-            nextDoorAttemptAt = 0L;
-        }
-        if (!player.equals(lastNavigationPosition))
-        {
-            lastNavigationPosition = player;
-            lastNavigationProgressAt = now;
-        }
-
-        WorldPoint target = toBank ? bankWaypoint(player) : karimWaypoint(player);
-        long stalledMs = now - lastNavigationProgressAt;
-        navigationDetails = player.getX() + "," + player.getY()
-                + " > " + target.getX() + "," + target.getY();
-
-        if (stalledMs >= 60_000L)
-        {
-            status = "Route blocked - stopped";
-            log.error("KSP Kebab Buyer blocked for {}s: at {}, target {}, bank={}",
-                    stalledMs / 1000, player, target, toBank);
-            Microbot.showMessage("KSP Kebab Buyer: route blocked; check client log.");
+            status = "Webwalker unavailable";
+            log.error("KSP Kebab Buyer: webwalker executor is not running");
             Microbot.stopPlugin(plugin);
             return;
         }
 
-        status = stalledMs >= 9_000L ? "Route stalled - recovering"
-                : (toBank ? "Bank: " : "Karim: ") + waypointName(target);
-        if (stalledMs >= 9_000L)
+        if (webWalkTarget == null || !webWalkTarget.equals(target)
+                || webWalkToBank != toBank)
         {
-            diagnostic("Navigation stalled " + stalledMs / 1000 + "s at " + player
-                    + ", target=" + target + ", moving=" + Rs2Player.isMoving());
+            cancelWebWalk("new destination");
+            webWalkTarget = target;
+            webWalkToBank = toBank;
+            lastNavigationPosition = player;
+            lastNavigationProgressAt = now;
+            nextWebWalkAttemptAt = 0L;
+            webWalkStallRecoveries = 0;
+            log.info("KSP Kebab Buyer: webwalking to {} ({})",
+                    toBank ? "Al Kharid bank" : "Karim", target);
         }
 
-        if (stalledMs >= 4_500L && now >= nextDoorAttemptAt)
+        if (!player.equals(lastNavigationPosition))
         {
-            nextDoorAttemptAt = now + 2_000L;
-            if (openNearbyDoor(player))
+            lastNavigationPosition = player;
+            lastNavigationProgressAt = now;
+            webWalkStallRecoveries = 0;
+        }
+
+        int remaining = player.getPlane() == target.getPlane()
+                ? player.distanceTo(target) : Integer.MAX_VALUE;
+        if (remaining <= reachedDistance)
+        {
+            cancelWebWalk("destination in range");
+            return;
+        }
+
+        navigationDetails = (toBank ? "Web: bank " : "Web: Karim ")
+                + (remaining == Integer.MAX_VALUE ? "other plane" : remaining + " tiles")
+                + (webWalkStallRecoveries > 0 ? " retry " + webWalkStallRecoveries : "");
+        status = toBank ? "Webwalking to Al Kharid bank" : "Webwalking to Karim";
+
+        if (now - lastNavigationProgressAt >= WEBWALK_STALL_MS
+                && now >= nextWebWalkAttemptAt)
+        {
+            webWalkStallRecoveries++;
+            log.warn("KSP Kebab Buyer: webwalker stalled at {} toward {}, attempt {}/{}",
+                    player, target, webWalkStallRecoveries, WEBWALK_MAX_STALL_RECOVERIES);
+            if (webWalkStallRecoveries >= WEBWALK_MAX_STALL_RECOVERIES)
             {
-                status = "Opening route door";
-                nextNavigationClickAt = now + 1_500L;
+                cancelWebWalk("stalled too many times");
+                status = "Webwalker failed - stopped";
+                Microbot.showMessage("KSP Kebab Buyer: webwalker stalled repeatedly. Check client log.");
+                Microbot.stopPlugin(plugin);
                 return;
             }
+            // Cancel this walk, including its pathfinder, before retrying.
+            // Do not inject manual minimap/canvas clicks or route waypoints.
+            cancelActiveWebWalk("stall recovery");
+            lastNavigationProgressAt = now;
+            nextWebWalkAttemptAt = now + WEBWALK_RETRY_MS;
+            status = "Recalculating webwalker route";
+            return;
         }
 
-        if (player.distanceTo(target) <= 2 || now < nextNavigationClickAt
-                || (Rs2Player.isMoving() && stalledMs < 4_500L))
+        if (webWalkTask != null)
+        {
+            if (!webWalkTask.isDone())
+            {
+                return; // Never submit another route while the current one runs.
+            }
+
+            try
+            {
+                boolean arrived = webWalkTask.get();
+                log.info("KSP Kebab Buyer: webwalker completed target={}, arrived={}",
+                        target, arrived);
+            }
+            catch (CancellationException ignored)
+            {
+                log.debug("KSP Kebab Buyer: previous webwalk cancelled");
+            }
+            catch (InterruptedException ex)
+            {
+                Thread.currentThread().interrupt();
+                return;
+            }
+            catch (ExecutionException ex)
+            {
+                log.warn("KSP Kebab Buyer: webwalker failed target={}", target, ex.getCause());
+            }
+            webWalkTask = null;
+            nextWebWalkAttemptAt = now + WEBWALK_RETRY_MS;
+        }
+
+        if (now < nextWebWalkAttemptAt)
         {
             return;
         }
 
-        boolean clicked;
-        if (player.getPlane() == target.getPlane() && player.distanceTo(target) <= 14)
+        final WorldPoint destination = target;
+        final int distance = reachedDistance;
+        nextWebWalkAttemptAt = now + WEBWALK_RETRY_MS;
+        webWalkTask = webWalkExecutor.submit(() -> Rs2Walker.walkTo(destination, distance));
+    }
+
+    private void cancelActiveWebWalk(String reason)
+    {
+        if (webWalkTask != null && !webWalkTask.isDone())
         {
-            clicked = Rs2Walker.walkMiniMap(target);
-            if (!clicked)
-            {
-                clicked = Rs2Walker.walkFastCanvas(target);
-            }
+            webWalkTask.cancel(true);
         }
-        else
+        webWalkTask = null;
+        // The global walker also owns the pathfinder. Clear only the route
+        // matching the destination this plugin submitted.
+        if (webWalkTarget != null && webWalkTarget.equals(Rs2Walker.getCurrentTarget()))
         {
-            // Full pathfinding is reserved for users starting far from Al Kharid.
-            clicked = Rs2Walker.walkTo(target, 2);
-        }
-        nextNavigationClickAt = now + (clicked ? BANK_WALK_RETRY_MS : 650L);
-        if (!clicked)
-        {
-            diagnostic("Walk click failed from " + player + " toward " + target);
+            Rs2Walker.clearWalkingRoute("kebab-buyer:" + reason);
         }
     }
 
-    private WorldPoint bankWaypoint(WorldPoint player)
+    private void cancelWebWalk(String reason)
     {
-        if (player.distanceTo(KARIM_TILE) > 35
-                && player.distanceTo(AL_KHARID_BANK_TILE) > 35)
+        if (webWalkTarget != null)
         {
-            return AL_KHARID_BANK_TILE;
+            cancelActiveWebWalk(reason);
         }
-        if (player.getY() >= 3178 && player.getX() < 3279
-                && player.distanceTo(KARIM_EXIT_TILE) > 2) return KARIM_EXIT_TILE;
-        if (player.getY() >= 3174 && player.distanceTo(WALKWAY_TILE) > 2) return WALKWAY_TILE;
-        if (player.getY() >= 3170 && player.distanceTo(BANK_ENTRANCE_TILE) > 2) return BANK_ENTRANCE_TILE;
-        return AL_KHARID_BANK_TILE;
-    }
-
-    private WorldPoint karimWaypoint(WorldPoint player)
-    {
-        if (player.distanceTo(KARIM_TILE) > 35
-                && player.distanceTo(AL_KHARID_BANK_TILE) > 35)
-        {
-            return KARIM_TILE;
-        }
-        if (player.getY() <= 3169 && player.distanceTo(BANK_ENTRANCE_TILE) > 2) return BANK_ENTRANCE_TILE;
-        if (player.getY() <= 3173 && player.distanceTo(WALKWAY_TILE) > 2) return WALKWAY_TILE;
-        if (player.getY() <= 3177 && player.distanceTo(KARIM_EXIT_TILE) > 2) return KARIM_EXIT_TILE;
-        return KARIM_TILE;
-    }
-
-    private String waypointName(WorldPoint tile)
-    {
-        if (tile.equals(KARIM_EXIT_TILE)) return "outside Karim";
-        if (tile.equals(WALKWAY_TILE)) return "south walkway";
-        if (tile.equals(BANK_ENTRANCE_TILE)) return "bank entrance";
-        if (tile.equals(AL_KHARID_BANK_TILE)) return "bank booths";
-        return "approaching Karim";
-    }
-
-    private boolean openNearbyDoor(WorldPoint player)
-    {
-        GameObject door = Rs2GameObject.get("Door", true);
-        if (door == null || door.getWorldLocation() == null
-                || player.distanceTo(door.getWorldLocation()) > 2)
-        {
-            return false;
-        }
-        WorldPoint tile = door.getWorldLocation();
-        boolean bankDoor = player.distanceTo(AL_KHARID_BANK_TILE) <= 8
-                && tile.distanceTo(AL_KHARID_BANK_TILE) <= 7;
-        boolean karimDoor = player.distanceTo(KARIM_TILE) <= 9
-                && tile.distanceTo(KARIM_TILE) <= 9;
-        if (!bankDoor && !karimDoor) return false;
-
-        boolean opened = Rs2GameObject.interact(door, "Open");
-        if (opened) log.info("KSP Kebab Buyer opened route door at {}", tile);
-        return opened;
+        webWalkTarget = null;
+        lastNavigationPosition = null;
+        lastNavigationProgressAt = 0L;
+        nextWebWalkAttemptAt = 0L;
+        webWalkStallRecoveries = 0;
     }
 
     private void resetNavigation()
     {
-        navigationActive = false;
-        lastNavigationPosition = null;
-        lastNavigationProgressAt = 0L;
-        nextNavigationClickAt = 0L;
-        nextDoorAttemptAt = 0L;
+        cancelWebWalk("reset");
         navigationDetails = "";
         bankOpenStartedAt = 0L;
         bankClickAttempts = 0;
@@ -804,6 +825,12 @@ public class KspKebabBuyerScript extends Script
     @Override
     public void shutdown()
     {
+        cancelWebWalk("plugin shutdown");
+        if (webWalkExecutor != null)
+        {
+            webWalkExecutor.shutdownNow();
+            webWalkExecutor = null;
+        }
         super.shutdown();
         status = "Stopped";
     }
