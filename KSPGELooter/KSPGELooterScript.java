@@ -22,13 +22,18 @@ import net.runelite.client.plugins.microbot.util.npc.Rs2NpcModel;
 import net.runelite.client.plugins.microbot.util.keyboard.Rs2Keyboard;
 import net.runelite.client.plugins.microbot.util.magic.Rs2Magic;
 import net.runelite.client.plugins.microbot.util.player.Rs2Player;
+import net.runelite.client.plugins.microbot.util.tile.Rs2Tile;
 import net.runelite.client.plugins.microbot.util.walker.Rs2Walker;
 
 import java.awt.event.KeyEvent;
 import java.time.Duration;
 import java.util.Comparator;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
@@ -44,6 +49,7 @@ public class KSPGELooterScript extends Script
     private static final long HIGH_ALCH_COOLDOWN_MS = 3_000L;
     private static final long PRIORITY_RELEASE_GRACE_MS = 1_200L;
     private static final long PRIORITY_HANDOFF_SETTLE_MS = 1_500L;
+    private static final int FAILED_TARGET_REJECT_THRESHOLD = 2;
     private static final String STAFF_OF_FIRE = "Staff of fire";
 
     public static volatile String status = "Idle";
@@ -76,6 +82,12 @@ public class KSPGELooterScript extends Script
     private long priorityHandoffReadyAt;
     private volatile boolean stopping;
     private boolean ownsPriorityPause;
+
+    // Targets that repeatedly fail or are not collision-reachable are ignored
+    // until that exact ground item disappears. This prevents a single bad
+    // target from pinning Priority Mode in "Retrying Take" forever.
+    private final Map<String, Integer> failedLootTargets = new HashMap<>();
+    private final Set<String> rejectedLootTargets = new HashSet<>();
 
     public boolean run(KSPGELooterConfig config)
     {
@@ -199,6 +211,8 @@ public class KSPGELooterScript extends Script
         inventorySlotsUsed = inventoryItemCount();
         priorityReleaseAt = lastAlchAt = lastRunePriceRefresh = priorityHandoffReadyAt = 0L;
         stopping = false;
+        failedLootTargets.clear();
+        rejectedLootTargets.clear();
         staffOfFireEquipped = insideArea = priorityTakeoverActive = priorityPauseOwned = ownsPriorityPause = false;
     }
 
@@ -273,6 +287,19 @@ public class KSPGELooterScript extends Script
 
     private Rs2TileItemModel findLootTarget(int minimumGeValue)
     {
+        pruneRejectedLootTargets();
+
+        WorldPoint player = Rs2Player.getWorldLocation();
+        if (!KSPGELooterArea.contains(player))
+        {
+            groundItemsSeen = eligibleGroundItems = 0;
+            return null;
+        }
+
+        // Build collision reachability once per scan instead of running a
+        // full BFS independently for every ground item in the busy GE scene.
+        Set<WorldPoint> reachableTiles = Rs2Tile.getReachableTilesFromTile(player, 40).keySet();
+
         List<Rs2TileItemModel> sceneItems = Microbot.getRs2TileItemCache().getStream()
                 .filter(item -> item != null && !item.isDespawned())
                 .filter(item -> KSPGELooterArea.contains(item.getWorldLocation()))
@@ -280,11 +307,12 @@ public class KSPGELooterScript extends Script
         groundItemsSeen = sceneItems.size();
 
         int accountType = accountType();
-        WorldPoint player = Rs2Player.getWorldLocation();
         List<Rs2TileItemModel> candidates = sceneItems.stream()
                 // Mirror RuneLite's TAKEABLE ownership rule. Main accounts may take public items
                 // whose original ownership is OTHER; the old isLootAble() filter rejected them.
                 .filter(item -> item.getOwnership() != TileItem.OWNERSHIP_OTHER || accountType == 0)
+                .filter(item -> !rejectedLootTargets.contains(lootKey(item)))
+                .filter(item -> reachableTiles.contains(item.getWorldLocation()))
                 .filter(item -> getGroundStackGeValue(item) >= minimumGeValue)
                 .sorted(Comparator.comparingLong(this::getGroundStackGeValue)
                         .reversed()
@@ -296,12 +324,28 @@ public class KSPGELooterScript extends Script
 
     private void spamLoot(Rs2TileItemModel item, KSPGELooterConfig config)
     {
-        if (item == null || !KSPGELooterArea.contains(item.getWorldLocation()) || !prepareLootUi()) return;
+        if (item == null) return;
+
+        String key = lootKey(item);
+        WorldPoint tile = item.getWorldLocation();
+        if (!isStrictlyAllowedLootTile(tile))
+        {
+            rejectLootTarget(item, "outside defined area or collision-unreachable");
+            return;
+        }
+
+        Rs2TileItemModel initialLive = findLiveGroundItem(item.getId(), tile);
+        if (initialLive == null || !isStrictlyAllowedLootTile(initialLive.getWorldLocation()))
+        {
+            rejectLootTarget(item, "target moved/despawned or is no longer allowed");
+            return;
+        }
+
+        if (!prepareLootUi()) return;
 
         int attempts = clamp(config.spamClicks(), 1, 12);
         int delay = clamp(config.spamDelayMs(), 30, 250);
         int itemId = item.getId();
-        WorldPoint tile = item.getWorldLocation();
         int beforeQuantity = Rs2Inventory.itemQuantity(itemId);
         int unitGePrice = getGePrice(itemId);
 
@@ -309,58 +353,152 @@ public class KSPGELooterScript extends Script
         targetGeValue = getGroundStackGeValue(item);
         status = "Looting " + targetName;
 
+        boolean dispatchedAtLeastOnce = false;
         for (int i = 0; i < attempts && Microbot.isLoggedIn(); i++)
         {
             WorldPoint player = Rs2Player.getWorldLocation();
             if (!KSPGELooterArea.contains(player))
             {
-                status = "OUTSIDE AREA - PAUSED";
+                status = "AREA GUARD - loot cancelled";
                 insideArea = false;
+                rejectLootTarget(item, "player left defined area during loot attempt");
+                Rs2Walker.clearWalkingRoute("ge-looter-left-area-during-loot");
                 return;
             }
 
             Rs2TileItemModel live = findLiveGroundItem(itemId, tile);
-            if (live == null || Rs2Inventory.itemQuantity(itemId) > beforeQuantity) break;
+            if (live == null || Rs2Inventory.itemQuantity(itemId) > beforeQuantity)
+            {
+                break;
+            }
+
+            // Re-check immediately before every Take. A cached candidate is never
+            // trusted once its tile is outside the hard area or not reachable from
+            // the player's current collision map.
+            if (!isStrictlyAllowedLootTile(live.getWorldLocation()))
+            {
+                rejectLootTarget(live, "failed live area/reachability guard");
+                return;
+            }
+
             if (!clearSelectedWidget()) return;
 
             boolean dispatched = live.pickup();
             if (!dispatched)
             {
-                status = "Retrying Take " + targetName;
+                status = "Take failed " + targetName;
                 sleep(delay);
                 continue;
             }
 
+            dispatchedAtLeastOnce = true;
             int distance = distance(player, tile);
-            int wait = Math.min(2_500, Math.max(350, 350 + distance * 220));
+            int wait = Math.min(4_000, Math.max(500, 500 + distance * 260));
             if (sleepUntil(() -> Rs2Inventory.itemQuantity(itemId) > beforeQuantity
-                    || findLiveGroundItem(itemId, tile) == null, wait)) break;
+                    || findLiveGroundItem(itemId, tile) == null
+                    || !KSPGELooterArea.contains(Rs2Player.getWorldLocation()), wait))
+            {
+                if (!KSPGELooterArea.contains(Rs2Player.getWorldLocation()))
+                {
+                    rejectLootTarget(item, "Take interaction attempted to leave defined area");
+                    status = "AREA GUARD - rejected loot target";
+                    Rs2Walker.clearWalkingRoute("ge-looter-rejected-outbound-loot");
+                    return;
+                }
+                break;
+            }
+
             if (i + 1 < attempts) sleep(delay);
         }
 
         sleepUntil(() -> Rs2Inventory.itemQuantity(itemId) > beforeQuantity
                 || findLiveGroundItem(itemId, tile) == null, 1_200);
+
         int gained = Math.max(0, Rs2Inventory.itemQuantity(itemId) - beforeQuantity);
         if (gained > 0)
         {
             itemsLooted += gained;
             totalLootGeValue += (long) unitGePrice * gained;
+            failedLootTargets.remove(key);
+            rejectedLootTargets.remove(key);
             priorityReleaseAt = System.currentTimeMillis() + PRIORITY_RELEASE_GRACE_MS;
         }
-        else if (findLiveGroundItem(itemId, tile) != null)
+        else
         {
-            status = "Take not confirmed - retrying " + targetName;
-            priorityReleaseAt = System.currentTimeMillis() + PRIORITY_RELEASE_GRACE_MS;
+            Rs2TileItemModel stillLive = findLiveGroundItem(itemId, tile);
+            if (stillLive != null)
+            {
+                int failures = failedLootTargets.merge(key, 1, Integer::sum);
+                if (!dispatchedAtLeastOnce || failures >= FAILED_TARGET_REJECT_THRESHOLD)
+                {
+                    rejectLootTarget(stillLive,
+                            !dispatchedAtLeastOnce
+                                    ? "Take interaction could not be dispatched"
+                                    : "Take was not confirmed after " + failures + " cycles");
+                }
+                else
+                {
+                    status = "Take not confirmed - one retry allowed";
+                    // Do not extend Priority Mode forever. The next loop gets one
+                    // final attempt; after that the target is ignored until despawn.
+                }
+            }
+            else
+            {
+                failedLootTargets.remove(key);
+                rejectedLootTargets.remove(key);
+            }
         }
         updateOverlayState();
     }
 
     private Rs2TileItemModel findLiveGroundItem(int itemId, WorldPoint tile)
     {
+        if (!isStrictlyAllowedLootTile(tile)) return null;
+
         return Microbot.getRs2TileItemCache().getStream()
                 .filter(i -> i != null && !i.isDespawned() && i.getId() == itemId)
-                .filter(i -> tile.equals(i.getWorldLocation()) && KSPGELooterArea.contains(i.getWorldLocation()))
+                .filter(i -> tile.equals(i.getWorldLocation()))
+                .filter(i -> isStrictlyAllowedLootTile(i.getWorldLocation()))
                 .findFirst().orElse(null);
+    }
+
+    private boolean isStrictlyAllowedLootTile(WorldPoint tile)
+    {
+        return tile != null
+                && KSPGELooterArea.contains(tile)
+                && Rs2Tile.isTileReachable(tile);
+    }
+
+    private void rejectLootTarget(Rs2TileItemModel item, String reason)
+    {
+        if (item == null) return;
+        String key = lootKey(item);
+        rejectedLootTargets.add(key);
+        failedLootTargets.remove(key);
+        clearTarget();
+        log.warn("KSP GE Looter: rejected loot target {} id={} at {} - {}",
+                safeName(item), item.getId(), item.getWorldLocation(), reason);
+        status = "Ignored unsafe/unreachable loot";
+    }
+
+    private void pruneRejectedLootTargets()
+    {
+        if (rejectedLootTargets.isEmpty() && failedLootTargets.isEmpty()) return;
+
+        Set<String> visible = Microbot.getRs2TileItemCache().getStream()
+                .filter(item -> item != null && !item.isDespawned())
+                .map(this::lootKey)
+                .collect(Collectors.toSet());
+        rejectedLootTargets.retainAll(visible);
+        failedLootTargets.keySet().retainAll(visible);
+    }
+
+    private String lootKey(Rs2TileItemModel item)
+    {
+        if (item == null || item.getWorldLocation() == null) return "invalid";
+        WorldPoint p = item.getWorldLocation();
+        return item.getId() + "@" + p.getX() + "," + p.getY() + "," + p.getPlane();
     }
 
     private boolean clearSelectedWidget()
