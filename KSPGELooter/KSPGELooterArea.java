@@ -15,4 +15,26 @@ public final class KSPGELooterArea
                 && point.getX() >= MIN_X && point.getX() <= MAX_X
                 && point.getY() >= MIN_Y && point.getY() <= MAX_Y;
     }
+
+    /**
+     * Nearest tile inside the configured GE looting rectangle.
+     * Used to return the looter to its own defined area after banking/walking.
+     */
+    public static WorldPoint nearestPointInside(WorldPoint point)
+    {
+        if (point == null || point.getPlane() != PLANE)
+        {
+            return returnPoint();
+        }
+
+        int x = Math.max(MIN_X, Math.min(MAX_X, point.getX()));
+        int y = Math.max(MIN_Y, Math.min(MAX_Y, point.getY()));
+        return new WorldPoint(x, y, PLANE);
+    }
+
+    /** Stable interior destination used after banking/outbound movement. */
+    public static WorldPoint returnPoint()
+    {
+        return new WorldPoint((MIN_X + MAX_X) / 2, (MIN_Y + MAX_Y) / 2, PLANE);
+    }
 }
