@@ -13,7 +13,9 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
 @Singleton
@@ -26,6 +28,9 @@ public class KspAccountPlayTimeCache
 
     private final Path cachePath = RuneLite.RUNELITE_DIR.toPath().resolve(CACHE_FILE_NAME);
     private final Map<String, Long> playTimeByAccount = new HashMap<>();
+    // Runtime-only marker: once Jagex's authoritative varc was read for an account,
+    // plugin/task restarts in the same loaded client reuse the synchronized cache.
+    private final Set<String> authoritativeAccountsThisSession = new HashSet<>();
 
     private String activeAccountKey;
     private long lastSampleAtMillis;
@@ -93,6 +98,12 @@ public class KspAccountPlayTimeCache
         return playTimeByAccount.containsKey(Long.toUnsignedString(accountHash));
     }
 
+    public synchronized boolean hasAuthoritativePlayTimeThisSession(long accountHash)
+    {
+        return accountHash != 0L
+                && authoritativeAccountsThisSession.contains(Long.toUnsignedString(accountHash));
+    }
+
     public synchronized void synchronizePlayTimeHours(long accountHash, int playTimeHours)
     {
         synchronizePlayTimeMillis(accountHash, TimeUnit.HOURS.toMillis(playTimeHours));
@@ -108,6 +119,7 @@ public class KspAccountPlayTimeCache
         String accountKey = Long.toUnsignedString(accountHash);
         long authoritativeMillis = playTimeMillis;
         long currentMillis = playTimeByAccount.getOrDefault(accountKey, 0L);
+        authoritativeAccountsThisSession.add(accountKey);
         if (!playTimeByAccount.containsKey(accountKey) || authoritativeMillis != currentMillis)
         {
             playTimeByAccount.put(accountKey, authoritativeMillis);

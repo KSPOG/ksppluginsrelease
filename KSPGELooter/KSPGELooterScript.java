@@ -23,6 +23,7 @@ import net.runelite.client.plugins.microbot.util.walker.Rs2Walker;
 
 import java.awt.event.KeyEvent;
 import java.time.Duration;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
