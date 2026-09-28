@@ -375,7 +375,8 @@ final class BondActivityAdvisor
 
     private int price(int itemId)
     {
-        return itemManager.getItemPrice(itemId);
+        long value = itemManager.getItemPrice(itemId);
+        return value <= 0L ? 0 : (int) Math.min(Integer.MAX_VALUE, value);
     }
 
     private long realizedSellPrice(int marketPrice)
