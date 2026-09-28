@@ -730,7 +730,7 @@ final class FactoryGrandExchangeInvoker
             {
                 return -1L;
             }
-            return offer.getPrice();
+            return (long) offer.getPrice();
         }).orElse(-1L);
 
         if (price < 0L) return -1;
