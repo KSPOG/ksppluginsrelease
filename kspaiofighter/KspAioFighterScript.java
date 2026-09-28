@@ -1,7 +1,6 @@
 package net.runelite.client.plugins.microbot.kspaiofighter;
 
 
-import net.runelite.client.plugins.microbot.kspbank.KspVerifiedBank;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.EnumSet;
@@ -404,7 +403,7 @@ public class KspAioFighterScript extends Script
 		}
 
 		setStatus("targets reached - walking to bank");
-		if (!KspVerifiedBank.walkToBankAndOpenBankBoothFirst())
+		if (!Rs2Bank.walkToBankAndUseBank())
 		{
 			return;
 		}
@@ -650,7 +649,7 @@ public class KspAioFighterScript extends Script
 		clearPendingLoot();
 		postKillLootUntilMs = 0L;
 
-		if (!KspVerifiedBank.walkToBankAndOpenBankBoothFirst())
+		if (!Rs2Bank.walkToBankAndUseBank())
 		{
 			return;
 		}
@@ -1463,7 +1462,7 @@ public class KspAioFighterScript extends Script
 
 	private void bankForGearSetup(Skill skill, List<String> missingGearBeforeBank)
 	{
-		if (!KspVerifiedBank.walkToBankAndOpenBankBoothFirst())
+		if (!Rs2Bank.walkToBankAndUseBank())
 		{
 			return;
 		}
