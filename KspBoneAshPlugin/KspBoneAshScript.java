@@ -10,8 +10,6 @@ import net.runelite.client.plugins.microbot.util.bank.Rs2Bank;
 import net.runelite.client.plugins.microbot.util.inventory.Rs2Inventory;
 import net.runelite.client.plugins.microbot.util.inventory.Rs2ItemModel;
 
-import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.List;
 import java.util.Random;
 import java.util.concurrent.TimeUnit;
@@ -229,41 +227,29 @@ public class KspBoneAshScript extends Script
 
     private int trackedInventoryCount(String itemName) { return Rs2Inventory.itemQuantity(itemName, true); }
 
-    private Rs2ItemModel selectRandomizedTarget(List<Rs2ItemModel> source)
+    private Rs2ItemModel selectRandomizedTarget(List<Rs2ItemModel> candidates)
     {
-        final List<Rs2ItemModel> candidates = new ArrayList<>(source);
-        candidates.sort(Comparator.comparingInt(Rs2ItemModel::getSlot));
-
+        // Rs2Inventory.getList() already gives us the candidate list. The old
+        // implementation copied and sorted it for every consumed item even though
+        // the traversal-distance calculation does not depend on sort order.
         if (candidates.size() == 1 || lastSlot < 0)
         {
             return candidates.get(random.nextInt(candidates.size()));
         }
 
-        final int randomSlotChance = clampPercent(config.randomSlotChance());
-        if (random.nextInt(100) < randomSlotChance)
+        if (random.nextInt(100) < clampPercent(config.randomSlotChance()))
         {
             return candidates.get(random.nextInt(candidates.size()));
         }
 
         Rs2ItemModel best = null;
         int bestDistance = Integer.MAX_VALUE;
-
         for (Rs2ItemModel candidate : candidates)
         {
-            int distance;
-            if (traversalDirection > 0)
-            {
-                distance = candidate.getSlot() > lastSlot
-                        ? candidate.getSlot() - lastSlot
-                        : (28 - lastSlot) + candidate.getSlot();
-            }
-            else
-            {
-                distance = candidate.getSlot() < lastSlot
-                        ? lastSlot - candidate.getSlot()
-                        : lastSlot + (28 - candidate.getSlot());
-            }
-
+            int slot = candidate.getSlot();
+            int distance = traversalDirection > 0
+                    ? (slot > lastSlot ? slot - lastSlot : (28 - lastSlot) + slot)
+                    : (slot < lastSlot ? lastSlot - slot : lastSlot + (28 - slot));
             if (distance < bestDistance)
             {
                 bestDistance = distance;
