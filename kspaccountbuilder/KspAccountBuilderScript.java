@@ -111,11 +111,15 @@ public class KspAccountBuilderScript extends Script
 
     private static final int LOOP_DELAY_MS = 600;
     private static final String EXTERNAL_AUTO_LOGIN_PLUGIN_CLASS = "net.runelite.client.plugins.microbot.accountselector.AutoLoginPlugin";
-    private static final int POST_TUTORIAL_BANK_CAMERA_PITCH = 358;
-    private static final int POST_TUTORIAL_BANK_CAMERA_YAW = 968;
-    private static final int POST_TUTORIAL_BANK_CAMERA_SCALE = 1154;
-    private static final int POST_TUTORIAL_BANK_CAMERA_ZOOM = 377;
-    private static final int CAMERA_SCALE_TOLERANCE = 16;
+    // Camera values recovered from the supplied Account Builder 1.5.200 bytecode.
+    private static final int POST_TUTORIAL_BANK_CAMERA_PITCH = 2821;
+    private static final int POST_TUTORIAL_BANK_CAMERA_YAW = 1951;
+    private static final int POST_TUTORIAL_BANK_CAMERA_SCALE = 612;
+    private static final int POST_TUTORIAL_BANK_CAMERA_RAW_ZOOM = 330;
+    private static final int CAMERA_ZOOM_MIN = 0;
+    private static final int CAMERA_ZOOM_MAX = 1400;
+    private static final int CAMERA_SCALE_TOLERANCE = 12;
+    private static final int CAMERA_SCALE_SAMPLE_DELAY_MS = 220;
     private static final int COINS_ID = 995;
     private static final String COINS = "Coins";
     private static final int MIN_QUEST_BUY_PRICE = 1_000;
@@ -3075,47 +3079,129 @@ public class KspAccountBuilderScript extends Script
             return false;
         }
 
-        Microbot.getClientThread().invoke(() ->
-        {
-            Microbot.getClient().setCameraPitchRelaxerEnabled(true);
-            Microbot.getClient().setCameraPitchTarget(POST_TUTORIAL_BANK_CAMERA_PITCH);
-            Microbot.getClient().setCameraYawTarget(POST_TUTORIAL_BANK_CAMERA_YAW);
-        });
-        Rs2Camera.setPitchInstant(POST_TUTORIAL_BANK_CAMERA_PITCH);
-        Rs2Camera.setYawInstant(POST_TUTORIAL_BANK_CAMERA_YAW);
-        applyCameraZoom(POST_TUTORIAL_BANK_CAMERA_ZOOM);
-        Microbot.getClientThread().invoke(() ->
-        {
-            Microbot.getClient().setCameraPitchTarget(POST_TUTORIAL_BANK_CAMERA_PITCH);
-            Microbot.getClient().setCameraYawTarget(POST_TUTORIAL_BANK_CAMERA_YAW);
-        });
-        boolean scaleSet = sleepUntil(
-                () -> Math.abs(getCameraScale() - POST_TUTORIAL_BANK_CAMERA_SCALE)
-                        <= CAMERA_SCALE_TOLERANCE,
-                2_000);
+        applyCameraAngle(
+                POST_TUTORIAL_BANK_CAMERA_PITCH,
+                POST_TUTORIAL_BANK_CAMERA_YAW);
+        applyCameraScale(POST_TUTORIAL_BANK_CAMERA_SCALE);
+        // Re-apply pitch/yaw after zoom calibration because the client can nudge
+        // the target while the camera scale is being changed.
+        applyCameraAngle(
+                POST_TUTORIAL_BANK_CAMERA_PITCH,
+                POST_TUTORIAL_BANK_CAMERA_YAW);
+
         debug(
-                "Set post-tutorial bank camera | scaleSet={} targetPitch={} actualPitch={} targetYaw={} actualYaw={} targetZoom={} actualZoom={} targetScale={} actualScale={}",
-                scaleSet,
+                "Set exact post-tutorial bank camera | targetPitch={} actualPitch={} targetYaw={} actualYaw={} targetScale={} actualZoom={} actualScale={}",
                 POST_TUTORIAL_BANK_CAMERA_PITCH,
                 Rs2Camera.getPitch(),
                 POST_TUTORIAL_BANK_CAMERA_YAW,
                 Rs2Camera.getYaw(),
-                POST_TUTORIAL_BANK_CAMERA_ZOOM,
-                getZoom(),
                 POST_TUTORIAL_BANK_CAMERA_SCALE,
+                getZoom(),
                 getCameraScale()
         );
         return true;
     }
 
-    private void applyCameraZoom(int zoom)
+    private void applyCameraAngle(int pitch, int yaw)
     {
         Microbot.getClientThread().invoke(() ->
         {
-            Microbot.getClient().setVarcIntValue(VarClientInt.CAMERA_ZOOM_FIXED_VIEWPORT, zoom);
-            Microbot.getClient().setVarcIntValue(VarClientInt.CAMERA_ZOOM_RESIZABLE_VIEWPORT, zoom);
-            Microbot.getClient().runScript(ScriptID.CAMERA_DO_ZOOM, zoom, zoom);
+            Microbot.getClient().setCameraPitchRelaxerEnabled(true);
+            Microbot.getClient().setCameraPitchTarget(pitch);
+            Microbot.getClient().setCameraYawTarget(yaw);
         });
+    }
+
+    private void applyCameraScale(int targetScale)
+    {
+        if (targetScale <= 0)
+        {
+            return;
+        }
+
+        int bestZoom = clampCameraZoom(getZoom());
+        int bestScale = getCameraScale();
+        int bestDistance = cameraScaleDistance(bestScale, targetScale);
+
+        int seedScale = sampleCameraScaleAtZoom(POST_TUTORIAL_BANK_CAMERA_RAW_ZOOM);
+        int seedDistance = cameraScaleDistance(seedScale, targetScale);
+        if (seedDistance < bestDistance)
+        {
+            bestZoom = clampCameraZoom(POST_TUTORIAL_BANK_CAMERA_RAW_ZOOM);
+            bestScale = seedScale;
+            bestDistance = seedDistance;
+        }
+
+        int low = CAMERA_ZOOM_MIN;
+        int high = Math.max(bestZoom, POST_TUTORIAL_BANK_CAMERA_RAW_ZOOM);
+        if (bestScale < targetScale)
+        {
+            high = CAMERA_ZOOM_MAX;
+        }
+
+        for (int i = 0; i < 12 && low <= high && bestDistance > CAMERA_SCALE_TOLERANCE; i++)
+        {
+            int mid = low + (high - low) / 2;
+            int scale = sampleCameraScaleAtZoom(mid);
+            int distance = cameraScaleDistance(scale, targetScale);
+
+            if (distance < bestDistance)
+            {
+                bestZoom = clampCameraZoom(mid);
+                bestScale = scale;
+                bestDistance = distance;
+            }
+
+            if (scale < targetScale)
+            {
+                low = mid + 1;
+            }
+            else
+            {
+                high = mid - 1;
+            }
+        }
+
+        setRawCameraZoom(bestZoom);
+        sleep(CAMERA_SCALE_SAMPLE_DELAY_MS);
+        debug(
+                "Applied calibrated camera scale | targetScale={} chosenRawZoom={} chosenScale={} finalScale={} finalRawZoom={}",
+                targetScale,
+                bestZoom,
+                bestScale,
+                getCameraScale(),
+                getZoom());
+    }
+
+    private int sampleCameraScaleAtZoom(int zoom)
+    {
+        setRawCameraZoom(zoom);
+        sleep(CAMERA_SCALE_SAMPLE_DELAY_MS);
+        return getCameraScale();
+    }
+
+    private int cameraScaleDistance(int scale, int targetScale)
+    {
+        return scale <= 0 ? Integer.MAX_VALUE : Math.abs(scale - targetScale);
+    }
+
+    private void setRawCameraZoom(int zoom)
+    {
+        int clampedZoom = clampCameraZoom(zoom);
+        Microbot.getClientThread().invoke(() ->
+        {
+            Microbot.getClient().setVarcIntValue(VarClientInt.CAMERA_ZOOM_FIXED_VIEWPORT, clampedZoom);
+            Microbot.getClient().setVarcIntValue(VarClientInt.CAMERA_ZOOM_RESIZABLE_VIEWPORT, clampedZoom);
+            Microbot.getClient().runScript(
+                    ScriptID.CAMERA_DO_ZOOM,
+                    clampedZoom,
+                    clampedZoom);
+        });
+    }
+
+    private int clampCameraZoom(int zoom)
+    {
+        return Math.max(CAMERA_ZOOM_MIN, Math.min(CAMERA_ZOOM_MAX, zoom));
     }
 
     private boolean isDialogueOpen()
@@ -3132,9 +3218,11 @@ public class KspAccountBuilderScript extends Script
 
     private int getZoom()
     {
-        return Microbot.getClient().isResized()
-                ? Microbot.getClient().getVarcIntValue(VarClientInt.CAMERA_ZOOM_RESIZABLE_VIEWPORT)
-                : Microbot.getClient().getVarcIntValue(VarClientInt.CAMERA_ZOOM_FIXED_VIEWPORT);
+        return Microbot.getClientThread().runOnClientThreadOptional(() ->
+                Microbot.getClient().isResized()
+                        ? Microbot.getClient().getVarcIntValue(VarClientInt.CAMERA_ZOOM_RESIZABLE_VIEWPORT)
+                        : Microbot.getClient().getVarcIntValue(VarClientInt.CAMERA_ZOOM_FIXED_VIEWPORT))
+                .orElse(0);
     }
 
     private int getCameraScale()
@@ -3962,23 +4050,13 @@ public class KspAccountBuilderScript extends Script
             return;
         }
 
-        if (accountPlayTimeCache.hasCachedPlayTime(accountHash))
-        {
-            synchronizedPlayTimeAccountHash = accountHash;
-            nextPlayTimeReadAtMillis = 0L;
-            log.info("[KSP Builder] Using cached account play time | accountHash={} minutes={}; skipping widget read",
-                    Long.toUnsignedString(accountHash),
-                    TimeUnit.MILLISECONDS.toMinutes(accountPlayTimeCache.getPlayTimeMillis(accountHash)));
-            return;
-        }
-
         long now = System.currentTimeMillis();
         if (now < nextPlayTimeReadAtMillis)
         {
             return;
         }
 
-        log.info("[KSP Builder] Reading account play time | accountHash={}",
+        log.info("[KSP Builder] Reading authoritative account play time varc | accountHash={}",
                 Long.toUnsignedString(accountHash));
         long playTimeMillis = TradeUnlock.readPlayTimeMillis();
         if (playTimeMillis < 0L)
