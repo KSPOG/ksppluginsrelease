@@ -33,7 +33,7 @@ import static net.runelite.client.plugins.microbot.util.Global.sleepUntil;
 public class KspHighAlchBankReserveGuard
 {
     private static final int COINS_ID = 995;
-    private static final long POLL_MS = 500L;
+    private static final long POLL_MS = 250L;
 
     public static volatile boolean normalising;
     public static volatile String status = "Disabled";
