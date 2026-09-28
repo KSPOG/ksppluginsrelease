@@ -880,7 +880,7 @@ public class KspSmartSuperheatScript extends Script
             int i = slot.ordinal();
             if (offers == null || i >= offers.length || offers[i] == null) return new OfferSnapshot(0, GrandExchangeOfferState.EMPTY, 0, 0);
             GrandExchangeOffer o = offers[i];
-            return new OfferSnapshot(o.getItemId(), o.getState(), o.getQuantitySold(), o.getPrice());
+            return new OfferSnapshot(o.getItemId(), o.getState(), o.getQuantitySold(), safeIntPrice(o.getPrice()));
         }).orElse(null);
     }
 
@@ -921,6 +921,12 @@ public class KspSmartSuperheatScript extends Script
     public long getMagicXp() { return magicXp; }
     public double getSmithingXp() { return smithingXp; }
     public long getRuntimeMillis() { return startedAt <= 0 ? 0 : System.currentTimeMillis() - startedAt; }
+
+    private static int safeIntPrice(long price)
+    {
+        if (price <= 0L) return 0;
+        return (int) Math.min(Integer.MAX_VALUE, price);
+    }
 
     private static final class GeOrder
     {

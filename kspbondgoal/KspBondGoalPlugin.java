@@ -60,7 +60,7 @@ public class KspBondGoalPlugin extends Plugin
     private long cachedBankCoins;
     private boolean bankKnown;
     private int tickCounter;
-    private int lastPositiveBondPrice;
+    private long lastPositiveBondPrice;
 
     @Provides
     KspBondGoalConfig provideConfig(ConfigManager configManager)
@@ -255,7 +255,7 @@ public class KspBondGoalPlugin extends Plugin
         }
 
         int override = config.bondPriceOverride();
-        int fetchedBondPrice = override > 0 ? override : itemManager.getItemPrice(OLD_SCHOOL_BOND);
+        long fetchedBondPrice = override > 0 ? override : itemManager.getItemPrice(OLD_SCHOOL_BOND);
 
         if (fetchedBondPrice > 0)
         {

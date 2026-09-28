@@ -1625,7 +1625,7 @@ if (!Rs2Widget.clickWidget(productionWidget))
             if (offers == null || index >= offers.length || offers[index] == null)
                 return new OfferSnapshot(0, GrandExchangeOfferState.EMPTY, 0, 0);
             GrandExchangeOffer offer = offers[index];
-            return new OfferSnapshot(offer.getItemId(), offer.getState(), offer.getQuantitySold(), offer.getPrice());
+            return new OfferSnapshot(offer.getItemId(), offer.getState(), offer.getQuantitySold(), safeIntPrice(offer.getPrice()));
         }).orElse(null);
     }
 
@@ -2092,6 +2092,12 @@ private Widget findProductionWidgetByItemId(Widget widget, int itemId)
             this.slot = slot;
             this.placedAt = placedAt;
         }
+    }
+
+    private static int safeIntPrice(long price)
+    {
+        if (price <= 0L) return 0;
+        return (int) Math.min(Integer.MAX_VALUE, price);
     }
 
     private static final class BuyOrder

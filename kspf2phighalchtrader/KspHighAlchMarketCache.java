@@ -282,11 +282,12 @@ final class KspHighAlchMarketCache implements AutoCloseable
 
     private void fallbackGuidePrice(Map<Integer, PricePoint> target, int itemId)
     {
-        int guide = itemManager.getItemPrice(itemId);
-        if (guide <= 0)
+        long liveGuide = itemManager.getItemPrice(itemId);
+        if (liveGuide <= 0L)
         {
             return;
         }
+        int guide = (int) Math.min(Integer.MAX_VALUE, liveGuide);
 
         // A guide-price fallback is intentionally biased upward for buying so a Wiki
         // outage cannot make an item look more profitable than the local cache suggests.

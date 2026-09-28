@@ -730,7 +730,7 @@ public class KspBonesToBananasScript extends Script
                 return new OfferSnapshot(0, GrandExchangeOfferState.EMPTY, 0, 0, 0);
             GrandExchangeOffer ge = offers[index];
             return new OfferSnapshot(ge.getItemId(), ge.getState(), ge.getQuantitySold(),
-                    ge.getTotalQuantity(), ge.getPrice());
+                    ge.getTotalQuantity(), safeIntPrice(ge.getPrice()));
         }).orElse(null);
     }
 
@@ -989,6 +989,12 @@ public class KspBonesToBananasScript extends Script
     public String getAntibanActivity() { return config != null && config.antiban() ? antiban.getActivity() : "Off"; }
     public int getAntibanShortPauses() { return antiban.getShortPauses(); }
     public int getAntibanLongBreaks() { return antiban.getLongBreaks(); }
+
+    private static int safeIntPrice(long price)
+    {
+        if (price <= 0L) return 0;
+        return (int) Math.min(Integer.MAX_VALUE, price);
+    }
 
     private static final class GeOrder
     {
