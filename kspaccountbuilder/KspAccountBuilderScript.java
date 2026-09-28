@@ -389,7 +389,7 @@ public class KspAccountBuilderScript extends Script
                     return;
                 }
 
-                if (pendingTask != null)
+                if (pendingTask != null || pendingRandomTaskSelection)
                 {
                     maybeLogStatus();
                     return;
@@ -3189,14 +3189,26 @@ public class KspAccountBuilderScript extends Script
             return false;
         }
 
-        if (!Rs2Inventory.isEmpty())
+        for (int attempt = 1; attempt <= 3 && !Rs2Inventory.isEmpty(); attempt++)
         {
+            Microbot.status = "Depositing inventory before next task";
             Rs2Bank.depositAll();
             sleepUntil(Rs2Inventory::isEmpty, 1_500);
-            sleep(200);
+
+            if (!Rs2Inventory.isEmpty())
+            {
+                debug("Task switch inventory deposit incomplete | attempt={}/3", attempt);
+                sleep(200);
+            }
         }
 
-        return Rs2Bank.isOpen();
+        boolean inventoryEmpty = Rs2Inventory.isEmpty();
+        if (!inventoryEmpty)
+        {
+            debug("Task switch blocked; inventory still contains items after deposit retries");
+        }
+
+        return Rs2Bank.isOpen() && inventoryEmpty;
     }
 
     private boolean unequipGatheringTools()
