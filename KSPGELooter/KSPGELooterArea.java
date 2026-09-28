@@ -24,11 +24,17 @@ public final class KSPGELooterArea
     {
         if (point == null || point.getPlane() != PLANE)
         {
-            return new WorldPoint((MIN_X + MAX_X) / 2, (MIN_Y + MAX_Y) / 2, PLANE);
+            return returnPoint();
         }
 
         int x = Math.max(MIN_X, Math.min(MAX_X, point.getX()));
         int y = Math.max(MIN_Y, Math.min(MAX_Y, point.getY()));
         return new WorldPoint(x, y, PLANE);
+    }
+
+    /** Stable interior destination used after banking/outbound movement. */
+    public static WorldPoint returnPoint()
+    {
+        return new WorldPoint((MIN_X + MAX_X) / 2, (MIN_Y + MAX_Y) / 2, PLANE);
     }
 }
