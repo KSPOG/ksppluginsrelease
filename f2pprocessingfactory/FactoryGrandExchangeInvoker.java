@@ -717,21 +717,24 @@ final class FactoryGrandExchangeInvoker
             return -1;
         }
 
-        return Microbot.getClientThread().runOnClientThreadOptional(() ->
+        long price = Microbot.getClientThread().runOnClientThreadOptional(() ->
         {
             GrandExchangeOffer[] offers = Microbot.getClient().getGrandExchangeOffers();
             int index = slot.ordinal();
             if (offers == null || index < 0 || index >= offers.length)
             {
-                return -1;
+                return -1L;
             }
             GrandExchangeOffer offer = offers[index];
             if (offer == null || offer.getItemId() != expectedItemId)
             {
-                return -1;
+                return -1L;
             }
             return offer.getPrice();
-        }).orElse(-1);
+        }).orElse(-1L);
+
+        if (price < 0L) return -1;
+        return (int) Math.min(Integer.MAX_VALUE, price);
     }
 
     private static boolean submitCurrentOffer()
