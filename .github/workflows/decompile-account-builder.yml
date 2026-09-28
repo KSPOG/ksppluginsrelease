@@ -19,13 +19,17 @@ jobs:
           ref: feature/account-builder-decompiled
           fetch-depth: 0
 
-      - name: Reconstruct input JAR
+      - name: Reconstruct Account Builder classes
         shell: bash
         run: |
           set -euo pipefail
-          cat .decompile-input/chunk_* > /tmp/accountbuilder.jar.b64
-          base64 --decode /tmp/accountbuilder.jar.b64 > /tmp/KspAccountBuilderPlugin-1.0.0.jar
-          echo "942e4b18144a5d439ec3159cacdbe5c5d0181c284fa40ec74788dbb7640184eb  /tmp/KspAccountBuilderPlugin-1.0.0.jar" | sha256sum -c -
+          base64 --decode .decompile-input/archive.b64 > /tmp/accountbuilder-classes.tar.xz
+          echo "a3e866ff20e06e2a348ab2ce5e00e6de892ca96369168a4be13b613200b89e8e  /tmp/accountbuilder-classes.tar.xz" | sha256sum -c -
+          rm -rf /tmp/accountbuilder-classes
+          mkdir -p /tmp/accountbuilder-classes
+          tar -xJf /tmp/accountbuilder-classes.tar.xz -C /tmp/accountbuilder-classes
+          test "$(find /tmp/accountbuilder-classes -type f -name '*.class' | wc -l)" -eq 297
+          (cd /tmp/accountbuilder-classes && jar cf /tmp/KspAccountBuilderPlugin-1.0.0.jar net)
 
       - name: Download CFR
         shell: bash
@@ -46,6 +50,7 @@ jobs:
           COUNT=$(find kspaccountbuilder -type f -name '*.java' | wc -l)
           echo "Recovered $COUNT Java source files"
           test "$COUNT" -ge 50
+          ! grep -R -n -E 'Decompilation failed|Unable to fully structure code' kspaccountbuilder
 
       - name: Record provenance and cleanup transport files
         shell: bash
@@ -53,12 +58,12 @@ jobs:
           set -euo pipefail
           cat > kspaccountbuilder/DECOMPILED_FROM.md <<'EOF'
           # KSP Account Builder recovered source
-          
+
           Recovered from `KspAccountBuilderPlugin-1.0.0.jar` with CFR 0.152.
-          
+
           Original JAR SHA-256:
           `942e4b18144a5d439ec3159cacdbe5c5d0181c284fa40ec74788dbb7640184eb`
-          
+
           The JAR is the authoritative source for this recovered source tree.
           EOF
           rm -rf .decompile-input
