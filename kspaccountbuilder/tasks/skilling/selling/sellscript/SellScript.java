@@ -49,6 +49,7 @@ import net.runelite.api.widgets.Widget;
 import net.runelite.client.plugins.microbot.Microbot;
 import net.runelite.client.plugins.microbot.Script;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.KspAccountPlayTimeCache;
+import net.runelite.client.plugins.microbot.kspaccountbuilder.TradeUnlock;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.ksputil.KspGrandExchangeHelper;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.ksputil.KspBankWidgetHelper;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.KspTaskDebug;
@@ -86,9 +87,6 @@ extends Script {
     private static final int TRADE_RESTRICTION_MIN_QUEST_POINTS = 10;
     private static final int TRADE_RESTRICTION_MIN_HOURS_PLAYED = 20;
     private static final int MAX_WITHDRAW_FAILURES = 3;
-    private static final int SIDE_JOURNAL_TAB_CONTAINER_WIDGET_ID = 41222157;
-    private static final int ACCOUNT_SUMMARY_WIDGET_ID = 46661633;
-    private static final int TIME_PLAYED_WIDGET_ID = 46661634;
     private static final String[] PICKAXE_NAMES = Buy.PICKAXE_NAMES;
     private static final String[] AXE_NAMES = Buy.AXE_NAMES;
     private static final long BUY_AFFORDABILITY_CACHE_MS = 3_000L;
@@ -121,11 +119,9 @@ extends Script {
     private final Set<String> blockedSellItems = new HashSet<String>();
     private final Map<String, Integer> withdrawFailureCounts = new HashMap<String, Integer>();
     private Boolean tradeRestrictionUnlockedCache;
-    private Integer cachedHoursPlayed;
     private long lastTradeRestrictionCheckAtMs;
     private long lastBuyAffordabilityCheckAtMs;
     private boolean cachedBuyAffordability;
-    private boolean attemptedHoursPlayedLookup;
     private SellState state = SellState.GOING_TO_GE;
     private boolean complete;
 
@@ -587,11 +583,12 @@ extends Script {
             return this.tradeRestrictionUnlockedCache;
         }
         long accountHash = this.getCurrentAccountHash();
-        long playTimeMillis = accountHash != 0L
-                && this.accountPlayTimeCache != null
-                && this.accountPlayTimeCache.hasCachedPlayTime(accountHash)
-                ? this.accountPlayTimeCache.getPlayTimeMillis(accountHash)
-                : -1L;
+        long playTimeMillis = TradeUnlock.readPlayTimeMillis();
+        if (playTimeMillis >= 0L && accountHash != 0L && this.accountPlayTimeCache != null)
+        {
+            this.accountPlayTimeCache.synchronizePlayTimeMillis(accountHash, playTimeMillis);
+        }
+
         boolean unlocked = false;
         if (this.getTotalLevel() >= TRADE_RESTRICTION_MIN_TOTAL_LEVEL
                 && this.getQuestPoints() >= TRADE_RESTRICTION_MIN_QUEST_POINTS) {
@@ -628,92 +625,6 @@ extends Script {
 
     private int getQuestPoints() {
         return Microbot.getVarbitPlayerValue((int)101);
-    }
-
-    private int getHoursPlayed() {
-        String[] parts;
-        if (this.cachedHoursPlayed != null) {
-            return this.cachedHoursPlayed;
-        }
-        String timePlayedText = this.getTimePlayedText();
-        if (timePlayedText == null || timePlayedText.isEmpty()) {
-            return 0;
-        }
-        int totalHours = 0;
-        for (String rawPart : parts = timePlayedText.toLowerCase(Locale.ENGLISH).split(",")) {
-            String part = rawPart.trim();
-            if (part.endsWith("days") || part.endsWith("day")) {
-                totalHours += this.extractLeadingNumber(part) * 24;
-                continue;
-            }
-            if (part.endsWith("hours") || part.endsWith("hour")) {
-                totalHours += this.extractLeadingNumber(part);
-                continue;
-            }
-            if (!part.endsWith("minutes") && !part.endsWith("minute")) continue;
-            totalHours += this.extractLeadingNumber(part) / 60;
-        }
-        this.cachedHoursPlayed = totalHours;
-        return totalHours;
-    }
-
-    private int extractLeadingNumber(String text) {
-        String digits = text.replaceAll("[^0-9]", "");
-        if (digits.isEmpty()) {
-            return 0;
-        }
-        try {
-            return Integer.parseInt(digits);
-        }
-        catch (NumberFormatException ex) {
-            return 0;
-        }
-    }
-
-    private String getTimePlayedText() {
-        Widget timePlayedWidget = Rs2Widget.getWidget((int)46661634);
-        if (timePlayedWidget == null || !Rs2Widget.isWidgetVisible((int)timePlayedWidget.getId()) || timePlayedWidget.getText() == null || timePlayedWidget.getText().isEmpty()) {
-            if (this.attemptedHoursPlayedLookup) {
-                return null;
-            }
-            if (!this.ensureTimePlayedPanelVisible()) {
-                return null;
-            }
-            timePlayedWidget = Rs2Widget.getWidget((int)46661634);
-            if (timePlayedWidget == null || timePlayedWidget.getText() == null || timePlayedWidget.getText().isEmpty()) {
-                return null;
-            }
-        }
-        return this.stripWidgetTags(timePlayedWidget.getText());
-    }
-
-    private boolean ensureTimePlayedPanelVisible() {
-        Widget accountSummaryWidget;
-        this.attemptedHoursPlayedLookup = true;
-        Widget timePlayedWidget = Rs2Widget.getWidget((int)46661634);
-        if (timePlayedWidget != null && Rs2Widget.isWidgetVisible((int)timePlayedWidget.getId())) {
-            return true;
-        }
-        if (Rs2GrandExchange.isOpen() || Rs2Bank.isOpen() || Rs2Player.isMoving() || Rs2Player.isInteracting()) {
-            return false;
-        }
-        Widget sideJournalTabContainer = Rs2Widget.getWidget((int)41222157);
-        if (sideJournalTabContainer != null) {
-            Rs2Widget.clickWidget((Widget)sideJournalTabContainer);
-            SellScript.sleep((int)200, (int)350);
-        }
-        if ((accountSummaryWidget = Rs2Widget.getWidget((int)46661633)) != null) {
-            Rs2Widget.clickWidget((Widget)accountSummaryWidget);
-            SellScript.sleepUntil(() -> {
-                Widget widget = Rs2Widget.getWidget((int)46661634);
-                return widget != null && widget.getText() != null && !widget.getText().isEmpty();
-            }, (int)2000);
-        }
-        return (timePlayedWidget = Rs2Widget.getWidget((int)46661634)) != null && timePlayedWidget.getText() != null && !timePlayedWidget.getText().isEmpty();
-    }
-
-    private String stripWidgetTags(String text) {
-        return text == null ? null : text.replaceAll("<[^>]+>", "").trim();
     }
 
     private boolean ensureGrandExchangeOpen() {
@@ -798,11 +709,9 @@ extends Script {
         this.blockedSellItems.clear();
         this.withdrawFailureCounts.clear();
         this.tradeRestrictionUnlockedCache = null;
-        this.cachedHoursPlayed = null;
         this.lastTradeRestrictionCheckAtMs = 0L;
         this.lastBuyAffordabilityCheckAtMs = 0L;
         this.cachedBuyAffordability = false;
-        this.attemptedHoursPlayedLookup = false;
         this.complete = false;
         KspWalkerGuard.clear("GE Sell:target-area");
         super.shutdown();
