@@ -34,7 +34,6 @@ public class AutoLoginScript extends Script
     private long lastWelcomePlayClickAtMillis;
     private long lastLoginAttemptAtMillis;
     private long lastLoginScreenDebugAtMillis;
-    private long loggedInAtMillis;
 
     public LoginState getState() { return state; }
 
@@ -50,7 +49,6 @@ public class AutoLoginScript extends Script
         lastWelcomePlayClickAtMillis = 0L;
         lastLoginAttemptAtMillis = 0L;
         lastLoginScreenDebugAtMillis = 0L;
-        loggedInAtMillis = 0L;
 
         BooleanSupplier loginAllowed = kspLoginAllowed == null ? ALWAYS_ALLOWED : kspLoginAllowed;
         mainScheduledFuture = scheduledExecutorService.scheduleWithFixedDelay(() ->
@@ -171,7 +169,6 @@ public class AutoLoginScript extends Script
         lastWelcomePlayClickAtMillis = 0L;
         lastLoginAttemptAtMillis = 0L;
         lastLoginScreenDebugAtMillis = 0L;
-        loggedInAtMillis = 0L;
 
         if (mainScheduledFuture != null && !mainScheduledFuture.isDone())
         {
@@ -385,7 +382,6 @@ public class AutoLoginScript extends Script
         lastWelcomePlayClickAtMillis = 0L;
         lastLoginAttemptAtMillis = 0L;
         lastLoginScreenDebugAtMillis = 0L;
-        loggedInAtMillis = 0L;
         super.shutdown();
         if (wasActive)
         {
