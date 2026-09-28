@@ -1,22 +1,24 @@
 package net.runelite.client.plugins.microbot.kspf2phighalchtrader;
 
-import com.google.gson.JsonElement;
-import com.google.gson.JsonObject;
-import com.google.gson.JsonParser;
+import com.google.gson.stream.JsonReader;
+import com.google.gson.stream.JsonToken;
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.client.callback.ClientThread;
 import net.runelite.client.game.ItemManager;
 import net.runelite.client.plugins.microbot.util.grandexchange.Rs2GrandExchange;
 import net.runelite.client.plugins.microbot.util.grandexchange.models.WikiPrice;
 
+import java.io.InputStreamReader;
 import java.lang.reflect.Field;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
+import java.nio.charset.StandardCharsets;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.Executors;
@@ -54,6 +56,7 @@ final class KspHighAlchMarketCache implements AutoCloseable
 
     private final Map<Integer, WikiPrice> targetCache;
     private final AtomicBoolean fallbackQueued = new AtomicBoolean(false);
+    private volatile Set<Integer> trackedItemIds = Set.of(NATURE_RUNE_ID, FIRE_RUNE_ID);
     private volatile Map<Integer, PricePoint> lastLiveSnapshot = Collections.emptyMap();
     private volatile long lastLiveAt;
     private volatile boolean closed;
@@ -74,7 +77,7 @@ final class KspHighAlchMarketCache implements AutoCloseable
     void start(KspF2PHighAlchTraderConfig config, Runnable onPrimed)
     {
         this.config = config;
-        executor.scheduleWithFixedDelay(this::refreshSafely, 0L, REFRESH_SECONDS, TimeUnit.SECONDS);
+        executor.scheduleWithFixedDelay(this::refreshSafely, 2L, REFRESH_SECONDS, TimeUnit.SECONDS);
 
         runOnClientThread(() ->
         {
@@ -155,55 +158,91 @@ final class KspHighAlchMarketCache implements AutoCloseable
             .GET()
             .build();
 
-        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+        HttpResponse<java.io.InputStream> response =
+            httpClient.send(request, HttpResponse.BodyHandlers.ofInputStream());
         if (response.statusCode() < 200 || response.statusCode() >= 300)
         {
+            response.body().close();
             throw new IllegalStateException("HTTP " + response.statusCode());
         }
 
-        JsonElement root = new JsonParser().parse(response.body());
-        if (!root.isJsonObject())
+        // Stream the Wiki JSON instead of materialising the complete response as a
+        // String + JsonObject tree. Only retain prices the trader can actually use.
+        Set<Integer> wanted = trackedItemIds;
+        Map<Integer, PricePoint> result = new HashMap<>(Math.max(16, wanted.size() * 2));
+        try (InputStreamReader input = new InputStreamReader(response.body(), StandardCharsets.UTF_8);
+             JsonReader json = new JsonReader(input))
         {
-            throw new IllegalStateException("Unexpected OSRS Wiki response");
-        }
-
-        JsonObject data = root.getAsJsonObject().getAsJsonObject("data");
-        if (data == null)
-        {
-            throw new IllegalStateException("OSRS Wiki response has no data object");
-        }
-
-        Map<Integer, PricePoint> result = new HashMap<>();
-        for (Map.Entry<String, JsonElement> entry : data.entrySet())
-        {
-            if (!entry.getValue().isJsonObject())
+            json.beginObject();
+            while (json.hasNext())
             {
-                continue;
-            }
+                String rootKey = json.nextName();
+                if (!"data".equals(rootKey))
+                {
+                    json.skipValue();
+                    continue;
+                }
 
-            int itemId;
-            try
-            {
-                itemId = Integer.parseInt(entry.getKey());
-            }
-            catch (NumberFormatException ignored)
-            {
-                continue;
-            }
+                json.beginObject();
+                while (json.hasNext())
+                {
+                    String itemKey = json.nextName();
+                    int itemId;
+                    try
+                    {
+                        itemId = Integer.parseInt(itemKey);
+                    }
+                    catch (NumberFormatException ignored)
+                    {
+                        json.skipValue();
+                        continue;
+                    }
 
-            JsonObject item = entry.getValue().getAsJsonObject();
-            int high = jsonInt(item, "high");
-            int low = jsonInt(item, "low");
-            if (high <= 0 && low <= 0)
-            {
-                continue;
-            }
+                    if (!wanted.contains(itemId))
+                    {
+                        json.skipValue();
+                        continue;
+                    }
 
-            int buy = high > 0 ? high : low;
-            int sell = low > 0 ? low : buy;
-            result.put(itemId, new PricePoint(buy, sell));
+                    int high = 0;
+                    int low = 0;
+                    json.beginObject();
+                    while (json.hasNext())
+                    {
+                        String priceKey = json.nextName();
+                        if ("high".equals(priceKey)) high = readJsonInt(json);
+                        else if ("low".equals(priceKey)) low = readJsonInt(json);
+                        else json.skipValue();
+                    }
+                    json.endObject();
+
+                    if (high <= 0 && low <= 0) continue;
+                    int buy = high > 0 ? high : low;
+                    int sell = low > 0 ? low : buy;
+                    result.put(itemId, new PricePoint(buy, sell));
+                }
+                json.endObject();
+            }
+            json.endObject();
         }
         return result;
+    }
+
+    private static int readJsonInt(JsonReader json) throws Exception
+    {
+        if (json.peek() == JsonToken.NULL)
+        {
+            json.nextNull();
+            return 0;
+        }
+        try
+        {
+            return Integer.parseInt(json.nextString());
+        }
+        catch (NumberFormatException ignored)
+        {
+            return 0;
+        }
     }
 
     /**
@@ -263,20 +302,22 @@ final class KspHighAlchMarketCache implements AutoCloseable
             return;
         }
 
-        Map<Integer, PricePoint> fallback = new HashMap<>();
-        fallbackGuidePrice(fallback, NATURE_RUNE_ID);
-        fallbackGuidePrice(fallback, FIRE_RUNE_ID);
+        Set<Integer> tracked = new HashSet<>();
+        tracked.add(NATURE_RUNE_ID);
+        tracked.add(FIRE_RUNE_ID);
 
         KspF2PHighAlchTraderConfig currentConfig = config;
         if (currentConfig != null)
         {
-            Set<Integer> candidates = F2PAlchCatalog.buildCandidateSet(currentConfig, true);
-            for (int itemId : candidates)
-            {
-                fallbackGuidePrice(fallback, itemId);
-            }
+            tracked.addAll(F2PAlchCatalog.buildCandidateSet(currentConfig, true));
         }
+        trackedItemIds = Collections.unmodifiableSet(tracked);
 
+        Map<Integer, PricePoint> fallback = new HashMap<>(Math.max(16, tracked.size() * 2));
+        for (int itemId : tracked)
+        {
+            fallbackGuidePrice(fallback, itemId);
+        }
         publish(fallback);
     }
 
@@ -352,22 +393,6 @@ final class KspHighAlchMarketCache implements AutoCloseable
             log.error("KSP High Alch Trader could not access Microbot GE price cache", ex);
         }
         return null;
-    }
-
-    private static int jsonInt(JsonObject object, String key)
-    {
-        if (object == null || !object.has(key) || object.get(key).isJsonNull())
-        {
-            return 0;
-        }
-        try
-        {
-            return object.get(key).getAsInt();
-        }
-        catch (Exception ignored)
-        {
-            return 0;
-        }
     }
 
     @Override
