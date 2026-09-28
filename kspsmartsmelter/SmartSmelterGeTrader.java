@@ -404,7 +404,7 @@ final class SmartSmelterGeTrader
                 return new OfferSnapshot(0, GrandExchangeOfferState.EMPTY, 0);
             }
             GrandExchangeOffer offer = offers[index];
-            return new OfferSnapshot(offer.getItemId(), offer.getState(), offer.getPrice());
+            return new OfferSnapshot(offer.getItemId(), offer.getState(), safeIntPrice(offer.getPrice()));
         }).orElse(null);
     }
 
@@ -474,6 +474,12 @@ final class SmartSmelterGeTrader
             log.debug("Unable to price GE item {}: {}", itemId, ex.getMessage());
             return 0;
         }
+    }
+
+    private static int safeIntPrice(long price)
+    {
+        if (price <= 0L) return 0;
+        return (int) Math.min(Integer.MAX_VALUE, price);
     }
 
     private static final class OfferSnapshot
