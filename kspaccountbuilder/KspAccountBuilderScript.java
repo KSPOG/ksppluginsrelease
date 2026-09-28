@@ -123,7 +123,7 @@ public class KspAccountBuilderScript extends Script
     private static final String BLUE_GOBLIN_MAIL = "Blue goblin mail";
     private static final String ORANGE_GOBLIN_MAIL = "Orange goblin mail";
     private static final int CHICKEN_TARGET_COMBAT_STAT_LEVEL = 15;
-    private static final long PLAY_TIME_READ_RETRY_MS = TimeUnit.SECONDS.toMillis(30);
+    private static final long PLAY_TIME_READ_RETRY_MS = TimeUnit.SECONDS.toMillis(1);
     private static final long BREAK_LOGOUT_COMBAT_GRACE_MS = TimeUnit.SECONDS.toMillis(11);
     private static final String BRONZE_SWORD = "Bronze sword";
     private static final String WOODEN_SHIELD = "Wooden shield";
@@ -3982,6 +3982,16 @@ public class KspAccountBuilderScript extends Script
 
         if (accountHash == synchronizedPlayTimeAccountHash)
         {
+            return;
+        }
+
+        // The authoritative varc only needs to be sampled once per account for the
+        // lifetime of this loaded client. AccountPlayTimeCache tracks elapsed logged-in
+        // time locally after that, so task/plugin restarts must not re-read the varc.
+        if (accountPlayTimeCache.hasAuthoritativePlayTimeThisSession(accountHash))
+        {
+            synchronizedPlayTimeAccountHash = accountHash;
+            nextPlayTimeReadAtMillis = 0L;
             return;
         }
 

@@ -102,7 +102,7 @@ extends Script {
             }
             this.smeltAtFurnace(this.targetBar);
             this.debug("SmeltScript active | area={} | targetBar={}", this.targetArea.name(), this.targetBar.name());
-        }, 0L, 600L, TimeUnit.MILLISECONDS);
+        }, 0L, LOOP_DELAY_MS, TimeUnit.MILLISECONDS);
         return true;
     }
 
@@ -290,7 +290,7 @@ extends Script {
         }
         if (KspWalkerGuard.walkToDestination(
                 "Smelting:target-area",
-                this.targetArea::getRandomPoint,
+                this::getAreaCenter,
                 this.targetArea.toWorldArea()::contains,
                 2,
                 WEB_WALK_COOLDOWN_MS)) {
@@ -342,18 +342,17 @@ extends Script {
         if (this.isWaitingForSmeltStart()) {
             return;
         }
-        if (!this.isIdleInTargetArea()) {
-            KspTaskDebug.throttled(log, this.debugLogging, "Smelting", "not-idle", 2_000L,
-                    "waiting for idle before furnace | player={} moving={} animating={} interacting={} area={}",
-                    Rs2Player.getWorldLocation(),
-                    Rs2Player.isMoving(),
-                    Rs2Player.isAnimating(),
-                    Rs2Player.isInteracting(),
-                    this.targetArea.getDisplayName());
+        WorldPoint playerLocation = Rs2Player.getWorldLocation();
+        if (playerLocation == null || !this.targetArea.toWorldArea().contains(playerLocation)) {
             return;
         }
+
+        // Reaching the furnace area is the hand-off point: cancel any residual walker
+        // route and interact immediately. Do not wait for the moving flag to clear;
+        // clicking the furnace safely replaces the final walking click.
+        this.clearTargetAreaWalkIfNeeded();
         long now = System.currentTimeMillis();
-        if (now - this.lastFurnaceInteractAtMs < 2000L) {
+        if (now - this.lastFurnaceInteractAtMs < FURNACE_INTERACT_COOLDOWN_MS) {
             return;
         }
         Rs2TileObjectModel furnace = this.findNearbyFurnaceInTargetArea();
@@ -403,8 +402,9 @@ extends Script {
     }
 
     private boolean handleSmeltSelection(BarLevels bar) {
-        boolean smeltSelectionOpened = Rs2Widget.sleepUntilHasWidgetText((String)"What would you like to smelt?", (int)270, (int)5, (boolean)false, (int)1500);
-        if (!smeltSelectionOpened) {
+        // Hot-path probe only. The old 1.5s sleep ran before every furnace click,
+        // creating an artificial idle gap on arrival.
+        if (Rs2Widget.findWidget("What would you like to smelt?", null, false) == null) {
             return false;
         }
         boolean clickedBar = Rs2Widget.clickWidget((String)bar.getDisplayName());
@@ -419,8 +419,9 @@ extends Script {
     }
 
     private boolean handleProductionWidget(BarLevels bar) {
-        boolean productionOpened;
-        if (!Rs2Widget.isProductionWidgetOpen() && !(productionOpened = SmeltScript.sleepUntil(Rs2Widget::isProductionWidgetOpen, (int)1500))) {
+        // Non-blocking check: the 250ms script loop will observe the widget as soon
+        // as it opens instead of sleeping another 1.5 seconds before furnace use.
+        if (!Rs2Widget.isProductionWidgetOpen()) {
             return false;
         }
         boolean selectedBar = this.selectProductionBar(bar);
@@ -431,7 +432,7 @@ extends Script {
         }
         Rs2Keyboard.keyPress((int)32);
         this.awaitingSmeltStartAtMs = System.currentTimeMillis();
-        SmeltScript.sleepUntil(() -> Rs2Player.isAnimating() || Rs2Player.isInteracting(), (int)2500);
+        SmeltScript.sleepUntil(() -> Rs2Player.isAnimating() || Rs2Player.isInteracting(), SMELT_START_GRACE_MS);
         return true;
     }
 
@@ -446,15 +447,6 @@ extends Script {
         return selected;
     }
 
-    private boolean isIdleInTargetArea() {
-        WorldPoint playerLocation = Rs2Player.getWorldLocation();
-        return playerLocation != null
-                && this.targetArea.toWorldArea().contains(playerLocation)
-                && !Rs2Player.isMoving()
-                && !Rs2Player.isAnimating()
-                && !Rs2Player.isInteracting();
-    }
-
     private boolean isWaitingForSmeltStart() {
         if (this.awaitingSmeltStartAtMs == 0L) {
             return false;
@@ -463,7 +455,7 @@ extends Script {
             return true;
         }
         long elapsed = System.currentTimeMillis() - this.awaitingSmeltStartAtMs;
-        if (elapsed < 2500L) {
+        if (elapsed < SMELT_START_GRACE_MS) {
             return true;
         }
         this.awaitingSmeltStartAtMs = 0L;

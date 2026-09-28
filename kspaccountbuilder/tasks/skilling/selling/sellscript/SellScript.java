@@ -49,7 +49,6 @@ import net.runelite.api.widgets.Widget;
 import net.runelite.client.plugins.microbot.Microbot;
 import net.runelite.client.plugins.microbot.Script;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.KspAccountPlayTimeCache;
-import net.runelite.client.plugins.microbot.kspaccountbuilder.TradeUnlock;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.ksputil.KspGrandExchangeHelper;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.ksputil.KspBankWidgetHelper;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.KspTaskDebug;
@@ -82,7 +81,7 @@ extends Script {
     private static final int GE_OFFER_INPUT_DELAY_MS = 900;
     private static final int INVENTORY_WAIT_TIMEOUT_MS = 3000;
     private static final int OFFER_SCREEN_WAIT_TIMEOUT_MS = 3000;
-    private static final int TRADE_RESTRICTION_CACHE_MS = 300000;
+    private static final int TRADE_RESTRICTION_CACHE_MS = 10000;
     private static final int TRADE_RESTRICTION_MIN_TOTAL_LEVEL = 100;
     private static final int TRADE_RESTRICTION_MIN_QUEST_POINTS = 10;
     private static final int TRADE_RESTRICTION_MIN_HOURS_PLAYED = 20;
@@ -583,11 +582,14 @@ extends Script {
             return this.tradeRestrictionUnlockedCache;
         }
         long accountHash = this.getCurrentAccountHash();
-        long playTimeMillis = TradeUnlock.readPlayTimeMillis();
-        if (playTimeMillis >= 0L && accountHash != 0L && this.accountPlayTimeCache != null)
-        {
-            this.accountPlayTimeCache.synchronizePlayTimeMillis(accountHash, playTimeMillis);
-        }
+        // Account Builder owns the single authoritative play-time read. GE selling only
+        // consumes the continuously updated shared cache; it must never trigger another
+        // ACCOUNT_SUMMARY_PLAYTIME varc read.
+        long playTimeMillis = accountHash != 0L
+                && this.accountPlayTimeCache != null
+                && this.accountPlayTimeCache.hasCachedPlayTime(accountHash)
+                ? this.accountPlayTimeCache.getPlayTimeMillis(accountHash)
+                : -1L;
 
         boolean unlocked = false;
         if (this.getTotalLevel() >= TRADE_RESTRICTION_MIN_TOTAL_LEVEL
