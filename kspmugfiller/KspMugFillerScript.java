@@ -258,7 +258,7 @@ public class KspMugFillerScript extends Script
             }
         }
 
-        int targetSlot = shuffledGlassSlots.get(slotCursor);
+        int targetSlot = shuffledGlassSlots[slotCursor];
         int before = glassCount();
 
         status = "Using Beer glass on barrel";
@@ -448,7 +448,7 @@ public class KspMugFillerScript extends Script
         bankDepositComplete = false;
         nextBankAttemptAt = 0L;
 
-        shuffledGlassSlots.clear();
+        shuffledGlassCount = 0;
         slotCursor = 0;
         awaitingInventoryChange = false;
         pendingGlassCount = 0;
