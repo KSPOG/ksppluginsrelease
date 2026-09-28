@@ -468,7 +468,7 @@ public class KspMugFillerScript extends Script
         }
 
         status = "Stopped";
-        shuffledGlassSlots.clear();
+        shuffledGlassCount = 0;
         awaitingInventoryChange = false;
     }
 
