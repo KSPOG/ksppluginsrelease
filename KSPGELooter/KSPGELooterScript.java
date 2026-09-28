@@ -612,7 +612,7 @@ public class KSPGELooterScript extends Script
         if (target == null) return false;
         if (!KSPGELooterArea.contains(Rs2Player.getWorldLocation()))
         {
-            status = "OUTSIDE AREA - PAUSED";
+            returnToDefinedArea();
             return false;
         }
 
@@ -655,7 +655,7 @@ public class KSPGELooterScript extends Script
         {
             if (!KSPGELooterArea.contains(Rs2Player.getWorldLocation()))
             {
-                status = "OUTSIDE AREA - PAUSED";
+                returnToDefinedArea();
                 return false;
             }
             if (Rs2GrandExchange.isOpen())
