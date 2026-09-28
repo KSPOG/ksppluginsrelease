@@ -236,6 +236,7 @@ public class KspAccountBuilderScript extends Script
     private long lastLoginHandoffLogAt;
     private String originalWindowTitle = "Microbot";
     private long synchronizedPlayTimeAccountHash;
+    private volatile long currentAccountHashSnapshot;
     private long nextPlayTimeReadAtMillis;
     private BankLocation taskSwitchBankLocation;
 
@@ -297,6 +298,7 @@ public class KspAccountBuilderScript extends Script
         lastBreakLoginAttemptAt = 0L;
         lastLoginHandoffLogAt = 0L;
         synchronizedPlayTimeAccountHash = 0L;
+        currentAccountHashSnapshot = 0L;
         nextPlayTimeReadAtMillis = 0L;
         taskSwitchBankLocation = null;
         pausedActivitySwitchRemainingMillis = -1L;
@@ -347,7 +349,7 @@ public class KspAccountBuilderScript extends Script
                     return;
                 }
 
-                sampleAccountPlayTime();
+                boolean playTimeConfirmed = sampleAccountPlayTime();
                 if (handleExperienceLampInterruption())
                 {
                     updateWindowTitle();
@@ -374,7 +376,7 @@ public class KspAccountBuilderScript extends Script
                     return;
                 }
 
-                if (!isPlayTimeConfirmedForCurrentAccount())
+                if (!playTimeConfirmed)
                 {
                     Microbot.status = "Confirming account play time";
                     maybeLogStatus();
@@ -3750,7 +3752,7 @@ public class KspAccountBuilderScript extends Script
     public long getAccountPlayTimeSeconds()
     {
         return TimeUnit.MILLISECONDS.toSeconds(
-                accountPlayTimeCache.getPlayTimeMillis(getCurrentAccountHash()));
+                accountPlayTimeCache.getPlayTimeMillis(currentAccountHashSnapshot));
     }
 
     public long getTimeUntilBreakSeconds()
@@ -3800,7 +3802,7 @@ public class KspAccountBuilderScript extends Script
         shuttingDown = true;
         if (accountPlayTimeCache != null)
         {
-            accountPlayTimeCache.sample(Microbot.isLoggedIn(), getCurrentAccountHash());
+            accountPlayTimeCache.sample(Microbot.isLoggedIn(), currentAccountHashSnapshot);
             accountPlayTimeCache.endSession();
         }
         super.shutdown();
@@ -3933,17 +3935,21 @@ public class KspAccountBuilderScript extends Script
         Rs2Antiban.resetAntibanSettings(true);
     }
 
-    private void sampleAccountPlayTime()
+    private boolean sampleAccountPlayTime()
     {
         boolean loggedIn = Microbot.isLoggedIn();
-        if (loggedIn && (TutorialIslandScript.isPreTutorialBlockingWidgetOpen() || TutorialIslandScript.isInTutorialIslandArea() || TutorialIslandScript.isOnTutorialIsland()))
+        if (loggedIn && (TutorialIslandScript.isPreTutorialBlockingWidgetOpen()
+                || TutorialIslandScript.isInTutorialIslandArea()
+                || TutorialIslandScript.isOnTutorialIsland()))
         {
             synchronizedPlayTimeAccountHash = 0L;
+            currentAccountHashSnapshot = 0L;
             nextPlayTimeReadAtMillis = 0L;
-            return;
+            return true;
         }
 
         long accountHash = getCurrentAccountHash();
+        currentAccountHashSnapshot = accountHash;
         accountPlayTimeCache.sample(loggedIn, accountHash);
 
         if (loggedIn
@@ -3963,26 +3969,26 @@ public class KspAccountBuilderScript extends Script
             awaitingActivitySwitchTimerStart = false;
             nextActivitySwitchAtMillis = -1L;
             synchronizedPlayTimeAccountHash = 0L;
-        nextPlayTimeReadAtMillis = 0L;
-        taskSwitchBankLocation = null;
-        debug("Account changed; stopped task selection until play time is confirmed");
+            nextPlayTimeReadAtMillis = 0L;
+            taskSwitchBankLocation = null;
+            debug("Account changed; stopped task selection until play time is confirmed");
         }
 
         if (!loggedIn)
         {
-            return;
+            return false;
         }
 
         if (accountHash == 0L)
         {
             KspTaskDebug.throttled(log, true, "Builder", "play-time-account-hash", 5_000L,
                     "Waiting to read account play time | reason=account-hash-unavailable");
-            return;
+            return false;
         }
 
         if (accountHash == synchronizedPlayTimeAccountHash)
         {
-            return;
+            return true;
         }
 
         // The authoritative varc only needs to be sampled once per account for the
@@ -3992,18 +3998,18 @@ public class KspAccountBuilderScript extends Script
         {
             synchronizedPlayTimeAccountHash = accountHash;
             nextPlayTimeReadAtMillis = 0L;
-            return;
+            return true;
         }
 
         if (!isReadyAfterLoginHandoff())
         {
-            return;
+            return false;
         }
 
         long now = System.currentTimeMillis();
         if (now < nextPlayTimeReadAtMillis)
         {
-            return;
+            return false;
         }
 
         log.info("[KSP Builder] Reading authoritative account play time varc | accountHash={}",
@@ -4014,7 +4020,7 @@ public class KspAccountBuilderScript extends Script
             nextPlayTimeReadAtMillis = now + PLAY_TIME_READ_RETRY_MS;
             log.info("[KSP Builder] Account play-time read failed; retrying in {} seconds",
                     TimeUnit.MILLISECONDS.toSeconds(PLAY_TIME_READ_RETRY_MS));
-            return;
+            return false;
         }
 
         accountPlayTimeCache.synchronizePlayTimeMillis(accountHash, playTimeMillis);
@@ -4023,17 +4029,7 @@ public class KspAccountBuilderScript extends Script
         log.info("[KSP Builder] Synchronized account play time | accountHash={} minutes={}",
                 Long.toUnsignedString(accountHash),
                 TimeUnit.MILLISECONDS.toMinutes(playTimeMillis));
-    }
-
-    private boolean isPlayTimeConfirmedForCurrentAccount()
-    {
-        if (Microbot.isLoggedIn() && (TutorialIslandScript.isPreTutorialBlockingWidgetOpen() || TutorialIslandScript.isInTutorialIslandArea() || TutorialIslandScript.isOnTutorialIsland()))
-        {
-            return true;
-        }
-
-        long accountHash = getCurrentAccountHash();
-        return accountHash != 0L && accountHash == synchronizedPlayTimeAccountHash;
+        return true;
     }
 
     private long getCurrentAccountHash()
