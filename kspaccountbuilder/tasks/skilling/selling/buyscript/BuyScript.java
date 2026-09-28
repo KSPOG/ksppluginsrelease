@@ -2393,7 +2393,8 @@ public class BuyScript extends Script {
             return gePrice;
         }
 
-        return itemPrice.getPrice();
+        long guidePrice = itemPrice.getPrice();
+        return guidePrice <= 0L ? 1 : (int) Math.min(Integer.MAX_VALUE, guidePrice);
     }
 
     private int getGuidePrice(Rs2ItemModel item) {
@@ -2421,10 +2422,10 @@ public class BuyScript extends Script {
             return gePrice;
         }
 
-        int itemModelPrice = item.getPrice();
+        long itemModelPrice = item.getPrice();
 
-        if (itemModelPrice > 0) {
-            return itemModelPrice;
+        if (itemModelPrice > 0L) {
+            return (int) Math.min(Integer.MAX_VALUE, itemModelPrice);
         }
 
         return this.getGuidePrice(item.getName());
