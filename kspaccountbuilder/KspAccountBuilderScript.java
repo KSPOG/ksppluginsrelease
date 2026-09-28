@@ -356,7 +356,7 @@ public class KspAccountBuilderScript extends Script
                     maybeLogStatus();
                     return;
                 }
-                processTimers();
+                processTimers(playTimeConfirmed);
                 updateWindowTitle();
                 if (isAnyBreakActive())
                 {
@@ -466,7 +466,7 @@ public class KspAccountBuilderScript extends Script
         return true;
     }
 
-    private void processTimers()
+    private void processTimers(boolean playTimeConfirmed)
     {
         if (shuttingDown)
         {
@@ -571,7 +571,7 @@ public class KspAccountBuilderScript extends Script
             return;
         }
 
-        if (!isPlayTimeConfirmedForCurrentAccount() || currentTask == null)
+        if (!playTimeConfirmed || currentTask == null)
         {
             pendingTask = null;
             pendingRandomTaskSelection = false;
