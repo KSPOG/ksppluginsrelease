@@ -216,11 +216,6 @@ public class MiningScript extends Script
                 return;
             }
 
-            if (!isIdleInTargetArea())
-            {
-                return;
-            }
-
             mineForCurrentLevel(miningLevel);
 
         }, 0L, LOOP_DELAY_MS, TimeUnit.MILLISECONDS);
@@ -694,10 +689,10 @@ public class MiningScript extends Script
             return;
         }
 
-        if (!isIdleInTargetArea())
+        if (!canStartMiningInTargetArea())
         {
             KspTaskDebug.throttled(log, debugLogging, "Mining", "not-idle", 2_000L,
-                    "waiting for idle before mining | player={} moving={} animating={} interacting={} area={}",
+                    "waiting until current action finishes before mining | player={} moving={} animating={} interacting={} area={}",
                     Rs2Player.getWorldLocation(),
                     Rs2Player.isMoving(),
                     Rs2Player.isAnimating(),
@@ -722,9 +717,9 @@ public class MiningScript extends Script
             return;
         }
 
-        if (!isIdleInTargetArea())
+        if (!canStartMiningInTargetArea())
         {
-            debug("Rock candidate found but player stopped being idle | rock={} id={} loc={} moving={} animating={} interacting={}",
+            debug("Rock candidate found but player started another action | rock={} id={} loc={} moving={} animating={} interacting={}",
                     targetRock.getName(),
                     targetRock.getId(),
                     targetRock.getWorldLocation(),
@@ -776,12 +771,11 @@ public class MiningScript extends Script
         }
     }
 
-    private boolean isIdleInTargetArea()
+    private boolean canStartMiningInTargetArea()
     {
         WorldPoint playerLocation = Rs2Player.getWorldLocation();
         return playerLocation != null
                 && targetArea.toWorldArea().contains(playerLocation)
-                && !Rs2Player.isMoving()
                 && !Rs2Player.isAnimating()
                 && !Rs2Player.isInteracting();
     }
