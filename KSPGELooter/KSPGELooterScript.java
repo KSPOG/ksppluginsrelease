@@ -296,9 +296,13 @@ public class KSPGELooterScript extends Script
             return null;
         }
 
+        // Build collision reachability once per scan instead of running a
+        // full BFS independently for every ground item in the busy GE scene.
+        Set<WorldPoint> reachableTiles = Rs2Tile.getReachableTilesFromTile(player, 40).keySet();
+
         List<Rs2TileItemModel> sceneItems = Microbot.getRs2TileItemCache().getStream()
                 .filter(item -> item != null && !item.isDespawned())
-                .filter(item -> isStrictlyAllowedLootTile(item.getWorldLocation()))
+                .filter(item -> KSPGELooterArea.contains(item.getWorldLocation()))
                 .collect(Collectors.toList());
         groundItemsSeen = sceneItems.size();
 
@@ -308,6 +312,7 @@ public class KSPGELooterScript extends Script
                 // whose original ownership is OTHER; the old isLootAble() filter rejected them.
                 .filter(item -> item.getOwnership() != TileItem.OWNERSHIP_OTHER || accountType == 0)
                 .filter(item -> !rejectedLootTargets.contains(lootKey(item)))
+                .filter(item -> reachableTiles.contains(item.getWorldLocation()))
                 .filter(item -> getGroundStackGeValue(item) >= minimumGeValue)
                 .sorted(Comparator.comparingLong(this::getGroundStackGeValue)
                         .reversed()
