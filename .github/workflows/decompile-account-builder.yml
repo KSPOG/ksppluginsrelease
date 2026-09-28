@@ -1,0 +1,75 @@
+name: Decompile Account Builder JAR
+
+on:
+  push:
+    branches:
+      - feature/account-builder-decompiled
+    paths:
+      - ".decompile-input/READY"
+
+permissions:
+  contents: write
+
+jobs:
+  decompile:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/account-builder-decompiled
+          fetch-depth: 0
+
+      - name: Reconstruct input JAR
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat .decompile-input/chunk_* > /tmp/accountbuilder.jar.b64
+          base64 --decode /tmp/accountbuilder.jar.b64 > /tmp/KspAccountBuilderPlugin-1.0.0.jar
+          echo "942e4b18144a5d439ec3159cacdbe5c5d0181c284fa40ec74788dbb7640184eb  /tmp/KspAccountBuilderPlugin-1.0.0.jar" | sha256sum -c -
+
+      - name: Download CFR
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fL --retry 3 -o /tmp/cfr.jar https://github.com/leibnitz27/cfr/releases/download/0.152/cfr-0.152.jar
+
+      - name: Decompile Account Builder
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/decompiled kspaccountbuilder
+          mkdir -p /tmp/decompiled kspaccountbuilder
+          java -jar /tmp/cfr.jar /tmp/KspAccountBuilderPlugin-1.0.0.jar --outputdir /tmp/decompiled --silent true
+          SRC=/tmp/decompiled/net/runelite/client/plugins/microbot/kspaccountbuilder
+          test -d "$SRC"
+          cp -a "$SRC"/. kspaccountbuilder/
+          COUNT=$(find kspaccountbuilder -type f -name '*.java' | wc -l)
+          echo "Recovered $COUNT Java source files"
+          test "$COUNT" -ge 50
+
+      - name: Record provenance and cleanup transport files
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > kspaccountbuilder/DECOMPILED_FROM.md <<'EOF'
+          # KSP Account Builder recovered source
+          
+          Recovered from `KspAccountBuilderPlugin-1.0.0.jar` with CFR 0.152.
+          
+          Original JAR SHA-256:
+          `942e4b18144a5d439ec3159cacdbe5c5d0181c284fa40ec74788dbb7640184eb`
+          
+          The JAR is the authoritative source for this recovered source tree.
+          EOF
+          rm -rf .decompile-input
+          rm -f .github/workflows/decompile-account-builder.yml
+
+      - name: Commit recovered source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Recover KSP Account Builder source from v1.0.0 JAR"
+          git push origin HEAD:feature/account-builder-decompiled
