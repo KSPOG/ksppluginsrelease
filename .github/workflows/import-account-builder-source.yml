@@ -1,0 +1,43 @@
+name: Import Account Builder Source
+
+on:
+  push:
+    branches:
+      - feature/f2p-account-builder
+    paths:
+      - .github/workflows/import-account-builder-source.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  import-source:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout source-loader repository
+        uses: actions/checkout@v4
+        with:
+          ref: feature/f2p-account-builder
+          fetch-depth: 0
+
+      - name: Fetch recovered Account Builder source
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/ksp-plugin-pack
+          git clone --depth 1 https://github.com/KSPOG/ksp-plugin-pack.git /tmp/ksp-plugin-pack
+          rm -rf kspaccountbuilder
+          cp -a /tmp/ksp-plugin-pack/Sources/kspaccountbuilder ./kspaccountbuilder
+
+      - name: Commit recovered source
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add kspaccountbuilder
+          if git diff --cached --quiet; then
+            echo "No source changes to commit."
+            exit 0
+          fi
+          git commit -m "Import recovered KSP Account Builder source"
+          git push origin HEAD:feature/f2p-account-builder
