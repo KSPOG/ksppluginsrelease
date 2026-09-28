@@ -25,7 +25,6 @@ public class AutoLoginScript extends Script
     private static final int LOOP_DELAY_MS = 250;
     private static final int WELCOME_PLAY_CLICK_COOLDOWN_MS = 2_500;
     private static final int LOGIN_ATTEMPT_COOLDOWN_MS = 10_000;
-    private static final int POST_LOGIN_SETTLE_MS = 4_000;
     private static final BooleanSupplier ALWAYS_ALLOWED = () -> true;
 
     private LoginState state = LoginState.IDLE;
@@ -145,24 +144,23 @@ public class AutoLoginScript extends Script
 
     private void handleLoggedInState()
     {
-        if (loggedInAtMillis == 0L)
+        transitionTo(LoginState.LOGGED_IN);
+
+        if (isPlayButtonVisible())
         {
-            loggedInAtMillis = System.currentTimeMillis();
-            transitionTo(LoginState.LOGGED_IN);
-            debug("logged in detected; waiting for welcome screen to settle before stopping helper");
             return;
         }
 
-        if (System.currentTimeMillis() - loggedInAtMillis < POST_LOGIN_SETTLE_MS)
+        Client client = Microbot.getClient();
+        if (client == null
+                || client.getLocalPlayer() == null
+                || client.getLocalPlayer().getWorldLocation() == null)
         {
-            transitionTo(LoginState.LOGGED_IN);
+            debug("logged in detected; waiting for local player/world location before handoff");
             return;
         }
 
-        if (!isPlayButtonVisible())
-        {
-            stopAfterLoginComplete();
-        }
+        stopAfterLoginComplete();
     }
 
     private void stopAfterLoginComplete()
@@ -191,7 +189,7 @@ public class AutoLoginScript extends Script
         }
     }
 
-    public boolean isActive() { return active || isRunning(); }
+    public boolean isActive() { return active; }
 
     private void handleLoginScreenWithLoginManager(Client client)
     {
