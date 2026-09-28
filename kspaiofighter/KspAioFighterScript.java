@@ -1277,43 +1277,54 @@ public class KspAioFighterScript extends Script
 	private boolean isConfiguredTileValid(WorldPoint worldPoint) { return worldPoint != null && worldPoint.getX() > 0 && worldPoint.getY() > 0; }
 	private Optional<Skill> selectTrainingSkill()
 	{
-		List<Skill> enabledSkills = getEnabledSkills();
-		if (currentTrainingSkill != null
-				&& enabledSkills.contains(currentTrainingSkill)
-				&& getLevel(currentTrainingSkill) < getTarget(currentTrainingSkill))
+		Skill current = currentTrainingSkill;
+		if (current != null
+				&& isTrainingSkillEnabled(current)
+				&& getLevel(current) < getTarget(current))
 		{
-			return Optional.of(currentTrainingSkill);
+			return Optional.of(current);
 		}
 
-		return enabledSkills.stream()
-				.filter(skill -> getLevel(skill) < getTarget(skill))
-				.findFirst();
+		if (config.trainAttack() && getLevel(Skill.ATTACK) < getTarget(Skill.ATTACK))
+		{
+			return Optional.of(Skill.ATTACK);
+		}
+		if (config.trainStrength() && getLevel(Skill.STRENGTH) < getTarget(Skill.STRENGTH))
+		{
+			return Optional.of(Skill.STRENGTH);
+		}
+		if (config.trainDefence() && getLevel(Skill.DEFENCE) < getTarget(Skill.DEFENCE))
+		{
+			return Optional.of(Skill.DEFENCE);
+		}
+		if (config.trainRanged() && getLevel(Skill.RANGED) < getTarget(Skill.RANGED))
+		{
+			return Optional.of(Skill.RANGED);
+		}
+		if (config.trainMagic() && getLevel(Skill.MAGIC) < getTarget(Skill.MAGIC))
+		{
+			return Optional.of(Skill.MAGIC);
+		}
+		return Optional.empty();
 	}
 
-	private List<Skill> getEnabledSkills()
+	private boolean isTrainingSkillEnabled(Skill skill)
 	{
-		List<Skill> skills = new ArrayList<>();
-		if (config.trainAttack())
+		switch (skill)
 		{
-			skills.add(Skill.ATTACK);
+			case ATTACK:
+				return config.trainAttack();
+			case STRENGTH:
+				return config.trainStrength();
+			case DEFENCE:
+				return config.trainDefence();
+			case RANGED:
+				return config.trainRanged();
+			case MAGIC:
+				return config.trainMagic();
+			default:
+				return false;
 		}
-		if (config.trainStrength())
-		{
-			skills.add(Skill.STRENGTH);
-		}
-		if (config.trainDefence())
-		{
-			skills.add(Skill.DEFENCE);
-		}
-		if (config.trainRanged())
-		{
-			skills.add(Skill.RANGED);
-		}
-		if (config.trainMagic())
-		{
-			skills.add(Skill.MAGIC);
-		}
-		return skills;
 	}
 
 	private int getTarget(Skill skill)
@@ -1381,17 +1392,22 @@ public class KspAioFighterScript extends Script
 		}
 
 		// Rs2Equipment.isWearing can fail for the ammo slot on some Microbot/RuneLite builds.
-		// Check the equipped item names directly as well so arrows/bolts/darts do not cause
-		// repeated gear-bank loops after they were already equipped.
+		// Fall back to a direct name scan without stream/map/lowercase allocations.
 		if (Rs2Equipment.isWearing(itemName))
 		{
 			return true;
 		}
 
-		String wanted = normalizeItemName(itemName);
-		return Rs2Equipment.items().stream()
-				.map(item -> item.getName() == null ? "" : normalizeItemName(item.getName()))
-				.anyMatch(equipped -> equipped.equals(wanted));
+		String wanted = itemName.trim();
+		for (Rs2ItemModel item : Rs2Equipment.items())
+		{
+			String equippedName = item == null ? null : item.getName();
+			if (equippedName != null && wanted.equalsIgnoreCase(equippedName.trim()))
+			{
+				return true;
+			}
+		}
+		return false;
 	}
 
 	private String normalizeItemName(String itemName) { return itemName == null ? "" : itemName.trim().toLowerCase(Locale.ENGLISH); }
