@@ -30,7 +30,6 @@
  */
 package net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.selling.sellscript;
 
-import java.util.ArrayList;
 import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -88,6 +87,8 @@ extends Script {
     private static final int MAX_WITHDRAW_FAILURES = 3;
     private static final String[] PICKAXE_NAMES = Buy.PICKAXE_NAMES;
     private static final String[] AXE_NAMES = Buy.AXE_NAMES;
+    private static final SellList[] SELL_ENTRIES = SellList.values();
+    private static final Skill[] SKILLS = Skill.values();
     private static final long BUY_AFFORDABILITY_CACHE_MS = 3_000L;
     private static final Set<SellList> PROTECTED_SKILL_RESOURCES = EnumSet.of(
             SellList.LOGS,
@@ -145,20 +146,22 @@ extends Script {
                 return;
             }
             this.updateState();
-            KspTaskDebug.throttled(log, this.debugLogging, "GE Sell", "loop", 5_000L,
-                    "loop | state={} complete={} player={} moving={} interacting={} bankOpen={} geOpen={} offerScreen={} slots={} hasInvSellable={} hasBankSellable={} blockedItems={}",
-                    this.state,
-                    this.complete,
-                    Rs2Player.getWorldLocation(),
-                    Rs2Player.isMoving(),
-                    Rs2Player.isInteracting(),
-                    Rs2Bank.isOpen(),
-                    Rs2GrandExchange.isOpen(),
-                    Rs2GrandExchange.isOfferScreenOpen(),
-                    Rs2GrandExchange.isOpen() ? Rs2GrandExchange.getAvailableSlotsCount() : -1,
-                    this.hasSellableInventoryItems(),
-                    this.hasSellableBankItems(),
-                    this.blockedSellItems);
+            if (this.debugLogging) {
+                KspTaskDebug.throttled(log, this.debugLogging, "GE Sell", "loop", 5_000L,
+                        "loop | state={} complete={} player={} moving={} interacting={} bankOpen={} geOpen={} offerScreen={} slots={} hasInvSellable={} hasBankSellable={} blockedItems={}",
+                        this.state,
+                        this.complete,
+                        Rs2Player.getWorldLocation(),
+                        Rs2Player.isMoving(),
+                        Rs2Player.isInteracting(),
+                        Rs2Bank.isOpen(),
+                        Rs2GrandExchange.isOpen(),
+                        Rs2GrandExchange.isOfferScreenOpen(),
+                        Rs2GrandExchange.isOpen() ? Rs2GrandExchange.getAvailableSlotsCount() : -1,
+                        this.hasSellableInventoryItems(),
+                        this.hasSellableBankItems(),
+                        this.blockedSellItems);
+            }
             switch (this.state) {
                 case GOING_TO_GE: {
                     if (!this.ensureInTargetArea()) {
@@ -180,7 +183,7 @@ extends Script {
                     return;
                 }
             }
-        }, 0L, 600L, TimeUnit.MILLISECONDS);
+        }, 0L, LOOP_DELAY_MS, TimeUnit.MILLISECONDS);
         return true;
     }
 
@@ -269,7 +272,7 @@ extends Script {
             SellScript.sleepUntil(Rs2Bank::hasWithdrawAsNote, (int)2000);
         }
         boolean withdrewAny = false;
-        for (SellList sellList : SellList.values()) {
+        for (SellList sellList : SELL_ENTRIES) {
             if (!this.shouldSellEntry(sellList)) continue;
             if (Rs2Inventory.isFull()) break;
             if (this.isBlockedSellItem(sellList.getDisplayName())) continue;
@@ -447,7 +450,7 @@ extends Script {
     }
 
     private boolean hasSellableBankItems() {
-        for (SellList sellList : SellList.values()) {
+        for (SellList sellList : SELL_ENTRIES) {
             if (!this.shouldSellEntry(sellList)
                     || this.isBlockedSellItem(sellList.getDisplayName())
                     || this.getSellableBankQuantity(sellList.getDisplayName()) <= 0) continue;
@@ -461,18 +464,16 @@ extends Script {
     }
 
     private Rs2ItemModel getNextSellableInventoryItem() {
-        List<String> sellNames = this.getAllowedSellNames();
-        for (Rs2ItemModel item : Rs2Inventory.all()) {
+        List<Rs2ItemModel> inventoryItems = Rs2Inventory.all();
+        for (Rs2ItemModel item : inventoryItems) {
             if (item == null
                     || item.getName() == null
                     || this.isBlockedSellItem(item.getName())
-                    || this.getSellableInventoryQuantity(item.getName(), item.getQuantity()) <= 0) {
+                    || this.getSellableInventoryQuantity(item.getName(), item.getQuantity()) <= 0
+                    || !this.isAllowedSellItemName(item.getName())) {
                 continue;
             }
-
-            if (sellNames.stream().anyMatch(name -> name.equalsIgnoreCase(item.getName()))) {
-                return item;
-            }
+            return item;
         }
 
         if (!this.canAffordGeBuyRequirements()) {
@@ -481,26 +482,27 @@ extends Script {
 
         String desiredPickaxe = this.resolveDesiredPickaxeName();
         String desiredAxe = this.resolveDesiredAxeName();
-        for (Rs2ItemModel item : Rs2Inventory.all()) {
+        for (Rs2ItemModel item : inventoryItems) {
             if (item == null
                     || item.getName() == null
                     || this.isBlockedSellItem(item.getName())
                     || !this.isOutdatedToolName(item.getName(), desiredPickaxe, desiredAxe)) {
                 continue;
             }
-
             return item;
         }
         return null;
     }
 
-    private List<String> getAllowedSellNames() {
-        ArrayList<String> names = new ArrayList<String>();
-        for (SellList sellList : SellList.values()) {
-            if (!this.shouldSellEntry(sellList) || this.isBlockedSellItem(sellList.getDisplayName())) continue;
-            names.add(sellList.getDisplayName());
+    private boolean isAllowedSellItemName(String itemName) {
+        for (SellList sellList : SELL_ENTRIES) {
+            if (sellList.getDisplayName().equalsIgnoreCase(itemName)
+                    && this.shouldSellEntry(sellList)
+                    && !this.isBlockedSellItem(sellList.getDisplayName())) {
+                return true;
+            }
         }
-        return names;
+        return false;
     }
 
     private boolean withdrawOutdatedToolsAsNotes() {
@@ -618,7 +620,7 @@ extends Script {
 
     private int getTotalLevel() {
         int total = 0;
-        for (Skill skill : Skill.values()) {
+        for (Skill skill : SKILLS) {
             if (skill == Skill.OVERALL) continue;
             total += Microbot.getClient().getRealSkillLevel(skill);
         }
