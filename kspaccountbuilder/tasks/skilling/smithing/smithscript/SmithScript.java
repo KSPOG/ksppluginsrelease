@@ -50,8 +50,8 @@ extends Script {
     private static final int INVENTORY_SLOTS = 28;
     private static final int LOOP_DELAY_MS = 250;
     private static final int WEB_WALK_COOLDOWN_MS = 3000;
-    private static final int ANVIL_INTERACT_COOLDOWN_MS = 2000;
-    private static final int SMITH_START_GRACE_MS = 2500;
+    private static final int ANVIL_INTERACT_COOLDOWN_MS = 750;
+    private static final int SMITH_START_GRACE_MS = 1500;
     private static final int SMITH_ANIMATION_COOLDOWN_MS = 1800;
     private static final int ANVIL_SEARCH_RADIUS = 12;
     private static final int ANVIL_APPROACH_DISTANCE = 6;

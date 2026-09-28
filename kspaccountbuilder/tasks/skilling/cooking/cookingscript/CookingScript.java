@@ -42,7 +42,7 @@ public class CookingScript extends Script
     private static final WorldPoint LUMBRIDGE_RANGE_LOCATION = new WorldPoint(3212, 3215, 0);
     private static final WorldPoint COOKING_EXIT_DOOR_POINT = new WorldPoint(3079, 3497, 0);
     private static final WorldPoint COOKING_EXIT_OUTSIDE_POINT = new WorldPoint(3080, 3498, 0);
-    private static final long DOOR_INTERACTION_COOLDOWN_MS = 2_000L;
+    private static final long DOOR_INTERACTION_COOLDOWN_MS = 750L;
 
     private volatile Areas targetArea = Areas.EDGEVILLE_RANGE;
     private volatile CookingState state = CookingState.WAITING;

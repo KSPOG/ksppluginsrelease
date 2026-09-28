@@ -42,7 +42,7 @@ public class FishingScript extends Script
 
     private static final int LOOP_DELAY_MS = 250;
     private static final int WEB_WALK_COOLDOWN_MS = 3_000;
-    private static final int NPC_INTERACTION_COOLDOWN_MS = 2_500;
+    private static final int NPC_INTERACTION_COOLDOWN_MS = 900;
     private static final int FISHING_SPOT_SEARCH_PADDING_TILES = 8;
     private static final int OUT_OF_AREA_SPOT_FALLBACK_RADIUS = 4;
     private static final int FISHING_SPOT_INTERACTION_DISTANCE = 8;
