@@ -5,7 +5,6 @@ import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.ItemComposition;
 import net.runelite.api.Skill;
 import net.runelite.api.TileItem;
-import net.runelite.api.WallObject;
 import net.runelite.api.coords.WorldPoint;
 import net.runelite.api.gameval.VarbitID;
 import net.runelite.client.plugins.microbot.Microbot;
@@ -16,9 +15,6 @@ import net.runelite.client.plugins.microbot.util.equipment.Rs2Equipment;
 import net.runelite.client.plugins.microbot.util.grandexchange.Rs2GrandExchange;
 import net.runelite.client.plugins.microbot.util.inventory.Rs2Inventory;
 import net.runelite.client.plugins.microbot.util.inventory.Rs2ItemModel;
-import net.runelite.client.plugins.microbot.util.gameobject.Rs2GameObject;
-import net.runelite.client.plugins.microbot.util.npc.Rs2Npc;
-import net.runelite.client.plugins.microbot.util.npc.Rs2NpcModel;
 import net.runelite.client.plugins.microbot.util.keyboard.Rs2Keyboard;
 import net.runelite.client.plugins.microbot.util.magic.Rs2Magic;
 import net.runelite.client.plugins.microbot.util.player.Rs2Player;
@@ -123,11 +119,10 @@ public class KSPGELooterScript extends Script
                 updateOverlayState();
                 if (!insideArea)
                 {
-                    Rs2Walker.clearWalkingRoute("ge-looter-outside-area");
-                    releasePriorityPause("Outside GE area");
-                    status = "OUTSIDE AREA - PAUSED";
+                    releasePriorityPause("Returning to defined GE area");
                     groundItemsSeen = eligibleGroundItems = 0;
                     clearTarget();
+                    returnToDefinedArea();
                     return;
                 }
 
@@ -670,10 +665,21 @@ public class KSPGELooterScript extends Script
             }
 
             status = "Opening GE bank";
-            if (!Rs2Bank.isOpen() && !openGrandExchangeBank())
+            if (!Rs2Bank.isOpen())
             {
-                status = "Unable to open GE bank";
-                return false;
+                // Restore the original GE Looter banking path. Rs2Bank.openBank()
+                // performs Microbot's native bank target discovery and uses the
+                // invoke-backed object/NPC interaction internally.
+                if (!Rs2Bank.openBank())
+                {
+                    status = "Unable to open GE bank";
+                    return false;
+                }
+                if (!sleepUntil(Rs2Bank::isOpen, 3_000))
+                {
+                    status = "Waiting for GE bank";
+                    return false;
+                }
             }
 
             if (!KSPGELooterArea.contains(Rs2Player.getWorldLocation()))
@@ -690,7 +696,9 @@ public class KSPGELooterScript extends Script
 
             sleepUntil(() -> !Rs2Inventory.isFull(), 2_000);
             Rs2Bank.closeBank();
-            status = "Returning to looting";
+            status = KSPGELooterArea.contains(Rs2Player.getWorldLocation())
+                    ? "Returning to looting"
+                    : "Returning to defined GE area";
             return true;
         }
         finally
@@ -700,75 +708,31 @@ public class KSPGELooterScript extends Script
     }
 
     /**
-     * GE-specific bank opener.
-     *
-     * The generic KSP bank helper only searches GameObject bank booths before
-     * falling back to a Banker. Grand Exchange bank booths are WallObjects
-     * (Microbot ids 10060/30389), so they can be missed by that path.
-     *
-     * Try Microbot's native bank opener first because it already considers
-     * normal bank objects + GE booth wall objects + Banker NPCs. If it still
-     * does not open the widget, explicitly try the GE booth and Banker so the
-     * looter cannot get stuck on one failed target type.
+     * GE Looter owns its return-to-area behavior; it does not rely on a shared
+     * bank helper for routing. Any accidental/outbound position is routed back
+     * into the exact configured GE looting rectangle before scanning resumes.
      */
-    private boolean openGrandExchangeBank()
+    private boolean returnToDefinedArea()
     {
-        if (Rs2Bank.isOpen()) return true;
-
-        if (Microbot.getClient().isWidgetSelected())
-        {
-            status = "Clearing selection before banking";
-            Rs2Keyboard.keyPress(KeyEvent.VK_ESCAPE);
-            sleepUntil(() -> !Microbot.getClient().isWidgetSelected(), 600);
-        }
-
         WorldPoint player = Rs2Player.getWorldLocation();
-
-        // Explicit invoke path: Rs2GameObject.interact -> Microbot.doInvoke.
-        WallObject geBooth = Rs2GameObject.findGrandExchangeBooth(20);
-        if (geBooth != null)
+        if (KSPGELooterArea.contains(player))
         {
-            status = "Invoking GE bank booth";
-            boolean invoked = invokeBankBooth(geBooth);
-            log.info("KSP GE Looter: GE booth invoke id={} at {} dispatched={}",
-                    geBooth.getId(), geBooth.getWorldLocation(), invoked);
-            if (invoked && sleepUntil(Rs2Bank::isOpen, 2_500))
-            {
-                return true;
-            }
+            insideArea = true;
+            status = "Returning to looting";
+            return true;
         }
 
-        // Explicit invoke fallback: Rs2Npc.interact -> Microbot.doInvoke.
-        Rs2NpcModel banker = Rs2Npc.getBankerNPC();
-        if (banker != null)
+        WorldPoint returnPoint = KSPGELooterArea.returnPoint();
+        WorldPoint currentTarget = Rs2Walker.getCurrentTarget();
+        if (currentTarget != null && !KSPGELooterArea.contains(currentTarget))
         {
-            status = "Invoking GE Banker";
-            boolean invoked = invokeBanker(banker);
-            log.info("KSP GE Looter: Banker invoke id={} at {} dispatched={}",
-                    banker.getId(), banker.getWorldLocation(), invoked);
-            if (invoked && sleepUntil(Rs2Bank::isOpen, 2_500))
-            {
-                return true;
-            }
+            Rs2Walker.clearWalkingRoute("ge-looter-return-to-defined-area");
         }
 
-        if (sleepUntil(Rs2Bank::isOpen, 600)) return true;
-
-        log.warn("KSP GE Looter: invoke banking failed; player={}, geBooth={}, banker={}",
-                player,
-                geBooth == null ? "missing" : geBooth.getWorldLocation(),
-                banker == null ? "missing" : banker.getWorldLocation());
-        return false;
-    }
-
-    private boolean invokeBankBooth(WallObject booth)
-    {
-        return booth != null && Rs2GameObject.interact(booth, "Bank");
-    }
-
-    private boolean invokeBanker(Rs2NpcModel banker)
-    {
-        return banker != null && Rs2Npc.interact(banker, "Bank");
+        status = "Returning to defined GE area";
+        boolean arrived = Rs2Walker.walkTo(returnPoint, 2);
+        updateOverlayState();
+        return arrived && insideArea;
     }
 
     private boolean acquireBankPause()
