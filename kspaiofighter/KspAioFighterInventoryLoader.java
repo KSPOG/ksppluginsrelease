@@ -55,7 +55,7 @@ final class KspAioFighterInventoryLoader
         if (matchesExactly(setup)) return true;
 
         Microbot.status = "KSP AIO Fighter: loading " + style + " inventory setup";
-        if (!KspVerifiedBank.walkToBankAndOpenBank())
+        if (!KspVerifiedBank.walkToBankAndOpenBankBoothFirst())
         {
             lastError = "Could not open a bank to load the " + style + " inventory setup.";
             return false;

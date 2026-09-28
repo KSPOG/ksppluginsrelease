@@ -404,7 +404,7 @@ public class KspAioFighterScript extends Script
 		}
 
 		setStatus("targets reached - walking to bank");
-		if (!KspVerifiedBank.walkToBankAndOpenBank())
+		if (!KspVerifiedBank.walkToBankAndOpenBankBoothFirst())
 		{
 			return;
 		}
@@ -650,7 +650,7 @@ public class KspAioFighterScript extends Script
 		clearPendingLoot();
 		postKillLootUntilMs = 0L;
 
-		if (!KspVerifiedBank.walkToBankAndOpenBank())
+		if (!KspVerifiedBank.walkToBankAndOpenBankBoothFirst())
 		{
 			return;
 		}
@@ -1463,7 +1463,7 @@ public class KspAioFighterScript extends Script
 
 	private void bankForGearSetup(Skill skill, List<String> missingGearBeforeBank)
 	{
-		if (!KspVerifiedBank.walkToBankAndOpenBank())
+		if (!KspVerifiedBank.walkToBankAndOpenBankBoothFirst())
 		{
 			return;
 		}
