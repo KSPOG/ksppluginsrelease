@@ -91,6 +91,7 @@ public final class KspLocalMuleServer implements Closeable
 
     private static final int CLIENT_READ_TIMEOUT_MS = 4_000;
     private static final int MAX_LINE_LENGTH = 8_192;
+    private static final long TERMINAL_JOB_RETENTION_MS = 5 * 60_000L;
 
     private final Map<String, MuleJob> jobs = new ConcurrentHashMap<>();
     private final ConcurrentLinkedQueue<String> queue = new ConcurrentLinkedQueue<>();
@@ -304,6 +305,8 @@ public final class KspLocalMuleServer implements Closeable
             {
                 job.state = JobState.CANCELLED;
             }
+            queue.remove(job.requestId);
+            job.touch();
         }
         return "CANCELLED";
     }
@@ -466,10 +469,17 @@ public final class KspLocalMuleServer implements Closeable
                     job.failureReason = completedAwaitingAck
                             ? "Worker did not acknowledge completed transfer"
                             : "Worker stopped contacting mule coordinator";
-                    if (job == activeJob)
-                    {
-                        activeJob = null;
-                    }
+                    if (job == activeJob) activeJob = null;
+                    queue.remove(job.requestId);
+                    job.lastContactAt = now; // start bounded terminal-retention window
+                    continue;
+                }
+
+                if ((job.state == JobState.FAILED || job.state == JobState.CANCELLED)
+                        && now - job.lastContactAt > TERMINAL_JOB_RETENTION_MS)
+                {
+                    queue.remove(job.requestId);
+                    jobs.remove(job.requestId, job);
                 }
             }
         }
