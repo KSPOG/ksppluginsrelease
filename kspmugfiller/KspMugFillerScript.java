@@ -14,12 +14,8 @@ import net.runelite.client.plugins.microbot.util.player.Rs2Player;
 import net.runelite.client.plugins.microbot.util.walker.Rs2Walker;
 
 import java.awt.event.KeyEvent;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.List;
 import java.util.Random;
 import java.util.concurrent.TimeUnit;
-import java.util.stream.Collectors;
 
 import static net.runelite.client.plugins.microbot.util.Global.sleepUntil;
 
@@ -41,7 +37,8 @@ public class KspMugFillerScript extends Script
     private static final long PRICE_REFRESH_MS = 30_000L;
 
     private final Random random = new Random();
-    private final List<Integer> shuffledGlassSlots = new ArrayList<>();
+    private final int[] shuffledGlassSlots = new int[28];
+    private int shuffledGlassCount;
 
     private volatile String status = "Starting";
     private volatile long startedAtMs;
@@ -218,18 +215,18 @@ public class KspMugFillerScript extends Script
             return;
         }
 
-        if (shuffledGlassSlots.isEmpty())
+        if (shuffledGlassCount == 0)
         {
             buildShuffledSlotOrder();
         }
 
-        while (slotCursor < shuffledGlassSlots.size()
-                && !slotContainsBeerGlass(shuffledGlassSlots.get(slotCursor)))
+        while (slotCursor < shuffledGlassCount
+                && !slotContainsBeerGlass(shuffledGlassSlots[slotCursor]))
         {
             slotCursor++;
         }
 
-        if (slotCursor >= shuffledGlassSlots.size())
+        if (slotCursor >= shuffledGlassCount)
         {
             if (glassCount() <= 0)
             {
@@ -371,14 +368,25 @@ public class KspMugFillerScript extends Script
 
     private void buildShuffledSlotOrder()
     {
-        shuffledGlassSlots.clear();
-        shuffledGlassSlots.addAll(Rs2Inventory.getList(item ->
-                        item != null && item.getId() == BEER_GLASS_ID)
-                .stream()
-                .map(Rs2ItemModel::getSlot)
-                .collect(Collectors.toList()));
+        shuffledGlassCount = 0;
+        for (Rs2ItemModel item : Rs2Inventory.getList(candidate ->
+                candidate != null && candidate.getId() == BEER_GLASS_ID))
+        {
+            if (shuffledGlassCount < shuffledGlassSlots.length)
+            {
+                shuffledGlassSlots[shuffledGlassCount++] = item.getSlot();
+            }
+        }
 
-        Collections.shuffle(shuffledGlassSlots, random);
+        // Inventory is capped at 28 slots, so a fixed primitive array avoids
+        // temporary Lists, boxed Integers, stream nodes and collector allocations.
+        for (int i = shuffledGlassCount - 1; i > 0; i--)
+        {
+            int swap = random.nextInt(i + 1);
+            int slot = shuffledGlassSlots[i];
+            shuffledGlassSlots[i] = shuffledGlassSlots[swap];
+            shuffledGlassSlots[swap] = slot;
+        }
         slotCursor = 0;
     }
 
@@ -403,7 +411,7 @@ public class KspMugFillerScript extends Script
         pendingInteractionAt = 0L;
         nextInventoryInteractionAt = 0L;
         slotCursor = 0;
-        shuffledGlassSlots.clear();
+        shuffledGlassCount = 0;
         status = "Bank reset";
     }
 
