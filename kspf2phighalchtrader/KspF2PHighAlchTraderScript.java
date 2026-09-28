@@ -64,7 +64,7 @@ public class KspF2PHighAlchTraderScript extends Script {
     private static final int HIGH_ALCH_CASTS_PER_HOUR = 1200;
     private static final long HIGH_ALCH_COOLDOWN_MS = 3000L;
     private static final double RUNE_BUY_MULTIPLIER = 1.03;
-    private static final int TICK_INTERVAL_MS = 600;
+    private static final int TICK_INTERVAL_MS = 300;
     private static final long FOUR_HOURS_MS = TimeUnit.HOURS.toMillis(4);
     private static final long ZERO_FILL_BLOCK_MS = TimeUnit.MINUTES.toMillis(2);
     private static final long GE_TRAVEL_RETRY_MS = 4000L;
@@ -593,7 +593,7 @@ public class KspF2PHighAlchTraderScript extends Script {
         }
 
         long now = System.currentTimeMillis();
-        for (AlchOpportunity ranked : new ArrayList<>(rankedOpportunities)) {
+        for (AlchOpportunity ranked : rankedOpportunities) {
             if (isSlowBuyCooldownActive(ranked.getItemId())
                     || blockedUntil.getOrDefault(ranked.getItemId(), 0L) > now) {
                 continue;
@@ -678,7 +678,7 @@ public class KspF2PHighAlchTraderScript extends Script {
         AlchOpportunity bestInventoryOpportunity = null;
         int bestInventoryQuantity = 0;
 
-        for (AlchOpportunity opportunity : new ArrayList<>(rankedOpportunities)) {
+        for (AlchOpportunity opportunity : rankedOpportunities) {
             if (opportunity == null) {
                 continue;
             }
@@ -1464,15 +1464,14 @@ public class KspF2PHighAlchTraderScript extends Script {
 
     private void resetExpiredPurchaseWindows() {
         long now = System.currentTimeMillis();
-        List<Integer> expiredItems = new ArrayList<>();
-        for (Map.Entry<Integer, Long> entry : purchaseWindowStartedAtByItem.entrySet()) {
+        java.util.Iterator<Map.Entry<Integer, Long>> purchaseIterator =
+                purchaseWindowStartedAtByItem.entrySet().iterator();
+        while (purchaseIterator.hasNext()) {
+            Map.Entry<Integer, Long> entry = purchaseIterator.next();
             if (now - entry.getValue() >= FOUR_HOURS_MS) {
-                expiredItems.add(entry.getKey());
+                purchasedInWindow.remove(entry.getKey());
+                purchaseIterator.remove();
             }
-        }
-        for (int itemId : expiredItems) {
-            purchaseWindowStartedAtByItem.remove(itemId);
-            purchasedInWindow.remove(itemId);
         }
         blockedUntil.entrySet().removeIf(entry -> entry.getValue() <= now);
         slowBuyCooldownUntil.entrySet().removeIf(entry -> entry.getValue() <= now);
@@ -1701,18 +1700,29 @@ public class KspF2PHighAlchTraderScript extends Script {
 
     public int getSlowBuyCooldownCount() {
         long now = System.currentTimeMillis();
-        return (int) slowBuyCooldownUntil.values().stream().filter(until -> until != null && until > now).count();
+        int count = 0;
+        for (Long until : slowBuyCooldownUntil.values()) {
+            if (until != null && until > now) {
+                count++;
+            }
+        }
+        return count;
     }
 
     public String getSlowBuyCooldownSummary() {
         long now = System.currentTimeMillis();
-        long earliest = slowBuyCooldownUntil.values().stream()
-                .filter(until -> until != null && until > now)
-                .mapToLong(Long::longValue)
-                .min()
-                .orElse(0L);
-        int count = getSlowBuyCooldownCount();
-        if (count <= 0 || earliest <= now) {
+        int count = 0;
+        long earliest = Long.MAX_VALUE;
+        for (Long until : slowBuyCooldownUntil.values()) {
+            if (until == null || until <= now) {
+                continue;
+            }
+            count++;
+            if (until < earliest) {
+                earliest = until;
+            }
+        }
+        if (count == 0) {
             return null;
         }
         long remaining = earliest - now;
