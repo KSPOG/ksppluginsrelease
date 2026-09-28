@@ -2697,7 +2697,7 @@ public class F2PProcessingFactoryScript extends Script
 
             int soldThisOffer = Math.max(0, result.filledQuantity);
             int offerPrice = factorySellOfferPrices.getOrDefault(existingOffer,
-                offer == null ? priceService.getSellOfferPrice(itemId, config.sellDiscountPercent(), 0) : offer.getPrice());
+                offer == null ? priceService.getSellOfferPrice(itemId, config.sellDiscountPercent(), 0) : safeIntPrice(offer.getPrice()));
 
             if (result.completed || result.cancelled)
             {
@@ -3679,7 +3679,7 @@ public class F2PProcessingFactoryScript extends Script
         GrandExchangeOffer live = getOffer(slot);
         int current = live == null
             ? factoryBuyOfferPrices.getOrDefault(slot, -1)
-            : live.getPrice();
+            : safeIntPrice(live.getPrice());
         if (calculated <= 0)
         {
             return calculated;
@@ -3697,7 +3697,7 @@ public class F2PProcessingFactoryScript extends Script
         GrandExchangeOffer live = getOffer(slot);
         int current = live == null
             ? factorySellOfferPrices.getOrDefault(slot, -1)
-            : live.getPrice();
+            : safeIntPrice(live.getPrice());
         if (calculated <= 0)
         {
             return calculated;
@@ -3780,7 +3780,7 @@ public class F2PProcessingFactoryScript extends Script
 
             int itemId = offer.getItemId();
             int quantity = Math.max(0, offer.getQuantitySold());
-            int price = Math.max(1, factoryBuyOfferPrices.getOrDefault(slot, offer.getPrice()));
+            int price = Math.max(1, factoryBuyOfferPrices.getOrDefault(slot, safeIntPrice(offer.getPrice())));
             boolean fullyBought = offer.getState() == GrandExchangeOfferState.BOUGHT;
             completed.add(new CompletedBuySnapshot(slot, itemId, quantity, price, fullyBought));
         }
@@ -4355,6 +4355,12 @@ public class F2PProcessingFactoryScript extends Script
         }
 
         return fingerprint.toString();
+    }
+
+    private static int safeIntPrice(long price)
+    {
+        if (price <= 0L) return 0;
+        return (int) Math.min(Integer.MAX_VALUE, price);
     }
 
     private static String prettifyState(FactoryState value)
