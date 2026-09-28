@@ -1,11 +1,11 @@
 package net.runelite.client.plugins.microbot.KSPGELooter;
 
 
-import net.runelite.client.plugins.microbot.kspbank.KspVerifiedBank;
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.ItemComposition;
 import net.runelite.api.Skill;
 import net.runelite.api.TileItem;
+import net.runelite.api.WallObject;
 import net.runelite.api.coords.WorldPoint;
 import net.runelite.api.gameval.VarbitID;
 import net.runelite.client.plugins.microbot.Microbot;
@@ -16,6 +16,9 @@ import net.runelite.client.plugins.microbot.util.equipment.Rs2Equipment;
 import net.runelite.client.plugins.microbot.util.grandexchange.Rs2GrandExchange;
 import net.runelite.client.plugins.microbot.util.inventory.Rs2Inventory;
 import net.runelite.client.plugins.microbot.util.inventory.Rs2ItemModel;
+import net.runelite.client.plugins.microbot.util.gameobject.Rs2GameObject;
+import net.runelite.client.plugins.microbot.util.npc.Rs2Npc;
+import net.runelite.client.plugins.microbot.util.npc.Rs2NpcModel;
 import net.runelite.client.plugins.microbot.util.keyboard.Rs2Keyboard;
 import net.runelite.client.plugins.microbot.util.magic.Rs2Magic;
 import net.runelite.client.plugins.microbot.util.player.Rs2Player;
@@ -483,18 +486,10 @@ public class KSPGELooterScript extends Script
             }
 
             status = "Opening GE bank";
-            if (!Rs2Bank.isOpen())
+            if (!Rs2Bank.isOpen() && !openGrandExchangeBank())
             {
-                if (!KspVerifiedBank.openBank())
-                {
-                    status = "Unable to open GE bank";
-                    return false;
-                }
-                if (!sleepUntil(Rs2Bank::isOpen, 3_000))
-                {
-                    status = "Waiting for GE bank";
-                    return false;
-                }
+                status = "Unable to open GE bank";
+                return false;
             }
 
             if (!KSPGELooterArea.contains(Rs2Player.getWorldLocation()))
@@ -518,6 +513,89 @@ public class KSPGELooterScript extends Script
         {
             if (releaseBankPause) releasePriorityPause("Bank transaction complete");
         }
+    }
+
+    /**
+     * GE-specific bank opener.
+     *
+     * The generic KSP bank helper only searches GameObject bank booths before
+     * falling back to a Banker. Grand Exchange bank booths are WallObjects
+     * (Microbot ids 10060/30389), so they can be missed by that path.
+     *
+     * Try Microbot's native bank opener first because it already considers
+     * normal bank objects + GE booth wall objects + Banker NPCs. If it still
+     * does not open the widget, explicitly try the GE booth and Banker so the
+     * looter cannot get stuck on one failed target type.
+     */
+    private boolean openGrandExchangeBank()
+    {
+        if (Rs2Bank.isOpen()) return true;
+
+        if (Microbot.getClient().isWidgetSelected())
+        {
+            status = "Clearing selection before banking";
+            Rs2Keyboard.keyPress(KeyEvent.VK_ESCAPE);
+            sleepUntil(() -> !Microbot.getClient().isWidgetSelected(), 600);
+        }
+
+        int epochBefore = Rs2Bank.getBankLiveEpoch();
+
+        status = "Opening GE bank";
+        boolean nativeOpened = Rs2Bank.openBank();
+        if (Rs2Bank.isOpen())
+        {
+            log.info("KSP GE Looter: GE bank opened via Rs2Bank.openBank(); result={}, epoch {} -> {}",
+                    nativeOpened, epochBefore, Rs2Bank.getBankLiveEpoch());
+            return true;
+        }
+
+        WorldPoint player = Rs2Player.getWorldLocation();
+        WallObject geBooth = Rs2GameObject.findGrandExchangeBooth(20);
+        if (geBooth != null)
+        {
+            status = "Opening GE bank booth";
+            boolean clicked = Rs2GameObject.interact(geBooth, "Bank");
+            log.info("KSP GE Looter: GE booth attempt id={} at {} clicked={}",
+                    geBooth.getId(), geBooth.getWorldLocation(), clicked);
+            if (clicked && sleepUntil(Rs2Bank::isOpen, 3_000))
+            {
+                return true;
+            }
+        }
+        else
+        {
+            log.warn("KSP GE Looter: no reachable Grand Exchange booth found near {}", player);
+        }
+
+        Rs2NpcModel banker = Rs2Npc.getBankerNPC();
+        if (banker != null)
+        {
+            status = "Opening GE Banker";
+            boolean clicked = Rs2Npc.interact(banker, "Bank");
+            log.info("KSP GE Looter: Banker attempt id={} at {} clicked={}",
+                    banker.getId(), banker.getWorldLocation(), clicked);
+            if (clicked && sleepUntil(Rs2Bank::isOpen, 3_000))
+            {
+                return true;
+            }
+        }
+        else
+        {
+            log.warn("KSP GE Looter: no Banker NPC found near {}", player);
+        }
+
+        // A bank interface can become visible just after an interaction helper
+        // returns false, especially while the bank container snapshot updates.
+        if (sleepUntil(Rs2Bank::isOpen, 1_000))
+        {
+            return true;
+        }
+
+        log.warn("KSP GE Looter: bank failed to open; player={}, geBooth={}, banker={}",
+                player,
+                geBooth == null ? "missing" : geBooth.getWorldLocation(),
+                banker == null ? "missing" : banker.getWorldLocation());
+        return false;
     }
 
     private boolean acquireBankPause()
