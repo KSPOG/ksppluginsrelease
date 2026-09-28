@@ -34,7 +34,7 @@ public class CraftingScript extends Script
     private static final int LOOP_DELAY_MS = 250;
     private static final int WALK_COOLDOWN_MS = 3_000;
     private static final int FURNACE_SEARCH_RADIUS = 12;
-    private static final int ACTION_COOLDOWN_MS = 2_000;
+    private static final int ACTION_COOLDOWN_MS = 750;
     private static final int PRODUCTION_START_TIMEOUT_MS = 2_500;
 
     private volatile CraftingState state = CraftingState.WAITING;

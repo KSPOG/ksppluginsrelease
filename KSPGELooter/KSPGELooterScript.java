@@ -23,15 +23,13 @@ import net.runelite.client.plugins.microbot.util.walker.Rs2Walker;
 
 import java.awt.event.KeyEvent;
 import java.time.Duration;
-import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.List;
+import java.util.Iterator;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
-import java.util.stream.Collectors;
 
 import static net.runelite.client.plugins.microbot.util.Global.sleep;
 import static net.runelite.client.plugins.microbot.util.Global.sleepUntil;
@@ -285,8 +283,6 @@ public class KSPGELooterScript extends Script
 
     private Rs2TileItemModel findLootTarget(int minimumGeValue, String excludeKey)
     {
-        pruneRejectedLootTargets();
-
         WorldPoint player = Rs2Player.getWorldLocation();
         if (!KSPGELooterArea.contains(player))
         {
@@ -294,31 +290,68 @@ public class KSPGELooterScript extends Script
             return null;
         }
 
-        // Build collision reachability once per scan instead of running a
-        // full BFS independently for every ground item in the busy GE scene.
+        // Busy GE scenes used to allocate two Lists and sort every 100 ms scan.
+        // Select the best target in one pass instead: no candidate List, no sort,
+        // and each item's loot key / GE value is computed at most once per scan.
         Set<WorldPoint> reachableTiles = Rs2Tile.getReachableTilesFromTile(player, 40).keySet();
+        boolean pruneTracked = !rejectedLootTargets.isEmpty() || !failedLootTargets.isEmpty();
+        Set<String> liveTrackedKeys = pruneTracked ? new HashSet<>() : null;
+        Iterator<Rs2TileItemModel> iterator = Microbot.getRs2TileItemCache().getStream().iterator();
 
-        List<Rs2TileItemModel> sceneItems = Microbot.getRs2TileItemCache().getStream()
-                .filter(item -> item != null && !item.isDespawned())
-                .filter(item -> KSPGELooterArea.contains(item.getWorldLocation()))
-                .collect(Collectors.toList());
-        groundItemsSeen = sceneItems.size();
-
+        Rs2TileItemModel best = null;
+        long bestValue = Long.MIN_VALUE;
+        int bestDistance = Integer.MAX_VALUE;
+        int seen = 0;
+        int eligible = 0;
         int accountType = accountType();
-        List<Rs2TileItemModel> candidates = sceneItems.stream()
-                // Mirror RuneLite's TAKEABLE ownership rule. Main accounts may take public items
-                // whose original ownership is OTHER; the old isLootAble() filter rejected them.
-                .filter(item -> item.getOwnership() != TileItem.OWNERSHIP_OTHER || accountType == 0)
-                .filter(item -> !rejectedLootTargets.contains(lootKey(item)))
-                .filter(item -> excludeKey == null || !excludeKey.equals(lootKey(item)))
-                .filter(item -> reachableTiles.contains(item.getWorldLocation()))
-                .filter(item -> getGroundStackGeValue(item) >= minimumGeValue)
-                .sorted(Comparator.comparingLong(this::getGroundStackGeValue)
-                        .reversed()
-                        .thenComparingInt(item -> distance(player, item.getWorldLocation())))
-                .collect(Collectors.toList());
-        eligibleGroundItems = candidates.size();
-        return candidates.isEmpty() ? null : candidates.get(0);
+
+        while (iterator.hasNext())
+        {
+            Rs2TileItemModel item = iterator.next();
+            if (item == null || item.isDespawned()) continue;
+
+            WorldPoint location = item.getWorldLocation();
+            if (!KSPGELooterArea.contains(location)) continue;
+            seen++;
+
+            String key = null;
+            if (pruneTracked || excludeKey != null)
+            {
+                key = lootKey(item);
+                if (pruneTracked
+                        && (rejectedLootTargets.contains(key) || failedLootTargets.containsKey(key)))
+                {
+                    liveTrackedKeys.add(key);
+                }
+            }
+
+            if (item.getOwnership() == TileItem.OWNERSHIP_OTHER && accountType != 0) continue;
+            if (key != null && rejectedLootTargets.contains(key)) continue;
+            if (excludeKey != null && excludeKey.equals(key)) continue;
+            if (!reachableTiles.contains(location)) continue;
+
+            long value = getGroundStackGeValue(item);
+            if (value < minimumGeValue) continue;
+
+            eligible++;
+            int itemDistance = distance(player, location);
+            if (best == null || value > bestValue || (value == bestValue && itemDistance < bestDistance))
+            {
+                best = item;
+                bestValue = value;
+                bestDistance = itemDistance;
+            }
+        }
+
+        if (pruneTracked)
+        {
+            rejectedLootTargets.retainAll(liveTrackedKeys);
+            failedLootTargets.keySet().retainAll(liveTrackedKeys);
+        }
+
+        groundItemsSeen = seen;
+        eligibleGroundItems = eligible;
+        return best;
     }
 
     private void spamLoot(Rs2TileItemModel firstItem, KSPGELooterConfig config)
@@ -415,7 +448,7 @@ public class KSPGELooterScript extends Script
                 dispatched = true;
 
                 int distance = distance(Rs2Player.getWorldLocation(), tile);
-                int wait = Math.min(4_000, Math.max(450, 450 + distance * 240));
+                int wait = Math.min(2_500, Math.max(400, 400 + distance * 160));
                 changedOrGone = sleepUntil(() ->
                         Rs2Inventory.itemQuantity(itemId) != beforeQuantity
                                 || inventoryItemCount() != beforeSlots
@@ -515,18 +548,6 @@ public class KSPGELooterScript extends Script
         log.warn("KSP GE Looter: rejected loot target {} id={} at {} - {}",
                 safeName(item), item.getId(), item.getWorldLocation(), reason);
         status = "Ignored unsafe/unreachable loot";
-    }
-
-    private void pruneRejectedLootTargets()
-    {
-        if (rejectedLootTargets.isEmpty() && failedLootTargets.isEmpty()) return;
-
-        Set<String> visible = Microbot.getRs2TileItemCache().getStream()
-                .filter(item -> item != null && !item.isDespawned())
-                .map(this::lootKey)
-                .collect(Collectors.toSet());
-        rejectedLootTargets.retainAll(visible);
-        failedLootTargets.keySet().retainAll(visible);
     }
 
     private String lootKey(Rs2TileItemModel item)

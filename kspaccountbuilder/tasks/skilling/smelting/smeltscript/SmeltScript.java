@@ -49,8 +49,8 @@ extends Script {
     private static final int INVENTORY_SLOTS = 28;
     private static final int LOOP_DELAY_MS = 250;
     private static final int WEB_WALK_COOLDOWN_MS = 3000;
-    private static final int FURNACE_INTERACT_COOLDOWN_MS = 2000;
-    private static final int SMELT_START_GRACE_MS = 2500;
+    private static final int FURNACE_INTERACT_COOLDOWN_MS = 750;
+    private static final int SMELT_START_GRACE_MS = 1500;
     private static final int SMELT_ANIMATION_COOLDOWN_MS = 1800;
     private static final int PRODUCTION_WIDGET_GROUP_ID = 270;
     private static final int PRODUCTION_WIDGET_CONTAINER_CHILD_ID = 13;

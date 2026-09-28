@@ -46,7 +46,7 @@ public class MiningScript extends Script
 
     private static final int LOOP_DELAY_MS = 250;
     private static final int WEB_WALK_COOLDOWN_MS = 3_000;
-    private static final int OBJECT_INTERACTION_COOLDOWN_MS = 2_500;
+    private static final int OBJECT_INTERACTION_COOLDOWN_MS = 900;
     private static final int ROCK_SEARCH_PADDING_TILES = 8;
     private static final int OUT_OF_AREA_ROCK_FALLBACK_RADIUS = 4;
     private static final int MID_TIER_RANDOM_MAX_LEVEL = 60;

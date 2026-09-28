@@ -101,6 +101,8 @@ public class KspMadCowScript extends Script {
     public static final int BRUTUS_ALT_ID = 15627;
     public static final int DEMONIC_BRUTUS_ID = 15628;
     public static final int DEMONIC_BRUTUS_GHOST_ID = 15629;
+    private static final int[] NORMAL_BRUTUS_IDS = {BRUTUS_ID, BRUTUS_ALT_ID};
+    private static final int[] DEMONIC_BRUTUS_IDS = {DEMONIC_BRUTUS_ID};
     public static final int ABYSSAL_POTATO_ID = 33118;
     public static final int MOOLETA_ID = 33101;
     public static final int COWBELL_EMPTY_ID = 33103;
@@ -309,6 +311,8 @@ public class KspMadCowScript extends Script {
 
     private KspMadCowConfig config;
     private Runnable stopRequest;
+    private String cachedSpecificLootConfig;
+    private Set<String> cachedSpecificLootItems = Set.of();
 
     private volatile KspMadCowState state = KspMadCowState.STOPPED;
     private volatile Skill trainingSkill = Skill.ATTACK;
@@ -5825,18 +5829,21 @@ public class KspMadCowScript extends Script {
      */
     private Set<String> configuredSpecificLootItems() {
         String configured = config.specificLootItems();
+        if (Objects.equals(configured, cachedSpecificLootConfig)) {
+            return cachedSpecificLootItems;
+        }
+
+        cachedSpecificLootConfig = configured;
         if (configured == null || configured.isBlank()) {
-            return Set.of();
+            return cachedSpecificLootItems = Set.of();
         }
 
         Set<String> items = new HashSet<>();
         for (String token : configured.split("[,;\\r\\n]+")) {
             String normalized = normalizeLootName(token);
-            if (!normalized.isEmpty()) {
-                items.add(normalized);
-            }
+            if (!normalized.isEmpty()) items.add(normalized);
         }
-        return items;
+        return cachedSpecificLootItems = Set.copyOf(items);
     }
 
     private String normalizeLootName(String itemName) {
@@ -6430,8 +6437,8 @@ public class KspMadCowScript extends Script {
 
     private Rs2NpcModel findBrutus() {
         int[] targetIds = config != null && config.demonicBrutus()
-                ? new int[]{DEMONIC_BRUTUS_ID}
-                : new int[]{BRUTUS_ID, BRUTUS_ALT_ID};
+                ? DEMONIC_BRUTUS_IDS
+                : NORMAL_BRUTUS_IDS;
 
         Rs2NpcModel cached = Microbot.getRs2NpcCache().query()
                 .withIds(targetIds)

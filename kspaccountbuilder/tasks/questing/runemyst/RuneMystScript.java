@@ -23,7 +23,7 @@ public class RuneMystScript extends Script
     private static final int LOOP_DELAY_MS = 250;
     private static final int NPC_REACH_DISTANCE = 4;
     private static final long WALK_REFIRE_COOLDOWN_MS = 3_500L;
-    private static final long ACTION_COOLDOWN_MS = 1_200L;
+    private static final long ACTION_COOLDOWN_MS = 650L;
 
     private static final int AIR_TALISMAN_ID = 1438;
     private static final int RESEARCH_PACKAGE_ID = 290;

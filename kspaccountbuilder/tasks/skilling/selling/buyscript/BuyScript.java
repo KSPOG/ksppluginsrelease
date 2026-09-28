@@ -43,7 +43,7 @@ public class BuyScript extends Script {
 
     private static final int LOOP_DELAY_MS = 250;
     private static final int WEB_WALK_COOLDOWN_MS = 3000;
-    private static final int ACTION_COOLDOWN_MS = 1200;
+    private static final int ACTION_COOLDOWN_MS = 650;
     private static final int BANK_WAIT_TIMEOUT_MS = 3000;
     private static final int GE_OFFER_INPUT_DELAY_MS = 900;
 
