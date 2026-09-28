@@ -34,10 +34,11 @@ public class FireMakingScript extends Script
 {
     private static final Logger log = LoggerFactory.getLogger(FireMakingScript.class);
 
-    private static final int LOOP_DELAY_MS = 600;
+    private static final int LOOP_DELAY_MS = 250;
     private static final int WEB_WALK_COOLDOWN_MS = 3_000;
-    private static final int FIRE_INTERACT_COOLDOWN_MS = 2_000;
-    private static final int FIRE_START_GRACE_MS = 2_500;
+    private static final int FIRE_INTERACT_COOLDOWN_MS = 450;
+    private static final int FIRE_START_GRACE_MS = 900;
+    private static final int FRESH_FIRE_APPEAR_TIMEOUT_MS = 1_500;
     private static final int BURN_PROMPT_ACTION_COOLDOWN_MS = 3_000;
     private static final int CAMPFIRE_DISTANCE = 6;
     private static final int NEARBY_CAMPFIRE_SCAN_RADIUS = 12;
@@ -117,9 +118,15 @@ public class FireMakingScript extends Script
                 resetFireInteractionState("active fire disappeared");
             }
 
-            if (expectingFiremakingXpDrop && Rs2Player.waitForXpDrop(Skill.FIREMAKING, 4500))
+            // Do not block the Firemaking loop waiting several seconds for a *future*
+            // XP drop. The first log can already have produced its XP before the next
+            // scheduler pass, which previously made waitForXpDrop(...) sit for the
+            // full timeout while a usable fire was already on the ground.
+            if (expectingFiremakingXpDrop
+                    && fireLocation == null
+                    && (Rs2Player.isAnimating() || Rs2Player.isInteracting()))
             {
-                debug("Firemaking in progress with {}", targetLogName);
+                debug("Firemaking action still active with {}", targetLogName);
                 return;
             }
 
@@ -550,14 +557,52 @@ public class FireMakingScript extends Script
             return;
         }
 
-        Rs2Inventory.combine(TINDERBOX_NAME, targetLogName);
-        debug("Attempting tinderbox/log combine | tinderbox={} log={} player={}", TINDERBOX_NAME, targetLogName, Rs2Player.getWorldLocation());
+        int logsBefore = Rs2Inventory.count(targetLogName);
+        boolean combined = Rs2Inventory.combine(TINDERBOX_NAME, targetLogName);
+        debug("Attempting tinderbox/log combine | tinderbox={} log={} player={} logsBefore={} dispatched={}",
+                TINDERBOX_NAME,
+                targetLogName,
+                Rs2Player.getWorldLocation(),
+                logsBefore,
+                combined);
+
+        if (!combined)
+        {
+            return;
+        }
 
         lastFireInteractAtMs = now;
         awaitingFireStartAtMs = now;
         expectingFiremakingXpDrop = true;
         tendingForestersCampfire = false;
 
+        // Inventory consumption is a much better success signal than waiting for a
+        // later XP drop. As soon as the first log leaves inventory, locate the fire
+        // and hand the remaining logs to it without an artificial multi-second idle.
+        sleepUntil(() -> Rs2Inventory.count(targetLogName) < logsBefore, 4_500);
+
+        if (Rs2Inventory.count(targetLogName) < logsBefore)
+        {
+            sleepUntil(() -> findUsableFireLocation() != null, FRESH_FIRE_APPEAR_TIMEOUT_MS);
+            WorldPoint freshFire = findUsableFireLocation();
+
+            if (freshFire != null)
+            {
+                awaitingFireStartAtMs = 0L;
+                // The build action and the "use log on fire" action are two distinct
+                // game actions. Do not make the latter inherit the build cooldown.
+                lastFireInteractAtMs = 0L;
+                debug("Fresh fire ready; handing remaining logs to it immediately | fire={} player={} remainingLogs={}",
+                        freshFire,
+                        Rs2Player.getWorldLocation(),
+                        Rs2Inventory.count(targetLogName));
+                useCampfire(getTargetLogId(targetLogName), freshFire);
+                return;
+            }
+        }
+
+        // Fallback for slow/lagged clients: retain the short start grace and let the
+        // normal scheduler retry. This is deliberately sub-second rather than 2.5s.
         sleepUntil(() -> Rs2Player.isAnimating() || Rs2Player.isInteracting(), FIRE_START_GRACE_MS);
     }
 
