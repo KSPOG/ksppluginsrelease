@@ -126,14 +126,8 @@ public enum SuperheatRecipe
     public int getSecondaryOrePerBar() { return secondaryOrePerBar; }
     public int getCoalPerBar() { return coalPerBar; }
 
-    public int getMaterialSlotsPerBar()
-    {
-        return primaryOrePerBar + secondaryOrePerBar + coalPerBar;
-    }
+    public int getMaterialSlotsPerBar() { return primaryOrePerBar + secondaryOrePerBar + coalPerBar; }
 
     @Override
-    public String toString()
-    {
-        return outputName;
-    }
+    public String toString() { return outputName; }
 }

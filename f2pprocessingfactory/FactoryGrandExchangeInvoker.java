@@ -72,9 +72,7 @@ final class FactoryGrandExchangeInvoker
 
     private static volatile boolean initialPlacementInProgress = false;
 
-    private FactoryGrandExchangeInvoker()
-    {
-    }
+    private FactoryGrandExchangeInvoker() {}
 
     static String getLastFailureReason()
     {
@@ -1046,15 +1044,9 @@ final class FactoryGrandExchangeInvoker
             && price > 0;
     }
 
-    private static boolean validBounds(Rectangle bounds)
-    {
-        return bounds != null && bounds.width > 0 && bounds.height > 0;
-    }
+    private static boolean validBounds(Rectangle bounds) { return bounds != null && bounds.width > 0 && bounds.height > 0; }
 
-    private static String normalize(String value)
-    {
-        return value == null ? "" : value.replaceAll("<[^>]+>", "").trim();
-    }
+    private static String normalize(String value) { return value == null ? "" : value.replaceAll("<[^>]+>", "").trim(); }
 
     private static boolean fail(String reason)
     {

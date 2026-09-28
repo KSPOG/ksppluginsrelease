@@ -78,10 +78,7 @@ public class KspKebabBuyerOverlay extends OverlayPanel
         return String.format("%02d:%02d:%02d", hours, minutes, seconds);
     }
 
-    private String formatNumber(long value)
-    {
-        return String.format("%,d", value);
-    }
+    private String formatNumber(long value) { return String.format("%,d", value); }
 
     private String formatGp(long value)
     {

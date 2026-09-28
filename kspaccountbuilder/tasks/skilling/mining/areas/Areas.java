@@ -60,20 +60,11 @@ public enum Areas
         this.northEast = new WorldPoint(maxX, maxY, firstCorner.getPlane());
     }
 
-    public String getDisplayName()
-    {
-        return displayName;
-    }
+    public String getDisplayName() { return displayName; }
 
-    public WorldPoint getSouthWest()
-    {
-        return southWest;
-    }
+    public WorldPoint getSouthWest() { return southWest; }
 
-    public WorldPoint getNorthEast()
-    {
-        return northEast;
-    }
+    public WorldPoint getNorthEast() { return northEast; }
 
     public WorldArea toWorldArea()
     {

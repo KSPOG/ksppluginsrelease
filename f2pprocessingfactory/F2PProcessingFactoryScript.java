@@ -1718,10 +1718,7 @@ public class F2PProcessingFactoryScript extends Script
             BANK_AMOUNT_PROMPT_TIMEOUT_MILLIS);
     }
 
-    private int getConfiguredBankWithdrawX()
-    {
-        return Microbot.getVarbitValue(VarbitID.BANK_REQUESTEDQUANTITY);
-    }
+    private int getConfiguredBankWithdrawX() { return Microbot.getVarbitValue(VarbitID.BANK_REQUESTEDQUANTITY); }
 
     /**
      * Uses the already configured bank X value without opening the chatbox amount
@@ -4006,10 +4003,7 @@ public class F2PProcessingFactoryScript extends Script
         }
     }
 
-    private boolean isGePlacementBackoffActive()
-    {
-        return System.currentTimeMillis() < nextGePlacementAttemptAt;
-    }
+    private boolean isGePlacementBackoffActive() { return System.currentTimeMillis() < nextGePlacementAttemptAt; }
 
     private long gePlacementBackoffSeconds()
     {
@@ -4512,10 +4506,7 @@ public class F2PProcessingFactoryScript extends Script
         }
     }
 
-    private int inventoryCount(int itemId)
-    {
-        return itemId <= 0 ? 0 : Math.max(0, Rs2Inventory.itemQuantity(itemId));
-    }
+    private int inventoryCount(int itemId) { return itemId <= 0 ? 0 : Math.max(0, Rs2Inventory.itemQuantity(itemId)); }
 
     private String getAccountName()
     {
@@ -4691,70 +4682,31 @@ public class F2PProcessingFactoryScript extends Script
         resetProgressWatchdog();
     }
 
-    private static String safeMessage(Exception ex)
-    {
-        return ex.getMessage() == null ? ex.getClass().getSimpleName() : ex.getMessage();
-    }
+    private static String safeMessage(Exception ex) { return ex.getMessage() == null ? ex.getClass().getSimpleName() : ex.getMessage(); }
 
-    public FactoryState getState()
-    {
-        return state;
-    }
+    public FactoryState getState() { return state; }
 
-    public FactoryRecipe getActiveRecipe()
-    {
-        return activeRecipe;
-    }
+    public FactoryRecipe getActiveRecipe() { return activeRecipe; }
 
-    public ProfitQuote getActiveQuote()
-    {
-        return activeQuote;
-    }
+    public ProfitQuote getActiveQuote() { return activeQuote; }
 
-    public String getStatus()
-    {
-        return status;
-    }
+    public String getStatus() { return status; }
 
-    public FactoryStats getStats()
-    {
-        return stats;
-    }
+    public FactoryStats getStats() { return stats; }
 
-    public int getCycleTargetUnits()
-    {
-        return cycleTargetUnits;
-    }
+    public int getCycleTargetUnits() { return cycleTargetUnits; }
 
-    public int getCycleProcessedUnits()
-    {
-        return cycleProcessedUnits;
-    }
+    public int getCycleProcessedUnits() { return cycleProcessedUnits; }
 
-    public int getObservedCoinTotal()
-    {
-        return observedCoinTotal;
-    }
+    public int getObservedCoinTotal() { return observedCoinTotal; }
 
-    public int getObservedSpendableCoins()
-    {
-        return observedSpendableCoins;
-    }
+    public int getObservedSpendableCoins() { return observedSpendableCoins; }
 
-    public boolean isMembersAccount()
-    {
-        return membersAccount;
-    }
+    public boolean isMembersAccount() { return membersAccount; }
 
-    public boolean isMemberWorld()
-    {
-        return memberWorld;
-    }
+    public boolean isMemberWorld() { return memberWorld; }
 
-    public long getWaitingUntil()
-    {
-        return waitingUntil;
-    }
+    public long getWaitingUntil() { return waitingUntil; }
 
     public String getRuntimeText()
     {
@@ -4765,30 +4717,15 @@ public class F2PProcessingFactoryScript extends Script
         return String.format("%02d:%02d:%02d", hours, minutes, seconds);
     }
 
-    public long getWaitSeconds()
-    {
-        return Math.max(0L, (waitingUntil - System.currentTimeMillis()) / 1_000L);
-    }
+    public long getWaitSeconds() { return Math.max(0L, (waitingUntil - System.currentTimeMillis()) / 1_000L); }
 
-    public String getAntibanStatus()
-    {
-        return antiban == null ? "Disabled" : antiban.getStatus();
-    }
+    public String getAntibanStatus() { return antiban == null ? "Disabled" : antiban.getStatus(); }
 
-    public long getAntibanPauseSeconds()
-    {
-        return antiban == null ? 0L : antiban.getPauseSeconds();
-    }
+    public long getAntibanPauseSeconds() { return antiban == null ? 0L : antiban.getPauseSeconds(); }
 
-    public int getProgressWatchdogRetryCount()
-    {
-        return watchdogRetryCount;
-    }
+    public int getProgressWatchdogRetryCount() { return watchdogRetryCount; }
 
-    public String getProgressWatchdogStatus()
-    {
-        return watchdogLastRecovery;
-    }
+    public String getProgressWatchdogStatus() { return watchdogLastRecovery; }
 
     @Override
     public void shutdown()

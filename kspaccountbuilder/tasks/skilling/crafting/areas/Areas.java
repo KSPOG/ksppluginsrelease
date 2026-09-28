@@ -14,13 +14,7 @@ public enum Areas
         this.area = area;
     }
 
-    public String getDisplayName()
-    {
-        return displayName;
-    }
+    public String getDisplayName() { return displayName; }
 
-    public Area getArea()
-    {
-        return area;
-    }
+    public Area getArea() { return area; }
 }

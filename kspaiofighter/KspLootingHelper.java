@@ -10,9 +10,7 @@ import org.slf4j.Logger;
 
 public final class KspLootingHelper
 {
-    private KspLootingHelper()
-    {
-    }
+    private KspLootingHelper() {}
 
     /**
      * Loot helper.
@@ -102,10 +100,7 @@ public final class KspLootingHelper
         return bounds;
     }
 
-    private static int clamp(int value, int min, int max)
-    {
-        return Math.max(min, Math.min(max, value));
-    }
+    private static int clamp(int value, int min, int max) { return Math.max(min, Math.min(max, value)); }
 
     private static void debug(Logger log, boolean debugLogging, String debugPrefix, String message, Object... args)
     {

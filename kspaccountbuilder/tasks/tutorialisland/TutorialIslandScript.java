@@ -51,7 +51,7 @@ import static net.runelite.client.plugins.microbot.util.dialogues.Rs2Dialogue.is
 @Singleton
 public class TutorialIslandScript extends Script
 {
-    private static final int LOOP_DELAY_MS = 600;
+    private static final int LOOP_DELAY_MS = 250;
     private static final int DEFAULT_CAMERA_ZOOM = 377;
     private static final int NAME_ATTEMPT_COOLDOWN_MS = 3500;
     private static final int CHARACTER_ATTEMPT_COOLDOWN_MS = 3500;
@@ -321,10 +321,7 @@ public class TutorialIslandScript extends Script
         return isDisplayNameWidgetOpenStatic() || isCharacterCreationWidgetOpenStatic() || isExperiencePromptOpenStatic();
     }
 
-    private static boolean isTutorialIslandLocation(WorldPoint location)
-    {
-        return location != null && TutAreas.contains(location);
-    }
+    private static boolean isTutorialIslandLocation(WorldPoint location) { return location != null && TutAreas.contains(location); }
 
     private static WorldPoint getLocalPlayerWorldLocationSafe()
     {
@@ -377,10 +374,7 @@ public class TutorialIslandScript extends Script
         }
     }
 
-    public void setDebugLogging(boolean enabled)
-    {
-        this.debugEnabled = enabled;
-    }
+    public void setDebugLogging(boolean enabled) { this.debugEnabled = enabled; }
 
     // -------------------------------------------------------------------------
     // Status calculation
@@ -456,15 +450,9 @@ public class TutorialIslandScript extends Script
         return location != null && START_AREA.contains(location);
     }
 
-    private boolean isDisplayNameWidgetOpen()
-    {
-        return isDisplayNameWidgetOpenStatic();
-    }
+    private boolean isDisplayNameWidgetOpen() { return isDisplayNameWidgetOpenStatic(); }
 
-    private boolean isCharacterCreationWidgetOpen()
-    {
-        return isCharacterCreationWidgetOpenStatic();
-    }
+    private boolean isCharacterCreationWidgetOpen() { return isCharacterCreationWidgetOpenStatic(); }
 
     private boolean isExperiencePromptOpen()
     {
@@ -475,15 +463,9 @@ public class TutorialIslandScript extends Script
                 || Rs2Widget.hasWidget(EXPERIENCE_OPTION_TEXTS[2]));
     }
 
-    private boolean isNameAttemptCoolingDown()
-    {
-        return System.currentTimeMillis() - lastNameAttemptAtMs < NAME_ATTEMPT_COOLDOWN_MS;
-    }
+    private boolean isNameAttemptCoolingDown() { return System.currentTimeMillis() - lastNameAttemptAtMs < NAME_ATTEMPT_COOLDOWN_MS; }
 
-    private boolean isCharacterAttemptCoolingDown()
-    {
-        return System.currentTimeMillis() - lastCharacterAttemptAtMs < CHARACTER_ATTEMPT_COOLDOWN_MS;
-    }
+    private boolean isCharacterAttemptCoolingDown() { return System.currentTimeMillis() - lastCharacterAttemptAtMs < CHARACTER_ATTEMPT_COOLDOWN_MS; }
 
     private boolean openSettingsTabForTutorialPrompt()
     {
@@ -1479,15 +1461,9 @@ public class TutorialIslandScript extends Script
         return accounts.get(accountQueueIndex);
     }
 
-    private List<AccountQueueEntry> parseAccountQueue()
-    {
-        return new ArrayList<>();
-    }
+    private List<AccountQueueEntry> parseAccountQueue() { return new ArrayList<>(); }
 
-    private boolean shouldRunMultipleAccounts()
-    {
-        return false;
-    }
+    private boolean shouldRunMultipleAccounts() { return false; }
 
     // -------------------------------------------------------------------------
     // State reset
@@ -1521,15 +1497,9 @@ public class TutorialIslandScript extends Script
     // NPC walk/talk helpers
     // -------------------------------------------------------------------------
 
-    private boolean walkAndTalk(Rs2NpcModel npc)
-    {
-        return walkAndTalk(npc, 2);
-    }
+    private boolean walkAndTalk(Rs2NpcModel npc) { return walkAndTalk(npc, 2); }
 
-    private boolean walkAndTalk(Rs2NpcModel npc, int reach)
-    {
-        return walkAndAct(npc, reach, "Talk-to", () -> sleepUntil(Rs2Dialogue::isInDialogue, 5000));
-    }
+    private boolean walkAndTalk(Rs2NpcModel npc, int reach) { return walkAndAct(npc, reach, "Talk-to", () -> sleepUntil(Rs2Dialogue::isInDialogue, 5000)); }
 
     private boolean walkAndAct(Rs2NpcModel npc, int reach, String action, Runnable afterClick)
     {
@@ -1709,10 +1679,7 @@ public class TutorialIslandScript extends Script
                 || Microbot.getVarbitPlayerValue(281) > 90, 5000);
     }
 
-    private boolean hasNearbyFire()
-    {
-        return Microbot.getRs2TileObjectCache().query().fromWorldView().withId(ObjectID.FIRE_26185).nearest() != null;
-    }
+    private boolean hasNearbyFire() { return Microbot.getRs2TileObjectCache().query().fromWorldView().withId(ObjectID.FIRE_26185).nearest() != null; }
 
     // -------------------------------------------------------------------------
     // Magic helper
@@ -1914,10 +1881,7 @@ public class TutorialIslandScript extends Script
     // Area / world helpers
     // -------------------------------------------------------------------------
 
-    private boolean walkToArea(WorldArea area)
-    {
-        return walkToArea(area, randomPoint(area));
-    }
+    private boolean walkToArea(WorldArea area) { return walkToArea(area, randomPoint(area)); }
 
     private boolean walkToArea(WorldArea area, WorldPoint target)
     {
@@ -1961,10 +1925,7 @@ public class TutorialIslandScript extends Script
         Rs2Player.waitForWalking();
     }
 
-    private boolean openTutorialPassage(int objectId, BooleanSupplier completed)
-    {
-        return openTutorialPassageAndWalk(objectId, null, 0, completed);
-    }
+    private boolean openTutorialPassage(int objectId, BooleanSupplier completed) { return openTutorialPassageAndWalk(objectId, null, 0, completed); }
 
     private boolean clickNearestTutorialObject(int objectId, String action)
     {
@@ -2063,10 +2024,7 @@ public class TutorialIslandScript extends Script
         return name.substring(0, 12);
     }
 
-    private int randomDelay(int min, int max)
-    {
-        return ThreadLocalRandom.current().nextInt(min, max + 1);
-    }
+    private int randomDelay(int min, int max) { return ThreadLocalRandom.current().nextInt(min, max + 1); }
 
     private void debug(String message, Object... args)
     {
@@ -2114,10 +2072,7 @@ public class TutorialIslandScript extends Script
         return status == null ? "Unknown" : status.name();
     }
 
-    public int getRemainingQueuedAccounts()
-    {
-        return Math.max(0, parseAccountQueue().size() - accountQueueIndex);
-    }
+    public int getRemainingQueuedAccounts() { return Math.max(0, parseAccountQueue().size() - accountQueueIndex); }
 
     // -------------------------------------------------------------------------
     // Inner types

@@ -53,8 +53,5 @@ public class KSPTradeReceiverPlugin extends Plugin
     }
 
     @Subscribe
-    public void onChatMessage(ChatMessage event)
-    {
-        script.onChatMessage(event);
-    }
+    public void onChatMessage(ChatMessage event) { script.onChatMessage(event); }
 }

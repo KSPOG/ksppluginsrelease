@@ -337,35 +337,17 @@ public class KspJewelryCrafterScript extends Script
         leaveBank(JewelryCrafterState.CRAFTING, "Ready: " + craftUnits + " x " + activeRecipe.getOutputName());
     }
 
-    private int recipeBarId()
-    {
-        return activeRecipe == null ? -1 : prices.getItemId(activeRecipe.getBarName());
-    }
+    private int recipeBarId() { return activeRecipe == null ? -1 : prices.getItemId(activeRecipe.getBarName()); }
 
-    private int recipeGemId()
-    {
-        return activeRecipe == null || !activeRecipe.usesGem() ? -1 : prices.getItemId(activeRecipe.getGemName());
-    }
+    private int recipeGemId() { return activeRecipe == null || !activeRecipe.usesGem() ? -1 : prices.getItemId(activeRecipe.getGemName()); }
 
-    private int recipeMouldId()
-    {
-        return activeRecipe == null ? -1 : prices.getItemId(activeRecipe.getMouldName());
-    }
+    private int recipeMouldId() { return activeRecipe == null ? -1 : prices.getItemId(activeRecipe.getMouldName()); }
 
-    private int recipeOutputId()
-    {
-        return activeRecipe == null ? -1 : prices.getItemId(activeRecipe.getOutputName());
-    }
+    private int recipeOutputId() { return activeRecipe == null ? -1 : prices.getItemId(activeRecipe.getOutputName()); }
 
-    private int inventoryCountById(int id)
-    {
-        return id <= 0 ? 0 : Rs2Inventory.count(id);
-    }
+    private int inventoryCountById(int id) { return id <= 0 ? 0 : Rs2Inventory.count(id); }
 
-    private int bankCountById(int id)
-    {
-        return id <= 0 ? 0 : Rs2Bank.count(id);
-    }
+    private int bankCountById(int id) { return id <= 0 ? 0 : Rs2Bank.count(id); }
 
     private boolean hasAnyCraftedJewelryInInventory()
     {
@@ -429,10 +411,7 @@ public class KspJewelryCrafterScript extends Script
         return false;
     }
 
-    private boolean hasUnneededInventory()
-    {
-        return Rs2Inventory.all().stream().anyMatch(item -> item != null && !isNeededInventoryItem(item.getId()));
-    }
+    private boolean hasUnneededInventory() { return Rs2Inventory.all().stream().anyMatch(item -> item != null && !isNeededInventoryItem(item.getId())); }
 
     private boolean isNeededInventoryItem(int id)
     {
@@ -453,10 +432,7 @@ public class KspJewelryCrafterScript extends Script
         return false;
     }
 
-    private boolean bankWidgetOpen()
-    {
-        return Rs2Widget.isWidgetVisible(BANK_WIDGET_GROUP, BANK_WIDGET_CHILD);
-    }
+    private boolean bankWidgetOpen() { return Rs2Widget.isWidgetVisible(BANK_WIDGET_GROUP, BANK_WIDGET_CHILD); }
 
     private boolean openVerifiedBank(boolean edgeville, String openingStatus)
     {
@@ -975,15 +951,9 @@ if (!Rs2Widget.clickWidget(productionWidget))
         return false;
     }
 
-    private boolean geSetupOpen()
-    {
-        return Rs2Widget.isWidgetVisible(InterfaceID.GeOffers.SETUP);
-    }
+    private boolean geSetupOpen() { return Rs2Widget.isWidgetVisible(InterfaceID.GeOffers.SETUP); }
 
-    private boolean geSubScreenOpen()
-    {
-        return Rs2GrandExchange.isOfferScreenOpen() || geSetupOpen();
-    }
+    private boolean geSubScreenOpen() { return Rs2GrandExchange.isOfferScreenOpen() || geSetupOpen(); }
 
     private boolean ensureGeOverview(String openingStatus)
     {
@@ -1732,30 +1702,15 @@ if (!Rs2Widget.clickWidget(productionWidget))
         return false;
     }
 
-    private boolean gePriceInputOpen()
-    {
-        return Rs2Widget.isWidgetVisible(InterfaceID.Chatbox.MES_TEXT2);
-    }
+    private boolean gePriceInputOpen() { return Rs2Widget.isWidgetVisible(InterfaceID.Chatbox.MES_TEXT2); }
 
-    private boolean allBuyOrdersDone()
-    {
-        return !buyQueue.isEmpty() && buyQueue.stream().allMatch(o -> o.completed || o.failed);
-    }
+    private boolean allBuyOrdersDone() { return !buyQueue.isEmpty() && buyQueue.stream().allMatch(o -> o.completed || o.failed); }
 
-    private boolean hasFailedBuyOrders()
-    {
-        return buyQueue.stream().anyMatch(o -> o.failed);
-    }
+    private boolean hasFailedBuyOrders() { return buyQueue.stream().anyMatch(o -> o.failed); }
 
-    private int activeBuyOrders()
-    {
-        return (int) buyQueue.stream().filter(o -> !o.completed && !o.failed && o.slot != null).count();
-    }
+    private int activeBuyOrders() { return (int) buyQueue.stream().filter(o -> !o.completed && !o.failed && o.slot != null).count(); }
 
-    private int queuedBuyOrders()
-    {
-        return (int) buyQueue.stream().filter(o -> !o.completed && !o.failed && o.slot == null).count();
-    }
+    private int queuedBuyOrders() { return (int) buyQueue.stream().filter(o -> !o.completed && !o.failed && o.slot == null).count(); }
 
     private void finishParallelRestock()
     {
@@ -1968,10 +1923,7 @@ if (!Rs2Widget.clickWidget(productionWidget))
         }).orElse(Integer.MAX_VALUE);
     }
 
-    private boolean isJewelryProductionOpen()
-    {
-        return Rs2Widget.isGoldCraftingWidgetOpen() || Rs2Widget.isSilverCraftingWidgetOpen();
-    }
+    private boolean isJewelryProductionOpen() { return Rs2Widget.isGoldCraftingWidgetOpen() || Rs2Widget.isSilverCraftingWidgetOpen(); }
 
     private Widget findProductionWidgetByItemId(int itemId)
 {

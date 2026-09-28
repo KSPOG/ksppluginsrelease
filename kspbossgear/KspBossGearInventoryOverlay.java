@@ -14,14 +14,8 @@ final class KspBossGearInventoryOverlay extends BossGearItemOverlay
     }
 
     @Override
-    protected boolean acceptsParent(int parentId)
-    {
-        return parentId == InterfaceID.Inventory.ITEMS || parentId == InterfaceID.Bankside.ITEMS;
-    }
+    protected boolean acceptsParent(int parentId) { return parentId == InterfaceID.Inventory.ITEMS || parentId == InterfaceID.Bankside.ITEMS; }
 
     @Override
-    protected boolean enabled()
-    {
-        return config.highlightInventory();
-    }
+    protected boolean enabled() { return config.highlightInventory(); }
 }

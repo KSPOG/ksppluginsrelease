@@ -19,15 +19,9 @@ public enum PickaxeEquip
         this.requiredAttackLevel = requiredAttackLevel;
     }
 
-    public String getDisplayName()
-    {
-        return displayName;
-    }
+    public String getDisplayName() { return displayName; }
 
-    public int getRequiredAttackLevel()
-    {
-        return requiredAttackLevel;
-    }
+    public int getRequiredAttackLevel() { return requiredAttackLevel; }
 
     public static PickaxeEquip bestForAttackLevel(int attackLevel)
     {

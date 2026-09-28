@@ -1,6 +1,6 @@
 /*
  * Decompiled with CFR 0.152.
- * 
+ *
  * Could not load the following classes:
  *  javax.inject.Singleton
  *  net.runelite.api.Skill
@@ -48,7 +48,7 @@ public class SmithScript
 extends Script {
     private static final Logger log = LoggerFactory.getLogger(SmithScript.class);
     private static final int INVENTORY_SLOTS = 28;
-    private static final int LOOP_DELAY_MS = 600;
+    private static final int LOOP_DELAY_MS = 250;
     private static final int WEB_WALK_COOLDOWN_MS = 3000;
     private static final int ANVIL_INTERACT_COOLDOWN_MS = 2000;
     private static final int SMITH_START_GRACE_MS = 2500;
@@ -560,18 +560,18 @@ extends Script {
             case BRONZE_DAGGER: {
                 return 9;
             }
-            case BRONZE_SCIMITAR: 
-            case IRON_SCIMITAR: 
+            case BRONZE_SCIMITAR:
+            case IRON_SCIMITAR:
             case STEEL_SCIMITAR: {
                 return 11;
             }
-            case BRONZE_WARHAMMER: 
-            case IRON_WARHAMMER: 
+            case BRONZE_WARHAMMER:
+            case IRON_WARHAMMER:
             case STEEL_WARHAMMER: {
                 return 16;
             }
-            case BRONZE_PLATEBODY: 
-            case IRON_PLATEBODY: 
+            case BRONZE_PLATEBODY:
+            case IRON_PLATEBODY:
             case STEEL_PLATEBODY: {
                 return 22;
             }

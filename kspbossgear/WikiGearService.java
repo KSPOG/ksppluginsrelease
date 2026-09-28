@@ -756,10 +756,7 @@ final class WikiGearService
         return name;
     }
 
-    private static String normalizeQuery(String query)
-    {
-        return query == null ? "" : SPACE.matcher(query.trim()).replaceAll(" ");
-    }
+    private static String normalizeQuery(String query) { return query == null ? "" : SPACE.matcher(query.trim()).replaceAll(" "); }
 
     private static String wikiUrl(String pageName)
     {

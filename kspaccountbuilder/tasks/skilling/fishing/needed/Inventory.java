@@ -24,13 +24,7 @@ public enum Inventory
         this.requiredItems = Collections.unmodifiableList(Arrays.asList(requiredItems));
     }
 
-    public String getDisplayName()
-    {
-        return displayName;
-    }
+    public String getDisplayName() { return displayName; }
 
-    public List<String> getRequiredItems()
-    {
-        return requiredItems;
-    }
+    public List<String> getRequiredItems() { return requiredItems; }
 }

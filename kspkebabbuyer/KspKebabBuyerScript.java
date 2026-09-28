@@ -788,15 +788,9 @@ public class KspKebabBuyerScript extends Script
         lastPriceRefreshAt = now;
     }
 
-    private int kebabCount()
-    {
-        return Rs2Inventory.itemQuantity(KEBAB_ID);
-    }
+    private int kebabCount() { return Rs2Inventory.itemQuantity(KEBAB_ID); }
 
-    private int coinCount()
-    {
-        return Rs2Inventory.itemQuantity(COINS_NAME, true);
-    }
+    private int coinCount() { return Rs2Inventory.itemQuantity(COINS_NAME, true); }
 
     private void resetSession()
     {
@@ -836,25 +830,13 @@ public class KspKebabBuyerScript extends Script
         status = "Stopped";
     }
 
-    public String getStatus()
-    {
-        return status;
-    }
+    public String getStatus() { return status; }
 
-    public String getNavigationDetails()
-    {
-        return navigationDetails;
-    }
+    public String getNavigationDetails() { return navigationDetails; }
 
-    public long getRuntimeMs()
-    {
-        return startedAtMs <= 0L ? 0L : Math.max(0L, System.currentTimeMillis() - startedAtMs);
-    }
+    public long getRuntimeMs() { return startedAtMs <= 0L ? 0L : Math.max(0L, System.currentTimeMillis() - startedAtMs); }
 
-    public long getKebabsBought()
-    {
-        return kebabsBought;
-    }
+    public long getKebabsBought() { return kebabsBought; }
 
     public long getKebabsPerHour()
     {
@@ -862,30 +844,15 @@ public class KspKebabBuyerScript extends Script
         return runtime <= 0L ? 0L : Math.round(kebabsBought * 3_600_000.0D / runtime);
     }
 
-    public long getBankTrips()
-    {
-        return bankTrips;
-    }
+    public long getBankTrips() { return bankTrips; }
 
-    public int getInventoryKebabs()
-    {
-        return inventoryKebabs;
-    }
+    public int getInventoryKebabs() { return inventoryKebabs; }
 
-    public int getCoinsRemaining()
-    {
-        return coinsRemaining;
-    }
+    public int getCoinsRemaining() { return coinsRemaining; }
 
-    public int getKebabGePrice()
-    {
-        return kebabGePrice;
-    }
+    public int getKebabGePrice() { return kebabGePrice; }
 
-    public long getGpSpent()
-    {
-        return kebabsBought * KEBAB_BUY_PRICE;
-    }
+    public long getGpSpent() { return kebabsBought * KEBAB_BUY_PRICE; }
 
     public long getEstimatedProfit()
     {

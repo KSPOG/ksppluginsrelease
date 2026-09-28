@@ -39,8 +39,5 @@ public final class Area
                 southWest.getPlane());
     }
 
-    public boolean contains(WorldPoint point)
-    {
-        return point != null && toWorldArea().contains(point);
-    }
+    public boolean contains(WorldPoint point) { return point != null && toWorldArea().contains(point); }
 }

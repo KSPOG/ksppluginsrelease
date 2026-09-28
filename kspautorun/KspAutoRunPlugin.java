@@ -28,16 +28,10 @@ public class KspAutoRunPlugin extends Plugin
     private KspAutoRunScript script;
 
     @Override
-    protected void startUp()
-    {
-        script.run(config);
-    }
+    protected void startUp() { script.run(config); }
 
     @Override
-    protected void shutDown()
-    {
-        script.shutdown();
-    }
+    protected void shutDown() { script.shutdown(); }
 
     @Provides
     KspAutoRunConfig provideConfig(ConfigManager configManager)

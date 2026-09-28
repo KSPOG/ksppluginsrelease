@@ -33,8 +33,5 @@ public final class KSPGELooterArea
     }
 
     /** Stable interior destination used after banking/outbound movement. */
-    public static WorldPoint returnPoint()
-    {
-        return new WorldPoint((MIN_X + MAX_X) / 2, (MIN_Y + MAX_Y) / 2, PLANE);
-    }
+    public static WorldPoint returnPoint() { return new WorldPoint((MIN_X + MAX_X) / 2, (MIN_Y + MAX_Y) / 2, PLANE); }
 }

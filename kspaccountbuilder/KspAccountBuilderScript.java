@@ -103,13 +103,10 @@ public class KspAccountBuilderScript extends Script
             this.selectionWeight = selectionWeight;
         }
 
-        private int getSelectionWeight()
-        {
-            return selectionWeight;
-        }
+        private int getSelectionWeight() { return selectionWeight; }
     }
 
-    private static final int LOOP_DELAY_MS = 600;
+    private static final int LOOP_DELAY_MS = 250;
     private static final String EXTERNAL_AUTO_LOGIN_PLUGIN_CLASS = "net.runelite.client.plugins.microbot.accountselector.AutoLoginPlugin";
     // Camera values recovered from the supplied Account Builder 1.5.200 bytecode.
     private static final int POST_TUTORIAL_BANK_CAMERA_PITCH = 2821;
@@ -242,20 +239,11 @@ public class KspAccountBuilderScript extends Script
     private long nextPlayTimeReadAtMillis;
     private BankLocation taskSwitchBankLocation;
 
-    public BuilderTask getCurrentTask()
-    {
-        return currentTask;
-    }
+    public BuilderTask getCurrentTask() { return currentTask; }
 
-    public boolean isBreakActive()
-    {
-        return breakActive;
-    }
+    public boolean isBreakActive() { return breakActive; }
 
-    public long getStartedAtMillis()
-    {
-        return startedAtMillis;
-    }
+    public long getStartedAtMillis() { return startedAtMillis; }
 
     public boolean run(KspAccountBuilderConfig config)
     {
@@ -1725,10 +1713,7 @@ public class KspAccountBuilderScript extends Script
         activeSingleSkillSelection = selection;
     }
 
-    private boolean isSingleSkillTaskForced()
-    {
-        return resolveSingleSkillTask() != null;
-    }
+    private boolean isSingleSkillTaskForced() { return resolveSingleSkillTask() != null; }
 
     private boolean isSingleSkillTargetRequired(BuilderTask task)
     {
@@ -1767,25 +1752,16 @@ public class KspAccountBuilderScript extends Script
         activitySwitchTimerPaused = false;
     }
 
-    private Areas resolveMiningStartArea()
-    {
-        return Areas.TIN_COPPER_VARROCK_EAST;
-    }
+    private Areas resolveMiningStartArea() { return Areas.TIN_COPPER_VARROCK_EAST; }
 
-    private TreeAreas resolveWoodcuttingStartArea()
-    {
-        return TreeAreas.REGULAR_TREE_VARROCK_WEST;
-    }
+    private TreeAreas resolveWoodcuttingStartArea() { return TreeAreas.REGULAR_TREE_VARROCK_WEST; }
 
     private net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.fishing.areas.Areas resolveFishingStartArea()
     {
         return net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.fishing.areas.Areas.SHRIMP_ANCHOVIES;
     }
 
-    private BarLevels resolveSmeltingFallbackBar()
-    {
-        return BarLevels.BRONZE;
-    }
+    private BarLevels resolveSmeltingFallbackBar() { return BarLevels.BRONZE; }
 
     private boolean hasResourcesForTask(BuilderTask task)
     {
@@ -1884,10 +1860,7 @@ public class KspAccountBuilderScript extends Script
         return hasAnySmeltingResourcesAvailable();
     }
 
-    private boolean isTaskTemporarilyDisabled(BuilderTask task)
-    {
-        return task == BuilderTask.STRONGHOLD_OF_SECURITY;
-    }
+    private boolean isTaskTemporarilyDisabled(BuilderTask task) { return task == BuilderTask.STRONGHOLD_OF_SECURITY; }
 
     private boolean isOneTimeTaskCompleted(BuilderTask task)
     {
@@ -1916,10 +1889,7 @@ public class KspAccountBuilderScript extends Script
                         oneTimeTask);
     }
 
-    private boolean isRuneMysteriesComplete()
-    {
-        return Rs2Player.getQuestState(Quest.RUNE_MYSTERIES) == QuestState.FINISHED;
-    }
+    private boolean isRuneMysteriesComplete() { return Rs2Player.getQuestState(Quest.RUNE_MYSTERIES) == QuestState.FINISHED; }
 
     private boolean hasEnoughCoinsForCooksAssistant()
     {
@@ -2091,10 +2061,7 @@ public class KspAccountBuilderScript extends Script
                 || Rs2Bank.count(itemName) > 0);
     }
 
-    private boolean hasBankItem(String itemName)
-    {
-        return itemName != null && Rs2Bank.count(itemName) > 0;
-    }
+    private boolean hasBankItem(String itemName) { return itemName != null && Rs2Bank.count(itemName) > 0; }
 
     private boolean hasAnySmeltingResourcesAvailable()
     {
@@ -2359,10 +2326,7 @@ public class KspAccountBuilderScript extends Script
         return false;
     }
 
-    private boolean hasAnyGeBuyResourcesAvailable()
-    {
-        return Buy.hasAnyGeBuyRequirementMissing() && buyScript.canAffordMissingBuys();
-    }
+    private boolean hasAnyGeBuyResourcesAvailable() { return Buy.hasAnyGeBuyRequirementMissing() && buyScript.canAffordMissingBuys(); }
 
     private boolean hasAnyOutdatedToolAvailable()
     {
@@ -2404,25 +2368,13 @@ public class KspAccountBuilderScript extends Script
         return false;
     }
 
-    private String resolveDesiredPickaxeForSellingTask()
-    {
-        return Buy.resolveDesiredPickaxeNameForGear();
-    }
+    private String resolveDesiredPickaxeForSellingTask() { return Buy.resolveDesiredPickaxeNameForGear(); }
 
-    private String resolveDesiredAxeForSellingTask()
-    {
-        return Buy.resolveDesiredAxeNameForGear();
-    }
+    private String resolveDesiredAxeForSellingTask() { return Buy.resolveDesiredAxeNameForGear(); }
 
-    private boolean hasHammerWithRequiredIdAnywhere()
-    {
-        return Buy.hasHammerAnywhere();
-    }
+    private boolean hasHammerWithRequiredIdAnywhere() { return Buy.hasHammerAnywhere(); }
 
-    private boolean hasTinderboxAnywhere()
-    {
-        return Buy.hasTinderboxAnywhere();
-    }
+    private boolean hasTinderboxAnywhere() { return Buy.hasTinderboxAnywhere(); }
 
     private boolean switchToTaskWithResources()
     {
@@ -2559,10 +2511,7 @@ public class KspAccountBuilderScript extends Script
         return selectWeightedTask(candidates, candidateCount);
     }
 
-    private boolean isSupportTask(BuilderTask task)
-    {
-        return task == BuilderTask.GE_BUY;
-    }
+    private boolean isSupportTask(BuilderTask task) { return task == BuilderTask.GE_BUY; }
 
     private boolean handlePendingMeleeSellHandoff()
     {
@@ -3180,10 +3129,7 @@ public class KspAccountBuilderScript extends Script
         return getCameraScale();
     }
 
-    private int cameraScaleDistance(int scale, int targetScale)
-    {
-        return scale <= 0 ? Integer.MAX_VALUE : Math.abs(scale - targetScale);
-    }
+    private int cameraScaleDistance(int scale, int targetScale) { return scale <= 0 ? Integer.MAX_VALUE : Math.abs(scale - targetScale); }
 
     private void setRawCameraZoom(int zoom)
     {
@@ -3199,10 +3145,7 @@ public class KspAccountBuilderScript extends Script
         });
     }
 
-    private int clampCameraZoom(int zoom)
-    {
-        return Math.max(CAMERA_ZOOM_MIN, Math.min(CAMERA_ZOOM_MAX, zoom));
-    }
+    private int clampCameraZoom(int zoom) { return Math.max(CAMERA_ZOOM_MIN, Math.min(CAMERA_ZOOM_MAX, zoom)); }
 
     private boolean isDialogueOpen()
     {
@@ -3433,10 +3376,7 @@ public class KspAccountBuilderScript extends Script
         }
     }
 
-    public boolean isAnyBreakActive()
-    {
-        return breakActive || sharedBreakActive;
-    }
+    public boolean isAnyBreakActive() { return breakActive || sharedBreakActive; }
 
     private long getPausedActivitySwitchSeconds()
     {

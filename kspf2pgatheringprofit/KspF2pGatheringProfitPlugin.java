@@ -53,13 +53,7 @@ public class KspF2pGatheringProfitPlugin extends Plugin
         return manager.getConfig(KspF2pGatheringProfitConfig.class);
     }
 
-    public KspF2pGatheringProfitScript getScript()
-    {
-        return script;
-    }
+    public KspF2pGatheringProfitScript getScript() { return script; }
 
-    public Instant getStarted()
-    {
-        return started;
-    }
+    public Instant getStarted() { return started; }
 }

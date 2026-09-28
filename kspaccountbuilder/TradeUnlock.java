@@ -9,9 +9,7 @@ import java.util.concurrent.TimeUnit;
 @Slf4j
 public final class TradeUnlock
 {
-    private TradeUnlock()
-    {
-    }
+    private TradeUnlock() {}
 
     /**
      * Reads Jagex's account-summary play-time varc.

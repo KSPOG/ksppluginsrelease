@@ -54,15 +54,9 @@ public enum GatheringMethod
         this.locations = locations;
     }
 
-    public boolean wilderness()
-    {
-        return this == RUNITE;
-    }
+    public boolean wilderness() { return this == RUNITE; }
 
-    public boolean karamjaFishing()
-    {
-        return this == LOBSTER || this == TUNA_SWORDFISH;
-    }
+    public boolean karamjaFishing() { return this == LOBSTER || this == TUNA_SWORDFISH; }
 
     public WorldPoint closest(WorldPoint from)
     {

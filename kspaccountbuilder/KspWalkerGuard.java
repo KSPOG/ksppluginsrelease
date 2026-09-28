@@ -22,9 +22,7 @@ public final class KspWalkerGuard
     private static long idleStartedAtMs;
     private static boolean canvasRecoveryAttempted;
 
-    private KspWalkerGuard()
-    {
-    }
+    private KspWalkerGuard() {}
 
     public static boolean walkToDestination(
             String key,
@@ -284,10 +282,7 @@ public final class KspWalkerGuard
         return true;
     }
 
-    private static boolean matches(Predicate<WorldPoint> matcher, WorldPoint point)
-    {
-        return point != null && matcher.test(point);
-    }
+    private static boolean matches(Predicate<WorldPoint> matcher, WorldPoint point) { return point != null && matcher.test(point); }
 
     private static WorldPoint getNearbyRecoveryTarget(WorldPoint playerLocation, WorldPoint walkerTarget)
     {

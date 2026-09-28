@@ -33,9 +33,7 @@ final class SmartSmelterGeTrader
     private static final int UI_TIMEOUT_MS = 5_000;
     private static final int OFFER_CONFIRM_TIMEOUT_MS = 3_500;
 
-    private SmartSmelterGeTrader()
-    {
-    }
+    private SmartSmelterGeTrader() {}
 
     static boolean placeBuy(int itemId, String itemName, int quantity)
     {
@@ -314,15 +312,9 @@ final class SmartSmelterGeTrader
         return false;
     }
 
-    private static boolean geSetupOpen()
-    {
-        return Rs2WidgetVisible.setup();
-    }
+    private static boolean geSetupOpen() { return Rs2WidgetVisible.setup(); }
 
-    private static boolean geSubScreenOpen()
-    {
-        return Rs2GrandExchange.isOfferScreenOpen() || geSetupOpen();
-    }
+    private static boolean geSubScreenOpen() { return Rs2GrandExchange.isOfferScreenOpen() || geSetupOpen(); }
 
     private static List<GrandExchangeSlots> getAvailableGeSlots()
     {
@@ -503,9 +495,7 @@ final class SmartSmelterGeTrader
      */
     private static final class Rs2WidgetVisible
     {
-        private Rs2WidgetVisible()
-        {
-        }
+        private Rs2WidgetVisible() {}
 
         private static boolean setup()
         {

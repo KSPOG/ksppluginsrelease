@@ -659,10 +659,7 @@ public class KspRobesOfRuinPlugin extends Plugin
         cachedRewardCount = rewards;
     }
 
-    private static String formatQuantity(String name, int quantity)
-    {
-        return quantity > 1 ? name + " x" + quantity : name;
-    }
+    private static String formatQuantity(String name, int quantity) { return quantity > 1 ? name + " x" + quantity : name; }
 
     private static String formatMissingQuantity(String name, int required, int present)
     {
@@ -712,10 +709,7 @@ public class KspRobesOfRuinPlugin extends Plugin
         return getMissingItems().isEmpty();
     }
 
-    private boolean isInVarrockWestBankBasement()
-    {
-        return isInVarrockWestBankBasement(playerLocation());
-    }
+    private boolean isInVarrockWestBankBasement() { return isInVarrockWestBankBasement(playerLocation()); }
 
     private boolean isInVarrockWestBankBasement(WorldPoint point)
     {
@@ -725,10 +719,7 @@ public class KspRobesOfRuinPlugin extends Plugin
                 && point.getY() >= 9808 && point.getY() <= 9850;
     }
 
-    private WorldPoint playerLocation()
-    {
-        return cachedPlayerLocation;
-    }
+    private WorldPoint playerLocation() { return cachedPlayerLocation; }
 
     private void loadProgress()
     {

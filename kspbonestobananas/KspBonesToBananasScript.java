@@ -823,10 +823,7 @@ public class KspBonesToBananasScript extends Script
         sleep(180, 300);
     }
 
-    private boolean hasRuneSupply(int id, int needed)
-    {
-        return totalSupply(id) >= needed;
-    }
+    private boolean hasRuneSupply(int id, int needed) { return totalSupply(id) >= needed; }
 
     private int totalSupply(int id)
     {

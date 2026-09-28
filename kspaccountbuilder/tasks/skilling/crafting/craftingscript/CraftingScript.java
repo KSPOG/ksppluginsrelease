@@ -31,7 +31,7 @@ public class CraftingScript extends Script
     private static final Logger log = LoggerFactory.getLogger(CraftingScript.class);
     private static final String BANK_WALK_KEY = "Crafting:edge-bank";
     private static final String FURNACE_WALK_KEY = "Crafting:edge-furnace";
-    private static final int LOOP_DELAY_MS = 600;
+    private static final int LOOP_DELAY_MS = 250;
     private static final int WALK_COOLDOWN_MS = 3_000;
     private static final int FURNACE_SEARCH_RADIUS = 12;
     private static final int ACTION_COOLDOWN_MS = 2_000;
@@ -45,15 +45,9 @@ public class CraftingScript extends Script
     private long lastActionAtMs;
     private boolean expectingXpDrop;
 
-    public boolean run()
-    {
-        return run(CraftingLevels.LEATHER_GLOVES, true);
-    }
+    public boolean run() { return run(CraftingLevels.LEATHER_GLOVES, true); }
 
-    public boolean run(CraftingLevels fallbackLevel)
-    {
-        return run(fallbackLevel, true);
-    }
+    public boolean run(CraftingLevels fallbackLevel) { return run(fallbackLevel, true); }
 
     public boolean run(CraftingLevels selectedLevel, boolean progressiveCrafting)
     {
@@ -119,10 +113,7 @@ public class CraftingScript extends Script
         return true;
     }
 
-    public void setDebugLogging(boolean debugLogging)
-    {
-        this.debugLogging = debugLogging;
-    }
+    public void setDebugLogging(boolean debugLogging) { this.debugLogging = debugLogging; }
 
     private void selectTargetRecipe()
     {
@@ -446,20 +437,11 @@ public class CraftingScript extends Script
         }
     }
 
-    public CraftingState getState()
-    {
-        return state;
-    }
+    public CraftingState getState() { return state; }
 
-    public CraftingLevels getTargetLevel()
-    {
-        return targetLevel;
-    }
+    public CraftingLevels getTargetLevel() { return targetLevel; }
 
-    public CraftInventory getTargetRecipe()
-    {
-        return targetRecipe;
-    }
+    public CraftInventory getTargetRecipe() { return targetRecipe; }
 
     @Override
     public void shutdown()

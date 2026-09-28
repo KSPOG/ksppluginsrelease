@@ -25,10 +25,7 @@ public interface KspRobesOfRuinConfig extends Config
         }
 
         @Override
-        public String toString()
-        {
-            return display;
-        }
+        public String toString() { return display; }
     }
 
     @ConfigSection(

@@ -36,7 +36,7 @@ import org.slf4j.LoggerFactory;
 public class WoodCuttingScript extends Script {
     private static final Logger log = LoggerFactory.getLogger(WoodCuttingScript.class);
 
-    private static final int LOOP_DELAY_MS = 600;
+    private static final int LOOP_DELAY_MS = 250;
     private static final int WEB_WALK_COOLDOWN_MS = 3000;
     private static final int OBJECT_INTERACTION_COOLDOWN_MS = 2_500;
     private static final int TREE_SEARCH_PADDING_TILES = 8;

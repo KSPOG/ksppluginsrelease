@@ -7,9 +7,7 @@ public final class KspTaskDebug
 {
     private static final ConcurrentHashMap<String, Long> LAST_LOG_AT = new ConcurrentHashMap<>();
 
-    private KspTaskDebug()
-    {
-    }
+    private KspTaskDebug() {}
 
     public static void info(Logger log, boolean enabled, String taskName, String message, Object... args)
     {

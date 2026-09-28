@@ -30,7 +30,7 @@ public class CookingScript extends Script
     private static final Logger log = LoggerFactory.getLogger(CookingScript.class);
     private static final String WALK_KEY = "Cooking:target-area";
     private static final String EXIT_WALK_KEY = "Cooking:exit-area";
-    private static final int LOOP_DELAY_MS = 600;
+    private static final int LOOP_DELAY_MS = 250;
     private static final int WALK_COOLDOWN_MS = 3_000;
     private static final int EDGEVILLE_STOVE_ID = 12269;
     private static final int LUMBRIDGE_RANGE_ID = 114;
@@ -50,10 +50,7 @@ public class CookingScript extends Script
     private boolean expectingXpDrop;
     private long lastDoorInteractionAtMs;
 
-    public void setDebugLogging(boolean debugLogging)
-    {
-        this.debugLogging = debugLogging;
-    }
+    public void setDebugLogging(boolean debugLogging) { this.debugLogging = debugLogging; }
 
     public boolean run(Areas area)
     {
@@ -355,15 +352,9 @@ public class CookingScript extends Script
         return selected;
     }
 
-    public Areas getTargetArea()
-    {
-        return targetArea;
-    }
+    public Areas getTargetArea() { return targetArea; }
 
-    public CookingState getState()
-    {
-        return state;
-    }
+    public CookingState getState() { return state; }
 
     private void debug(String message, Object... args)
     {

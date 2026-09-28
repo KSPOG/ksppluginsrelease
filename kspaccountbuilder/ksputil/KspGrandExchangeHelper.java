@@ -10,9 +10,7 @@ public final class KspGrandExchangeHelper
     private static final String GRAND_EXCHANGE_CLERK = "Grand Exchange Clerk";
     private static final int CLERK_REACHABLE_DISTANCE = 15;
 
-    private KspGrandExchangeHelper()
-    {
-    }
+    private KspGrandExchangeHelper() {}
 
     public static boolean closeBankBeforeExchange()
     {
@@ -25,10 +23,7 @@ public final class KspGrandExchangeHelper
         return true;
     }
 
-    public static boolean openExchangeDirectly()
-    {
-        return Rs2GrandExchange.isOpen() || Rs2GrandExchange.openExchange();
-    }
+    public static boolean openExchangeDirectly() { return Rs2GrandExchange.isOpen() || Rs2GrandExchange.openExchange(); }
 
     public static boolean interactClerk()
     {

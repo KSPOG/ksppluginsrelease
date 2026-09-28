@@ -40,7 +40,7 @@ public class FishingScript extends Script
 {
     private static final Logger log = LoggerFactory.getLogger(FishingScript.class);
 
-    private static final int LOOP_DELAY_MS = 600;
+    private static final int LOOP_DELAY_MS = 250;
     private static final int WEB_WALK_COOLDOWN_MS = 3_000;
     private static final int NPC_INTERACTION_COOLDOWN_MS = 2_500;
     private static final int FISHING_SPOT_SEARCH_PADDING_TILES = 8;
@@ -68,15 +68,9 @@ public class FishingScript extends Script
     private long lastNpcInteractionAtMs;
     private long lastWebWalkAtMs;
 
-    public void setDebugLogging(boolean debugLogging)
-    {
-        this.debugLogging = debugLogging;
-    }
+    public void setDebugLogging(boolean debugLogging) { this.debugLogging = debugLogging; }
 
-    public boolean run(Areas area)
-    {
-        return run(area, true);
-    }
+    public boolean run(Areas area) { return run(area, true); }
 
     public boolean run(Areas area, boolean progressiveFishing)
     {
@@ -219,10 +213,7 @@ public class FishingScript extends Script
         return LevelReqs.SALMON;
     }
 
-    private boolean hasAvailableItem(String itemName)
-    {
-        return Rs2Inventory.hasItem(itemName) || Rs2Bank.count(itemName) > 0;
-    }
+    private boolean hasAvailableItem(String itemName) { return Rs2Inventory.hasItem(itemName) || Rs2Bank.count(itemName) > 0; }
 
     private boolean hasAvailableKaramjaFare()
     {
@@ -358,10 +349,7 @@ public class FishingScript extends Script
         return NO_COOKING_BATCH;
     }
 
-    private String getCookingBatchName()
-    {
-        return cookingBatchItemId == ItemID.RAW_SALMON ? "salmon" : "trout";
-    }
+    private String getCookingBatchName() { return cookingBatchItemId == ItemID.RAW_SALMON ? "salmon" : "trout"; }
 
     private void resetCookingBatch()
     {
@@ -516,10 +504,7 @@ public class FishingScript extends Script
         return targetArea.getRandomPoint();
     }
 
-    private void clearTargetAreaWalkIfNeeded()
-    {
-        stopWalkerIfInsideTargetArea();
-    }
+    private void clearTargetAreaWalkIfNeeded() { stopWalkerIfInsideTargetArea(); }
 
     public void stopWalkerIfInsideTargetArea()
     {
@@ -892,10 +877,7 @@ public class FishingScript extends Script
                 || "Feather".equalsIgnoreCase(itemName);
     }
 
-    private boolean isCoins(String itemName)
-    {
-        return "Coins".equalsIgnoreCase(itemName);
-    }
+    private boolean isCoins(String itemName) { return "Coins".equalsIgnoreCase(itemName); }
 
     private void ensureKaramjaCoins()
     {
@@ -993,10 +975,7 @@ public class FishingScript extends Script
         super.shutdown();
     }
 
-    public Areas getTargetArea()
-    {
-        return targetArea;
-    }
+    public Areas getTargetArea() { return targetArea; }
 
     private enum FishingTarget
     {
@@ -1031,9 +1010,6 @@ public class FishingScript extends Script
             return SHRIMP;
         }
 
-        private List<String> getActions()
-        {
-            return actions;
-        }
+        private List<String> getActions() { return actions; }
     }
 }

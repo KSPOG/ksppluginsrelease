@@ -365,10 +365,7 @@ public class EssenceMining extends Script
         return false;
     }
 
-    private boolean canAct()
-    {
-        return System.currentTimeMillis() - lastActionAtMs >= ACTION_COOLDOWN_MS;
-    }
+    private boolean canAct() { return System.currentTimeMillis() - lastActionAtMs >= ACTION_COOLDOWN_MS; }
 
     private int getCurrentRegion()
     {
@@ -376,10 +373,7 @@ public class EssenceMining extends Script
         return location == null ? -1 : location.getRegionID();
     }
 
-    public boolean isInEssenceMine()
-    {
-        return getCurrentRegion() == ESSENCE_MINE_REGION;
-    }
+    public boolean isInEssenceMine() { return getCurrentRegion() == ESSENCE_MINE_REGION; }
 
     public boolean isInTaskArea()
     {
@@ -389,20 +383,11 @@ public class EssenceMining extends Script
                 || location.distanceTo(BankLocation.VARROCK_EAST.getWorldPoint()) <= 12));
     }
 
-    public EssenceState getState()
-    {
-        return state;
-    }
+    public EssenceState getState() { return state; }
 
-    public String getStatus()
-    {
-        return status;
-    }
+    public String getStatus() { return status; }
 
-    public void setDebugLogging(boolean debugLogging)
-    {
-        this.debugLogging = debugLogging;
-    }
+    public void setDebugLogging(boolean debugLogging) { this.debugLogging = debugLogging; }
 
     @Override
     public void shutdown()

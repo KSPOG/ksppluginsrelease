@@ -44,7 +44,7 @@ public class MiningScript extends Script
 {
     private static final Logger log = LoggerFactory.getLogger(MiningScript.class);
 
-    private static final int LOOP_DELAY_MS = 600;
+    private static final int LOOP_DELAY_MS = 250;
     private static final int WEB_WALK_COOLDOWN_MS = 3_000;
     private static final int OBJECT_INTERACTION_COOLDOWN_MS = 2_500;
     private static final int ROCK_SEARCH_PADDING_TILES = 8;
@@ -108,15 +108,9 @@ public class MiningScript extends Script
     private long lastObjectInteractionAtMs;
     private long lastUnderAttackAtMs;
 
-    public void setDebugLogging(boolean debugLogging)
-    {
-        this.debugLogging = debugLogging;
-    }
+    public void setDebugLogging(boolean debugLogging) { this.debugLogging = debugLogging; }
 
-    public void setProgressiveMining(boolean progressiveMining)
-    {
-        this.progressiveMining = progressiveMining;
-    }
+    public void setProgressiveMining(boolean progressiveMining) { this.progressiveMining = progressiveMining; }
 
     public boolean run(Areas area)
     {
@@ -367,10 +361,7 @@ public class MiningScript extends Script
         return false;
     }
 
-    private String resolveDesiredPickaxe(MiningReq miningReq)
-    {
-        return miningReq != null ? miningReq.getDisplayName() : null;
-    }
+    private String resolveDesiredPickaxe(MiningReq miningReq) { return miningReq != null ? miningReq.getDisplayName() : null; }
 
     private String resolveBestOwnedPickaxeName(String targetPickaxeName)
     {
@@ -1188,10 +1179,7 @@ public class MiningScript extends Script
         return RockLevel.TIN;
     }
 
-    private int getOwnedOreCount(String oreName)
-    {
-        return Rs2Inventory.count(oreName) + Math.max(0, Rs2Bank.count(oreName));
-    }
+    private int getOwnedOreCount(String oreName) { return Rs2Inventory.count(oreName) + Math.max(0, Rs2Bank.count(oreName)); }
 
     private void debug(String message, Object... args)
     {
@@ -1218,8 +1206,5 @@ public class MiningScript extends Script
         super.shutdown();
     }
 
-    public Areas getTargetArea()
-    {
-        return targetArea;
-    }
+    public Areas getTargetArea() { return targetArea; }
 }

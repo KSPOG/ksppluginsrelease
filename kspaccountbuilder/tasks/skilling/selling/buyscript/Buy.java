@@ -74,9 +74,7 @@ public final class Buy
     public static final List<String> PICKAXE_NAME_LIST = Collections.unmodifiableList(Arrays.asList(PICKAXE_NAMES));
     public static final List<String> AXE_NAME_LIST = Collections.unmodifiableList(Arrays.asList(AXE_NAMES));
 
-    private Buy()
-    {
-    }
+    private Buy() {}
 
     public static String resolveDesiredPickaxeNameForBuy()
     {
@@ -217,15 +215,9 @@ public final class Buy
                 || Rs2Bank.count(itemName) > 0);
     }
 
-    public static boolean hasHammerAnywhere()
-    {
-        return hasItemIdInInventory(HAMMER_ITEM_ID) || hasItemIdInBank(HAMMER_ITEM_ID);
-    }
+    public static boolean hasHammerAnywhere() { return hasItemIdInInventory(HAMMER_ITEM_ID) || hasItemIdInBank(HAMMER_ITEM_ID); }
 
-    public static boolean hasTinderboxAnywhere()
-    {
-        return hasNamedItemAnywhere(TINDERBOX_NAME);
-    }
+    public static boolean hasTinderboxAnywhere() { return hasNamedItemAnywhere(TINDERBOX_NAME); }
 
     public static boolean hasItemIdInInventory(int itemId)
     {
@@ -239,20 +231,11 @@ public final class Buy
                 .anyMatch(item -> item != null && item.getId() == itemId);
     }
 
-    public static boolean isPickaxeName(String itemName)
-    {
-        return matchesAny(itemName, PICKAXE_NAMES);
-    }
+    public static boolean isPickaxeName(String itemName) { return matchesAny(itemName, PICKAXE_NAMES); }
 
-    public static boolean isAxeName(String itemName)
-    {
-        return matchesAny(itemName, AXE_NAMES);
-    }
+    public static boolean isAxeName(String itemName) { return matchesAny(itemName, AXE_NAMES); }
 
-    public static boolean isToolName(String itemName)
-    {
-        return isPickaxeName(itemName) || isAxeName(itemName);
-    }
+    public static boolean isToolName(String itemName) { return isPickaxeName(itemName) || isAxeName(itemName); }
 
     public static boolean isOutdatedToolName(String itemName, String desiredPickaxe, String desiredAxe)
     {
@@ -519,14 +502,8 @@ public final class Buy
             this.missingItems = Collections.unmodifiableList(new ArrayList<>(missingItems));
         }
 
-        public List<String> getDesiredItems()
-        {
-            return desiredItems;
-        }
+        public List<String> getDesiredItems() { return desiredItems; }
 
-        public List<String> getMissingItems()
-        {
-            return missingItems;
-        }
+        public List<String> getMissingItems() { return missingItems; }
     }
 }

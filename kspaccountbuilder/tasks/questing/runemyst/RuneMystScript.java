@@ -20,7 +20,7 @@ import org.slf4j.LoggerFactory;
 public class RuneMystScript extends Script
 {
     private static final Logger log = LoggerFactory.getLogger(RuneMystScript.class);
-    private static final int LOOP_DELAY_MS = 600;
+    private static final int LOOP_DELAY_MS = 250;
     private static final int NPC_REACH_DISTANCE = 4;
     private static final long WALK_REFIRE_COOLDOWN_MS = 3_500L;
     private static final long ACTION_COOLDOWN_MS = 1_200L;
@@ -255,10 +255,7 @@ public class RuneMystScript extends Script
         }
     }
 
-    private boolean isQuestComplete()
-    {
-        return Rs2Player.getQuestState(Quest.RUNE_MYSTERIES) == QuestState.FINISHED;
-    }
+    private boolean isQuestComplete() { return Rs2Player.getQuestState(Quest.RUNE_MYSTERIES) == QuestState.FINISHED; }
 
     private void markComplete()
     {
@@ -268,25 +265,13 @@ public class RuneMystScript extends Script
         shutdown();
     }
 
-    public boolean isComplete()
-    {
-        return complete || isQuestComplete();
-    }
+    public boolean isComplete() { return complete || isQuestComplete(); }
 
-    public RuneMystState getState()
-    {
-        return state;
-    }
+    public RuneMystState getState() { return state; }
 
-    public String getStatus()
-    {
-        return status;
-    }
+    public String getStatus() { return status; }
 
-    public void setDebugLogging(boolean debugLogging)
-    {
-        this.debugLogging = debugLogging;
-    }
+    public void setDebugLogging(boolean debugLogging) { this.debugLogging = debugLogging; }
 
     @Override
     public void shutdown()

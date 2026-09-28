@@ -1,6 +1,6 @@
 /*
  * Decompiled with CFR 0.152.
- * 
+ *
  * Could not load the following classes:
  *  javax.inject.Singleton
  *  net.runelite.api.Skill
@@ -47,7 +47,7 @@ public class SmeltScript
 extends Script {
     private static final Logger log = LoggerFactory.getLogger(SmeltScript.class);
     private static final int INVENTORY_SLOTS = 28;
-    private static final int LOOP_DELAY_MS = 600;
+    private static final int LOOP_DELAY_MS = 250;
     private static final int WEB_WALK_COOLDOWN_MS = 3000;
     private static final int FURNACE_INTERACT_COOLDOWN_MS = 2000;
     private static final int SMELT_START_GRACE_MS = 2500;

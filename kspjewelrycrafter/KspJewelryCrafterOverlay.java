@@ -115,13 +115,7 @@ public class KspJewelryCrafterOverlay extends OverlayPanel
         return value.substring(0, Math.max(1, max - 3)) + "...";
     }
 
-    private static String format(long value)
-    {
-        return String.format("%,d", value);
-    }
+    private static String format(long value) { return String.format("%,d", value); }
 
-    private static String gp(long value)
-    {
-        return String.format("%,d gp", value);
-    }
+    private static String gp(long value) { return String.format("%,d gp", value); }
 }

@@ -502,10 +502,7 @@ public class KspAioFighterPaint extends Overlay
 		return builder.toString();
 	}
 
-	private String formatInventory()
-	{
-		return getInventoryUsedSlots() + "/28" + (Rs2Inventory.isFull() ? " full" : "");
-	}
+	private String formatInventory() { return getInventoryUsedSlots() + "/28" + (Rs2Inventory.isFull() ? " full" : ""); }
 
 	private int getInventoryUsedSlots()
 	{
@@ -525,10 +522,7 @@ public class KspAioFighterPaint extends Overlay
 		return used;
 	}
 
-	private String formatPoint(WorldPoint point)
-	{
-		return point == null ? "-" : point.getX() + "," + point.getY() + "," + point.getPlane();
-	}
+	private String formatPoint(WorldPoint point) { return point == null ? "-" : point.getX() + "," + point.getY() + "," + point.getPlane(); }
 
 	private String trim(String value, FontMetrics metrics, int maxWidth)
 	{
@@ -558,8 +552,5 @@ public class KspAioFighterPaint extends Overlay
 		return String.format("%02d:%02d", minutes, seconds);
 	}
 
-	private String formatAge(long ageMs)
-	{
-		return Math.max(0L, ageMs / 1_000L) + "s";
-	}
+	private String formatAge(long ageMs) { return Math.max(0L, ageMs / 1_000L) + "s"; }
 }

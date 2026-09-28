@@ -210,15 +210,9 @@ public class KspKaramjaFishingScript extends Script
         return p != null && p.getX() >= 3000 && p.getX() < 3075 && p.getY() >= 3180 && p.getY() < 3260;
     }
 
-    private String tool()
-    {
-        return config.mode() == KspKaramjaFishingConfig.Mode.LOBSTER ? "Lobster pot" : "Harpoon";
-    }
+    private String tool() { return config.mode() == KspKaramjaFishingConfig.Mode.LOBSTER ? "Lobster pot" : "Harpoon"; }
 
-    private boolean hasTool()
-    {
-        return Rs2Inventory.hasItem(tool());
-    }
+    private boolean hasTool() { return Rs2Inventory.hasItem(tool()); }
 
     public int fishCount()
     {

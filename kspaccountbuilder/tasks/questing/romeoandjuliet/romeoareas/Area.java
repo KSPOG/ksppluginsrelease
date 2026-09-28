@@ -45,8 +45,5 @@ public final class Area
                 plane);
     }
 
-    public boolean contains(WorldPoint point)
-    {
-        return point != null && toWorldArea().contains(point);
-    }
+    public boolean contains(WorldPoint point) { return point != null && toWorldArea().contains(point); }
 }

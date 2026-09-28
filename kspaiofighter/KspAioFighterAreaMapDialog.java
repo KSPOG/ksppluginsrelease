@@ -208,15 +208,9 @@ final class KspAioFighterAreaMapDialog extends JDialog
         }
     }
 
-    private static boolean valid(WorldPoint point)
-    {
-        return point != null && point.getX() > 0 && point.getY() > 0;
-    }
+    private static boolean valid(WorldPoint point) { return point != null && point.getX() > 0 && point.getY() > 0; }
 
-    private static String format(WorldPoint point)
-    {
-        return "(" + point.getX() + ", " + point.getY() + ", " + point.getPlane() + ")";
-    }
+    private static String format(WorldPoint point) { return "(" + point.getX() + ", " + point.getY() + ", " + point.getPlane() + ")"; }
 
     private static final class ExplvMapCanvas extends JPanel
     {
@@ -310,10 +304,7 @@ final class KspAioFighterAreaMapDialog extends JDialog
                 }
 
                 @Override
-                public void mouseWheelMoved(MouseWheelEvent e)
-                {
-                    zoomAt(e.getX(), e.getY(), e.getWheelRotation() < 0 ? 1 : -1);
-                }
+                public void mouseWheelMoved(MouseWheelEvent e) { zoomAt(e.getX(), e.getY(), e.getWheelRotation() < 0 ? 1 : -1); }
             };
             addMouseListener(mouse);
             addMouseMotionListener(mouse);
@@ -579,24 +570,12 @@ final class KspAioFighterAreaMapDialog extends JDialog
             return new WorldPoint(x, y, plane);
         }
 
-        private double scale()
-        {
-            return Math.pow(2.0, zoom - MAX_ZOOM);
-        }
+        private double scale() { return Math.pow(2.0, zoom - MAX_ZOOM); }
 
-        private static double worldCentreMaxPixelX(int worldX)
-        {
-            return ((worldX + 0.5 - RS_OFFSET_X) * RS_TILE_PX) + (RS_TILE_PX / 4.0);
-        }
+        private static double worldCentreMaxPixelX(int worldX) { return ((worldX + 0.5 - RS_OFFSET_X) * RS_TILE_PX) + (RS_TILE_PX / 4.0); }
 
-        private static double worldCentreMaxPixelY(int worldY)
-        {
-            return MAP_HEIGHT_MAX_ZOOM_PX - ((worldY + 0.5 - RS_OFFSET_Y) * RS_TILE_PX);
-        }
+        private static double worldCentreMaxPixelY(int worldY) { return MAP_HEIGHT_MAX_ZOOM_PX - ((worldY + 0.5 - RS_OFFSET_Y) * RS_TILE_PX); }
 
-        private static int clampPlane(int value)
-        {
-            return Math.max(0, Math.min(3, value));
-        }
+        private static int clampPlane(int value) { return Math.max(0, Math.min(3, value)); }
     }
 }

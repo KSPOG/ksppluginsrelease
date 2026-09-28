@@ -38,8 +38,5 @@ enum KspAioFighterGearStyle
     }
 
     @Override
-    public String toString()
-    {
-        return displayName;
-    }
+    public String toString() { return displayName; }
 }

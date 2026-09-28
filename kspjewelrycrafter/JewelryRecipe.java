@@ -94,15 +94,9 @@ public enum JewelryRecipe
         this.xp = xp;
     }
 
-    public boolean isEligible(int level, boolean memberAccount)
-    {
-        return level >= craftingLevel && (!membersOnly || memberAccount);
-    }
+    public boolean isEligible(int level, boolean memberAccount) { return level >= craftingLevel && (!membersOnly || memberAccount); }
 
-    public boolean usesGem()
-    {
-        return gemName != null;
-    }
+    public boolean usesGem() { return gemName != null; }
 
     public String getOutputName() { return outputName; }
     public int getCraftingLevel() { return craftingLevel; }
@@ -120,8 +114,5 @@ public enum JewelryRecipe
     }
 
     @Override
-    public String toString()
-    {
-        return outputName + " (Lvl " + craftingLevel + (membersOnly ? ", P2P" : ", F2P") + ")";
-    }
+    public String toString() { return outputName + " (Lvl " + craftingLevel + (membersOnly ? ", P2P" : ", F2P") + ")"; }
 }

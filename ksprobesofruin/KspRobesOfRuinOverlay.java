@@ -160,10 +160,7 @@ public class KspRobesOfRuinOverlay extends OverlayPanel
         }
     }
 
-    private String format(net.runelite.api.coords.WorldPoint point)
-    {
-        return point.getX() + ", " + point.getY() + ", " + point.getPlane();
-    }
+    private String format(net.runelite.api.coords.WorldPoint point) { return point.getX() + ", " + point.getY() + ", " + point.getPlane(); }
 
     private String shorten(String value, int max)
     {

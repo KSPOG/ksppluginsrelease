@@ -498,44 +498,23 @@ public enum FactoryRecipe
         this.inputs = Collections.unmodifiableList(Arrays.asList(inputs));
     }
 
-    public String getDisplayName()
-    {
-        return displayName;
-    }
+    public String getDisplayName() { return displayName; }
 
-    public Skill getRequiredSkill()
-    {
-        return requiredSkill;
-    }
+    public Skill getRequiredSkill() { return requiredSkill; }
 
-    public int getRequiredLevel()
-    {
-        return requiredLevel;
-    }
+    public int getRequiredLevel() { return requiredLevel; }
 
-    public RecipeInput getInteractionItemA()
-    {
-        return interactionItemA;
-    }
+    public RecipeInput getInteractionItemA() { return interactionItemA; }
 
-    public RecipeInput getInteractionItemB()
-    {
-        return interactionItemB;
-    }
+    public RecipeInput getInteractionItemB() { return interactionItemB; }
 
     /**
      * True for recipes such as herb cleaning where the processing action is
      * performed directly on one inventory item instead of combining two items.
      */
-    public boolean isSingleItemInteraction()
-    {
-        return interactionItemB == null;
-    }
+    public boolean isSingleItemInteraction() { return interactionItemB == null; }
 
-    public String getOutputItemName()
-    {
-        return outputItemName;
-    }
+    public String getOutputItemName() { return outputItemName; }
 
     /**
      * Secondary tradeable outputs produced alongside the primary processed item.
@@ -571,35 +550,17 @@ public enum FactoryRecipe
         return Collections.unmodifiableList(outputs);
     }
 
-    public int getEstimatedUnitsPerHour()
-    {
-        return estimatedUnitsPerHour;
-    }
+    public int getEstimatedUnitsPerHour() { return estimatedUnitsPerHour; }
 
-    public String getProcessingAction()
-    {
-        return processingAction;
-    }
+    public String getProcessingAction() { return processingAction; }
 
-    public String getProductionOptionText()
-    {
-        return productionOptionText;
-    }
+    public String getProductionOptionText() { return productionOptionText; }
 
-    public boolean requiresProductionOptionSelection()
-    {
-        return productionOptionText != null && !productionOptionText.isBlank();
-    }
+    public boolean requiresProductionOptionSelection() { return productionOptionText != null && !productionOptionText.isBlank(); }
 
-    public boolean isMembersOnly()
-    {
-        return membersOnly;
-    }
+    public boolean isMembersOnly() { return membersOnly; }
 
-    public List<RecipeInput> getInputs()
-    {
-        return inputs;
-    }
+    public List<RecipeInput> getInputs() { return inputs; }
 
     public int getMaximumInventoryBatch()
     {
@@ -628,8 +589,5 @@ public enum FactoryRecipe
     }
 
     @Override
-    public String toString()
-    {
-        return displayName;
-    }
+    public String toString() { return displayName; }
 }

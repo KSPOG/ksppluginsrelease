@@ -2,9 +2,7 @@ package net.runelite.client.plugins.microbot.kspaccountbuilder;
 
 public final class KspSingleSkillConfigTarget
 {
-    private KspSingleSkillConfigTarget()
-    {
-    }
+    private KspSingleSkillConfigTarget() {}
 
     public interface TargetOption
     {
@@ -28,15 +26,9 @@ public final class KspSingleSkillConfigTarget
             this.target = target;
         }
 
-        public KspSingleSkillTarget getTarget()
-        {
-            return target;
-        }
+        public KspSingleSkillTarget getTarget() { return target; }
 
-        public String toString()
-        {
-            return this == PROGRESSIVE ? "Progressive" : target.toString();
-        }
+        public String toString() { return this == PROGRESSIVE ? "Progressive" : target.toString(); }
     }
 
     public enum Woodcutting implements TargetOption
@@ -58,15 +50,9 @@ public final class KspSingleSkillConfigTarget
             this.target = target;
         }
 
-        public KspSingleSkillTarget getTarget()
-        {
-            return target;
-        }
+        public KspSingleSkillTarget getTarget() { return target; }
 
-        public String toString()
-        {
-            return this == PROGRESSIVE ? "Progressive" : target.toString();
-        }
+        public String toString() { return this == PROGRESSIVE ? "Progressive" : target.toString(); }
     }
 
     public enum Fishing implements TargetOption
@@ -85,15 +71,9 @@ public final class KspSingleSkillConfigTarget
             this.target = target;
         }
 
-        public KspSingleSkillTarget getTarget()
-        {
-            return target;
-        }
+        public KspSingleSkillTarget getTarget() { return target; }
 
-        public String toString()
-        {
-            return this == PROGRESSIVE ? "Progressive" : target.toString();
-        }
+        public String toString() { return this == PROGRESSIVE ? "Progressive" : target.toString(); }
     }
 
     public enum Cooking implements TargetOption
@@ -110,15 +90,9 @@ public final class KspSingleSkillConfigTarget
             this.target = target;
         }
 
-        public KspSingleSkillTarget getTarget()
-        {
-            return target;
-        }
+        public KspSingleSkillTarget getTarget() { return target; }
 
-        public String toString()
-        {
-            return this == AUTOMATIC ? "Automatic" : target.toString();
-        }
+        public String toString() { return this == AUTOMATIC ? "Automatic" : target.toString(); }
     }
 
     public enum Melee implements TargetOption
@@ -138,15 +112,9 @@ public final class KspSingleSkillConfigTarget
             this.target = target;
         }
 
-        public KspSingleSkillTarget getTarget()
-        {
-            return target;
-        }
+        public KspSingleSkillTarget getTarget() { return target; }
 
-        public String toString()
-        {
-            return this == AUTOMATIC ? "Automatic" : target.toString();
-        }
+        public String toString() { return this == AUTOMATIC ? "Automatic" : target.toString(); }
     }
 
     public enum Crafting implements TargetOption
@@ -177,15 +145,9 @@ public final class KspSingleSkillConfigTarget
             this.target = target;
         }
 
-        public KspSingleSkillTarget getTarget()
-        {
-            return target;
-        }
+        public KspSingleSkillTarget getTarget() { return target; }
 
-        public String toString()
-        {
-            return this == PROGRESSIVE ? "Progressive" : target.toString();
-        }
+        public String toString() { return this == PROGRESSIVE ? "Progressive" : target.toString(); }
     }
 
     public enum Smithing implements TargetOption
@@ -210,15 +172,9 @@ public final class KspSingleSkillConfigTarget
             this.target = target;
         }
 
-        public KspSingleSkillTarget getTarget()
-        {
-            return target;
-        }
+        public KspSingleSkillTarget getTarget() { return target; }
 
-        public String toString()
-        {
-            return this == PROGRESSIVE ? "Progressive" : target.toString();
-        }
+        public String toString() { return this == PROGRESSIVE ? "Progressive" : target.toString(); }
     }
 
     public enum Smelting implements TargetOption
@@ -241,14 +197,8 @@ public final class KspSingleSkillConfigTarget
             this.target = target;
         }
 
-        public KspSingleSkillTarget getTarget()
-        {
-            return target;
-        }
+        public KspSingleSkillTarget getTarget() { return target; }
 
-        public String toString()
-        {
-            return this == PROGRESSIVE ? "Progressive" : target.toString();
-        }
+        public String toString() { return this == PROGRESSIVE ? "Progressive" : target.toString(); }
     }
 }

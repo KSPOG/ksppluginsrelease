@@ -156,10 +156,7 @@ public class KspAioFighterScript extends Script
 		super.shutdown();
 	}
 
-	public void setStopPluginCallback(Runnable stopPluginCallback)
-	{
-		this.stopPluginCallback = stopPluginCallback;
-	}
+	public void setStopPluginCallback(Runnable stopPluginCallback) { this.stopPluginCallback = stopPluginCallback; }
 
 	private void loop(long generation)
 	{
@@ -511,50 +508,23 @@ public class KspAioFighterScript extends Script
 		return lastTargetNpcName == null || lastTargetNpcName.isEmpty() ? "-" : lastTargetNpcName;
 	}
 
-	public WorldPoint getOverlayTargetLocation()
-	{
-		return lastTargetNpcLocation;
-	}
+	public WorldPoint getOverlayTargetLocation() { return lastTargetNpcLocation; }
 
-	public int getOverlayTargetMaxHit()
-	{
-		return cachedTargetNpcMaxHit;
-	}
+	public int getOverlayTargetMaxHit() { return cachedTargetNpcMaxHit; }
 
-	public long getOverlayLastTargetAgeMs()
-	{
-		return lastTargetUpdateMs <= 0L ? -1L : System.currentTimeMillis() - lastTargetUpdateMs;
-	}
+	public long getOverlayLastTargetAgeMs() { return lastTargetUpdateMs <= 0L ? -1L : System.currentTimeMillis() - lastTargetUpdateMs; }
 
-	public String getOverlayLastError()
-	{
-		return lastError == null || lastError.isEmpty() ? "-" : lastError;
-	}
+	public String getOverlayLastError() { return lastError == null || lastError.isEmpty() ? "-" : lastError; }
 
-	public long getOverlayLastErrorAgeMs()
-	{
-		return lastErrorMs <= 0L ? -1L : System.currentTimeMillis() - lastErrorMs;
-	}
+	public long getOverlayLastErrorAgeMs() { return lastErrorMs <= 0L ? -1L : System.currentTimeMillis() - lastErrorMs; }
 
-	public String formatOverlayPoint(WorldPoint point)
-	{
-		return formatPoint(point);
-	}
+	public String formatOverlayPoint(WorldPoint point) { return formatPoint(point); }
 
-	public WorldPoint getOverlayAttackAreaTile1()
-	{
-		return getAttackAreaTile1();
-	}
+	public WorldPoint getOverlayAttackAreaTile1() { return getAttackAreaTile1(); }
 
-	public WorldPoint getOverlayAttackAreaTile2()
-	{
-		return getAttackAreaTile2();
-	}
+	public WorldPoint getOverlayAttackAreaTile2() { return getAttackAreaTile2(); }
 
-	public WorldPoint getOverlaySafeSpot()
-	{
-		return getSafeSpot();
-	}
+	public WorldPoint getOverlaySafeSpot() { return getSafeSpot(); }
 
 	private boolean waitForRequiredAreaSetupBeforeBanking()
 	{
@@ -731,10 +701,7 @@ public class KspAioFighterScript extends Script
 		return selectTrainingSkill().orElse(null) == Skill.MAGIC;
 	}
 
-	private boolean shouldBankForHighAlchRunes()
-	{
-		return config.highAlchLoot() && !hasHighAlchRunes(1);
-	}
+	private boolean shouldBankForHighAlchRunes() { return config.highAlchLoot() && !hasHighAlchRunes(1); }
 
 	private void depositAllExceptProtectedRunes()
 	{
@@ -976,10 +943,7 @@ public class KspAioFighterScript extends Script
 						|| runeQuantity(runeRequirement.getKey()) >= runeRequirement.getValue() * casts);
 	}
 
-	private int runeQuantity(Runes rune)
-	{
-		return rune == null ? 0 : Rs2Inventory.itemQuantity(rune.getItemId());
-	}
+	private int runeQuantity(Runes rune) { return rune == null ? 0 : Rs2Inventory.itemQuantity(rune.getItemId()); }
 
 	private boolean isRuneCoveredByEquipment(Runes rune)
 	{
@@ -1036,10 +1000,7 @@ public class KspAioFighterScript extends Script
 		Rs2Player.drinkCombatPotionAt(skill);
 	}
 
-	private int getConfiguredFoodCount()
-	{
-		return Rs2Inventory.count(config.foodName(), true);
-	}
+	private int getConfiguredFoodCount() { return Rs2Inventory.count(config.foodName(), true); }
 
 	private int getConfiguredFoodHeal()
 	{
@@ -1213,10 +1174,7 @@ public class KspAioFighterScript extends Script
 		return new WorldPoint(x, y, tile1.getPlane());
 	}
 
-	private boolean canRetryWalk(long lastWalkAttemptMs)
-	{
-		return System.currentTimeMillis() - lastWalkAttemptMs >= WALK_RETRY_MS;
-	}
+	private boolean canRetryWalk(long lastWalkAttemptMs) { return System.currentTimeMillis() - lastWalkAttemptMs >= WALK_RETRY_MS; }
 
 	private String formatPoint(WorldPoint point)
 	{
@@ -1227,10 +1185,7 @@ public class KspAioFighterScript extends Script
 		return "(" + point.getX() + ", " + point.getY() + ", " + point.getPlane() + ")";
 	}
 
-	private boolean isInsideAttackArea(Rs2NpcModel npc)
-	{
-		return npc != null && isInsideAttackArea(npc.getWorldLocation());
-	}
+	private boolean isInsideAttackArea(Rs2NpcModel npc) { return npc != null && isInsideAttackArea(npc.getWorldLocation()); }
 
 	private boolean isInsideAttackArea(WorldPoint point)
 	{
@@ -1319,10 +1274,7 @@ public class KspAioFighterScript extends Script
 		return value == null ? 0 : value;
 	}
 
-	private boolean isConfiguredTileValid(WorldPoint worldPoint)
-	{
-		return worldPoint != null && worldPoint.getX() > 0 && worldPoint.getY() > 0;
-	}
+	private boolean isConfiguredTileValid(WorldPoint worldPoint) { return worldPoint != null && worldPoint.getX() > 0 && worldPoint.getY() > 0; }
 	private Optional<Skill> selectTrainingSkill()
 	{
 		List<Skill> enabledSkills = getEnabledSkills();
@@ -1383,10 +1335,7 @@ public class KspAioFighterScript extends Script
 		}
 	}
 
-	private int getLevel(Skill skill)
-	{
-		return Microbot.getClient().getRealSkillLevel(skill);
-	}
+	private int getLevel(Skill skill) { return Microbot.getClient().getRealSkillLevel(skill); }
 
 	private void equipGearFor(Skill skill)
 	{
@@ -1445,15 +1394,9 @@ public class KspAioFighterScript extends Script
 				.anyMatch(equipped -> equipped.equals(wanted));
 	}
 
-	private String normalizeItemName(String itemName)
-	{
-		return itemName == null ? "" : itemName.trim().toLowerCase(Locale.ENGLISH);
-	}
+	private String normalizeItemName(String itemName) { return itemName == null ? "" : itemName.trim().toLowerCase(Locale.ENGLISH); }
 
-	private boolean isGearMarkedUnavailable(String itemName)
-	{
-		return unavailableGearThisRun.contains(normalizeItemName(itemName));
-	}
+	private boolean isGearMarkedUnavailable(String itemName) { return unavailableGearThisRun.contains(normalizeItemName(itemName)); }
 
 	private boolean canRetryGearBank(Skill skill)
 	{
@@ -1642,10 +1585,7 @@ public class KspAioFighterScript extends Script
 				|| ((parameterType == int.class || parameterType == Integer.class) && item instanceof Integer);
 	}
 
-	private Object coerceWithdrawArgument(Class<?> parameterType, Object item)
-	{
-		return parameterType == String.class ? String.valueOf(item) : item;
-	}
+	private Object coerceWithdrawArgument(Class<?> parameterType, Object item) { return parameterType == String.class ? String.valueOf(item) : item; }
 
 	private boolean isRangedAmmoName(String itemName)
 	{
@@ -1775,10 +1715,7 @@ public class KspAioFighterScript extends Script
 		return null;
 	}
 
-	private boolean styleTrains(TrainingStyle style, Skill skill)
-	{
-		return Arrays.asList(style.skills).contains(skill);
-	}
+	private boolean styleTrains(TrainingStyle style, Skill skill) { return Arrays.asList(style.skills).contains(skill); }
 
 	private boolean shouldAllowSharedStyle(TrainingStyle style, Skill skill)
 	{
@@ -2010,10 +1947,7 @@ public class KspAioFighterScript extends Script
 				&& System.currentTimeMillis() < postKillLootUntilMs;
 	}
 
-	private boolean isLootingEnabled()
-	{
-		return config.lootItems() || config.buryBones();
-	}
+	private boolean isLootingEnabled() { return config.lootItems() || config.buryBones(); }
 
 	private boolean buryBonesFromInventory()
 	{
@@ -2197,10 +2131,7 @@ public class KspAioFighterScript extends Script
 				.nearestOnClientThread(searchRadius);
 	}
 
-	private boolean matchesLootOwnership(Rs2TileItemModel item)
-	{
-		return !lootOwnOnly() || item.isOwned();
-	}
+	private boolean matchesLootOwnership(Rs2TileItemModel item) { return !lootOwnOnly() || item.isOwned(); }
 
 	private boolean canStoreLoot(Rs2TileItemModel item)
 	{
@@ -2239,10 +2170,7 @@ public class KspAioFighterScript extends Script
 				|| itemName.endsWith("bone");
 	}
 
-	private String normalizeLootName(String name)
-	{
-		return name == null ? "" : name.trim().toLowerCase(Locale.ENGLISH);
-	}
+	private String normalizeLootName(String name) { return name == null ? "" : name.trim().toLowerCase(Locale.ENGLISH); }
 
 	private Set<String> getLootNameNeedles()
 	{
@@ -2252,10 +2180,7 @@ public class KspAioFighterScript extends Script
 				.collect(Collectors.toSet()));
 	}
 
-	private boolean lootOwnOnly()
-	{
-		return config.lootOwnership() == KspLootOwnership.LOOT_OWN;
-	}
+	private boolean lootOwnOnly() { return config.lootOwnership() == KspLootOwnership.LOOT_OWN; }
 
 	private void highAlch()
 	{
@@ -2295,10 +2220,7 @@ public class KspAioFighterScript extends Script
 		Rs2Player.waitForAnimation();
 	}
 
-	private List<String> getConfiguredNpcNames()
-	{
-		return csv(config.npcNames());
-	}
+	private List<String> getConfiguredNpcNames() { return csv(config.npcNames()); }
 
 	private List<String> csv(String value)
 	{
@@ -2355,10 +2277,5 @@ public class KspAioFighterScript extends Script
 		}
 	}
 }
-
-
-
-
-
 
 

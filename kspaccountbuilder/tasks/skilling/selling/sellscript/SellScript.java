@@ -1,6 +1,6 @@
 /*
  * Decompiled with CFR 0.152.
- * 
+ *
  * Could not load the following classes:
  *  javax.inject.Singleton
  *  net.runelite.api.MenuAction
@@ -76,7 +76,7 @@ import org.slf4j.LoggerFactory;
 public class SellScript
 extends Script {
     private static final Logger log = LoggerFactory.getLogger(SellScript.class);
-    private static final int LOOP_DELAY_MS = 600;
+    private static final int LOOP_DELAY_MS = 250;
     private static final int WEB_WALK_COOLDOWN_MS = 3000;
     private static final int ACTION_COOLDOWN_MS = 1200;
     private static final int GE_OFFER_INPUT_DELAY_MS = 900;

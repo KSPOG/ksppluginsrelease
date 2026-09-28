@@ -628,20 +628,11 @@ public class KspHighAlchMuleService
         }).orElse("");
     }
 
-    private static boolean isFirstTradeOpen()
-    {
-        return Rs2Widget.isWidgetVisible(InterfaceID.Trademain.ACCEPT);
-    }
+    private static boolean isFirstTradeOpen() { return Rs2Widget.isWidgetVisible(InterfaceID.Trademain.ACCEPT); }
 
-    private static boolean isConfirmationOpen()
-    {
-        return Rs2Widget.isWidgetVisible(InterfaceID.Tradeconfirm.TRADE2ACCEPT);
-    }
+    private static boolean isConfirmationOpen() { return Rs2Widget.isWidgetVisible(InterfaceID.Tradeconfirm.TRADE2ACCEPT); }
 
-    private static String cleanText(String value)
-    {
-        return value == null ? "" : Text.removeTags(value).trim();
-    }
+    private static String cleanText(String value) { return value == null ? "" : Text.removeTags(value).trim(); }
 
     private static String normaliseName(String value)
     {

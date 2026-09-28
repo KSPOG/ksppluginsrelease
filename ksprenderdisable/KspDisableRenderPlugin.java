@@ -62,22 +62,13 @@ public class KspDisableRenderPlugin extends Plugin
     private final RenderCallback renderFilter = new RenderCallback()
     {
         @Override
-        public boolean addEntity(Renderable renderable, boolean ui)
-        {
-            return !filterEntities;
-        }
+        public boolean addEntity(Renderable renderable, boolean ui) { return !filterEntities; }
 
         @Override
-        public boolean drawObject(Scene scene, TileObject object)
-        {
-            return !filterTileObjects;
-        }
+        public boolean drawObject(Scene scene, TileObject object) { return !filterTileObjects; }
 
         @Override
-        public boolean drawTile(Scene scene, Tile tile)
-        {
-            return !filterSceneTiles;
-        }
+        public boolean drawTile(Scene scene, Tile tile) { return !filterSceneTiles; }
     };
 
     @Override
@@ -258,33 +249,18 @@ public class KspDisableRenderPlugin extends Plugin
         }
 
         @Override
-        public void swapScene(Scene scene)
-        {
-            delegate.swapScene(scene);
-        }
+        public void swapScene(Scene scene) { delegate.swapScene(scene); }
 
         @Override
-        public void loadScene(Scene scene)
-        {
-            delegate.loadScene(scene);
-        }
+        public void loadScene(Scene scene) { delegate.loadScene(scene); }
 
         @Override
-        public void loadScene(WorldView worldView, Scene scene)
-        {
-            delegate.loadScene(worldView, scene);
-        }
+        public void loadScene(WorldView worldView, Scene scene) { delegate.loadScene(worldView, scene); }
 
         @Override
-        public void despawnWorldView(WorldView worldView)
-        {
-            delegate.despawnWorldView(worldView);
-        }
+        public void despawnWorldView(WorldView worldView) { delegate.despawnWorldView(worldView); }
 
         @Override
-        public void invalidateZone(Scene scene, int zoneX, int zoneZ)
-        {
-            delegate.invalidateZone(scene, zoneX, zoneZ);
-        }
+        public void invalidateZone(Scene scene, int zoneX, int zoneZ) { delegate.invalidateZone(scene, zoneX, zoneZ); }
     }
 }

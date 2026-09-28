@@ -99,10 +99,7 @@ public class KspSmartSuperheatOverlay extends OverlayPanel
         );
     }
 
-    private void separator()
-    {
-        panelComponent.getChildren().add(LineComponent.builder().build());
-    }
+    private void separator() { panelComponent.getChildren().add(LineComponent.builder().build()); }
 
     private String pretty(SmartSuperheatState state)
     {
@@ -119,15 +116,9 @@ public class KspSmartSuperheatOverlay extends OverlayPanel
         return out.toString();
     }
 
-    private String signedGp(long value)
-    {
-        return (value >= 0 ? "+" : "") + format(value) + " gp";
-    }
+    private String signedGp(long value) { return (value >= 0 ? "+" : "") + format(value) + " gp"; }
 
-    private String format(long value)
-    {
-        return String.format(Locale.ROOT, "%,d", value);
-    }
+    private String format(long value) { return String.format(Locale.ROOT, "%,d", value); }
 
     private String duration(long millis)
     {

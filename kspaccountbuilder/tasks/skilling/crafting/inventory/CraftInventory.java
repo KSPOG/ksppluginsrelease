@@ -103,20 +103,11 @@ public enum CraftInventory
         this.ingredients = ingredients;
     }
 
-    public String getProductName()
-    {
-        return productName;
-    }
+    public String getProductName() { return productName; }
 
-    public RecipeType getRecipeType()
-    {
-        return recipeType;
-    }
+    public RecipeType getRecipeType() { return recipeType; }
 
-    public Ingredient[] getIngredients()
-    {
-        return ingredients.clone();
-    }
+    public Ingredient[] getIngredients() { return ingredients.clone(); }
 
     public Ingredient getTool()
     {
@@ -130,15 +121,9 @@ public enum CraftInventory
         return null;
     }
 
-    public boolean requiresFurnace()
-    {
-        return recipeType == RecipeType.FURNACE;
-    }
+    public boolean requiresFurnace() { return recipeType == RecipeType.FURNACE; }
 
-    private static Ingredient ingredient(String itemName, int amount, boolean reusable)
-    {
-        return new Ingredient(itemName, amount, reusable);
-    }
+    private static Ingredient ingredient(String itemName, int amount, boolean reusable) { return new Ingredient(itemName, amount, reusable); }
 
     public enum RecipeType
     {
@@ -160,19 +145,10 @@ public enum CraftInventory
             this.reusable = reusable;
         }
 
-        public String getItemName()
-        {
-            return itemName;
-        }
+        public String getItemName() { return itemName; }
 
-        public int getAmount()
-        {
-            return amount;
-        }
+        public int getAmount() { return amount; }
 
-        public boolean isReusable()
-        {
-            return reusable;
-        }
+        public boolean isReusable() { return reusable; }
     }
 }

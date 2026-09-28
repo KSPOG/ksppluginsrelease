@@ -14,8 +14,5 @@ public enum TeleportSortMode
     }
 
     @Override
-    public String toString()
-    {
-        return displayName;
-    }
+    public String toString() { return displayName; }
 }

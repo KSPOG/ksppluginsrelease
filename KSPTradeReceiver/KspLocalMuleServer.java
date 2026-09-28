@@ -86,10 +86,7 @@ public final class KspLocalMuleServer implements Closeable
         public JobState getState() { return state; }
         public String getFailureReason() { return failureReason; }
 
-        private void touch()
-        {
-            lastContactAt = System.currentTimeMillis();
-        }
+        private void touch() { lastContactAt = System.currentTimeMillis(); }
     }
 
     private static final int CLIENT_READ_TIMEOUT_MS = 4_000;
@@ -497,10 +494,7 @@ public final class KspLocalMuleServer implements Closeable
         this.muleTile = tile;
     }
 
-    public boolean hasPendingJobs()
-    {
-        return pendingCount() > 0;
-    }
+    public boolean hasPendingJobs() { return pendingCount() > 0; }
 
     public boolean hasUnacknowledgedCompletion()
     {
@@ -548,15 +542,9 @@ public final class KspLocalMuleServer implements Closeable
         return count;
     }
 
-    public int getPort()
-    {
-        return port;
-    }
+    public int getPort() { return port; }
 
-    public boolean isRunning()
-    {
-        return running.get();
-    }
+    public boolean isRunning() { return running.get(); }
 
     @Override
     public synchronized void close()

@@ -101,10 +101,7 @@ public class KspBonesToBananasOverlay extends OverlayPanel
         panelComponent.getChildren().add(LineComponent.builder().left(left + ":").right(right == null ? "-" : right).build());
     }
 
-    private void separator()
-    {
-        panelComponent.getChildren().add(LineComponent.builder().build());
-    }
+    private void separator() { panelComponent.getChildren().add(LineComponent.builder().build()); }
 
     private static String pretty(KspBonesToBananasState state)
     {
@@ -121,15 +118,9 @@ public class KspBonesToBananasOverlay extends OverlayPanel
         return out.toString();
     }
 
-    private static String signed(long value)
-    {
-        return (value >= 0 ? "+" : "") + format(value) + " gp";
-    }
+    private static String signed(long value) { return (value >= 0 ? "+" : "") + format(value) + " gp"; }
 
-    private static String format(long value)
-    {
-        return String.format(Locale.ROOT, "%,d", value);
-    }
+    private static String format(long value) { return String.format(Locale.ROOT, "%,d", value); }
 
     private static String duration(long millis)
     {
