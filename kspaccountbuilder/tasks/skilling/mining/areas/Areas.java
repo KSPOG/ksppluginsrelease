@@ -1,12 +1,10 @@
 package net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.mining.areas;
 
-import lombok.Getter;
 import net.runelite.api.coords.WorldArea;
 import net.runelite.api.coords.WorldPoint;
 
 import java.util.concurrent.ThreadLocalRandom;
 
-@Getter
 public enum Areas
 {
     TIN_COPPER_VARROCK_EAST(
@@ -60,6 +58,21 @@ public enum Areas
 
         this.southWest = new WorldPoint(minX, minY, firstCorner.getPlane());
         this.northEast = new WorldPoint(maxX, maxY, firstCorner.getPlane());
+    }
+
+    public String getDisplayName()
+    {
+        return displayName;
+    }
+
+    public WorldPoint getSouthWest()
+    {
+        return southWest;
+    }
+
+    public WorldPoint getNorthEast()
+    {
+        return northEast;
     }
 
     public WorldArea toWorldArea()

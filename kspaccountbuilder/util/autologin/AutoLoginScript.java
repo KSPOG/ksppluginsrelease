@@ -1,6 +1,5 @@
 package net.runelite.client.plugins.microbot.kspaccountbuilder.util.autologin;
 
-import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.Client;
 import net.runelite.api.GameState;
@@ -29,7 +28,6 @@ public class AutoLoginScript extends Script
     private static final int POST_LOGIN_SETTLE_MS = 4_000;
     private static final BooleanSupplier ALWAYS_ALLOWED = () -> true;
 
-    @Getter
     private LoginState state = LoginState.IDLE;
 
     private volatile boolean active;
@@ -38,6 +36,11 @@ public class AutoLoginScript extends Script
     private long lastLoginAttemptAtMillis;
     private long lastLoginScreenDebugAtMillis;
     private long loggedInAtMillis;
+
+    public LoginState getState()
+    {
+        return state;
+    }
 
     public void setDebugLogging(boolean debugLogging)
     {

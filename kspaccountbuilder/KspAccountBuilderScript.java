@@ -1,6 +1,5 @@
 package net.runelite.client.plugins.microbot.kspaccountbuilder;
 
-import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.*;
 import net.runelite.api.coords.WorldPoint;
@@ -198,13 +197,10 @@ public class KspAccountBuilderScript extends Script
     @Inject
     private KspAccountTaskCache accountTaskCache;
 
-    @Getter
     private volatile BuilderTask currentTask;
 
-    @Getter
     private volatile boolean breakActive;
 
-    @Getter
     private long startedAtMillis;
 
     private boolean taskStarted;
@@ -241,6 +237,21 @@ public class KspAccountBuilderScript extends Script
     private long synchronizedPlayTimeAccountHash;
     private long nextPlayTimeReadAtMillis;
     private BankLocation taskSwitchBankLocation;
+
+    public BuilderTask getCurrentTask()
+    {
+        return currentTask;
+    }
+
+    public boolean isBreakActive()
+    {
+        return breakActive;
+    }
+
+    public long getStartedAtMillis()
+    {
+        return startedAtMillis;
+    }
 
     public boolean run(KspAccountBuilderConfig config)
     {
