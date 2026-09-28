@@ -50,6 +50,7 @@ public class KSPGELooterScript extends Script
     private static final long PRIORITY_RELEASE_GRACE_MS = 1_200L;
     private static final long PRIORITY_HANDOFF_SETTLE_MS = 1_500L;
     private static final int FAILED_TARGET_REJECT_THRESHOLD = 2;
+    private static final int MAX_IMMEDIATE_LOOT_HANDOFFS = 12;
     private static final String STAFF_OF_FIRE = "Staff of fire";
 
     public static volatile String status = "Idle";
@@ -322,134 +323,171 @@ public class KSPGELooterScript extends Script
         return candidates.isEmpty() ? null : candidates.get(0);
     }
 
-    private void spamLoot(Rs2TileItemModel item, KSPGELooterConfig config)
+    private void spamLoot(Rs2TileItemModel firstItem, KSPGELooterConfig config)
     {
-        if (item == null) return;
+        if (firstItem == null || !prepareLootUi()) return;
 
-        String key = lootKey(item);
-        WorldPoint tile = item.getWorldLocation();
-        if (!isStrictlyAllowedLootTile(tile))
-        {
-            rejectLootTarget(item, "outside defined area or collision-unreachable");
-            return;
-        }
-
-        Rs2TileItemModel initialLive = findLiveGroundItem(item.getId(), tile);
-        if (initialLive == null || !isStrictlyAllowedLootTile(initialLive.getWorldLocation()))
-        {
-            rejectLootTarget(item, "target moved/despawned or is no longer allowed");
-            return;
-        }
-
-        if (!prepareLootUi()) return;
-
+        Rs2TileItemModel item = firstItem;
+        int minimumGeValue = Math.max(0, config.minimumGeValue());
         int attempts = clamp(config.spamClicks(), 1, 12);
         int delay = clamp(config.spamDelayMs(), 30, 250);
-        int itemId = item.getId();
-        int beforeQuantity = Rs2Inventory.itemQuantity(itemId);
-        int unitGePrice = getGePrice(itemId);
 
-        targetName = safeName(item);
-        targetGeValue = getGroundStackGeValue(item);
-        status = "Looting " + targetName;
-
-        boolean dispatchedAtLeastOnce = false;
-        for (int i = 0; i < attempts && Microbot.isLoggedIn(); i++)
+        /*
+         * Fast handoff loop:
+         * once the inventory changes OR the current ground item disappears,
+         * immediately select and invoke Take on the next eligible item without
+         * returning to the 100 ms scheduler first.
+         */
+        for (int handoff = 0;
+             handoff < MAX_IMMEDIATE_LOOT_HANDOFFS && item != null && Microbot.isLoggedIn();
+             handoff++)
         {
+            WorldPoint tile = item.getWorldLocation();
+            if (!isStrictlyAllowedLootTile(tile))
+            {
+                rejectLootTarget(item, "outside defined area or collision-unreachable");
+                item = findLootTarget(minimumGeValue);
+                continue;
+            }
+
+            Rs2TileItemModel live = findLiveGroundItem(item.getId(), tile);
+            if (live == null)
+            {
+                // It disappeared before we clicked it. Move straight to the next item.
+                failedLootTargets.remove(lootKey(item));
+                rejectedLootTargets.remove(lootKey(item));
+                item = findLootTarget(minimumGeValue);
+                continue;
+            }
+
             WorldPoint player = Rs2Player.getWorldLocation();
             if (!KSPGELooterArea.contains(player))
             {
                 status = "AREA GUARD - loot cancelled";
                 insideArea = false;
-                rejectLootTarget(item, "player left defined area during loot attempt");
                 Rs2Walker.clearWalkingRoute("ge-looter-left-area-during-loot");
                 return;
             }
 
-            Rs2TileItemModel live = findLiveGroundItem(itemId, tile);
-            if (live == null || Rs2Inventory.itemQuantity(itemId) > beforeQuantity)
+            if (Rs2Inventory.isFull() && !canStackIntoInventory(live))
             {
-                break;
-            }
-
-            // Re-check immediately before every Take. A cached candidate is never
-            // trusted once its tile is outside the hard area or not reachable from
-            // the player's current collision map.
-            if (!isStrictlyAllowedLootTile(live.getWorldLocation()))
-            {
-                rejectLootTarget(live, "failed live area/reachability guard");
                 return;
             }
 
-            if (!clearSelectedWidget()) return;
+            String key = lootKey(live);
+            int itemId = live.getId();
+            int beforeQuantity = Rs2Inventory.itemQuantity(itemId);
+            int beforeSlots = inventoryItemCount();
+            int unitGePrice = getGePrice(itemId);
 
-            boolean dispatched = live.pickup();
-            if (!dispatched)
-            {
-                status = "Take failed " + targetName;
-                sleep(delay);
-                continue;
-            }
+            targetName = safeName(live);
+            targetGeValue = getGroundStackGeValue(live);
+            status = "Looting " + targetName;
 
-            dispatchedAtLeastOnce = true;
-            int distance = distance(player, tile);
-            int wait = Math.min(4_000, Math.max(500, 500 + distance * 260));
-            if (sleepUntil(() -> Rs2Inventory.itemQuantity(itemId) > beforeQuantity
-                    || findLiveGroundItem(itemId, tile) == null
-                    || !KSPGELooterArea.contains(Rs2Player.getWorldLocation()), wait))
+            boolean dispatched = false;
+            boolean changedOrGone = false;
+
+            for (int attempt = 0; attempt < attempts && Microbot.isLoggedIn(); attempt++)
             {
-                if (!KSPGELooterArea.contains(Rs2Player.getWorldLocation()))
+                live = findLiveGroundItem(itemId, tile);
+                if (live == null)
                 {
-                    rejectLootTarget(item, "Take interaction attempted to leave defined area");
-                    status = "AREA GUARD - rejected loot target";
-                    Rs2Walker.clearWalkingRoute("ge-looter-rejected-outbound-loot");
-                    return;
+                    changedOrGone = true;
+                    break;
                 }
-                break;
+
+                if (!isStrictlyAllowedLootTile(live.getWorldLocation()))
+                {
+                    rejectLootTarget(live, "failed live area/reachability guard");
+                    changedOrGone = true;
+                    break;
+                }
+
+                if (!clearSelectedWidget()) return;
+
+                // Rs2TileItemModel.pickup()/click("Take") dispatches through
+                // Microbot.doInvoke (GROUND_ITEM_* menu action); no mouse click.
+                boolean invoked = invokeTake(live);
+                if (!invoked)
+                {
+                    status = "Take invoke failed " + targetName;
+                    if (attempt + 1 < attempts) sleep(delay);
+                    continue;
+                }
+                dispatched = true;
+
+                int distance = distance(Rs2Player.getWorldLocation(), tile);
+                int wait = Math.min(4_000, Math.max(450, 450 + distance * 240));
+                changedOrGone = sleepUntil(() ->
+                        Rs2Inventory.itemQuantity(itemId) != beforeQuantity
+                                || inventoryItemCount() != beforeSlots
+                                || findLiveGroundItem(itemId, tile) == null
+                                || !KSPGELooterArea.contains(Rs2Player.getWorldLocation()),
+                        wait);
+
+                if (changedOrGone)
+                {
+                    break; // no spam-delay here: hand off immediately below
+                }
+                if (attempt + 1 < attempts) sleep(delay);
             }
 
-            if (i + 1 < attempts) sleep(delay);
-        }
+            if (!KSPGELooterArea.contains(Rs2Player.getWorldLocation()))
+            {
+                rejectLootTarget(item, "Take interaction attempted to leave defined area");
+                status = "AREA GUARD - rejected loot target";
+                Rs2Walker.clearWalkingRoute("ge-looter-rejected-outbound-loot");
+                return;
+            }
 
-        sleepUntil(() -> Rs2Inventory.itemQuantity(itemId) > beforeQuantity
-                || findLiveGroundItem(itemId, tile) == null, 1_200);
+            int gained = Math.max(0, Rs2Inventory.itemQuantity(itemId) - beforeQuantity);
+            boolean disappeared = findLiveGroundItem(itemId, tile) == null;
+            boolean inventoryChanged = gained > 0 || inventoryItemCount() != beforeSlots;
 
-        int gained = Math.max(0, Rs2Inventory.itemQuantity(itemId) - beforeQuantity);
-        if (gained > 0)
-        {
-            itemsLooted += gained;
-            totalLootGeValue += (long) unitGePrice * gained;
-            failedLootTargets.remove(key);
-            rejectedLootTargets.remove(key);
-            priorityReleaseAt = System.currentTimeMillis() + PRIORITY_RELEASE_GRACE_MS;
-        }
-        else
-        {
-            Rs2TileItemModel stillLive = findLiveGroundItem(itemId, tile);
-            if (stillLive != null)
+            if (gained > 0)
+            {
+                itemsLooted += gained;
+                totalLootGeValue += (long) unitGePrice * gained;
+                failedLootTargets.remove(key);
+                rejectedLootTargets.remove(key);
+                priorityReleaseAt = System.currentTimeMillis() + PRIORITY_RELEASE_GRACE_MS;
+            }
+            else if (!inventoryChanged && !disappeared)
             {
                 int failures = failedLootTargets.merge(key, 1, Integer::sum);
-                if (!dispatchedAtLeastOnce || failures >= FAILED_TARGET_REJECT_THRESHOLD)
+                if (!dispatched || failures >= FAILED_TARGET_REJECT_THRESHOLD)
                 {
-                    rejectLootTarget(stillLive,
-                            !dispatchedAtLeastOnce
-                                    ? "Take interaction could not be dispatched"
+                    rejectLootTarget(item,
+                            !dispatched
+                                    ? "Take invoke could not be dispatched"
                                     : "Take was not confirmed after " + failures + " cycles");
                 }
                 else
                 {
                     status = "Take not confirmed - one retry allowed";
-                    // Do not extend Priority Mode forever. The next loop gets one
-                    // final attempt; after that the target is ignored until despawn.
+                    updateOverlayState();
+                    return;
                 }
             }
             else
             {
+                // Another player can make the target disappear. That is a successful
+                // handoff condition, not a reason to retry the vanished target.
                 failedLootTargets.remove(key);
                 rejectedLootTargets.remove(key);
             }
+
+            updateOverlayState();
+
+            // Critical fast path: inventory changed or target vanished -> immediately
+            // pick the next valid target and invoke it in this same scheduler pass.
+            item = findLootTarget(minimumGeValue);
         }
-        updateOverlayState();
+    }
+
+    private boolean invokeTake(Rs2TileItemModel item)
+    {
+        return item != null && item.pickup();
     }
 
     private Rs2TileItemModel findLiveGroundItem(int itemId, WorldPoint tile)
@@ -676,64 +714,53 @@ public class KSPGELooterScript extends Script
             sleepUntil(() -> !Microbot.getClient().isWidgetSelected(), 600);
         }
 
-        int epochBefore = Rs2Bank.getBankLiveEpoch();
-
-        status = "Opening GE bank";
-        boolean nativeOpened = Rs2Bank.openBank();
-        if (Rs2Bank.isOpen())
-        {
-            log.info("KSP GE Looter: GE bank opened via Rs2Bank.openBank(); result={}, epoch {} -> {}",
-                    nativeOpened, epochBefore, Rs2Bank.getBankLiveEpoch());
-            return true;
-        }
-
         WorldPoint player = Rs2Player.getWorldLocation();
+
+        // Explicit invoke path: Rs2GameObject.interact -> Microbot.doInvoke.
         WallObject geBooth = Rs2GameObject.findGrandExchangeBooth(20);
         if (geBooth != null)
         {
-            status = "Opening GE bank booth";
-            boolean clicked = Rs2GameObject.interact(geBooth, "Bank");
-            log.info("KSP GE Looter: GE booth attempt id={} at {} clicked={}",
-                    geBooth.getId(), geBooth.getWorldLocation(), clicked);
-            if (clicked && sleepUntil(Rs2Bank::isOpen, 3_000))
+            status = "Invoking GE bank booth";
+            boolean invoked = invokeBankBooth(geBooth);
+            log.info("KSP GE Looter: GE booth invoke id={} at {} dispatched={}",
+                    geBooth.getId(), geBooth.getWorldLocation(), invoked);
+            if (invoked && sleepUntil(Rs2Bank::isOpen, 2_500))
             {
                 return true;
             }
         }
-        else
-        {
-            log.warn("KSP GE Looter: no reachable Grand Exchange booth found near {}", player);
-        }
 
+        // Explicit invoke fallback: Rs2Npc.interact -> Microbot.doInvoke.
         Rs2NpcModel banker = Rs2Npc.getBankerNPC();
         if (banker != null)
         {
-            status = "Opening GE Banker";
-            boolean clicked = Rs2Npc.interact(banker, "Bank");
-            log.info("KSP GE Looter: Banker attempt id={} at {} clicked={}",
-                    banker.getId(), banker.getWorldLocation(), clicked);
-            if (clicked && sleepUntil(Rs2Bank::isOpen, 3_000))
+            status = "Invoking GE Banker";
+            boolean invoked = invokeBanker(banker);
+            log.info("KSP GE Looter: Banker invoke id={} at {} dispatched={}",
+                    banker.getId(), banker.getWorldLocation(), invoked);
+            if (invoked && sleepUntil(Rs2Bank::isOpen, 2_500))
             {
                 return true;
             }
         }
-        else
-        {
-            log.warn("KSP GE Looter: no Banker NPC found near {}", player);
-        }
 
-        // A bank interface can become visible just after an interaction helper
-        // returns false, especially while the bank container snapshot updates.
-        if (sleepUntil(Rs2Bank::isOpen, 1_000))
-        {
-            return true;
-        }
+        if (sleepUntil(Rs2Bank::isOpen, 600)) return true;
 
-        log.warn("KSP GE Looter: bank failed to open; player={}, geBooth={}, banker={}",
+        log.warn("KSP GE Looter: invoke banking failed; player={}, geBooth={}, banker={}",
                 player,
                 geBooth == null ? "missing" : geBooth.getWorldLocation(),
                 banker == null ? "missing" : banker.getWorldLocation());
         return false;
+    }
+
+    private boolean invokeBankBooth(WallObject booth)
+    {
+        return booth != null && Rs2GameObject.interact(booth, "Bank");
+    }
+
+    private boolean invokeBanker(Rs2NpcModel banker)
+    {
+        return banker != null && Rs2Npc.interact(banker, "Bank");
     }
 
     private boolean acquireBankPause()
