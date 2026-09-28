@@ -425,9 +425,10 @@ public class KspMugFillerScript extends Script
 
     private int getGePrice(int itemId)
     {
-        return Math.max(0, Microbot.getClientThread()
+        long price = Microbot.getClientThread()
                 .runOnClientThreadOptional(() -> Microbot.getItemManager().getItemPrice(itemId))
-                .orElse(0));
+                .orElse(0L);
+        return price <= 0L ? 0 : (int) Math.min(Integer.MAX_VALUE, price);
     }
 
     private void resetSession()
