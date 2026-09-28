@@ -22,7 +22,7 @@ import javax.inject.Inject;
         isExternal = PluginConstants.IS_EXTERNAL
 )
 public class KspDirectFishingPlugin extends Plugin {
-    public static final String VERSION = "0.1.7";
+    public static final String VERSION = "0.1.8";
     @Inject private KspDirectFishingConfig config;
     @Inject private KspDirectFishingScript script;
     @Inject private KspDirectFishingOverlay overlay;
