@@ -32,7 +32,11 @@ public class KspAccountPlayTimeCache
     // plugin/task restarts in the same loaded client reuse the synchronized cache.
     private final Set<String> authoritativeAccountsThisSession = new HashSet<>();
 
+    // Keep the active account in primitive fields so the 250 ms sampler does not
+    // allocate a new account-key String and boxed Long every tick.
+    private long activeAccountHash;
     private String activeAccountKey;
+    private long activePlayTimeMillis = -1L;
     private long lastSampleAtMillis;
     private long lastSaveAtMillis;
     private boolean dirty;
@@ -45,31 +49,30 @@ public class KspAccountPlayTimeCache
     public synchronized void sample(boolean loggedIn, long accountHash)
     {
         long now = System.currentTimeMillis();
-        String accountKey = loggedIn && accountHash != 0L
-                ? Long.toUnsignedString(accountHash)
-                : null;
-
-        if (accountKey == null)
+        if (!loggedIn || accountHash == 0L)
         {
-            activeAccountKey = null;
-            lastSampleAtMillis = 0L;
+            storeActiveValue();
+            clearActiveAccount();
             saveIfDue(now);
             return;
         }
 
-        if (!accountKey.equals(activeAccountKey))
+        if (accountHash != activeAccountHash)
         {
-            activeAccountKey = accountKey;
+            storeActiveValue();
+            activeAccountHash = accountHash;
+            activeAccountKey = Long.toUnsignedString(accountHash);
+            activePlayTimeMillis = playTimeByAccount.getOrDefault(activeAccountKey, -1L);
             lastSampleAtMillis = now;
             return;
         }
 
-        if (lastSampleAtMillis > 0L && playTimeByAccount.containsKey(accountKey))
+        if (lastSampleAtMillis > 0L && activePlayTimeMillis >= 0L)
         {
             long elapsed = Math.max(0L, now - lastSampleAtMillis);
             if (elapsed > 0L)
             {
-                playTimeByAccount.merge(accountKey, elapsed, Long::sum);
+                activePlayTimeMillis += elapsed;
                 dirty = true;
             }
         }
@@ -85,6 +88,11 @@ public class KspAccountPlayTimeCache
             return 0L;
         }
 
+        if (accountHash == activeAccountHash && activeAccountKey != null)
+        {
+            return Math.max(0L, activePlayTimeMillis);
+        }
+
         return Math.max(0L, playTimeByAccount.getOrDefault(Long.toUnsignedString(accountHash), 0L));
     }
 
@@ -95,13 +103,25 @@ public class KspAccountPlayTimeCache
             return false;
         }
 
+        if (accountHash == activeAccountHash && activeAccountKey != null)
+        {
+            return activePlayTimeMillis >= 0L;
+        }
+
         return playTimeByAccount.containsKey(Long.toUnsignedString(accountHash));
     }
 
     public synchronized boolean hasAuthoritativePlayTimeThisSession(long accountHash)
     {
-        return accountHash != 0L
-                && authoritativeAccountsThisSession.contains(Long.toUnsignedString(accountHash));
+        if (accountHash == 0L)
+        {
+            return false;
+        }
+
+        String accountKey = accountHash == activeAccountHash && activeAccountKey != null
+                ? activeAccountKey
+                : Long.toUnsignedString(accountHash);
+        return authoritativeAccountsThisSession.contains(accountKey);
     }
 
     public synchronized void synchronizePlayTimeHours(long accountHash, int playTimeHours)
@@ -116,22 +136,37 @@ public class KspAccountPlayTimeCache
             return;
         }
 
-        String accountKey = Long.toUnsignedString(accountHash);
-        long authoritativeMillis = playTimeMillis;
-        long currentMillis = playTimeByAccount.getOrDefault(accountKey, 0L);
+        String accountKey = accountHash == activeAccountHash && activeAccountKey != null
+                ? activeAccountKey
+                : Long.toUnsignedString(accountHash);
         authoritativeAccountsThisSession.add(accountKey);
-        if (!playTimeByAccount.containsKey(accountKey) || authoritativeMillis != currentMillis)
+
+        if (accountHash == activeAccountHash && activeAccountKey != null)
         {
-            playTimeByAccount.put(accountKey, authoritativeMillis);
-            dirty = true;
-            flush();
+            if (activePlayTimeMillis != playTimeMillis)
+            {
+                activePlayTimeMillis = playTimeMillis;
+                dirty = true;
+            }
+            lastSampleAtMillis = System.currentTimeMillis();
         }
+        else
+        {
+            Long current = playTimeByAccount.get(accountKey);
+            if (current == null || current.longValue() != playTimeMillis)
+            {
+                playTimeByAccount.put(accountKey, playTimeMillis);
+                dirty = true;
+            }
+        }
+
+        flush();
     }
 
     public synchronized void endSession()
     {
-        activeAccountKey = null;
-        lastSampleAtMillis = 0L;
+        storeActiveValue();
+        clearActiveAccount();
         flush();
     }
 
@@ -142,6 +177,7 @@ public class KspAccountPlayTimeCache
             return;
         }
 
+        storeActiveValue();
         Path temporaryPath = cachePath.resolveSibling(cachePath.getFileName() + ".tmp");
         try
         {
@@ -173,6 +209,28 @@ public class KspAccountPlayTimeCache
         }
     }
 
+    private void storeActiveValue()
+    {
+        if (activeAccountKey == null || activePlayTimeMillis < 0L)
+        {
+            return;
+        }
+
+        Long stored = playTimeByAccount.get(activeAccountKey);
+        if (stored == null || stored.longValue() != activePlayTimeMillis)
+        {
+            playTimeByAccount.put(activeAccountKey, activePlayTimeMillis);
+        }
+    }
+
+    private void clearActiveAccount()
+    {
+        activeAccountHash = 0L;
+        activeAccountKey = null;
+        activePlayTimeMillis = -1L;
+        lastSampleAtMillis = 0L;
+    }
+
     private void saveIfDue(long now)
     {
         if (dirty && now - lastSaveAtMillis >= SAVE_INTERVAL_MS)
@@ -193,13 +251,15 @@ public class KspAccountPlayTimeCache
             CacheData cacheData = GSON.fromJson(reader, CacheData.class);
             if (cacheData != null && cacheData.playTimeByAccount != null)
             {
-                cacheData.playTimeByAccount.forEach((accountKey, playTimeMillis) ->
+                for (Map.Entry<String, Long> entry : cacheData.playTimeByAccount.entrySet())
                 {
+                    String accountKey = entry.getKey();
+                    Long playTimeMillis = entry.getValue();
                     if (accountKey != null && playTimeMillis != null && playTimeMillis >= 0L)
                     {
                         playTimeByAccount.put(accountKey, playTimeMillis);
                     }
-                });
+                }
             }
         }
         catch (Exception ex)
@@ -217,7 +277,7 @@ public class KspAccountPlayTimeCache
 
         private CacheData(Map<String, Long> playTimeByAccount)
         {
-            this.playTimeByAccount = new HashMap<>(playTimeByAccount);
+            this.playTimeByAccount = playTimeByAccount;
         }
     }
 }
