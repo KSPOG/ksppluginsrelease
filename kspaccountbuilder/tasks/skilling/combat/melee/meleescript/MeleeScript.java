@@ -1,9 +1,7 @@
 package net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.combat.melee.meleescript;
 
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
@@ -441,15 +439,7 @@ public class MeleeScript
     }
 
     private Rs2TileItemModel findNearestLoot(TrainingStage stage) {
-        if (stage == null || stage.lootNames == null) {
-            return null;
-        }
-        HashSet<String> lootNames = Arrays.stream(stage.lootNames)
-                .filter(Objects::nonNull)
-                .map(name -> name.trim().toLowerCase(Locale.ENGLISH))
-                .filter(name -> !name.isEmpty())
-                .collect(Collectors.toCollection(HashSet::new));
-        if (lootNames.isEmpty()) {
+        if (stage == null || stage.lootNames == null || stage.lootNames.length == 0) {
             return null;
         }
 
@@ -460,9 +450,18 @@ public class MeleeScript
                         && item.isLootAble()
                         && this.isLocationInTargetArea(item.getWorldLocation(), stage)
                         && this.canStoreLoot(item)
-                        && (lootNames.contains(item.getName().trim().toLowerCase(Locale.ENGLISH))
+                        && (this.matchesConfiguredLootName(stage.lootNames, item.getName())
                             || (stage.area != CombatAreas.CHICKENS && item.isOwned())))
                 .nearestOnClientThread(LOOT_RADIUS);
+    }
+
+    private boolean matchesConfiguredLootName(String[] lootNames, String itemName) {
+        for (String lootName : lootNames) {
+            if (lootName != null && lootName.equalsIgnoreCase(itemName)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private boolean canStoreLoot(Rs2TileItemModel item) {
@@ -614,54 +613,69 @@ public class MeleeScript
     }
 
     private void attackTarget(TrainingStage stage) {
-        List<Rs2NpcModel> candidates;
-        Rs2NpcModel target;
         Player localPlayer = Microbot.getClient().getLocalPlayer();
         Actor currentInteracting = Rs2Player.getInteracting();
         WorldPoint playerLocation = Rs2Player.getWorldLocation();
         if (stage == null || localPlayer == null || playerLocation == null) {
             return;
         }
+
         Rs2NpcModel currentAttacker = findNpcAttackingPlayer(localPlayer, playerLocation, stage);
         if (currentAttacker != null) {
             this.setStatus("Fighting " + currentAttacker.getName());
-            KspTaskDebug.throttled(log, this.debugLogging, "Melee", "already-under-attack", 3_000L,
-                    "Skipping new target; player is actively fighting attacker | attacker={} id={} loc={} playerInteracting={} animating={}",
-                    currentAttacker.getName(),
-                    currentAttacker.getId(),
-                    currentAttacker.getWorldLocation(),
-                    currentInteracting,
-                    Rs2Player.isAnimating());
+            if (this.debugLogging) {
+                KspTaskDebug.throttled(log, true, "Melee", "already-under-attack", 3_000L,
+                        "Skipping new target; player is actively fighting attacker | attacker={} id={} loc={} playerInteracting={} animating={}",
+                        currentAttacker.getName(),
+                        currentAttacker.getId(),
+                        currentAttacker.getWorldLocation(),
+                        currentInteracting,
+                        Rs2Player.isAnimating());
+            }
             return;
         }
-        ArrayList<String> npcNames = new ArrayList<String>();
-        npcNames.add(stage.primaryNpc.getDisplayName().toLowerCase(Locale.ENGLISH));
-        if (stage.secondaryNpc != null) {
-            npcNames.add(stage.secondaryNpc.getDisplayName().toLowerCase(Locale.ENGLISH));
-        }
-        candidates = Microbot.getRs2NpcCache().query()
+
+        String primaryName = stage.primaryNpc.getDisplayName();
+        String secondaryName = stage.secondaryNpc == null ? null : stage.secondaryNpc.getDisplayName();
+        List<Rs2NpcModel> candidates = Microbot.getRs2NpcCache().query()
                 .fromWorldView()
                 .where(npc -> npc.getCombatLevel() > 0 && !npc.isDead())
                 .where(npc -> {
                     String name = npc.getName();
-                    return name != null && npcNames.contains(name.toLowerCase(Locale.ENGLISH));
+                    return name != null
+                            && (name.equalsIgnoreCase(primaryName)
+                            || (secondaryName != null && name.equalsIgnoreCase(secondaryName)));
                 })
                 .where(npc -> this.isNpcInTargetArea(npc, stage))
-                .toListOnClientThread()
-                .stream()
-                .filter(npc -> this.canAttackNpc(npc, localPlayer))
-                .sorted(Comparator.comparingInt((Rs2NpcModel npc) -> npc.getInteracting() == null ? 0 : 1)
-                        .thenComparingInt(npc -> npc.getWorldLocation().distanceTo(playerLocation)))
-                .collect(Collectors.toList());
-        target = candidates.isEmpty() ? null : candidates.get(0);
+                .toListOnClientThread();
+
+        Rs2NpcModel target = null;
+        int bestBusyRank = Integer.MAX_VALUE;
+        int bestDistance = Integer.MAX_VALUE;
+        for (Rs2NpcModel npc : candidates) {
+            if (!this.canAttackNpc(npc, localPlayer) || npc.getWorldLocation() == null) {
+                continue;
+            }
+
+            int busyRank = npc.getInteracting() == null ? 0 : 1;
+            int distance = npc.getWorldLocation().distanceTo(playerLocation);
+            if (busyRank < bestBusyRank || (busyRank == bestBusyRank && distance < bestDistance)) {
+                target = npc;
+                bestBusyRank = busyRank;
+                bestDistance = distance;
+            }
+        }
+
         if (target == null) {
-            this.setStatus("Waiting for " + stage.primaryNpc.getDisplayName());
-            KspTaskDebug.throttled(log, this.debugLogging, "Melee", "no-target", 3_000L,
-                    "no attack target found | primary={} secondary={} player={} area={}",
-                    stage.primaryNpc.getDisplayName(),
-                    stage.secondaryNpc != null ? stage.secondaryNpc.getDisplayName() : "none",
-                    playerLocation,
-                    stage.area.getDisplayName());
+            this.setStatus("Waiting for " + primaryName);
+            if (this.debugLogging) {
+                KspTaskDebug.throttled(log, true, "Melee", "no-target", 3_000L,
+                        "no attack target found | primary={} secondary={} player={} area={}",
+                        primaryName,
+                        secondaryName == null ? "none" : secondaryName,
+                        playerLocation,
+                        stage.area.getDisplayName());
+            }
             return;
         }
         if (Objects.equals(currentInteracting, target.getNpc()) && Rs2Player.isAnimating()) {
@@ -669,7 +683,7 @@ public class MeleeScript
             return;
         }
         if (!this.canAttackNpc(target, localPlayer)) {
-            this.setStatus("Waiting for an available " + stage.primaryNpc.getDisplayName());
+            this.setStatus("Waiting for an available " + primaryName);
             this.debug(
                     "Skipped claimed npc before attack | target={} id={} interacting={} healthRatio={}",
                     target.getName(),
@@ -678,11 +692,12 @@ public class MeleeScript
                     target.getHealthRatio());
             return;
         }
+
         currentAttacker = findNpcAttackingPlayer(localPlayer, playerLocation, stage);
         if (isActivelyFighting(stage)) {
             this.setStatus("Fighting " + (currentAttacker != null
                     ? currentAttacker.getName()
-                    : stage.primaryNpc.getDisplayName()));
+                    : primaryName));
             this.debug(
                     "Cancelled npc attack because combat started before click | selectedTarget={} attacker={} playerInteracting={}",
                     target.getName(),
@@ -690,6 +705,7 @@ public class MeleeScript
                     Rs2Player.getInteracting());
             return;
         }
+
         this.setStatus("Attacking " + target.getName());
         this.debug("Attempting npc attack | target={} id={} loc={} combatLevel={} reachable={} player={} distance={} targetInteracting={}",
                 target.getName(),
@@ -701,7 +717,7 @@ public class MeleeScript
                 playerLocation.distanceTo(target.getWorldLocation()),
                 target.getInteracting());
         target.click("Attack");
-        boolean activityStarted = MeleeScript.sleepUntil(() -> Rs2Player.isInteracting() || Rs2Player.isAnimating(), (int)2000);
+        boolean activityStarted = MeleeScript.sleepUntil(() -> Rs2Player.isInteracting() || Rs2Player.isAnimating(), 2000);
         this.debug("Npc attack post-click wait | activityStarted={} target={} player={} moving={} animating={} interacting={} inCombat={}",
                 activityStarted,
                 target.getName(),
@@ -784,7 +800,7 @@ public class MeleeScript
             return null;
         }
 
-        return Microbot.getRs2NpcCache().query()
+        List<Rs2NpcModel> attackers = Microbot.getRs2NpcCache().query()
                 .fromWorldView()
                 .where(npc -> npc != null
                         && !npc.isDead()
@@ -794,11 +810,22 @@ public class MeleeScript
                         && (Rs2Player.isInteracting()
                             || npc.getWorldLocation().distanceTo(playerLocation) <= PASSIVE_ATTACKER_MAX_DISTANCE)
                         && Objects.equals(npc.getInteracting(), localPlayer))
-                .toListOnClientThread()
-                .stream()
-                .min(Comparator.comparingInt(npc -> npc.getWorldLocation()
-                        .distanceTo(playerLocation)))
-                .orElse(null);
+                .toListOnClientThread();
+
+        Rs2NpcModel nearest = null;
+        int nearestDistance = Integer.MAX_VALUE;
+        for (Rs2NpcModel npc : attackers) {
+            WorldPoint location = npc.getWorldLocation();
+            if (location == null) {
+                continue;
+            }
+            int distance = location.distanceTo(playerLocation);
+            if (distance < nearestDistance) {
+                nearest = npc;
+                nearestDistance = distance;
+            }
+        }
+        return nearest;
     }
 
     private boolean isIgnoredCombatNpc(String npcName) {
@@ -881,7 +908,20 @@ public class MeleeScript
 
     private String getBestOwnedWeaponUpToCurrentLevel() {
         int attackLevel = this.getSkillLevel(Skill.ATTACK);
-        return Arrays.stream(Weapons.values()).filter(weapon -> attackLevel >= weapon.getRequiredAttackLevel()).sorted(Comparator.comparingInt(Weapons::getRequiredAttackLevel).thenComparingInt(Enum::ordinal).reversed()).map(Weapons::getDisplayName).filter(this::hasWeaponEquippedOrInInventory).findFirst().orElse(null);
+        Weapons best = null;
+        for (Weapons weapon : Weapons.values()) {
+            if (attackLevel < weapon.getRequiredAttackLevel()
+                    || !this.hasWeaponEquippedOrInInventory(weapon.getDisplayName())) {
+                continue;
+            }
+            if (best == null
+                    || weapon.getRequiredAttackLevel() > best.getRequiredAttackLevel()
+                    || (weapon.getRequiredAttackLevel() == best.getRequiredAttackLevel()
+                        && weapon.ordinal() > best.ordinal())) {
+                best = weapon;
+            }
+        }
+        return best == null ? null : best.getDisplayName();
     }
 
     private boolean hasCurrentTaskWeaponEquippedOrInInventory() {
@@ -889,7 +929,7 @@ public class MeleeScript
     }
 
     private boolean hasWeaponEquippedOrInInventory(String itemName) {
-        return itemName != null && (Rs2Equipment.isWearing((String[])new String[]{itemName}) || Rs2Inventory.hasItem((String[])new String[]{itemName}));
+        return itemName != null && (Rs2Equipment.isWearing(itemName) || Rs2Inventory.hasItem(itemName));
     }
 
     private boolean isDragonSlayerCompleted() {
@@ -923,7 +963,7 @@ public class MeleeScript
     }
 
     private boolean hasItemAnywhere(String itemName) {
-        return itemName != null && (Rs2Equipment.isWearing((String[])new String[]{itemName}) || Rs2Inventory.hasItem((String[])new String[]{itemName}) || Rs2Inventory.hasItem((String)itemName, (boolean)true) || Rs2Bank.count((String)itemName) > 0);
+        return itemName != null && (Rs2Equipment.isWearing(itemName) || Rs2Inventory.hasItem(itemName) || Rs2Inventory.hasItem((String)itemName, (boolean)true) || Rs2Bank.count((String)itemName) > 0);
     }
 
     private Food getBestFoodInInventory() {
