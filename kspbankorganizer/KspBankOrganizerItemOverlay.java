@@ -160,10 +160,7 @@ final class KspBankOrganizerItemOverlay extends WidgetItemOverlay
         }
     }
 
-    private static boolean validBounds(Rectangle bounds)
-    {
-        return bounds != null && bounds.width > 0 && bounds.height > 0;
-    }
+    private static boolean validBounds(Rectangle bounds) { return bounds != null && bounds.width > 0 && bounds.height > 0; }
 
     private static boolean crossesBoundary(Rectangle item, Rectangle parent)
     {

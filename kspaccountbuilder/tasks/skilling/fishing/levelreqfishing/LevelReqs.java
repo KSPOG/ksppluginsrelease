@@ -33,13 +33,7 @@ public enum LevelReqs
         return best;
     }
 
-    public String getDisplayName()
-    {
-        return displayName;
-    }
+    public String getDisplayName() { return displayName; }
 
-    public int getRequiredFishingLevel()
-    {
-        return requiredFishingLevel;
-    }
+    public int getRequiredFishingLevel() { return requiredFishingLevel; }
 }

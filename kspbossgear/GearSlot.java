@@ -29,10 +29,7 @@ public enum GearSlot
         this.displayName = displayName;
     }
 
-    public String getDisplayName()
-    {
-        return displayName;
-    }
+    public String getDisplayName() { return displayName; }
 
     static GearSlot detect(String rawRow, int fallbackIndex)
     {

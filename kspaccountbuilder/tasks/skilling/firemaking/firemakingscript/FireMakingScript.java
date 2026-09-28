@@ -64,10 +64,7 @@ public class FireMakingScript extends Script
     private boolean debugLogging;
     private boolean walkingToTargetArea;
 
-    public void setDebugLogging(boolean debugLogging)
-    {
-        this.debugLogging = debugLogging;
-    }
+    public void setDebugLogging(boolean debugLogging) { this.debugLogging = debugLogging; }
 
     public boolean run(FireArea area)
     {
@@ -323,15 +320,9 @@ public class FireMakingScript extends Script
         return false;
     }
 
-    private boolean hasLogsForCurrentTarget(String targetLogName)
-    {
-        return Rs2Inventory.hasItem(targetLogName);
-    }
+    private boolean hasLogsForCurrentTarget(String targetLogName) { return Rs2Inventory.hasItem(targetLogName); }
 
-    private boolean hasLogsAvailable(String targetLogName)
-    {
-        return Rs2Inventory.hasItem(targetLogName) || Rs2Bank.count(targetLogName) > 0;
-    }
+    private boolean hasLogsAvailable(String targetLogName) { return Rs2Inventory.hasItem(targetLogName) || Rs2Bank.count(targetLogName) > 0; }
 
     private boolean ensureInTargetArea()
     {
@@ -1040,15 +1031,9 @@ public class FireMakingScript extends Script
                 .first());
     }
 
-    private boolean isInTargetArea(WorldPoint point)
-    {
-        return point != null && targetArea.toWorldArea().contains(point);
-    }
+    private boolean isInTargetArea(WorldPoint point) { return point != null && targetArea.toWorldArea().contains(point); }
 
-    private boolean isValidFireId(int objectId)
-    {
-        return objectId == NORMAL_FIRE_ID || objectId == FORESTERS_CAMPFIRE_ID;
-    }
+    private boolean isValidFireId(int objectId) { return objectId == NORMAL_FIRE_ID || objectId == FORESTERS_CAMPFIRE_ID; }
 
     private WorldPoint getAreaCenter()
     {
@@ -1105,8 +1090,5 @@ public class FireMakingScript extends Script
         super.shutdown();
     }
 
-    public FireArea getTargetArea()
-    {
-        return targetArea;
-    }
+    public FireArea getTargetArea() { return targetArea; }
 }

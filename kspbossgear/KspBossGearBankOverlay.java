@@ -14,14 +14,8 @@ final class KspBossGearBankOverlay extends BossGearItemOverlay
     }
 
     @Override
-    protected boolean acceptsParent(int parentId)
-    {
-        return parentId == InterfaceID.Bankmain.ITEMS || parentId == InterfaceID.SharedBank.ITEMS;
-    }
+    protected boolean acceptsParent(int parentId) { return parentId == InterfaceID.Bankmain.ITEMS || parentId == InterfaceID.SharedBank.ITEMS; }
 
     @Override
-    protected boolean enabled()
-    {
-        return config.highlightBank();
-    }
+    protected boolean enabled() { return config.highlightBank(); }
 }

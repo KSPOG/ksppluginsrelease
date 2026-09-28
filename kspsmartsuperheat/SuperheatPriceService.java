@@ -100,10 +100,7 @@ public final class SuperheatPriceService
         );
     }
 
-    public long getLastSuccessAt()
-    {
-        return lastSuccessAt;
-    }
+    public long getLastSuccessAt() { return lastSuccessAt; }
 
     private static int calculateBatchSize(SuperheatRecipe recipe, boolean freeFireRunes)
     {

@@ -60,23 +60,11 @@ public enum Areas
         return new WorldPoint(x, y, southWest.getPlane());
     }
 
-    public boolean contains(WorldPoint point)
-    {
-        return point != null && toWorldArea().contains(point);
-    }
+    public boolean contains(WorldPoint point) { return point != null && toWorldArea().contains(point); }
 
-    public String getDisplayName()
-    {
-        return displayName;
-    }
+    public String getDisplayName() { return displayName; }
 
-    public WorldPoint getSouthWest()
-    {
-        return southWest;
-    }
+    public WorldPoint getSouthWest() { return southWest; }
 
-    public WorldPoint getNorthEast()
-    {
-        return northEast;
-    }
+    public WorldPoint getNorthEast() { return northEast; }
 }

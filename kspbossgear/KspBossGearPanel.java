@@ -166,10 +166,7 @@ public final class KspBossGearPanel extends PluginPanel
         suggestions.addMouseListener(new MouseAdapter()
         {
             @Override
-            public void mouseClicked(MouseEvent e)
-            {
-                if (e.getClickCount() == 2) useSelectedSuggestion();
-            }
+            public void mouseClicked(MouseEvent e) { if (e.getClickCount() == 2) useSelectedSuggestion(); }
         });
         suggestions.addListSelectionListener(e -> {
             if (!e.getValueIsAdjusting() && suggestions.getSelectedValue() != null)

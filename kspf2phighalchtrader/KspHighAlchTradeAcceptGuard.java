@@ -166,10 +166,7 @@ public class KspHighAlchTradeAcceptGuard
         return false;
     }
 
-    private static String cleanText(String value)
-    {
-        return value == null ? "" : Text.removeTags(value).trim();
-    }
+    private static String cleanText(String value) { return value == null ? "" : Text.removeTags(value).trim(); }
 
     private static String normaliseName(String value)
     {

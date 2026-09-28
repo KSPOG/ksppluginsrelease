@@ -48,13 +48,7 @@ public class KspKaramjaFishingOverlay extends OverlayPanel
         return super.render(graphics);
     }
 
-    private void line(String left, String right)
-    {
-        panelComponent.getChildren().add(LineComponent.builder().left(left + ":").right(right).build());
-    }
+    private void line(String left, String right) { panelComponent.getChildren().add(LineComponent.builder().left(left + ":").right(right).build()); }
 
-    private String n(int value)
-    {
-        return String.format("%,d", value);
-    }
+    private String n(int value) { return String.format("%,d", value); }
 }

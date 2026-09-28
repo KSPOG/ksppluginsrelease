@@ -652,10 +652,7 @@ final class SmartSorter
         return 50;
     }
 
-    private static boolean isGem(String lower)
-    {
-        return containsAny(lower, "sapphire", "emerald", "ruby", "diamond", "dragonstone", "onyx", "zenyte");
-    }
+    private static boolean isGem(String lower) { return containsAny(lower, "sapphire", "emerald", "ruby", "diamond", "dragonstone", "onyx", "zenyte"); }
 
     private static int gemTier(String lower)
     {
@@ -752,15 +749,9 @@ final class SmartSorter
         return false;
     }
 
-    private static String lower(String value)
-    {
-        return value == null ? "" : value.toLowerCase();
-    }
+    private static String lower(String value) { return value == null ? "" : value.toLowerCase(); }
 
-    private static long stableNameHash(String value)
-    {
-        return value == null ? 0 : Integer.toUnsignedLong(value.toLowerCase().hashCode());
-    }
+    private static long stableNameHash(String value) { return value == null ? 0 : Integer.toUnsignedLong(value.toLowerCase().hashCode()); }
 
     private enum TeleportSub { RUNES, JEWELRY, TABLETS, OTHER }
     private enum GearSub { MELEE_WEAPON, MELEE_ARMOR, RANGED_WEAPON, RANGED_ARMOR, MAGE_WEAPON, MAGE_ARMOR, GENERAL }

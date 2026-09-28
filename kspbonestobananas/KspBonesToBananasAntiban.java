@@ -70,10 +70,7 @@ final class KspBonesToBananasAntiban
         }
     }
 
-    private void schedule(KspBonesToBananasConfig.AntibanProfile p)
-    {
-        castsUntilLongBreak = random(p.castsMin, p.castsMax);
-    }
+    private void schedule(KspBonesToBananasConfig.AntibanProfile p) { castsUntilLongBreak = random(p.castsMin, p.castsMax); }
 
     private static int random(int min, int max)
     {

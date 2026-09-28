@@ -109,10 +109,7 @@ abstract class BossGearItemOverlay extends WidgetItemOverlay
         graphics.setStroke(oldStroke);
     }
 
-    private static boolean valid(Rectangle bounds)
-    {
-        return bounds != null && bounds.width > 0 && bounds.height > 0;
-    }
+    private static boolean valid(Rectangle bounds) { return bounds != null && bounds.width > 0 && bounds.height > 0; }
 
     private static boolean crossesBoundary(Rectangle item, Rectangle parent)
     {

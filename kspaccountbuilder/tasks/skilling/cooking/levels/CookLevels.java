@@ -26,23 +26,11 @@ public enum CookLevels
         this.requiredLevel = requiredLevel;
     }
 
-    public String getRawItemName()
-    {
-        return rawItemName;
-    }
+    public String getRawItemName() { return rawItemName; }
 
-    public int getRawItemId()
-    {
-        return rawItemId;
-    }
+    public int getRawItemId() { return rawItemId; }
 
-    public String getCookedItemName()
-    {
-        return cookedItemName;
-    }
+    public String getCookedItemName() { return cookedItemName; }
 
-    public int getRequiredLevel()
-    {
-        return requiredLevel;
-    }
+    public int getRequiredLevel() { return requiredLevel; }
 }

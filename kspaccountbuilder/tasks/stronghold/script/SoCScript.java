@@ -19,7 +19,7 @@ import net.runelite.client.plugins.microbot.util.walker.StrongholdAnswer;
 @Singleton
 public class SoCScript extends Script
 {
-    private static final int LOOP_DELAY_MS = 600;
+    private static final int LOOP_DELAY_MS = 250;
     private static final int WALK_REFIRE_MS = 3_000;
     private static final int HEAL_PERCENT = 55;
     private static final int GIFT_OF_PEACE_OBJECT_ID = 20_656;
@@ -380,8 +380,5 @@ public class SoCScript extends Script
         super.shutdown();
     }
 
-    public boolean isComplete()
-    {
-        return complete;
-    }
+    public boolean isComplete() { return complete; }
 }

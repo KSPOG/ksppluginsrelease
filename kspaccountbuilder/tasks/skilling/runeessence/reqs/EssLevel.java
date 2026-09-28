@@ -13,13 +13,7 @@ public enum EssLevel
         this.requiredMiningLevel = requiredMiningLevel;
     }
 
-    public String getDisplayName()
-    {
-        return displayName;
-    }
+    public String getDisplayName() { return displayName; }
 
-    public int getRequiredMiningLevel()
-    {
-        return requiredMiningLevel;
-    }
+    public int getRequiredMiningLevel() { return requiredMiningLevel; }
 }

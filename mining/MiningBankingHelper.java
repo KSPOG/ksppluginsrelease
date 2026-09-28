@@ -18,10 +18,7 @@ public final class MiningBankingHelper
 
     private MiningBankingHelper() {}
 
-    public static boolean depositInventoryExceptPickaxe()
-    {
-        return depositInventoryExceptPickaxeUntilClear(DEFAULT_TIMEOUT_MS);
-    }
+    public static boolean depositInventoryExceptPickaxe() { return depositInventoryExceptPickaxeUntilClear(DEFAULT_TIMEOUT_MS); }
 
     public static boolean depositInventoryExceptPickaxeUntilClear(long timeoutMs)
     {

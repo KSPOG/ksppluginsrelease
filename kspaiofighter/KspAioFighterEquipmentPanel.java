@@ -267,10 +267,7 @@ final class KspAioFighterEquipmentPanel extends PluginPanel
         refreshAreaStatus();
     }
 
-    private void openPicker(EquipmentInventorySlot slot)
-    {
-        ensureLoaded(() -> showPicker(slot));
-    }
+    private void openPicker(EquipmentInventorySlot slot) { ensureLoaded(() -> showPicker(slot)); }
 
     private void ensureLoaded(Runnable next)
     {
@@ -403,10 +400,7 @@ final class KspAioFighterEquipmentPanel extends PluginPanel
         return value.length() <= 11 ? value : value.substring(0, 10) + "…";
     }
 
-    private static boolean valid(WorldPoint point)
-    {
-        return point != null && point.getX() > 0 && point.getY() > 0;
-    }
+    private static boolean valid(WorldPoint point) { return point != null && point.getX() > 0 && point.getY() > 0; }
 
     private static final class ItemRenderer extends JPanel implements ListCellRenderer<KspAioFighterEquipmentItem>
     {

@@ -15,8 +15,5 @@ public enum JewelrySelectionMode
     }
 
     @Override
-    public String toString()
-    {
-        return label;
-    }
+    public String toString() { return label; }
 }

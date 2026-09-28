@@ -33,9 +33,7 @@ public class TutAreas
             TUTORIAL_END_AREA
     };
 
-    private TutAreas()
-    {
-    }
+    private TutAreas() {}
 
     public static boolean contains(WorldPoint point)
     {

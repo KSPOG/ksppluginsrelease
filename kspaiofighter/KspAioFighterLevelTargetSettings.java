@@ -81,8 +81,5 @@ final class KspAioFighterLevelTargetSettings
         configManager.unsetConfiguration(KspAioFighterConfig.GROUP, backupKey);
     }
 
-    private void setTarget(String key, int value)
-    {
-        configManager.setConfiguration(KspAioFighterConfig.GROUP, key, Math.max(1, Math.min(99, value)));
-    }
+    private void setTarget(String key, int value) { configManager.setConfiguration(KspAioFighterConfig.GROUP, key, Math.max(1, Math.min(99, value))); }
 }

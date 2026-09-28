@@ -26,7 +26,7 @@ import org.slf4j.LoggerFactory;
 public class RomeoScript extends Script
 {
     private static final Logger log = LoggerFactory.getLogger(RomeoScript.class);
-    private static final int LOOP_DELAY_MS = 600;
+    private static final int LOOP_DELAY_MS = 250;
     private static final int NPC_REACH_DISTANCE = 4;
     private static final long WALK_REFIRE_COOLDOWN_MS = 3_500L;
     private static final long ACTION_COOLDOWN_MS = 1_200L;
@@ -968,10 +968,7 @@ public class RomeoScript extends Script
                 .nearestOnClientThread();
     }
 
-    private boolean actionCooldownElapsed()
-    {
-        return System.currentTimeMillis() - lastActionAtMs >= ACTION_COOLDOWN_MS;
-    }
+    private boolean actionCooldownElapsed() { return System.currentTimeMillis() - lastActionAtMs >= ACTION_COOLDOWN_MS; }
 
     private boolean hasCadavaBerries()
     {
@@ -979,10 +976,7 @@ public class RomeoScript extends Script
                 >= Inv.CADAVA_BERRIES.getQuantity();
     }
 
-    private boolean hasMessage()
-    {
-        return Rs2Inventory.itemQuantity(Inv.MESSAGE.getItemId()) >= Inv.MESSAGE.getQuantity();
-    }
+    private boolean hasMessage() { return Rs2Inventory.itemQuantity(Inv.MESSAGE.getItemId()) >= Inv.MESSAGE.getQuantity(); }
 
     private boolean hasCadavaPotion()
     {
@@ -997,20 +991,11 @@ public class RomeoScript extends Script
                 || getQuestLogStage() > QUEST_STAGE_FINISH_WITH_ROMEO;
     }
 
-    public void setDebugLogging(boolean debugLogging)
-    {
-        this.debugLogging = debugLogging;
-    }
+    public void setDebugLogging(boolean debugLogging) { this.debugLogging = debugLogging; }
 
-    public RomeoState getState()
-    {
-        return state;
-    }
+    public RomeoState getState() { return state; }
 
-    public String getStatus()
-    {
-        return status;
-    }
+    public String getStatus() { return status; }
 
     @Override
     public void shutdown()

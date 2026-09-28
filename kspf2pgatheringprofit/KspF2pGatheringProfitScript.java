@@ -243,10 +243,7 @@ public class KspF2pGatheringProfitScript extends Script
         return Math.max(0, sell - (int) Math.floor(sell * .02));
     }
 
-    private int estimate(GatheringMethod candidate)
-    {
-        return unitValue(candidate) * candidate.unitsHour;
-    }
+    private int estimate(GatheringMethod candidate) { return unitValue(candidate) * candidate.unitsHour; }
 
     private void trackYield()
     {
@@ -497,15 +494,9 @@ public class KspF2pGatheringProfitScript extends Script
         return null;
     }
 
-    private boolean hasUsableTool(ToolTier[] tools, int skillLevel)
-    {
-        return bestHeldToolName(tools, skillLevel) != null;
-    }
+    private boolean hasUsableTool(ToolTier[] tools, int skillLevel) { return bestHeldToolName(tools, skillLevel) != null; }
 
-    private boolean hasTool(String name)
-    {
-        return Rs2Inventory.hasItem(name) || Rs2Equipment.isWearing(name);
-    }
+    private boolean hasTool(String name) { return Rs2Inventory.hasItem(name) || Rs2Equipment.isWearing(name); }
 
     private String missingInputDescription()
     {

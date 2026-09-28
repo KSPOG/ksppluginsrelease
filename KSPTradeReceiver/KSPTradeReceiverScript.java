@@ -569,20 +569,11 @@ public class KSPTradeReceiverScript extends Script
         }
     }
 
-    private boolean isTradeOpen()
-    {
-        return isFirstTradeScreenOpen() || isConfirmationScreenOpen();
-    }
+    private boolean isTradeOpen() { return isFirstTradeScreenOpen() || isConfirmationScreenOpen(); }
 
-    private boolean isFirstTradeScreenOpen()
-    {
-        return Rs2Widget.isWidgetVisible(InterfaceID.Trademain.ACCEPT);
-    }
+    private boolean isFirstTradeScreenOpen() { return Rs2Widget.isWidgetVisible(InterfaceID.Trademain.ACCEPT); }
 
-    private boolean isConfirmationScreenOpen()
-    {
-        return Rs2Widget.isWidgetVisible(InterfaceID.Tradeconfirm.TRADE2ACCEPT);
-    }
+    private boolean isConfirmationScreenOpen() { return Rs2Widget.isWidgetVisible(InterfaceID.Tradeconfirm.TRADE2ACCEPT); }
 
     private void captureTradeTileIfMissing()
     {
@@ -631,10 +622,7 @@ public class KSPTradeReceiverScript extends Script
         return suffix > 0 ? cleanText(cleanedMessage.substring(0, suffix)) : "";
     }
 
-    private static String configuredName(KSPTradeReceiverConfig config)
-    {
-        return config == null ? "" : normaliseName(config.traderName());
-    }
+    private static String configuredName(KSPTradeReceiverConfig config) { return config == null ? "" : normaliseName(config.traderName()); }
 
     private static String displayConfiguredName(String name)
     {

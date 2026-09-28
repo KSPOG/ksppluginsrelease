@@ -186,9 +186,6 @@ final class KspAioFighterInventoryLoader
         }
 
         @Override
-        public int hashCode()
-        {
-            return 31 * name.toLowerCase(java.util.Locale.ROOT).hashCode() + Boolean.hashCode(noted);
-        }
+        public int hashCode() { return 31 * name.toLowerCase(java.util.Locale.ROOT).hashCode() + Boolean.hashCode(noted); }
     }
 }

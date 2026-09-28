@@ -56,7 +56,6 @@ public class KspF2PHighAlchTraderScript extends Script {
     }
 
 
-
     private static final int NATURE_RUNE_ID = 561;
     private static final int FIRE_RUNE_ID = 554;
     private static final int COINS_ID = 995;

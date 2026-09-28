@@ -132,13 +132,7 @@ final class KspAioFighterInventorySettings
             + (item.isNoted() ? "1" : "0") + "|" + encodedName;
     }
 
-    private static String setupKey(KspAioFighterGearStyle style)
-    {
-        return SETUP_PREFIX + style.name().toLowerCase(Locale.ROOT);
-    }
+    private static String setupKey(KspAioFighterGearStyle style) { return SETUP_PREFIX + style.name().toLowerCase(Locale.ROOT); }
 
-    private static String enabledKey(KspAioFighterGearStyle style)
-    {
-        return ENABLED_PREFIX + style.name().toLowerCase(Locale.ROOT);
-    }
+    private static String enabledKey(KspAioFighterGearStyle style) { return ENABLED_PREFIX + style.name().toLowerCase(Locale.ROOT); }
 }

@@ -228,10 +228,7 @@ final class FactoryAntibanController
             : config.antibanProfile();
     }
 
-    private static boolean roll(double chance)
-    {
-        return chance > 0.0 && ThreadLocalRandom.current().nextDouble() < Math.min(1.0, chance);
-    }
+    private static boolean roll(double chance) { return chance > 0.0 && ThreadLocalRandom.current().nextDouble() < Math.min(1.0, chance); }
 
     private static int randomBetween(int minimum, int maximum)
     {

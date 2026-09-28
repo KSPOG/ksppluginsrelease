@@ -83,15 +83,9 @@ public final class BonesToBananasQuote
         return (int) value;
     }
 
-    public double getAverageInputCostPerBone()
-    {
-        return batchSize <= 0 ? 0D : inputCostPerCast / (double) batchSize;
-    }
+    public double getAverageInputCostPerBone() { return batchSize <= 0 ? 0D : inputCostPerCast / (double) batchSize; }
 
-    public double getProfitPerBone()
-    {
-        return batchSize <= 0 ? 0D : profitPerCast / (double) batchSize;
-    }
+    public double getProfitPerBone() { return batchSize <= 0 ? 0D : profitPerCast / (double) batchSize; }
 
     public BananaBoneType getBone() { return bone; }
     public boolean isValid() { return valid; }

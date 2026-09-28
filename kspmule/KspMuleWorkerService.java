@@ -69,10 +69,7 @@ public final class KspMuleWorkerService
     }
 
     /** True while any local KSP mule transfer owns interaction priority. */
-    public static boolean isTransferPriorityActive()
-    {
-        return GLOBAL_TRANSFER_LOCK.get();
-    }
+    public static boolean isTransferPriorityActive() { return GLOBAL_TRANSFER_LOCK.get(); }
 
     public synchronized void start(KspMuleConfig config)
     {
@@ -132,20 +129,14 @@ public final class KspMuleWorkerService
         pollJob();
     }
 
-    private long effectiveBankReserve(KspMuleConfig c)
-    {
-        return Math.max(0L, Math.max((long) c.muleKeepInBank(), (long) c.muleMinimumBankReserve()));
-    }
+    private long effectiveBankReserve(KspMuleConfig c) { return Math.max(0L, Math.max((long) c.muleKeepInBank(), (long) c.muleMinimumBankReserve())); }
 
     private long effectiveTradingCapital(KspMuleConfig c)
     {
         return Math.max(0L, Math.max((long) c.muleKeepTradingCapital(), (long) c.muleMinimumTradingCapital()));
     }
 
-    private void refreshCoinSummary()
-    {
-        totalCoins = Math.max(0L, Rs2Inventory.itemQuantity(COINS_ID)) + Math.max(0L, Rs2Bank.count(COINS_ID));
-    }
+    private void refreshCoinSummary() { totalCoins = Math.max(0L, Rs2Inventory.itemQuantity(COINS_ID)) + Math.max(0L, Rs2Bank.count(COINS_ID)); }
 
     private void maybeStartTransfer()
     {

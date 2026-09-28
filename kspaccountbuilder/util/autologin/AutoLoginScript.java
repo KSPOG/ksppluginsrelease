@@ -22,7 +22,7 @@ import static net.runelite.client.plugins.microbot.util.Global.sleepUntil;
 @Slf4j
 public class AutoLoginScript extends Script
 {
-    private static final int LOOP_DELAY_MS = 600;
+    private static final int LOOP_DELAY_MS = 250;
     private static final int WELCOME_PLAY_CLICK_COOLDOWN_MS = 2_500;
     private static final int LOGIN_ATTEMPT_COOLDOWN_MS = 10_000;
     private static final int POST_LOGIN_SETTLE_MS = 4_000;
@@ -37,20 +37,11 @@ public class AutoLoginScript extends Script
     private long lastLoginScreenDebugAtMillis;
     private long loggedInAtMillis;
 
-    public LoginState getState()
-    {
-        return state;
-    }
+    public LoginState getState() { return state; }
 
-    public void setDebugLogging(boolean debugLogging)
-    {
-        this.debugLogging = debugLogging;
-    }
+    public void setDebugLogging(boolean debugLogging) { this.debugLogging = debugLogging; }
 
-    public boolean run()
-    {
-        return run(ALWAYS_ALLOWED);
-    }
+    public boolean run() { return run(ALWAYS_ALLOWED); }
 
     public boolean run(BooleanSupplier kspLoginAllowed)
     {
@@ -200,10 +191,7 @@ public class AutoLoginScript extends Script
         }
     }
 
-    public boolean isActive()
-    {
-        return active || isRunning();
-    }
+    public boolean isActive() { return active || isRunning(); }
 
     private void handleLoginScreenWithLoginManager(Client client)
     {

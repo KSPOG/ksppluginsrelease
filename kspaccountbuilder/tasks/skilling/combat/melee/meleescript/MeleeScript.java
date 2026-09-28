@@ -53,7 +53,7 @@ import org.slf4j.LoggerFactory;
 public class MeleeScript
         extends Script {
     private static final Logger log = LoggerFactory.getLogger(MeleeScript.class);
-    private static final int LOOP_DELAY_MS = 400;
+    private static final int LOOP_DELAY_MS = 250;
     private static final int WEB_WALK_COOLDOWN_MS = 3000;
     private static final int TARGET_FOOD_COUNT = Buy.MELEE_TARGET_FOOD_COUNT;
     private static final int CHICKEN_TARGET_COMBAT_STAT_LEVEL = 15;

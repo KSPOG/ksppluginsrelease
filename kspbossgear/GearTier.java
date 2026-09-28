@@ -18,19 +18,10 @@ public enum GearTier
         this.color = color;
     }
 
-    public String getDisplayName()
-    {
-        return displayName;
-    }
+    public String getDisplayName() { return displayName; }
 
-    public Color getColor()
-    {
-        return color;
-    }
+    public Color getColor() { return color; }
 
     @Override
-    public String toString()
-    {
-        return displayName;
-    }
+    public String toString() { return displayName; }
 }

@@ -32,7 +32,6 @@ public class LocationOption {
     private final Map<Integer,Integer> requiredItems; //id key ,and amount value
 
 
-
     public LocationOption(WorldPoint worldPoint, String name, boolean membersOnly) {
         this(worldPoint, name,membersOnly, new HashMap<>(), new HashMap<>(),new HashMap<>(),new HashMap<>(),new HashMap<>());
     }

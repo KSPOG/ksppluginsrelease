@@ -14,8 +14,5 @@ public enum LimitExhaustedAction
     }
 
     @Override
-    public String toString()
-    {
-        return displayName;
-    }
+    public String toString() { return displayName; }
 }

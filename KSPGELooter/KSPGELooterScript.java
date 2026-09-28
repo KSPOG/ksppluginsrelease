@@ -281,10 +281,7 @@ public class KSPGELooterScript extends Script
                 : Duration.ofMillis(Math.max(0L, System.currentTimeMillis() - startTimeMs));
     }
 
-    private Rs2TileItemModel findLootTarget(int minimumGeValue)
-    {
-        return findLootTarget(minimumGeValue, null);
-    }
+    private Rs2TileItemModel findLootTarget(int minimumGeValue) { return findLootTarget(minimumGeValue, null); }
 
     private Rs2TileItemModel findLootTarget(int minimumGeValue, String excludeKey)
     {
@@ -488,10 +485,7 @@ public class KSPGELooterScript extends Script
         }
     }
 
-    private boolean invokeTake(Rs2TileItemModel item)
-    {
-        return item != null && item.pickup();
-    }
+    private boolean invokeTake(Rs2TileItemModel item) { return item != null && item.pickup(); }
 
     private Rs2TileItemModel findLiveGroundItem(int itemId, WorldPoint tile)
     {
@@ -811,10 +805,7 @@ public class KSPGELooterScript extends Script
         return a == null || b == null || a.getPlane() != b.getPlane() ? Integer.MAX_VALUE : a.distanceTo(b);
     }
 
-    private static int clamp(int value, int minimum, int maximum)
-    {
-        return Math.max(minimum, Math.min(maximum, value));
-    }
+    private static int clamp(int value, int minimum, int maximum) { return Math.max(minimum, Math.min(maximum, value)); }
 
     private static int inventoryItemCount() { return (int) Rs2Inventory.items().count(); }
 

@@ -363,15 +363,9 @@ final class BondActivityAdvisor
         return Math.max(0, units4h);
     }
 
-    private int limit4h(int itemId)
-    {
-        return tradeLimits == null ? 0 : tradeLimits.getLimit4Hours(itemId);
-    }
+    private int limit4h(int itemId) { return tradeLimits == null ? 0 : tradeLimits.getLimit4Hours(itemId); }
 
-    private int level(Skill skill)
-    {
-        return skill == null ? 99 : client.getRealSkillLevel(skill);
-    }
+    private int level(Skill skill) { return skill == null ? 99 : client.getRealSkillLevel(skill); }
 
     private int price(int itemId)
     {
@@ -379,20 +373,11 @@ final class BondActivityAdvisor
         return value <= 0L ? 0 : (int) Math.min(Integer.MAX_VALUE, value);
     }
 
-    private long realizedSellPrice(int marketPrice)
-    {
-        return (long) marketPrice * config.saleRealizationPercent() / 100L;
-    }
+    private long realizedSellPrice(int marketPrice) { return (long) marketPrice * config.saleRealizationPercent() / 100L; }
 
-    private long scaledThroughput(int baseline)
-    {
-        return Math.max(1L, (long) baseline * config.activityEfficiencyPercent() / 100L);
-    }
+    private long scaledThroughput(int baseline) { return Math.max(1L, (long) baseline * config.activityEfficiencyPercent() / 100L); }
 
-    private static String formatHourly(long units4h)
-    {
-        return String.format(Locale.US, "%.1f", units4h / 4.0);
-    }
+    private static String formatHourly(long units4h) { return String.format(Locale.US, "%.1f", units4h / 4.0); }
 
     static final class ActivityEstimate
     {

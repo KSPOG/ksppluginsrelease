@@ -204,15 +204,9 @@ public class KspAioFighterPlugin extends Plugin
 		refreshPanelAutomationState();
 	}
 
-	private void stopAutomationFromScript()
-	{
-		SwingUtilities.invokeLater(this::stopAutomation);
-	}
+	private void stopAutomationFromScript() { SwingUtilities.invokeLater(this::stopAutomation); }
 
-	private boolean isAutomationRunning()
-	{
-		return automationRunning || preparingStart;
-	}
+	private boolean isAutomationRunning() { return automationRunning || preparingStart; }
 
 	private void loadInventorySetup(KspAioFighterGearStyle style)
 	{
@@ -432,10 +426,7 @@ public class KspAioFighterPlugin extends Plugin
 		Microbot.status = "KSP AIO Fighter: safe spot set to " + formatPoint(safeSpot);
 	}
 
-	private boolean isUseSafeSpotEnabled()
-	{
-		return Boolean.TRUE.equals(configManager.getConfiguration(KspAioFighterConfig.GROUP, "useSafeSpot", Boolean.class));
-	}
+	private boolean isUseSafeSpotEnabled() { return Boolean.TRUE.equals(configManager.getConfiguration(KspAioFighterConfig.GROUP, "useSafeSpot", Boolean.class)); }
 
 	private boolean isAttackAreaEnabled()
 	{
@@ -512,15 +503,9 @@ public class KspAioFighterPlugin extends Plugin
 		return x == null || y == null || plane == null ? null : new WorldPoint(x, y, plane);
 	}
 
-	private boolean isConfiguredTileValid(WorldPoint point)
-	{
-		return point != null && point.getX() > 0 && point.getY() > 0;
-	}
+	private boolean isConfiguredTileValid(WorldPoint point) { return point != null && point.getX() > 0 && point.getY() > 0; }
 
-	private String formatPoint(WorldPoint point)
-	{
-		return "(" + point.getX() + ", " + point.getY() + ", " + point.getPlane() + ")";
-	}
+	private String formatPoint(WorldPoint point) { return "(" + point.getX() + ", " + point.getY() + ", " + point.getPlane() + ")"; }
 
 	private WorldPoint getSelectedWorldPoint()
 	{

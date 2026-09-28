@@ -201,9 +201,7 @@ public class KspAccountPlayTimeCache
     {
         private Map<String, Long> playTimeByAccount = new HashMap<>();
 
-        private CacheData()
-        {
-        }
+        private CacheData() {}
 
         private CacheData(Map<String, Long> playTimeByAccount)
         {

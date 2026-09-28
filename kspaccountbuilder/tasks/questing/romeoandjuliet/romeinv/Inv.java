@@ -19,18 +19,9 @@ public enum Inv
         this.quantity = quantity;
     }
 
-    public String getDisplayName()
-    {
-        return displayName;
-    }
+    public String getDisplayName() { return displayName; }
 
-    public int getItemId()
-    {
-        return itemId;
-    }
+    public int getItemId() { return itemId; }
 
-    public int getQuantity()
-    {
-        return quantity;
-    }
+    public int getQuantity() { return quantity; }
 }

@@ -140,10 +140,7 @@ public enum KspSingleSkillTarget
         return options.toArray(new KspSingleSkillTarget[0]);
     }
 
-    public boolean supports(KspTrainSingleSkillTask selectedTask)
-    {
-        return this == NONE || this == AUTOMATIC || task == selectedTask;
-    }
+    public boolean supports(KspTrainSingleSkillTask selectedTask) { return this == NONE || this == AUTOMATIC || task == selectedTask; }
 
     public <T> T getValue(Class<T> type)
     {
@@ -151,8 +148,5 @@ public enum KspSingleSkillTarget
     }
 
     @Override
-    public String toString()
-    {
-        return displayName;
-    }
+    public String toString() { return displayName; }
 }

@@ -331,10 +331,7 @@ final class BossGearService
         }
     }
 
-    private static void addItemId(Set<Integer> target, Rs2ItemModel item)
-    {
-        if (item != null && item.getId() > 0) target.add(item.getId());
-    }
+    private static void addItemId(Set<Integer> target, Rs2ItemModel item) { if (item != null && item.getId() > 0) target.add(item.getId()); }
 
     synchronized void shutdown()
     {
@@ -533,10 +530,7 @@ final class BossGearService
         return false;
     }
 
-    private static String normalize(String value)
-    {
-        return value == null ? "" : value.trim().toLowerCase(Locale.ROOT);
-    }
+    private static String normalize(String value) { return value == null ? "" : value.trim().toLowerCase(Locale.ROOT); }
 
     private static String readableMessage(Throwable ex)
     {
@@ -561,10 +555,7 @@ final class BossGearService
             this.bankIds = bankIds;
         }
 
-        private static OwnershipSnapshot empty()
-        {
-            return new OwnershipSnapshot(Collections.emptySet(), Collections.emptySet(), Collections.emptySet());
-        }
+        private static OwnershipSnapshot empty() { return new OwnershipSnapshot(Collections.emptySet(), Collections.emptySet(), Collections.emptySet()); }
     }
 
     enum HighlightKind

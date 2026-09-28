@@ -71,10 +71,7 @@ final class WikiGearPage
         }
 
         @Override
-        public String toString()
-        {
-            return name;
-        }
+        public String toString() { return name; }
     }
 
     static final class GearRow

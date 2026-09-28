@@ -227,10 +227,7 @@ public class KspBoneAshScript extends Script
         return Rs2Inventory.getList(item -> item != null && item.getName().equalsIgnoreCase(itemName));
     }
 
-    private int trackedInventoryCount(String itemName)
-    {
-        return Rs2Inventory.itemQuantity(itemName, true);
-    }
+    private int trackedInventoryCount(String itemName) { return Rs2Inventory.itemQuantity(itemName, true); }
 
     private Rs2ItemModel selectRandomizedTarget(List<Rs2ItemModel> source)
     {
@@ -337,10 +334,7 @@ public class KspBoneAshScript extends Script
         return min + random.nextInt((max - min) + 1);
     }
 
-    private int clampPercent(int value)
-    {
-        return Math.max(0, Math.min(100, value));
-    }
+    private int clampPercent(int value) { return Math.max(0, Math.min(100, value)); }
 
     private String configuredItemName()
     {

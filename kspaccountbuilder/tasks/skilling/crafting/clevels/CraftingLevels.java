@@ -28,13 +28,7 @@ public enum CraftingLevels
         this.requiredLevel = requiredLevel;
     }
 
-    public String getDisplayName()
-    {
-        return displayName;
-    }
+    public String getDisplayName() { return displayName; }
 
-    public int getRequiredLevel()
-    {
-        return requiredLevel;
-    }
+    public int getRequiredLevel() { return requiredLevel; }
 }

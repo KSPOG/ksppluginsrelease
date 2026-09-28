@@ -392,10 +392,7 @@ public class KspMugFillerScript extends Script
                 .isPresent();
     }
 
-    private int glassCount()
-    {
-        return Rs2Inventory.itemQuantity(BEER_GLASS_ID);
-    }
+    private int glassCount() { return Rs2Inventory.itemQuantity(BEER_GLASS_ID); }
 
     private void beginBankReset()
     {
@@ -467,20 +464,11 @@ public class KspMugFillerScript extends Script
         awaitingInventoryChange = false;
     }
 
-    public String getStatus()
-    {
-        return status;
-    }
+    public String getStatus() { return status; }
 
-    public long getRuntimeMs()
-    {
-        return startedAtMs <= 0L ? 0L : Math.max(0L, System.currentTimeMillis() - startedAtMs);
-    }
+    public long getRuntimeMs() { return startedAtMs <= 0L ? 0L : Math.max(0L, System.currentTimeMillis() - startedAtMs); }
 
-    public long getFilledCount()
-    {
-        return filledCount;
-    }
+    public long getFilledCount() { return filledCount; }
 
     public long getFilledPerHour()
     {

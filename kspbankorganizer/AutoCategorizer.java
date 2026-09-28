@@ -284,8 +284,5 @@ final class AutoCategorizer
         putAll(ItemCategory.GEAR, 7462, 6570, 21295, 10499, 22109, 4089, 4091, 4093, 4107, 4109);
     }
 
-    private void putAll(ItemCategory category, int... itemIds)
-    {
-        for (int itemId : itemIds) idOverrides.putIfAbsent(itemId, category);
-    }
+    private void putAll(ItemCategory category, int... itemIds) { for (int itemId : itemIds) idOverrides.putIfAbsent(itemId, category); }
 }

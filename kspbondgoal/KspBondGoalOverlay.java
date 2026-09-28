@@ -170,10 +170,7 @@ public class KspBondGoalOverlay extends OverlayPanel
         );
     }
 
-    private static String formatGp(long value)
-    {
-        return String.format(Locale.US, "%,d gp", Math.max(0, value));
-    }
+    private static String formatGp(long value) { return String.format(Locale.US, "%,d gp", Math.max(0, value)); }
 
     private static String compactGp(long value)
     {

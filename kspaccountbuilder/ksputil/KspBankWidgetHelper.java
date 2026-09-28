@@ -9,9 +9,7 @@ public final class KspBankWidgetHelper
     private static final int SCREEN_HIGHLIGHT_GROUP = 664;
     private static final int SCREEN_HIGHLIGHT_CLOSE_CHILD = 29;
 
-    private KspBankWidgetHelper()
-    {
-    }
+    private KspBankWidgetHelper() {}
 
     public static boolean closeBankTutorialOverlayIfOpen()
     {

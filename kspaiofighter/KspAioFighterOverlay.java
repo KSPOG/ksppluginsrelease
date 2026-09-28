@@ -52,10 +52,7 @@ public class KspAioFighterOverlay extends Overlay
 		return panelComponent.render(graphics);
 	}
 
-	private void addLine(String left, String right)
-	{
-		addLine(left, right, Color.WHITE);
-	}
+	private void addLine(String left, String right) { addLine(left, right, Color.WHITE); }
 
 	private void addLine(String left, String right, Color rightColor)
 	{
@@ -132,10 +129,7 @@ public class KspAioFighterOverlay extends Overlay
 		return trim(error, 44) + " / " + formatAge(ageMs);
 	}
 
-	private String formatPoint(WorldPoint point)
-	{
-		return point == null ? "-" : point.getX() + "," + point.getY() + "," + point.getPlane();
-	}
+	private String formatPoint(WorldPoint point) { return point == null ? "-" : point.getX() + "," + point.getY() + "," + point.getPlane(); }
 
 	private String stripPrefix(String status)
 	{
@@ -147,10 +141,7 @@ public class KspAioFighterOverlay extends Overlay
 		return status.startsWith(prefix) ? status.substring(prefix.length()) : status;
 	}
 
-	private String empty(String value, String fallback)
-	{
-		return value == null || value.trim().isEmpty() ? fallback : trim(value.trim(), 32);
-	}
+	private String empty(String value, String fallback) { return value == null || value.trim().isEmpty() ? fallback : trim(value.trim(), 32); }
 
 	private String trim(String value, int maxLength)
 	{

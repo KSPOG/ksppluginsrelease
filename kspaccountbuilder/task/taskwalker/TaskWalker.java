@@ -12,9 +12,7 @@ public final class TaskWalker
 {
     private static final long WALK_REFIRE_COOLDOWN_MS = 8_000L;
 
-    private TaskWalker()
-    {
-    }
+    private TaskWalker() {}
 
     public static synchronized boolean walkToArea(WorldArea area, WorldPoint target, int reachedDistance)
     {
@@ -60,8 +58,5 @@ public final class TaskWalker
         );
     }
 
-    public static synchronized boolean walkToNearestBankAndOpen()
-    {
-        return Rs2Bank.isOpen() || Rs2Bank.walkToBankAndUseBank() || Rs2Bank.openBank();
-    }
+    public static synchronized boolean walkToNearestBankAndOpen() { return Rs2Bank.isOpen() || Rs2Bank.walkToBankAndUseBank() || Rs2Bank.openBank(); }
 }

@@ -4,9 +4,7 @@ import net.runelite.client.plugins.microbot.util.bank.Rs2Bank;
 
 public final class KspBankMode
 {
-    private KspBankMode()
-    {
-    }
+    private KspBankMode() {}
 
     public static boolean ensureWithdrawAsItem()
     {

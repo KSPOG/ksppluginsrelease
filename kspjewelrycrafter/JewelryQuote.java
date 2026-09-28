@@ -29,10 +29,7 @@ public final class JewelryQuote
         this.roi = roi;
     }
 
-    public static JewelryQuote invalid(JewelryRecipe recipe, String reason)
-    {
-        return new JewelryQuote(recipe, false, reason, 0, 0, 0, 0, 0, 0, 0.0);
-    }
+    public static JewelryQuote invalid(JewelryRecipe recipe, String reason) { return new JewelryQuote(recipe, false, reason, 0, 0, 0, 0, 0, 0, 0.0); }
 
     public static JewelryQuote valid(JewelryRecipe recipe, int barBuyPrice, int gemBuyPrice,
                                      int outputSellPrice, int inputCost, int tax, int profit, double roi)

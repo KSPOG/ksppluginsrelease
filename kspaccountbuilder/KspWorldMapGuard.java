@@ -12,9 +12,7 @@ public final class KspWorldMapGuard
     private static final long CLOSE_COOLDOWN_MS = 1_500L;
     private static long lastCloseAtMs;
 
-    private KspWorldMapGuard()
-    {
-    }
+    private KspWorldMapGuard() {}
 
     public static synchronized boolean closeIfOpen()
     {

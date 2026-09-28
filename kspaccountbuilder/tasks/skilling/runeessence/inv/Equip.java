@@ -21,20 +21,11 @@ public enum Equip
         this.requiredAttackLevel = requiredAttackLevel;
     }
 
-    public String getDisplayName()
-    {
-        return displayName;
-    }
+    public String getDisplayName() { return displayName; }
 
-    public int getRequiredMiningLevel()
-    {
-        return requiredMiningLevel;
-    }
+    public int getRequiredMiningLevel() { return requiredMiningLevel; }
 
-    public int getRequiredAttackLevel()
-    {
-        return requiredAttackLevel;
-    }
+    public int getRequiredAttackLevel() { return requiredAttackLevel; }
 
     public static Equip bestForLevels(int miningLevel, int attackLevel)
     {

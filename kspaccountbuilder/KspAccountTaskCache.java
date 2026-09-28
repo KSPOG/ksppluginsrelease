@@ -140,9 +140,7 @@ public class KspAccountTaskCache
     {
         private Map<String, Map<String, Boolean>> taskStateByAccount = new HashMap<>();
 
-        private CacheData()
-        {
-        }
+        private CacheData() {}
 
         private CacheData(Map<String, Map<String, Boolean>> taskStateByAccount)
         {

@@ -60,9 +60,7 @@ public final class KaramjaTravelHelper
     private static volatile TravelDirection pendingTravelDirection;
     private static volatile long pendingTravelUntilMs;
 
-    private KaramjaTravelHelper()
-    {
-    }
+    private KaramjaTravelHelper() {}
 
     public static boolean travelToKaramjaFishingSpot()
     {
@@ -166,10 +164,7 @@ public final class KaramjaTravelHelper
         return false;
     }
 
-    public static boolean isNearKaramjaFishingSpot()
-    {
-        return isNearKaramjaFishingSpot(Rs2Player.getWorldLocation());
-    }
+    public static boolean isNearKaramjaFishingSpot() { return isNearKaramjaFishingSpot(Rs2Player.getWorldLocation()); }
 
     public static boolean isNearKaramjaFishingSpot(WorldPoint location)
     {
@@ -178,10 +173,7 @@ public final class KaramjaTravelHelper
                 && location.distanceTo(KARAMJA_FISHING_POINT) <= FISHING_AREA_DISTANCE;
     }
 
-    public static boolean isInKaramjaDockArea()
-    {
-        return isInKaramjaDockArea(Rs2Player.getWorldLocation());
-    }
+    public static boolean isInKaramjaDockArea() { return isInKaramjaDockArea(Rs2Player.getWorldLocation()); }
 
     public static boolean isInKaramjaDockArea(WorldPoint location)
     {
@@ -194,10 +186,7 @@ public final class KaramjaTravelHelper
         );
     }
 
-    public static boolean isNearPortSarimTravelPoint()
-    {
-        return isNearPortSarimTravelPoint(Rs2Player.getWorldLocation());
-    }
+    public static boolean isNearPortSarimTravelPoint() { return isNearPortSarimTravelPoint(Rs2Player.getWorldLocation()); }
 
     public static boolean isNearPortSarimTravelPoint(WorldPoint location)
     {
@@ -206,10 +195,7 @@ public final class KaramjaTravelHelper
                 && location.distanceTo2D(PORT_SARIM_TRAVEL_POINT) <= NPC_REACH_DISTANCE;
     }
 
-    public static boolean isInPortSarimCustomsArea()
-    {
-        return isInPortSarimCustomsArea(Rs2Player.getWorldLocation());
-    }
+    public static boolean isInPortSarimCustomsArea() { return isInPortSarimCustomsArea(Rs2Player.getWorldLocation()); }
 
     public static boolean isInPortSarimCustomsArea(WorldPoint location)
     {
@@ -222,10 +208,7 @@ public final class KaramjaTravelHelper
         );
     }
 
-    public static boolean isInKaramjaArea()
-    {
-        return isInKaramjaArea(Rs2Player.getWorldLocation());
-    }
+    public static boolean isInKaramjaArea() { return isInKaramjaArea(Rs2Player.getWorldLocation()); }
 
     public static boolean isInKaramjaArea(WorldPoint location)
     {
@@ -235,25 +218,13 @@ public final class KaramjaTravelHelper
                 && location.getY() < 3200;
     }
 
-    public static WorldPoint getKaramjaFishingPoint()
-    {
-        return KARAMJA_FISHING_POINT;
-    }
+    public static WorldPoint getKaramjaFishingPoint() { return KARAMJA_FISHING_POINT; }
 
-    public static WorldPoint getKaramjaCustomsPoint()
-    {
-        return KARAMJA_CUSTOMS_POINT;
-    }
+    public static WorldPoint getKaramjaCustomsPoint() { return KARAMJA_CUSTOMS_POINT; }
 
-    public static WorldPoint getPortSarimTravelPoint()
-    {
-        return PORT_SARIM_TRAVEL_POINT;
-    }
+    public static WorldPoint getPortSarimTravelPoint() { return PORT_SARIM_TRAVEL_POINT; }
 
-    public static WorldPoint getPortSarimDepositPoint()
-    {
-        return PORT_SARIM_DEPOSIT_POINT;
-    }
+    public static WorldPoint getPortSarimDepositPoint() { return PORT_SARIM_DEPOSIT_POINT; }
 
     public static void clearWalkerState()
     {

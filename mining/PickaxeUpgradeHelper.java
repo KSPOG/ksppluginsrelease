@@ -230,10 +230,7 @@ public final class PickaxeUpgradeHelper
     }
 
     /** Compatibility entry point retained for any external callers. */
-    public static void tryUpgradePickaxe()
-    {
-        ensureBestPickaxeAfterDeposit();
-    }
+    public static void tryUpgradePickaxe() { ensureBestPickaxeAfterDeposit(); }
 
     public static boolean isPickaxeName(String name)
     {

@@ -16,10 +16,7 @@ public class KspLevelUpDialogueEvent implements BlockingEvent
     private static final int LEVEL_UP_CONTINUE_WIDGET = 15269891;
 
     @Override
-    public boolean validate()
-    {
-        return Microbot.isLoggedIn() && Rs2Widget.isWidgetVisible(LEVEL_UP_CONTINUE_WIDGET);
-    }
+    public boolean validate() { return Microbot.isLoggedIn() && Rs2Widget.isWidgetVisible(LEVEL_UP_CONTINUE_WIDGET); }
 
     @Override
     public boolean execute()
@@ -39,8 +36,5 @@ public class KspLevelUpDialogueEvent implements BlockingEvent
     }
 
     @Override
-    public BlockingEventPriority priority()
-    {
-        return BlockingEventPriority.HIGHEST;
-    }
+    public BlockingEventPriority priority() { return BlockingEventPriority.HIGHEST; }
 }
