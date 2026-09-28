@@ -1,0 +1,43 @@
+name: Temporary Java syntax validation
+
+on:
+  push:
+    branches:
+      - cleanup/repo-wide-reactive-source-pass
+
+permissions:
+  contents: read
+
+jobs:
+  parse:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: cleanup/repo-wide-reactive-source-pass
+      - name: Validate Java syntax trees
+        shell: bash
+        run: |
+          python3 -m pip install --quiet tree-sitter tree-sitter-java
+          python3 <<'PY'
+          from pathlib import Path
+          from tree_sitter import Language, Parser
+          import tree_sitter_java
+
+          language = Language(tree_sitter_java.language())
+          parser = Parser(language)
+          failures = []
+          files = sorted(Path(".").rglob("*.java"))
+          for path in files:
+              source = path.read_bytes()
+              tree = parser.parse(source)
+              if tree.root_node.has_error:
+                  failures.append(str(path))
+          print(f"Parsed Java files: {len(files)}")
+          if failures:
+              print("Syntax failures:")
+              print("\n".join(failures))
+              raise SystemExit(1)
+          PY
+      - name: Diff whitespace check
+        run: git diff --check origin/main...HEAD
