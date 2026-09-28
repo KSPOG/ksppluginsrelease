@@ -149,10 +149,23 @@ public class AutoLoginScript extends Script
             return;
         }
 
-        Client client = Microbot.getClient();
-        if (client == null
-                || client.getLocalPlayer() == null
-                || client.getLocalPlayer().getWorldLocation() == null)
+        if (Microbot.getClientThread() == null)
+        {
+            debug("logged in detected; waiting for client thread before handoff");
+            return;
+        }
+
+        boolean playerReady = Microbot.getClientThread()
+                .runOnClientThreadOptional(() ->
+                {
+                    Client client = Microbot.getClient();
+                    return client != null
+                            && client.getLocalPlayer() != null
+                            && client.getLocalPlayer().getWorldLocation() != null;
+                })
+                .orElse(false);
+
+        if (!playerReady)
         {
             debug("logged in detected; waiting for local player/world location before handoff");
             return;
