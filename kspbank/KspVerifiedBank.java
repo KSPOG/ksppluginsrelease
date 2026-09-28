@@ -1,11 +1,18 @@
 package net.runelite.client.plugins.microbot.kspbank;
 
 import net.runelite.api.GameObject;
+import net.runelite.api.WallObject;
+import net.runelite.api.coords.WorldPoint;
+import net.runelite.client.plugins.microbot.Microbot;
 import net.runelite.client.plugins.microbot.util.bank.Rs2Bank;
 import net.runelite.client.plugins.microbot.util.gameobject.Rs2GameObject;
 import net.runelite.client.plugins.microbot.util.grandexchange.Rs2GrandExchange;
+import net.runelite.client.plugins.microbot.util.keyboard.Rs2Keyboard;
+import net.runelite.client.plugins.microbot.util.player.Rs2Player;
 import net.runelite.client.plugins.microbot.util.npc.Rs2Npc;
 import net.runelite.client.plugins.microbot.util.npc.Rs2NpcModel;
+
+import java.awt.event.KeyEvent;
 
 import static net.runelite.client.plugins.microbot.util.Global.sleepUntil;
 
@@ -115,6 +122,87 @@ public final class KspVerifiedBank
             }
         }
         return false;
+    }
+
+    /**
+     * AIO Fighter bank opener.
+     *
+     * The Fighter can bank from several locations, so do not lock it to the
+     * AutoMining-specific booth id. Walk with Microbot's bank webwalker, then
+     * invoke the nearest reachable Bank booth first. If the current bank uses a
+     * different bank object (chest/etc.), a GE wall booth, or only a Banker NPC,
+     * fall back in that order. Every interaction is verified by Rs2Bank.isOpen().
+     */
+    public static boolean walkToBankAndOpenBankBoothFirst()
+    {
+        if (Rs2Bank.isOpen()) return true;
+        if (!Rs2Bank.walkToBank()) return false;
+        if (Rs2Bank.isOpen()) return true;
+        return openBankBoothFirst();
+    }
+
+    public static boolean openBankBoothFirst()
+    {
+        if (Rs2Bank.isOpen()) return true;
+
+        if (Microbot.getClient().isWidgetSelected())
+        {
+            Rs2Keyboard.keyPress(KeyEvent.VK_ESCAPE);
+            sleepUntil(() -> !Microbot.getClient().isWidgetSelected(), 600);
+        }
+
+        WorldPoint player = Rs2Player.getWorldLocation();
+        if (player == null) return false;
+
+        // 1) Prefer the nearest reachable object literally named "Bank booth".
+        GameObject booth = Rs2GameObject.findReachableObject(
+                "Bank booth", true, 20, player, true, "Bank");
+        if (booth != null)
+        {
+            boolean invoked = Rs2GameObject.interact(booth, "Bank");
+            if (invoked && sleepUntil(Rs2Bank::isOpen, 5_000))
+            {
+                return true;
+            }
+        }
+
+        // 2) Support bank chests/other bank objects from Microbot's bank-id set.
+        GameObject genericBank = Rs2GameObject.findBank(20);
+        if (genericBank != null
+                && (booth == null || genericBank.getId() != booth.getId()
+                    || !genericBank.getWorldLocation().equals(booth.getWorldLocation()))
+                && Rs2GameObject.isReachable(genericBank))
+        {
+            boolean invoked = Rs2GameObject.interact(genericBank, "Bank");
+            if (invoked && sleepUntil(Rs2Bank::isOpen, 5_000))
+            {
+                return true;
+            }
+        }
+
+        // 3) Grand Exchange bank booths are WallObjects, not GameObjects.
+        WallObject geBooth = Rs2GameObject.findGrandExchangeBooth(20);
+        if (geBooth != null)
+        {
+            boolean invoked = Rs2GameObject.interact(geBooth, "Bank");
+            if (invoked && sleepUntil(Rs2Bank::isOpen, 5_000))
+            {
+                return true;
+            }
+        }
+
+        // 4) Final fallback for banks where only the NPC is usable.
+        Rs2NpcModel banker = Rs2Npc.getBankerNPC();
+        if (banker != null)
+        {
+            boolean invoked = Rs2Npc.interact(banker, "Bank");
+            if (invoked && sleepUntil(Rs2Bank::isOpen, 5_000))
+            {
+                return true;
+            }
+        }
+
+        return Rs2Bank.isOpen();
     }
 
     /**
