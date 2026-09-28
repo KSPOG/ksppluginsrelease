@@ -782,7 +782,7 @@ public class KspKebabBuyerScript extends Script
         }
 
         long livePrice = Microbot.getClientThread()
-                .runOnClientThreadOptional(() -> Microbot.getItemManager().getItemPrice(KEBAB_ID))
+                .runOnClientThreadOptional(() -> (long) Microbot.getItemManager().getItemPrice(KEBAB_ID))
                 .orElse(0L);
         kebabGePrice = livePrice <= 0L ? 0 : (int) Math.min(Integer.MAX_VALUE, livePrice);
         lastPriceRefreshAt = now;
