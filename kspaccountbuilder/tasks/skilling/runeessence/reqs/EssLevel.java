@@ -1,8 +1,5 @@
 package net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.runeessence.reqs;
 
-import lombok.Getter;
-
-@Getter
 public enum EssLevel
 {
     RUNE_ESSENCE("Rune essence", 1);
@@ -14,5 +11,15 @@ public enum EssLevel
     {
         this.displayName = displayName;
         this.requiredMiningLevel = requiredMiningLevel;
+    }
+
+    public String getDisplayName()
+    {
+        return displayName;
+    }
+
+    public int getRequiredMiningLevel()
+    {
+        return requiredMiningLevel;
     }
 }
