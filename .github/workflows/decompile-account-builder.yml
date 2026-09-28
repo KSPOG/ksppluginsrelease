@@ -23,7 +23,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          base64 --decode .decompile-input/archive.b64 > /tmp/accountbuilder-classes.tar.xz
+          cat .decompile-input/chunk_* > /tmp/accountbuilder-classes.b64\n          base64 --decode /tmp/accountbuilder-classes.b64 > /tmp/accountbuilder-classes.tar.xz
           echo "a3e866ff20e06e2a348ab2ce5e00e6de892ca96369168a4be13b613200b89e8e  /tmp/accountbuilder-classes.tar.xz" | sha256sum -c -
           rm -rf /tmp/accountbuilder-classes
           mkdir -p /tmp/accountbuilder-classes
