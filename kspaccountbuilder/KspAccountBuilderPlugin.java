@@ -7,6 +7,7 @@ import net.runelite.client.config.ConfigManager;
 import net.runelite.client.plugins.Plugin;
 import net.runelite.client.plugins.PluginDescriptor;
 import net.runelite.client.plugins.microbot.PluginConstants;
+import net.runelite.client.plugins.microbot.kspaccountbuilder.ksputil.KspLevelUpDialogueEvent;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.ksputil.randomevents.KspRandomEventSolver;
 import net.runelite.client.ui.overlay.OverlayManager;
 
@@ -14,8 +15,8 @@ import javax.inject.Inject;
 
 @PluginDescriptor(
         name = PluginConstants.KSP + "Account Builder",
-        description = "Will automatically build a F2P Main",
-        tags = {"microbot", "ksp", "account", "builder"},
+        description = "Builds a F2P main account with automated account progression",
+        tags = {"microbot", "ksp", "account", "builder", "hotreload"},
         authors = {"KSP"},
         version = KspAccountBuilderPlugin.VERSION,
         minClientVersion = "2.0.13",
@@ -44,6 +45,7 @@ public class KspAccountBuilderPlugin extends Plugin
     private OverlayManager overlayManager;
 
     private KspRandomEventSolver randomEventSolver;
+    private KspLevelUpDialogueEvent levelUpDialogueEvent;
 
     @Provides
     KspAccountBuilderConfig provideConfig(ConfigManager configManager)
@@ -59,6 +61,8 @@ public class KspAccountBuilderPlugin extends Plugin
         overlayManager.add(overlay);
         randomEventSolver = new KspRandomEventSolver();
         Microbot.getBlockingEventManager().add(randomEventSolver);
+        levelUpDialogueEvent = new KspLevelUpDialogueEvent();
+        Microbot.getBlockingEventManager().add(levelUpDialogueEvent);
         script.run(config);
     }
 
@@ -72,7 +76,23 @@ public class KspAccountBuilderPlugin extends Plugin
             Microbot.getBlockingEventManager().remove(randomEventSolver);
             randomEventSolver = null;
         }
+        if (levelUpDialogueEvent != null)
+        {
+            Microbot.getBlockingEventManager().remove(levelUpDialogueEvent);
+            levelUpDialogueEvent = null;
+        }
         overlayManager.remove(overlay);
+    }
+
+    public void prepareHotUnload()
+    {
+        log.info("Preparing KSP Account Builder for hot unload");
+        script.shutdown();
+    }
+
+    public void afterHotReload()
+    {
+        log.info("KSP Account Builder hot reload completed | version={}", VERSION);
     }
 
     private void migrateSingleSkillTargetDefaults()
