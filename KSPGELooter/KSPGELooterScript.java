@@ -288,6 +288,11 @@ public class KSPGELooterScript extends Script
 
     private Rs2TileItemModel findLootTarget(int minimumGeValue)
     {
+        return findLootTarget(minimumGeValue, null);
+    }
+
+    private Rs2TileItemModel findLootTarget(int minimumGeValue, String excludeKey)
+    {
         pruneRejectedLootTargets();
 
         WorldPoint player = Rs2Player.getWorldLocation();
@@ -313,6 +318,7 @@ public class KSPGELooterScript extends Script
                 // whose original ownership is OTHER; the old isLootAble() filter rejected them.
                 .filter(item -> item.getOwnership() != TileItem.OWNERSHIP_OTHER || accountType == 0)
                 .filter(item -> !rejectedLootTargets.contains(lootKey(item)))
+                .filter(item -> excludeKey == null || !excludeKey.equals(lootKey(item)))
                 .filter(item -> reachableTiles.contains(item.getWorldLocation()))
                 .filter(item -> getGroundStackGeValue(item) >= minimumGeValue)
                 .sorted(Comparator.comparingLong(this::getGroundStackGeValue)
@@ -480,8 +486,10 @@ public class KSPGELooterScript extends Script
             updateOverlayState();
 
             // Critical fast path: inventory changed or target vanished -> immediately
-            // pick the next valid target and invoke it in this same scheduler pass.
-            item = findLootTarget(minimumGeValue);
+            // pick a DIFFERENT valid target and invoke it in this same scheduler pass.
+            // Excluding the just-completed cache key prevents one-tick cache lag from
+            // re-invoking Take on an item we already picked up.
+            item = findLootTarget(minimumGeValue, key);
         }
     }
 
