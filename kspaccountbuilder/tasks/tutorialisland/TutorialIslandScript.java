@@ -53,10 +53,6 @@ public class TutorialIslandScript extends Script
 {
     private static final int LOOP_DELAY_MS = 250;
     private static final int DEFAULT_CAMERA_ZOOM = 377;
-    private static final int NAME_ATTEMPT_COOLDOWN_MS = 3500;
-    private static final int CHARACTER_ATTEMPT_COOLDOWN_MS = 3500;
-    private static final int CHARACTER_CONFIRM_RETRIES = 3;
-    private static final int CHARACTER_CONFIRM_TIMEOUT_MS = 2500;
     private static final int RAT_PEN_GATE_ID = 9719;
     private static final int RAT_PEN_INNER_BOUNDARY_X = 3110;
     private static final int ACCOUNT_GUIDE_DOOR_ID = 9721;
@@ -123,9 +119,12 @@ public class TutorialIslandScript extends Script
     private static final WorldArea CHURCH_AREA           = TutAreas.CHURCH_AREA;
     private static final WorldArea TUTORIAL_END_AREA     = TutAreas.TUTORIAL_END_AREA;
 
-    private long lastNameAttemptAtMs;
-    private long lastCharacterAttemptAtMs;
     private String lastGeneratedName = "None";
+    private boolean nameLookupPending;
+    private boolean nameSetPending;
+    private boolean characterCustomized;
+    private boolean characterConfirmDispatched;
+    private boolean experienceSelectionDispatched;
     private String lastCharacterAction = "Waiting";
     private String lastExperienceSelection = "None";
     private String completionState = "Active";
@@ -192,22 +191,14 @@ public class TutorialIslandScript extends Script
                 if (isDisplayNameWidgetOpen())
                 {
                     status = Status.NAME;
-                    if (!isNameAttemptCoolingDown())
-                    {
-                        enterGeneratedName();
-                        lastNameAttemptAtMs = System.currentTimeMillis();
-                    }
+                    enterGeneratedName();
                     return;
                 }
 
                 if (isCharacterCreationWidgetOpen())
                 {
                     status = Status.CHARACTER;
-                    if (!isCharacterAttemptCoolingDown())
-                    {
-                        lastCharacterAttemptAtMs = System.currentTimeMillis();
-                        randomizeCharacter();
-                    }
+                    randomizeCharacter();
                     return;
                 }
 
@@ -464,10 +455,6 @@ public class TutorialIslandScript extends Script
                 || Rs2Widget.hasWidget(EXPERIENCE_OPTION_TEXTS[2]));
     }
 
-    private boolean isNameAttemptCoolingDown() { return System.currentTimeMillis() - lastNameAttemptAtMs < NAME_ATTEMPT_COOLDOWN_MS; }
-
-    private boolean isCharacterAttemptCoolingDown() { return System.currentTimeMillis() - lastCharacterAttemptAtMs < CHARACTER_ATTEMPT_COOLDOWN_MS; }
-
     private boolean openSettingsTabForTutorialPrompt()
     {
         String dialogueText = Rs2Dialogue.getDialogueText();
@@ -477,14 +464,17 @@ public class TutorialIslandScript extends Script
             return false;
         }
 
+        if (Rs2Widget.isWidgetVisible(SETTINGS_PANEL_GROUP, 0)
+                || Rs2Widget.hasWidget("Controls Settings"))
+        {
+            return false;
+        }
+
         if (!Rs2Widget.clickWidget(FIXED_VIEWPORT_GROUP, SETTINGS_TAB_CHILD))
         {
             debug("Failed to click the Tutorial Island Settings tab widget.");
-            return true;
         }
 
-        sleepUntil(() -> Rs2Widget.isWidgetVisible(SETTINGS_PANEL_GROUP, 0)
-                || Rs2Widget.hasWidget("Controls Settings"), 3000);
         return true;
     }
 
@@ -494,25 +484,64 @@ public class TutorialIslandScript extends Script
 
     private void enterGeneratedName()
     {
+        if (nameSetPending)
+        {
+            if (!isDisplayNameWidgetOpen())
+            {
+                nameSetPending = false;
+                nameLookupPending = false;
+                lastGeneratedName = "None";
+            }
+            return;
+        }
+
+        if (nameLookupPending)
+        {
+            if (isGeneratedNameAvailable(lastGeneratedName))
+            {
+                boolean clicked = Rs2Widget.clickWidget(NAME_CREATION_GROUP, SET_NAME_BUTTON_CHILD);
+                if (!clicked)
+                {
+                    Widget setName = Rs2Widget.findWidget("Set name", null, false);
+                    clicked = setName != null && Rs2Widget.clickWidget(setName);
+                }
+                if (!clicked)
+                {
+                    clicked = Rs2Widget.clickWidget(NAME_CREATION_GROUP, LOOK_UP_NAME_BUTTON_CHILD);
+                }
+
+                nameSetPending = clicked;
+                return;
+            }
+
+            String response = getDisplayNameResponse();
+            String lower = response.toLowerCase();
+            if (!response.isEmpty()
+                    && (lower.contains("not available")
+                    || lower.contains("unavailable")
+                    || lower.contains("already taken")
+                    || lower.contains("try another")))
+            {
+                nameLookupPending = false;
+                lastGeneratedName = "None";
+            }
+            return;
+        }
+
         String name = generateDisplayName();
         lastGeneratedName = name;
-
         clearDisplayNameInput();
-        sleep(randomDelay(180, 420));
 
-        Rs2Widget.clickWidget(NAME_CREATION_GROUP, NAME_INPUT_CHILD);
-        sleep(randomDelay(240, 520));
+        if (!Rs2Widget.clickWidget(NAME_CREATION_GROUP, NAME_INPUT_CHILD))
+        {
+            return;
+        }
 
         Rs2Keyboard.typeString(name);
-        sleep(randomDelay(220, 520));
 
-        Rs2Widget.clickWidget(NAME_CREATION_GROUP, LOOK_UP_NAME_BUTTON_CHILD);
-        sleep(randomDelay(4200, 5600));
-
-        if (isGeneratedNameAvailable(name))
+        if (Rs2Widget.clickWidget(NAME_CREATION_GROUP, LOOK_UP_NAME_BUTTON_CHILD))
         {
-            Rs2Widget.clickWidget(NAME_CREATION_GROUP, LOOK_UP_NAME_BUTTON_CHILD);
-            sleepUntil(() -> !isDisplayNameWidgetOpen(), 6000);
+            nameLookupPending = true;
         }
     }
 
@@ -525,13 +554,14 @@ public class TutorialIslandScript extends Script
             return;
         }
 
-        Rs2Widget.clickWidget(NAME_CREATION_GROUP, NAME_INPUT_CHILD);
-        sleep(randomDelay(240, 520));
+        if (!Rs2Widget.clickWidget(NAME_CREATION_GROUP, NAME_INPUT_CHILD))
+        {
+            return;
+        }
 
         for (int i = 0; i < currentInput.length(); i++)
         {
             Rs2Keyboard.keyPress(KeyEvent.VK_BACK_SPACE);
-            sleep(randomDelay(18, 55));
         }
     }
 
@@ -547,17 +577,21 @@ public class TutorialIslandScript extends Script
         return nameInput.getText().replace("*", "").trim();
     }
 
-    private boolean isGeneratedNameAvailable(String name)
+    private String getDisplayNameResponse()
     {
         Widget responseWidget = Rs2Widget.getWidget(NAME_CREATION_GROUP, NAME_RESPONSE_TEXT_CHILD);
 
         if (responseWidget == null || responseWidget.getText() == null)
         {
-            return false;
+            return "";
         }
 
-        String responseText = Rs2UiHelper.stripColTags(responseWidget.getText());
-        return responseText.startsWith("Great! The display name " + name + " is available");
+        return Rs2UiHelper.stripColTags(responseWidget.getText()).trim();
+    }
+
+    private boolean isGeneratedNameAvailable(String name)
+    {
+        return getDisplayNameResponse().startsWith("Great! The display name " + name + " is available");
     }
 
     // -------------------------------------------------------------------------
