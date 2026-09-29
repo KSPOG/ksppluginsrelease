@@ -305,7 +305,6 @@ public class MiningScript extends Script
         {
             if (KspBankWidgetHelper.closeBankTutorialOverlayIfOpen())
             {
-                sleep(300);
                 return false;
             }
 
@@ -589,8 +588,7 @@ public class MiningScript extends Script
                 : Collections.singletonList(pickaxeToKeep);
 
         Rs2DepositBox.depositAllExcept(itemsToKeep, false);
-        sleepUntil(() -> !Rs2Inventory.isFull(), 2_000);
-        debug("Deposited Rimmington gold ore | kept={} invFull={} depositBoxOpen={}",
+        debug("Depositing Rimmington gold ore | kept={} invFull={} depositBoxOpen={}",
                 itemsToKeep,
                 Rs2Inventory.isFull(),
                 Rs2DepositBox.isOpen());
