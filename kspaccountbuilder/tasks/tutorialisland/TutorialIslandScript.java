@@ -735,8 +735,15 @@ public class TutorialIslandScript extends Script
 
         if (waitingForSurvivalFire)
         {
-            if (fire == null) return;
-            waitingForSurvivalFire = false;
+            if (fire != null)
+            {
+                waitingForSurvivalFire = false;
+            }
+            else if (Rs2Inventory.hasItem("Logs") && readyForAction() && !Rs2Player.isMoving())
+            {
+                waitingForSurvivalFire = false;
+            }
+            else return;
         }
 
         if (fire != null)
