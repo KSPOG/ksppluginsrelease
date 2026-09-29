@@ -689,6 +689,11 @@ public class TutorialIslandScript extends Script
             return;
         }
 
+        if (!toggledSettings && configureCameraAfterGielinorGuide())
+        {
+            return;
+        }
+
         walkAndTalk(npc);
     }
 
@@ -696,29 +701,31 @@ public class TutorialIslandScript extends Script
     {
         int progress = Microbot.getVarbitPlayerValue(281);
 
-        if (!toggledSettings && configureCameraAfterGielinorGuide())
-        {
-            return;
-        }
-
         if (progress == 10 || progress == 20 || progress == 60)
         {
             talkToSurvivalExpert();
+            return;
         }
-        else if (progress < 40)
+
+        if (progress == 30)
         {
             clickTab("Inventory");
+            return;
         }
-        else if (progress < 50)
+
+        if (progress == 40)
         {
             fishShrimp();
+            return;
         }
-        else if (progress < 70)
+
+        if (progress == 50)
         {
             clickTab("Skills");
-            talkToSurvivalExpert();
+            return;
         }
-        else if (progress <= 90)
+
+        if (progress >= 70 && progress <= 90)
         {
             if (!Rs2Inventory.hasItem("Bronze Axe") || !Rs2Inventory.hasItem("Tinderbox"))
             {
@@ -744,7 +751,10 @@ public class TutorialIslandScript extends Script
                 return;
             }
             cookShrimpOnOwnFire();
+            return;
         }
+
+        debug("Waiting for Survival Guide progress update | progress=%d", progress);
     }
 
     private boolean configureCameraAfterGielinorGuide()
