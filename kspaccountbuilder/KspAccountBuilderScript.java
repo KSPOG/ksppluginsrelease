@@ -1065,6 +1065,14 @@ public class KspAccountBuilderScript extends Script
             return false;
         }
 
+        if (hasImmediateTaskResources(forcedTask))
+        {
+            auditedSingleSkillTask = forcedTask;
+            clearPendingSingleSkillAudit();
+            Microbot.status = "Resources ready for " + forcedTask;
+            return false;
+        }
+
         if (pendingSingleSkillAuditTask != forcedTask)
         {
             stopCurrentTaskScript();
@@ -1465,6 +1473,30 @@ public class KspAccountBuilderScript extends Script
     private boolean hasAnyToolAvailable(String[] toolNames)
     {
         for (String name : toolNames) if (hasAnywhere(name)) return true;
+        return false;
+    }
+
+    private boolean hasImmediateTaskResources(BuilderTask task)
+    {
+        switch (task)
+        {
+            case RUNE_ESSENCE:
+                return isRuneMysteriesComplete() && hasLocalTool(Buy.PICKAXE_NAMES);
+            case MINING:
+                return hasLocalTool(Buy.PICKAXE_NAMES);
+            case WOODCUTTING:
+                return hasLocalTool(Buy.AXE_NAMES);
+            default:
+                return false;
+        }
+    }
+
+    private boolean hasLocalTool(String[] names)
+    {
+        for (String name : names)
+        {
+            if (Rs2Inventory.hasItem(name) || Rs2Equipment.isWearing(name)) return true;
+        }
         return false;
     }
 
