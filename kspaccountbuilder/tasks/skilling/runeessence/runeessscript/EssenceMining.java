@@ -230,7 +230,7 @@ public class EssenceMining extends Script
     {
         state = EssenceState.EXITING_MINE;
         status = "Leaving rune essence mine";
-        if (Rs2Player.isAnimating() || Rs2Player.isMoving() || !canAct())
+        if (Rs2Player.isAnimating() || Rs2Player.isInteracting() || !canAct())
         {
             return;
         }
