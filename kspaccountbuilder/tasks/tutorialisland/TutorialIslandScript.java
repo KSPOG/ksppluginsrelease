@@ -147,6 +147,7 @@ public class TutorialIslandScript extends Script
     private boolean treeActionDispatched;
     private boolean fishingActionDispatched;
     private boolean homeTeleportDispatched;
+    private boolean windStrikeSelected;
 
     public boolean run()
     {
@@ -1425,8 +1426,11 @@ public class TutorialIslandScript extends Script
 
         if (progress == 510)
         {
-            // Use a specific walkable tile near the bank entrance — randomPoint() can land on
-            // unreachable counter/wall tiles inside the bank building (seen at 3128,3118).
+            if (Rs2Bank.isOpen())
+            {
+                return;
+            }
+
             WorldPoint bankEntrance = new WorldPoint(3120, 3124, 0);
             WorldPoint playerLocation = Rs2Player.getWorldLocation();
 
@@ -1441,35 +1445,38 @@ public class TutorialIslandScript extends Script
                 return;
             }
 
-            if (Microbot.getRs2TileObjectCache().query().fromWorldView().interact(ObjectID.BANK_BOOTH_10083))
+            if (!Rs2Player.isMoving() && !Rs2Player.isInteracting())
             {
-                sleepUntil(() -> Microbot.getVarbitPlayerValue(281) != 510
-                        || Rs2Bank.isOpen(), 1_500);
+                Microbot.getRs2TileObjectCache().query().fromWorldView().interact(ObjectID.BANK_BOOTH_10083);
             }
+            return;
         }
-        else if (progress == 520)
+
+        if (progress == 520)
         {
             handleBankSpaceAndPollBooth();
+            return;
         }
-        else if (progress == 525 || progress == 530)
+
+        if (progress == 525 || progress == 530)
         {
-            closePollOrOptionsWidget();
-            if (npc != null)
+            if (closePollOrOptionsWidget())
             {
-                walkToAccountGuideRoomAndTalk(npc);
-            }
-        }
-        else if (progress == 531)
-        {
-            clickTab("Account Management");
-        }
-        else if (progress == 532)
-        {
-            if (Rs2Dialogue.isInDialogue())
-            {
-                clickContinue();
                 return;
             }
+
+            walkToAccountGuideRoomAndTalk(npc);
+            return;
+        }
+
+        if (progress == 531)
+        {
+            clickTab("Account Management");
+            return;
+        }
+
+        if (progress == 532)
+        {
             walkToAccountGuideRoomAndTalk(npc);
         }
     }
@@ -1479,25 +1486,31 @@ public class TutorialIslandScript extends Script
         Rs2NpcModel npc = Microbot.getRs2NpcCache().query().fromWorldView().withId(NpcID.BROTHER_BRACE).nearest();
         int progress = Microbot.getVarbitPlayerValue(281);
 
-        if (progress == 640 || progress == 550 || progress == 540)
+        if (progress == 540 || progress == 550)
         {
-            walkTutorialLocal(new WorldPoint(3125, 3106, 0), 3);
-            Rs2Player.waitForWalking();
             walkAndTalk(npc);
+            return;
         }
-        else if (progress == 560)
+
+        if (progress == 560)
         {
             clickTab("Prayer");
+            return;
         }
-        else if (progress == 570)
+
+        if (progress == 570)
         {
             walkAndTalk(npc);
+            return;
         }
-        else if (progress == 580)
+
+        if (progress == 580)
         {
             clickTab("Friends list");
+            return;
         }
-        else if (progress == 600)
+
+        if (progress == 600)
         {
             walkAndTalk(npc);
         }
@@ -1510,23 +1523,29 @@ public class TutorialIslandScript extends Script
 
         if (progress == 610 || progress == 620)
         {
-            walkTutorialLocal(new WorldPoint(3142, 3089, 0), 3);
-            Rs2Player.waitForWalking();
             walkAndTalk(npc);
+            return;
         }
-        else if (progress == 630)
+
+        if (progress == 630)
         {
             clickTab("Magic");
+            return;
         }
-        else if (progress == 640)
+
+        if (progress == 640)
         {
             walkAndTalk(npc);
+            return;
         }
-        else if (progress == 650)
+
+        if (progress == 650)
         {
             widgetCast();
+            return;
         }
-        else if (progress == 680)
+
+        if (progress >= 660 && progress < 1000)
         {
             if (isInDialogue())
             {
@@ -1534,25 +1553,12 @@ public class TutorialIslandScript extends Script
                 return;
             }
 
-            castLumbridgeHomeTeleport();
-        }
-        else if (progress > 680)
-        {
-            if (isInDialogue())
+            if (progress >= 680)
             {
-                handleFinalMageDialogue();
+                castLumbridgeHomeTeleport();
                 return;
             }
 
-            walkAndTalk(npc);
-        }
-        else if (progress >= 660)
-        {
-            if (isInDialogue())
-            {
-                handleFinalMageDialogue();
-                return;
-            }
             walkAndTalk(npc);
         }
     }
