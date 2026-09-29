@@ -823,14 +823,17 @@ public class TutorialIslandScript extends Script
         if (Rs2Tab.getCurrentTab() != InterfaceTab.SETTINGS)
         {
             Rs2Tab.switchTo(InterfaceTab.SETTINGS);
-            Rs2Random.waitEx(1200, 300);
             return true;
         }
 
         Rs2Camera.setZoom(DEFAULT_CAMERA_ZOOM);
-        Rs2Random.waitEx(300, 100);
-        Rs2Camera.setPitch(280);
-        sleepUntil(() -> Rs2Camera.getPitch() > 250);
+
+        if (Rs2Camera.getPitch() <= 250)
+        {
+            Rs2Camera.setPitch(280);
+            return true;
+        }
+
         toggledSettings = true;
         return true;
     }
@@ -1713,11 +1716,7 @@ public class TutorialIslandScript extends Script
 
     private boolean walkAndTalk(Rs2NpcModel npc, int reach)
     {
-        return walkAndAct(
-                npc,
-                reach,
-                "Talk-to",
-                () -> sleepUntil(Rs2Dialogue::isInDialogue, 1_500));
+        return walkAndAct(npc, reach, "Talk-to", null);
     }
 
     private boolean walkAndAct(Rs2NpcModel npc, int reach, String action, Runnable afterClick)
@@ -2110,7 +2109,6 @@ public class TutorialIslandScript extends Script
         if (widget != null)
         {
             Rs2Widget.clickWidget(widget);
-            Rs2Random.waitEx(1200, 300);
         }
     }
 
@@ -2136,7 +2134,6 @@ public class TutorialIslandScript extends Script
                     && Arrays.stream(actionsText).anyMatch(a -> a.equalsIgnoreCase("close")))
             {
                 Rs2Widget.clickWidget(dynamicWidgetOption);
-                Rs2Random.waitEx(1200, 300);
                 return;
             }
         }
@@ -2241,15 +2238,6 @@ public class TutorialIslandScript extends Script
         }
 
         walkTutorialLocal(target, 3);
-        Rs2Player.waitForWalking();
-
-        location = Rs2Player.getWorldLocation();
-        if (location != null && area.contains(location))
-        {
-            KspWalkerGuard.clearActiveWalker("ksp_account_builder_tutorial_reached_area");
-            return true;
-        }
-
         return false;
     }
 
@@ -2260,16 +2248,25 @@ public class TutorialIslandScript extends Script
             return;
         }
 
-        KspWalkerGuard.clear("Tutorial Island:local-walk");
         WorldPoint playerLocation = Rs2Player.getWorldLocation();
-
-        if (playerLocation != null && playerLocation.distanceTo(target) <= reach)
+        if (playerLocation == null)
         {
             return;
         }
 
+        if (playerLocation.distanceTo(target) <= reach)
+        {
+            KspWalkerGuard.clearActiveWalker("ksp_account_builder_tutorial_local_target_reached");
+            return;
+        }
+
+        if (Rs2Player.isMoving())
+        {
+            return;
+        }
+
+        KspWalkerGuard.clear("Tutorial Island:local-walk");
         Rs2Walker.walkTo(target, reach);
-        Rs2Player.waitForWalking();
     }
 
     private boolean openTutorialPassage(int objectId, BooleanSupplier completed) { return openTutorialPassageAndWalk(objectId, null, 0, completed); }
@@ -2318,46 +2315,30 @@ public class TutorialIslandScript extends Script
 
     private boolean openTutorialPassageAndWalk(int objectId, WorldPoint target, int reach, BooleanSupplier completed)
     {
-        for (int attempt = 0; attempt < 3; attempt++)
+        if (completed.getAsBoolean())
         {
-            if (completed.getAsBoolean())
-            {
-                return true;
-            }
+            return true;
+        }
 
-            boolean interacted = Microbot.getRs2TileObjectCache()
-                    .query()
-                    .fromWorldView()
-                    .interact(objectId, "Open");
+        if (Rs2Player.isMoving() || Rs2Player.isInteracting())
+        {
+            return false;
+        }
 
-            if (interacted)
-            {
-                sleepUntil(() -> completed.getAsBoolean(), 1200);
-            }
-            else
-            {
-                Rs2Random.waitEx(300, 100);
-            }
+        if (Microbot.getRs2TileObjectCache()
+                .query()
+                .fromWorldView()
+                .interact(objectId, "Open"))
+        {
+            return false;
+        }
 
-            if (completed.getAsBoolean())
-            {
-                return true;
-            }
-
-            if (target != null)
-            {
-                walkTutorialLocal(target, reach);
-                sleepUntil(() -> completed.getAsBoolean(), 1200);
-            }
+        if (target != null)
+        {
+            walkTutorialLocal(target, reach);
         }
 
         return completed.getAsBoolean();
-    }
-
-    private boolean isInArea(WorldArea area)
-    {
-        WorldPoint location = Rs2Player.getWorldLocation();
-        return location != null && area.contains(location);
     }
 
     private boolean isNpcReachable(Rs2NpcModel npc, int reach)
