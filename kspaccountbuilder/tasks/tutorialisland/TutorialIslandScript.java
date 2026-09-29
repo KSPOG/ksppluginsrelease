@@ -1579,10 +1579,28 @@ public class TutorialIslandScript extends Script
 
     private boolean castLumbridgeHomeTeleport()
     {
+        WorldPoint location = Rs2Player.getWorldLocation();
+        if (Microbot.getVarbitPlayerValue(281) >= 1000
+                || (location != null && !TutAreas.contains(location)))
+        {
+            homeTeleportDispatched = false;
+            return true;
+        }
+
+        if (homeTeleportDispatched)
+        {
+            if (Rs2Player.isAnimating() || Rs2Player.isInteracting())
+            {
+                return true;
+            }
+
+            homeTeleportDispatched = false;
+        }
+
         if (Rs2Tab.getCurrentTab() != InterfaceTab.MAGIC)
         {
             Rs2Tab.switchTo(InterfaceTab.MAGIC);
-            Rs2Random.waitEx(600, 100);
+            return false;
         }
 
         Widget homeTeleport = Rs2Widget.findWidget("Lumbridge Home Teleport", true);
@@ -1597,16 +1615,13 @@ public class TutorialIslandScript extends Script
             return false;
         }
 
-        if (!Rs2Widget.clickWidget(homeTeleport))
+        if (Rs2Widget.clickWidget(homeTeleport))
         {
-            return false;
+            homeTeleportDispatched = true;
+            return true;
         }
 
-        return sleepUntil(() -> {
-            WorldPoint location = Rs2Player.getWorldLocation();
-            return Microbot.getVarbitPlayerValue(281) >= 1000
-                    || (location != null && !TutAreas.contains(location));
-        }, 15_000);
+        return false;
     }
 
     // -------------------------------------------------------------------------
@@ -1835,6 +1850,7 @@ public class TutorialIslandScript extends Script
         treeActionDispatched = false;
         fishingActionDispatched = false;
         homeTeleportDispatched = false;
+        windStrikeSelected = false;
     }
 
     // -------------------------------------------------------------------------
@@ -2135,43 +2151,29 @@ public class TutorialIslandScript extends Script
 
     private boolean widgetCast()
     {
-        if (Rs2Player.isAnimating() || Rs2Player.getInteracting() != null)
+        if (Microbot.getVarbitPlayerValue(281) != 650)
+        {
+            windStrikeSelected = false;
+            return true;
+        }
+
+        if (Rs2Player.isAnimating() || Rs2Player.isInteracting())
         {
             return true;
         }
 
-        Widget windStrike = Rs2Widget.findWidget("Wind Strike", null, true);
-
-        if (windStrike == null)
+        if (!windStrikeSelected)
         {
-            windStrike = Rs2Widget.getWidget(218, 11);
-        }
-        if (windStrike == null)
-        {
-            return false;
-        }
-
-        boolean hidden;
-        try
-        {
-            hidden = Rs2Widget.isHidden(windStrike.getId());
-        }
-        catch (Exception ignored)
-        {
-            hidden = true;
-        }
-
-        if (hidden)
-        {
-            clickTab("Magic");
-            windStrike = Rs2Widget.getWidget(218, 8);
+            Widget windStrike = Rs2Widget.findWidget("Wind Strike", null, true);
 
             if (windStrike == null)
             {
-                windStrike = Rs2Widget.findWidget("Wind Strike", null, true);
+                windStrike = Rs2Widget.getWidget(218, 11);
             }
+
             if (windStrike == null)
             {
+                clickTab("Magic");
                 return false;
             }
 
@@ -2179,6 +2181,7 @@ public class TutorialIslandScript extends Script
             {
                 if (Rs2Widget.isHidden(windStrike.getId()))
                 {
+                    clickTab("Magic");
                     return false;
                 }
             }
@@ -2186,34 +2189,35 @@ public class TutorialIslandScript extends Script
             {
                 return false;
             }
+
+            if (!Rs2Widget.clickWidget(windStrike))
+            {
+                return false;
+            }
+
+            windStrikeSelected = true;
+            return true;
         }
 
-        if (!Rs2Widget.clickWidget(windStrike))
-        {
-            return false;
-        }
-
-        Rs2NpcModel chicken = Microbot.getRs2NpcCache().query().fromWorldView().withName("chicken").nearestOnClientThread();
+        Rs2NpcModel chicken = Microbot.getRs2NpcCache()
+                .query()
+                .fromWorldView()
+                .withName("chicken")
+                .nearestOnClientThread();
 
         if (chicken == null)
         {
             return false;
         }
 
-        if (!chicken.click("Cast"))
+        if (chicken.click("Cast"))
         {
-            return false;
+            windStrikeSelected = false;
+            return true;
         }
 
-        sleepUntil(() -> Rs2Player.isAnimating()
-                || Rs2Player.isInteracting()
-                || Microbot.getVarbitPlayerValue(281) != 650, 1_500);
-        return true;
+        return false;
     }
-
-    // -------------------------------------------------------------------------
-    // UI helpers
-    // -------------------------------------------------------------------------
 
     private void clickTab(String tabName)
     {
@@ -2254,7 +2258,7 @@ public class TutorialIslandScript extends Script
 
     private void handleBankSpaceAndPollBooth()
     {
-        if (KspBankWidgetHelper.closeBankTutorialOverlayIfOpenAndWait())
+        if (KspBankWidgetHelper.closeBankTutorialOverlayIfOpen())
         {
             return;
         }
@@ -2262,7 +2266,6 @@ public class TutorialIslandScript extends Script
         if (Rs2Widget.isWidgetVisible(928, 4))
         {
             Rs2Widget.clickWidget(928, 4);
-            Rs2Random.waitEx(1200, 300);
             return;
         }
 
@@ -2279,45 +2282,42 @@ public class TutorialIslandScript extends Script
                     if (widgetText != null && widgetText.equalsIgnoreCase("Want more bank space?"))
                     {
                         Rs2Widget.clickWidget(289, 7);
-                        Rs2Random.waitEx(1200, 300);
-                        break;
+                        return;
                     }
                 }
             }
         }
 
-        Rs2Bank.closeBank();
-        if (!sleepUntil(() -> !Rs2Bank.isOpen(), 1_500))
+        if (Rs2Bank.isOpen())
         {
+            Rs2Bank.closeBank();
             return;
         }
 
-        if (Microbot.getRs2TileObjectCache().query().fromWorldView().interact(26815))
+        if (!Rs2Player.isMoving() && !Rs2Player.isInteracting())
         {
-            sleepUntil(() -> Microbot.getVarbitPlayerValue(281) != 520
-                    || Rs2Widget.isWidgetVisible(928, 4), 1_500);
+            Microbot.getRs2TileObjectCache().query().fromWorldView().interact(26815);
         }
     }
 
-    private void closePollOrOptionsWidget()
+    private boolean closePollOrOptionsWidget()
     {
         if (Rs2Widget.isWidgetVisible(928, 4))
         {
             Rs2Widget.clickWidget(928, 4);
-            Rs2Random.waitEx(1200, 300);
-            return;
+            return true;
         }
 
         if (!Rs2Widget.isWidgetVisible(310, 2))
         {
-            return;
+            return false;
         }
 
         Widget widgetOptions = Rs2Widget.getWidget(310, 2);
 
         if (widgetOptions == null || widgetOptions.getDynamicChildren() == null)
         {
-            return;
+            return false;
         }
 
         for (Widget dynamicWidgetOption : widgetOptions.getDynamicChildren())
@@ -2328,15 +2328,12 @@ public class TutorialIslandScript extends Script
                     && Arrays.stream(actionsText).anyMatch(a -> a.equalsIgnoreCase("close")))
             {
                 Rs2Widget.clickWidget(dynamicWidgetOption);
-                Rs2Random.waitEx(1200, 300);
-                return;
+                return true;
             }
         }
-    }
 
-    // -------------------------------------------------------------------------
-    // Area / world helpers
-    // -------------------------------------------------------------------------
+        return false;
+    }
 
     private boolean walkToArea(WorldArea area) { return walkToArea(area, randomPoint(area)); }
 
