@@ -979,7 +979,6 @@ public class TutorialIslandScript extends Script
             openTutorialPassage(
                     9716,
                     () -> Microbot.getVarbitPlayerValue(281) >= 220 || isNpcReachable(npc, 4));
-            Rs2Random.waitEx(1200, 300);
         }
         else if (progress == 220 || progress == 240)
         {
@@ -1171,11 +1170,22 @@ public class TutorialIslandScript extends Script
         }
         else if (progress == 500)
         {
-            walkTutorialLocal(new WorldPoint(3111, 9526, Rs2Player.getWorldLocation().getPlane()), 3);
-            Rs2Player.waitForWalking();
-            Microbot.getClientThread().invoke(() ->
-                    Microbot.getRs2TileObjectCache().query().fromWorldView().withName("Ladder").interact("Climb-up"));
-            sleepUntil(() -> Microbot.getVarbitPlayerValue(281) != 500);
+            Rs2TileObjectModel ladder = Microbot.getRs2TileObjectCache()
+                    .query()
+                    .fromWorldView()
+                    .withName("Ladder")
+                    .nearestOnClientThread();
+
+            if (!prepareTutorialObjectInteraction(ladder, 4))
+            {
+                return;
+            }
+
+            if (ladder.click("Climb-up"))
+            {
+                sleepUntil(() -> Microbot.getVarbitPlayerValue(281) != 500
+                        || !isInArea(RAT_PIT_AREA), 1_500);
+            }
         }
         else if (progress == 480 || progress == 490)
         {
@@ -1252,10 +1262,24 @@ public class TutorialIslandScript extends Script
             // Use a specific walkable tile near the bank entrance — randomPoint() can land on
             // unreachable counter/wall tiles inside the bank building (seen at 3128,3118).
             WorldPoint bankEntrance = new WorldPoint(3120, 3124, 0);
-            walkTutorialLocal(bankEntrance, 5);
-            Rs2Player.waitForWalking();
-            Microbot.getRs2TileObjectCache().query().fromWorldView().interact(ObjectID.BANK_BOOTH_10083);
-            sleepUntil(() -> Microbot.getVarbitPlayerValue(281) != 510);
+            WorldPoint playerLocation = Rs2Player.getWorldLocation();
+
+            if (playerLocation == null)
+            {
+                return;
+            }
+
+            if (playerLocation.distanceTo(bankEntrance) > 5)
+            {
+                walkTutorialLocal(bankEntrance, 5);
+                return;
+            }
+
+            if (Microbot.getRs2TileObjectCache().query().fromWorldView().interact(ObjectID.BANK_BOOTH_10083))
+            {
+                sleepUntil(() -> Microbot.getVarbitPlayerValue(281) != 510
+                        || Rs2Bank.isOpen(), 1_500);
+            }
         }
         else if (progress == 520)
         {
@@ -2063,9 +2087,16 @@ public class TutorialIslandScript extends Script
         }
 
         Rs2Bank.closeBank();
-        sleepUntil(() -> !Rs2Bank.isOpen());
-        Microbot.getRs2TileObjectCache().query().fromWorldView().interact(26815);
-        sleepUntil(() -> Microbot.getVarbitPlayerValue(281) != 520 || Rs2Widget.isWidgetVisible(928, 4));
+        if (!sleepUntil(() -> !Rs2Bank.isOpen(), 1_500))
+        {
+            return;
+        }
+
+        if (Microbot.getRs2TileObjectCache().query().fromWorldView().interact(26815))
+        {
+            sleepUntil(() -> Microbot.getVarbitPlayerValue(281) != 520
+                    || Rs2Widget.isWidgetVisible(928, 4), 1_500);
+        }
     }
 
     private void closePollOrOptionsWidget()
