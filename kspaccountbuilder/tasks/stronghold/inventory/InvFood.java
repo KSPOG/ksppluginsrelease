@@ -2,7 +2,6 @@ package net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.stronghold.
 
 import java.util.Arrays;
 import java.util.Comparator;
-import net.runelite.client.plugins.microbot.Script;
 import net.runelite.client.plugins.microbot.util.bank.Rs2Bank;
 import net.runelite.client.plugins.microbot.util.inventory.Rs2Inventory;
 import net.runelite.client.plugins.microbot.util.misc.Rs2Food;
@@ -32,7 +31,6 @@ public final class InvFood
         if (!Rs2Inventory.isEmpty())
         {
             Rs2Bank.depositAll();
-            Script.sleepUntil(Rs2Inventory::isEmpty, 3_000);
             return false;
         }
 
@@ -47,9 +45,7 @@ public final class InvFood
             return false;
         }
 
-        return Script.sleepUntil(
-                () -> Rs2Inventory.itemQuantity(selectedFood.getId()) >= REQUIRED_FOOD,
-                3_000);
+        return false;
     }
 
     public Rs2Food findBestAvailableFood()
