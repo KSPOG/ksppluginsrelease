@@ -20,10 +20,8 @@ import net.runelite.client.plugins.microbot.util.bank.Rs2Bank;
 import net.runelite.client.plugins.microbot.util.camera.Rs2Camera;
 import net.runelite.client.plugins.microbot.util.dialogues.Rs2Dialogue;
 import net.runelite.client.plugins.microbot.util.equipment.Rs2Equipment;
-import net.runelite.client.plugins.microbot.util.gameobject.Rs2GameObject;
 import net.runelite.client.plugins.microbot.util.inventory.Rs2Inventory;
 import net.runelite.client.plugins.microbot.util.keyboard.Rs2Keyboard;
-import net.runelite.client.plugins.microbot.util.math.Rs2Random;
 import net.runelite.client.plugins.microbot.util.misc.Rs2UiHelper;
 import net.runelite.client.plugins.microbot.util.player.Rs2Player;
 import net.runelite.client.plugins.microbot.util.security.Login;
@@ -109,7 +107,6 @@ public class TutorialIslandScript extends Script
     private static final WorldArea START_AREA            = TutAreas.START_AREA;
     private static final WorldArea SURVIVAL_AREA         = TutAreas.SURVIVAL_AREA;
     private static final WorldArea COOKING_AREA          = TutAreas.COOKING_AREA;
-    private static final WorldArea QUEST_GUIDE_AREA      = TutAreas.QUEST_TUT_AREA;
     private static final WorldPoint COOKING_AREA_WALK_TILE = new WorldPoint(3074, 3087, 0);
     private static final WorldPoint QUEST_GUIDE_WALK_TILE = new WorldPoint(3085, 3121, 0);
     private static final WorldArea MINING_SMITHING_AREA  = TutAreas.MINING_SMITHING_AREA;
