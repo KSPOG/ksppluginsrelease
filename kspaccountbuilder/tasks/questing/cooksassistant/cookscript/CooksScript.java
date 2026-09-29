@@ -140,6 +140,11 @@ public class CooksScript extends Script {
             return;
         }
 
+        if (Rs2Bank.isOpen()) {
+            Rs2Bank.closeBank();
+            return;
+        }
+
         if (!ensureAtCook()) {
             state = CooksState.WALKING_TO_COOK;
             return;
