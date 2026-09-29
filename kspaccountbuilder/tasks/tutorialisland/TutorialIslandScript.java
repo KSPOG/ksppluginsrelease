@@ -689,6 +689,11 @@ public class TutorialIslandScript extends Script
             return;
         }
 
+        if (!toggledSettings && configureCameraAfterGielinorGuide())
+        {
+            return;
+        }
+
         walkAndTalk(npc);
     }
 
@@ -696,29 +701,37 @@ public class TutorialIslandScript extends Script
     {
         int progress = Microbot.getVarbitPlayerValue(281);
 
-        if (!toggledSettings && configureCameraAfterGielinorGuide())
+        if (progress == 10 || progress == 20)
         {
+            talkToSurvivalExpert();
             return;
         }
 
-        if (progress == 10 || progress == 20 || progress == 60)
-        {
-            talkToSurvivalExpert();
-        }
-        else if (progress < 40)
+        if (progress < 40)
         {
             clickTab("Inventory");
+            return;
         }
-        else if (progress < 50)
+
+        if (progress < 50)
         {
             fishShrimp();
+            return;
         }
-        else if (progress < 70)
+
+        if (progress < 60)
         {
             clickTab("Skills");
-            talkToSurvivalExpert();
+            return;
         }
-        else if (progress <= 90)
+
+        if (progress < 70)
+        {
+            talkToSurvivalExpert();
+            return;
+        }
+
+        if (progress <= 90)
         {
             if (!Rs2Inventory.hasItem("Bronze Axe") || !Rs2Inventory.hasItem("Tinderbox"))
             {
@@ -744,7 +757,10 @@ public class TutorialIslandScript extends Script
                 return;
             }
             cookShrimpOnOwnFire();
+            return;
         }
+
+        debug("Waiting for Survival Guide progress update | progress=%d", progress);
     }
 
     private boolean configureCameraAfterGielinorGuide()
@@ -823,9 +839,9 @@ public class TutorialIslandScript extends Script
 
     private boolean talkToSurvivalExpert()
     {
-        if (!walkToArea(SURVIVAL_AREA))
+        if (isInDialogue())
         {
-            return false;
+            return true;
         }
 
         Rs2NpcModel npc = Microbot.getRs2NpcCache().query().fromWorldView().withId(NpcID.SURVIVAL_EXPERT).nearest();
@@ -835,7 +851,34 @@ public class TutorialIslandScript extends Script
             npc = Microbot.getRs2NpcCache().query().fromWorldView().withName("Survival Expert").nearest();
         }
 
-        return walkAndTalk(npc, 4);
+        WorldPoint playerLocation = Rs2Player.getWorldLocation();
+        WorldPoint npcLocation = npc != null ? npc.getWorldLocation() : null;
+
+        if (playerLocation == null)
+        {
+            return false;
+        }
+
+        if (npcLocation == null)
+        {
+            walkToArea(SURVIVAL_AREA);
+            return false;
+        }
+
+        if (playerLocation.distanceTo(npcLocation) > 4)
+        {
+            walkTutorialLocal(npcLocation, 4);
+            return false;
+        }
+
+        KspWalkerGuard.clearActiveWalker("ksp_account_builder_survival_expert");
+        if (!npc.click("Talk-to"))
+        {
+            return false;
+        }
+
+        sleepUntil(Rs2Dialogue::isInDialogue, 1_500);
+        return true;
     }
 
     private void cookingGuide()
