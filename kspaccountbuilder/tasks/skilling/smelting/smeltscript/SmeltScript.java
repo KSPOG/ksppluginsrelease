@@ -178,7 +178,7 @@ extends Script {
         if (!Rs2Bank.isOpen()) {
             return false;
         }
-        if (KspBankWidgetHelper.closeBankTutorialOverlayIfOpenAndWait()) {
+        if (KspBankWidgetHelper.closeBankTutorialOverlayIfOpen()) {
             return false;
         }
         if (!KspBankMode.ensureWithdrawAsItem()) {
@@ -186,7 +186,6 @@ extends Script {
             return false;
         }
         Rs2Bank.depositAll();
-        SmeltScript.sleep((int)250);
         int barsToWithdraw = this.getBarsToWithdrawForInventory(req);
         if (barsToWithdraw <= 0) {
             this.debug("Not enough ores in bank to withdraw for {}", bar.getDisplayName());
@@ -202,7 +201,6 @@ extends Script {
             return false;
         }
         Rs2Bank.closeBank();
-        SmeltScript.sleepUntil(() -> !Rs2Bank.isOpen(), (int)1500);
         return false;
     }
 
@@ -219,27 +217,21 @@ extends Script {
     }
 
     private boolean prepareExactOreInventory(ReqOres req, int primaryTargetAmount, int secondaryTargetAmount) {
-        for (int attempt = 0; attempt < 2; ++attempt) {
-            if (attempt > 0) {
-                Rs2Bank.depositAll();
-                SmeltScript.sleep((int)150);
-            }
-            if (!this.withdrawExactOreAmount(req.getPrimaryOreName(), primaryTargetAmount) || req.hasSecondaryOre() && !this.withdrawExactOreAmount(req.getSecondaryOreName(), secondaryTargetAmount) || !this.hasExactOreInventory(req, primaryTargetAmount, secondaryTargetAmount)) continue;
-            return true;
+        if (!this.withdrawExactOreAmount(req.getPrimaryOreName(), primaryTargetAmount)) {
+            return false;
         }
-        return false;
+        if (req.hasSecondaryOre() && !this.withdrawExactOreAmount(req.getSecondaryOreName(), secondaryTargetAmount)) {
+            return false;
+        }
+        return this.hasExactOreInventory(req, primaryTargetAmount, secondaryTargetAmount);
     }
 
     private boolean withdrawExactOreAmount(String oreName, int targetAmount) {
-        if (targetAmount <= 0) {
+        if (targetAmount <= 0 || Rs2Inventory.count((String)oreName) == targetAmount) {
             return true;
         }
-        boolean withdrew = Rs2Bank.withdrawX((String)oreName, (int)targetAmount);
-        if (!withdrew) {
-            return false;
-        }
-        SmeltScript.sleepUntil(() -> Rs2Inventory.count((String)oreName) == targetAmount, (int)2000);
-        return Rs2Inventory.count((String)oreName) == targetAmount;
+        Rs2Bank.withdrawX((String)oreName, (int)targetAmount);
+        return false;
     }
 
     private boolean hasExactOreInventory(ReqOres req, int primaryTargetAmount, int secondaryTargetAmount) {
@@ -325,10 +317,6 @@ extends Script {
             this.lastSmeltAnimationAtMs = System.currentTimeMillis();
             return;
         }
-        long sinceLastSmeltAnimation = System.currentTimeMillis() - this.lastSmeltAnimationAtMs;
-        if (sinceLastSmeltAnimation < 1800L) {
-            return;
-        }
         if (Rs2Bank.isOpen()) {
             Rs2Bank.closeBank();
             return;
@@ -408,13 +396,11 @@ extends Script {
             return false;
         }
         boolean clickedBar = Rs2Widget.clickWidget((String)bar.getDisplayName());
-        this.debug("Smelt selection widget | bar={} clicked={} productionOpen={}", bar.getDisplayName(), clickedBar, Rs2Widget.isProductionWidgetOpen());
+        this.debug("Smelt selection widget | bar={} clicked={} productionOpen={}",
+                bar.getDisplayName(), clickedBar, Rs2Widget.isProductionWidgetOpen());
         if (!clickedBar) {
             this.debug("Failed to click smelt option {}", bar.getDisplayName());
-            return true;
         }
-        Rs2Widget.sleepUntilHasNotWidgetText((String)"What would you like to smelt?", (int)270, (int)5, (boolean)false, (int)3000);
-        this.handleProductionWidget(bar);
         return true;
     }
 
@@ -432,7 +418,6 @@ extends Script {
         }
         Rs2Keyboard.keyPress((int)32);
         this.awaitingSmeltStartAtMs = System.currentTimeMillis();
-        SmeltScript.sleepUntil(() -> Rs2Player.isAnimating() || Rs2Player.isInteracting(), SMELT_START_GRACE_MS);
         return true;
     }
 
@@ -440,9 +425,6 @@ extends Script {
         boolean selected = Rs2Widget.clickWidget((String)bar.getDisplayName(), Optional.of(270), (int)13, (boolean)false);
         if (!selected) {
             boolean bl = selected = Rs2Widget.clickWidget((String)bar.getDisplayName(), (boolean)true) || Rs2Widget.clickWidget((String)bar.getDisplayName(), (boolean)false);
-        }
-        if (selected) {
-            SmeltScript.sleep((int)150);
         }
         return selected;
     }
