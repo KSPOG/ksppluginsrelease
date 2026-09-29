@@ -1542,7 +1542,14 @@ public class TutorialIslandScript extends Script
 
     private boolean walkAndTalk(Rs2NpcModel npc) { return walkAndTalk(npc, 2); }
 
-    private boolean walkAndTalk(Rs2NpcModel npc, int reach) { return walkAndAct(npc, reach, "Talk-to", () -> sleepUntil(Rs2Dialogue::isInDialogue, 5000)); }
+    private boolean walkAndTalk(Rs2NpcModel npc, int reach)
+    {
+        return walkAndAct(
+                npc,
+                reach,
+                "Talk-to",
+                () -> sleepUntil(Rs2Dialogue::isInDialogue, 1_500));
+    }
 
     private boolean walkAndAct(Rs2NpcModel npc, int reach, String action, Runnable afterClick)
     {
@@ -1559,39 +1566,25 @@ public class TutorialIslandScript extends Script
             return false;
         }
 
-        if (npc.click(action))
+        if (playerLocation.distanceTo(npcLocation) > reach)
         {
-            if (afterClick != null)
-            {
-                afterClick.run();
-            }
-            return true;
+            walkTutorialLocal(npcLocation, reach);
+            return false;
         }
 
-        if (playerLocation.distanceTo(npcLocation) <= reach)
+        KspWalkerGuard.clearActiveWalker("ksp_account_builder_tutorial_npc_interaction");
+
+        if (!npc.click(action))
         {
             return false;
         }
 
-        walkTutorialLocal(npcLocation, reach);
-        Rs2Player.waitForWalking();
-        playerLocation = Rs2Player.getWorldLocation();
-
-        if (playerLocation == null || playerLocation.distanceTo(npcLocation) > reach)
+        if (afterClick != null)
         {
-            return false;
+            afterClick.run();
         }
 
-        if (npc.click(action))
-        {
-            if (afterClick != null)
-            {
-                afterClick.run();
-            }
-            return true;
-        }
-
-        return false;
+        return true;
     }
 
     // -------------------------------------------------------------------------
@@ -1685,12 +1678,16 @@ public class TutorialIslandScript extends Script
             fireLocation = Rs2Player.getWorldLocation();
         }
 
-        Rs2Inventory.combine("Logs", "Tinderbox");
+        if (!Rs2Inventory.combine("Logs", "Tinderbox"))
+        {
+            debug("Failed to start Tutorial Island firemaking interaction.");
+            return;
+        }
 
         WorldPoint confirmedLocation = fireLocation;
-        boolean fireConfirmed = sleepUntil(() -> !Rs2Inventory.hasItem("Logs"), 5000);
+        boolean fireStarted = sleepUntil(() -> Rs2Player.isAnimating() || !Rs2Inventory.hasItem("Logs"), 1_500);
 
-        if (fireConfirmed)
+        if (fireStarted)
         {
             ownFireLocation = confirmedLocation;
         }
@@ -1698,28 +1695,120 @@ public class TutorialIslandScript extends Script
 
     private void cutTree()
     {
-        Microbot.getClientThread().invoke(() ->
-                Microbot.getRs2TileObjectCache().query().fromWorldView().withName("Tree").interact("Chop down"));
-        sleepUntil(() -> Rs2Inventory.hasItem("Logs") && !Rs2Player.isAnimating(2400));
-    }
-
-    private void fishShrimp()
-    {
-        Microbot.getRs2NpcCache().query().fromWorldView().withId(NpcID.FISHING_SPOT_3317).interact("Net");
-        sleepUntil(() -> Rs2Inventory.contains(false, "shrimps"));
-    }
-
-    private void cookShrimpOnOwnFire()
-    {
-        if (!Rs2Inventory.interact(ItemID.RAW_SHRIMPS_2514, "Use"))
+        if (Rs2Inventory.hasItem("Logs"))
         {
             return;
         }
 
-        Rs2Random.waitEx(240, 80);
-        Microbot.getRs2TileObjectCache().query().fromWorldView().withId(ObjectID.FIRE_26185).interact("Use");
-        sleepUntil(() -> !Rs2Inventory.hasItem(ItemID.RAW_SHRIMPS_2514)
-                || Microbot.getVarbitPlayerValue(281) > 90, 5000);
+        Rs2TileObjectModel tree = Microbot.getRs2TileObjectCache()
+                .query()
+                .fromWorldView()
+                .withName("Tree")
+                .nearestOnClientThread();
+
+        if (tree == null || tree.getWorldLocation() == null)
+        {
+            debug("Waiting for Tutorial Island tree to become available.");
+            return;
+        }
+
+        WorldPoint playerLocation = Rs2Player.getWorldLocation();
+        if (playerLocation == null)
+        {
+            return;
+        }
+
+        if (playerLocation.distanceTo(tree.getWorldLocation()) > 4)
+        {
+            walkTutorialLocal(tree.getWorldLocation(), 4);
+            return;
+        }
+
+        KspWalkerGuard.clearActiveWalker("ksp_account_builder_tutorial_tree");
+
+        if (!tree.click("Chop down"))
+        {
+            debug("Failed to interact with Tutorial Island tree.");
+            return;
+        }
+
+        sleepUntil(() -> Rs2Player.isAnimating() || Rs2Inventory.hasItem("Logs"), 1_500);
+    }
+
+    private void fishShrimp()
+    {
+        if (Rs2Inventory.hasItem(ItemID.RAW_SHRIMPS_2514))
+        {
+            return;
+        }
+
+        Rs2NpcModel fishingSpot = Microbot.getRs2NpcCache()
+                .query()
+                .fromWorldView()
+                .withId(NpcID.FISHING_SPOT_3317)
+                .nearest();
+
+        if (fishingSpot == null || fishingSpot.getWorldLocation() == null)
+        {
+            debug("Waiting for Tutorial Island fishing spot to become available.");
+            return;
+        }
+
+        WorldPoint playerLocation = Rs2Player.getWorldLocation();
+        WorldPoint spotLocation = fishingSpot.getWorldLocation();
+
+        if (playerLocation == null)
+        {
+            return;
+        }
+
+        if (playerLocation.distanceTo(spotLocation) > 4)
+        {
+            walkTutorialLocal(spotLocation, 4);
+            return;
+        }
+
+        KspWalkerGuard.clearActiveWalker("ksp_account_builder_tutorial_fishing");
+
+        if (!fishingSpot.click("Net"))
+        {
+            debug("Failed to interact with Tutorial Island fishing spot.");
+            return;
+        }
+
+        sleepUntil(() -> Rs2Player.isAnimating()
+                || Rs2Inventory.hasItem(ItemID.RAW_SHRIMPS_2514)
+                || Microbot.getVarbitPlayerValue(281) >= 50, 1_500);
+    }
+
+    private void cookShrimpOnOwnFire()
+    {
+        if (!Rs2Inventory.hasItem(ItemID.RAW_SHRIMPS_2514))
+        {
+            return;
+        }
+
+        Rs2TileObjectModel fire = Microbot.getRs2TileObjectCache()
+                .query()
+                .fromWorldView()
+                .withId(ObjectID.FIRE_26185)
+                .nearestOnClientThread();
+
+        if (fire == null)
+        {
+            ownFireLocation = null;
+            return;
+        }
+
+        if (!Rs2Inventory.useItemOnObject(ItemID.RAW_SHRIMPS_2514, fire.getId()))
+        {
+            debug("Failed to use raw shrimps on Tutorial Island fire.");
+            return;
+        }
+
+        sleepUntil(() -> Rs2Player.isAnimating()
+                || !Rs2Inventory.hasItem(ItemID.RAW_SHRIMPS_2514)
+                || Microbot.getVarbitPlayerValue(281) > 90, 1_500);
     }
 
     private boolean hasNearbyFire() { return Microbot.getRs2TileObjectCache().query().fromWorldView().withId(ObjectID.FIRE_26185).nearest() != null; }
