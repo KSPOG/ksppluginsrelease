@@ -772,6 +772,7 @@ public class WoodCuttingScript extends Script {
     }
 
     public void shutdown() {
+        lastBankActionAtMs = 0L;
         this.startingTargetTreeInitialized = false;
         this.randomMidTierTree = null;
         this.randomOakArea = null;
