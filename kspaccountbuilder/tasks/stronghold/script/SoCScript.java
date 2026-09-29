@@ -190,7 +190,6 @@ public class SoCScript extends Script
             if (interactWithExactObject(objectId, objectLocation))
             {
                 rewardInteractionStarted = true;
-                sleepUntil(Rs2Dialogue::isInDialogue, 3_000);
             }
             return;
         }
@@ -237,42 +236,22 @@ public class SoCScript extends Script
 
     private boolean handleDialogue()
     {
-        if (!Rs2Dialogue.isInDialogue())
-        {
-            return false;
-        }
-
-        if (rewardInteractionStarted)
-        {
-            rewardDialogueSeen = true;
-        }
-        else
-        {
-            securityDoorDialogueActive = true;
-        }
+        if (!Rs2Dialogue.isInDialogue()) return false;
 
         if (Rs2Dialogue.hasContinue())
         {
             Rs2Dialogue.clickContinue();
-            sleep(150, 300);
             return true;
         }
 
-        if (!Rs2Dialogue.hasSelectAnOption())
-        {
-            return true;
-        }
+        if (!Rs2Dialogue.hasSelectAnOption()) return false;
 
-        String question = Rs2Dialogue.getQuestion();
+        String question = Rs2Dialogue.getDialogueText();
         String answer = question == null ? null : StrongholdAnswer.findAnswer(question);
-        if (answer != null && Rs2Dialogue.clickOption(answer, true))
-        {
-            sleep(150, 300);
-            return true;
-        }
+        if (answer != null && Rs2Dialogue.clickOption(answer, true)) return true;
 
         Microbot.status = "Unknown Stronghold security question";
-        return true;
+        return false;
     }
 
     private boolean finishSecurityDoorDialogue()
@@ -291,10 +270,7 @@ public class SoCScript extends Script
 
     private void handlePendingLadderDescent()
     {
-        if (pendingLadderArea == null)
-        {
-            return;
-        }
+        if (pendingLadderArea == null) return;
 
         if (!pendingLadderArea.getArea().contains(Rs2Player.getWorldLocation()))
         {
@@ -302,16 +278,11 @@ public class SoCScript extends Script
             return;
         }
 
-        Microbot.status = "Descending Stronghold ladder";
-        boolean interacted = Microbot.getRs2TileObjectCache()
-                .query()
+        boolean interacted = Microbot.getRs2TileObjectCache().query()
                 .fromWorldView()
                 .withName("Ladder")
                 .interact("Climb-down");
-        if (interacted)
-        {
-            sleepUntil(() -> !pendingLadderArea.getArea().contains(Rs2Player.getWorldLocation()), 5_000);
-        }
+        if (interacted) Microbot.status = "Descending Stronghold ladder";
     }
 
     private void returnToBank()
