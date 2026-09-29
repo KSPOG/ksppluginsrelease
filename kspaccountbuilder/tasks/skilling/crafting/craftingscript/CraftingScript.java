@@ -34,8 +34,7 @@ public class CraftingScript extends Script
     private static final int LOOP_DELAY_MS = 250;
     private static final int WALK_COOLDOWN_MS = 3_000;
     private static final int FURNACE_SEARCH_RADIUS = 12;
-    private static final int ACTION_COOLDOWN_MS = 750;
-    private static final int PRODUCTION_START_TIMEOUT_MS = 2_500;
+    private static final int ACTION_COOLDOWN_MS = 300;
 
     private volatile CraftingState state = CraftingState.WAITING;
     private volatile CraftingLevels targetLevel = CraftingLevels.LEATHER_GLOVES;
@@ -78,7 +77,7 @@ public class CraftingScript extends Script
                     Rs2Player.isInteracting(),
                     Rs2Bank.isOpen());
 
-            if (!hasRequiredInventory(targetRecipe))
+            if (!hasRequiredInventory(targetRecipe) || Rs2Bank.isOpen())
             {
                 state = CraftingState.BANKING;
                 prepareInventory(targetRecipe);
@@ -186,42 +185,39 @@ public class CraftingScript extends Script
 
         if (!Rs2Bank.isOpen())
         {
-            if (!Rs2Bank.openBank())
-            {
-                return;
-            }
-            sleepUntil(Rs2Bank::isOpen, 3_000);
+            Rs2Bank.openBank();
             return;
         }
 
-        if (KspBankWidgetHelper.closeBankTutorialOverlayIfOpenAndWait()
+        if (KspBankWidgetHelper.closeBankTutorialOverlayIfOpen()
                 || !KspBankMode.ensureWithdrawAsItem())
         {
             return;
         }
 
-        Rs2Bank.depositAll();
-        sleep(200);
+        if (!Rs2Inventory.isEmpty() && !hasRequiredInventory(recipe))
+        {
+            Rs2Bank.depositAll();
+            return;
+        }
 
         for (Ingredient ingredient : recipe.getIngredients())
         {
             int amount = resolveWithdrawAmount(recipe, ingredient);
-            if (amount <= 0 || !withdraw(ingredient.getItemName(), amount))
+            if (amount <= 0)
             {
                 Microbot.status = "Missing crafting item: " + ingredient.getItemName();
-                debug("Unable to withdraw {} x{} for {}",
-                        ingredient.getItemName(), amount, targetLevel.getDisplayName());
+                return;
+            }
+
+            if (Rs2Inventory.count(ingredient.getItemName()) < amount)
+            {
+                withdraw(ingredient.getItemName(), amount);
                 return;
             }
         }
 
-        if (!hasRequiredInventory(recipe))
-        {
-            return;
-        }
-
         Rs2Bank.closeBank();
-        sleepUntil(() -> !Rs2Bank.isOpen(), 1_500);
     }
 
     private int resolveWithdrawAmount(CraftInventory recipe, Ingredient ingredient)
@@ -256,16 +252,9 @@ public class CraftingScript extends Script
 
     private boolean withdraw(String itemName, int amount)
     {
-        boolean withdrew = amount == 1
+        return amount == 1
                 ? Rs2Bank.withdrawOne(itemName)
                 : Rs2Bank.withdrawX(itemName, amount);
-        if (!withdrew)
-        {
-            return false;
-        }
-
-        sleepUntil(() -> Rs2Inventory.count(itemName) >= amount, 2_000);
-        return Rs2Inventory.count(itemName) >= amount;
     }
 
     private boolean ensureInArea(Areas area, String walkKey)
@@ -294,6 +283,13 @@ public class CraftingScript extends Script
 
     private void craftFromInventory(CraftInventory recipe)
     {
+        if (Rs2Widget.isProductionWidgetOpen()
+                || Rs2Widget.findWidget(targetLevel.getDisplayName(), null, false) != null)
+        {
+            selectProductAndMakeAll(recipe);
+            return;
+        }
+
         if (!canStartAction())
         {
             return;
@@ -306,37 +302,16 @@ public class CraftingScript extends Script
             return;
         }
 
-        if (expectingXpDrop && Rs2Player.waitForXpDrop(Skill.CRAFTING, 4_500))
-        {
-            return;
-        }
-
         Microbot.status = "Crafting " + targetLevel.getDisplayName();
-        Rs2Inventory.use(tool.getItemName());
-        sleep(150);
-        Rs2Inventory.use(material.getItemName());
-
-        boolean interfaceOpened = sleepUntil(
-                () -> Rs2Widget.isProductionWidgetOpen()
-                        || Rs2Widget.findWidget(targetLevel.getDisplayName(), null, false) != null
-                        || Rs2Player.isAnimating(),
-                PRODUCTION_START_TIMEOUT_MS);
-        if (!interfaceOpened)
+        if (Rs2Inventory.combine(tool.getItemName(), material.getItemName()))
         {
-            return;
+            lastActionAtMs = System.currentTimeMillis();
         }
-
-        selectProductAndMakeAll(recipe);
     }
 
     private void craftAtFurnace(CraftInventory recipe)
     {
         if (!canStartAction())
-        {
-            return;
-        }
-
-        if (expectingXpDrop && Rs2Player.waitForXpDrop(Skill.CRAFTING, 4_500))
         {
             return;
         }
@@ -356,14 +331,7 @@ public class CraftingScript extends Script
 
         Microbot.status = "Crafting " + targetLevel.getDisplayName();
         lastActionAtMs = System.currentTimeMillis();
-        if (!furnace.click("Smelt"))
-        {
-            return;
-        }
-
-        sleepUntil(() -> Rs2Widget.isGoldCraftingWidgetOpen()
-                || Rs2Widget.isSilverCraftingWidgetOpen(), 3_000);
-        selectProductAndMakeAll(recipe);
+        furnace.click("Smelt");
     }
 
     private void selectProductAndMakeAll(CraftInventory recipe)
@@ -383,7 +351,6 @@ public class CraftingScript extends Script
         Rs2Keyboard.keyPress(KeyEvent.VK_SPACE);
         expectingXpDrop = true;
         lastActionAtMs = System.currentTimeMillis();
-        sleepUntil(() -> Rs2Player.isAnimating() || Rs2Player.isInteracting(), 2_500);
     }
 
     private boolean canStartAction()
@@ -393,7 +360,7 @@ public class CraftingScript extends Script
             Rs2Bank.closeBank();
             return false;
         }
-        if (Rs2Player.isMoving() || Rs2Player.isAnimating() || Rs2Player.isInteracting())
+        if (Rs2Player.isAnimating() || Rs2Player.isInteracting())
         {
             return false;
         }
