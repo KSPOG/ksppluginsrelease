@@ -86,6 +86,13 @@ public class CraftingScript extends Script
                 return;
             }
 
+            if (Rs2Bank.isOpen())
+            {
+                bankInventoryReset = false;
+                Rs2Bank.closeBank();
+                return;
+            }
+
             if (targetRecipe.requiresFurnace())
             {
                 if (!ensureInArea(Areas.EDGE_FURNACE, FURNACE_WALK_KEY))
