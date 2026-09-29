@@ -84,7 +84,7 @@ public class CookingScript extends Script
                 return;
             }
 
-            if (!Rs2Inventory.hasItem(fish.getRawItemName()))
+            if (!Rs2Inventory.hasItem(fish.getRawItemName()) || Rs2Bank.isOpen())
             {
                 state = CookingState.BANKING;
                 bankForFish(fish);
@@ -97,12 +97,6 @@ public class CookingScript extends Script
                 return;
             }
 
-            if (expectingXpDrop && Rs2Player.waitForXpDrop(Skill.COOKING, 4_500))
-            {
-                state = CookingState.COOKING;
-                return;
-            }
-
             if (Rs2Widget.findWidget("How many would you like to cook?", null, false) != null)
             {
                 state = CookingState.OPENING_COOKING_INTERFACE;
@@ -112,9 +106,6 @@ public class CookingScript extends Script
                     Rs2Keyboard.keyPress(KeyEvent.VK_SPACE);
                     expectingXpDrop = true;
                     state = CookingState.COOKING;
-                    sleepUntil(() -> Rs2Player.isAnimating()
-                            || Rs2Widget.findWidget(
-                                    "How many would you like to cook?", null, false) == null, 2_000);
                 }
                 return;
             }
@@ -134,11 +125,7 @@ public class CookingScript extends Script
 
             state = CookingState.OPENING_COOKING_INTERFACE;
             Microbot.status = "Cooking " + fish.getCookedItemName();
-            if (stove.click("Cook"))
-            {
-                sleepUntil(() -> Rs2Widget.findWidget(
-                        "How many would you like to cook?", null, false) != null, 3_000);
-            }
+            stove.click("Cook");
         }, 0L, LOOP_DELAY_MS, TimeUnit.MILLISECONDS);
 
         return true;
@@ -173,19 +160,30 @@ public class CookingScript extends Script
             return;
         }
 
-        if (!Rs2Bank.walkToBankAndUseBank() && !Rs2Bank.openBank())
+        if (!Rs2Bank.isOpen())
         {
+            Rs2Bank.walkToBankAndUseBank();
+            Rs2Bank.openBank();
             return;
         }
-        if (!Rs2Bank.isOpen() || KspBankWidgetHelper.closeBankTutorialOverlayIfOpenAndWait())
+
+        if (KspBankWidgetHelper.closeBankTutorialOverlayIfOpen())
         {
             return;
         }
 
-        Rs2Bank.depositAll();
-        sleepUntil(Rs2Inventory::isEmpty, 2_000);
-        Rs2Bank.withdrawAll(fish.getRawItemName());
-        sleepUntil(() -> Rs2Inventory.hasItem(fish.getRawItemName()), 3_000);
+        if (!Rs2Inventory.isEmpty() && !Rs2Inventory.hasItem(fish.getRawItemName()))
+        {
+            Rs2Bank.depositAll();
+            return;
+        }
+
+        if (!Rs2Inventory.hasItem(fish.getRawItemName()))
+        {
+            Rs2Bank.withdrawAll(fish.getRawItemName());
+            return;
+        }
+
         Rs2Bank.closeBank();
         expectingXpDrop = false;
     }
@@ -339,11 +337,6 @@ public class CookingScript extends Script
         {
             selected = Rs2Widget.clickWidget(itemName, true)
                     || Rs2Widget.clickWidget(itemName, false);
-        }
-
-        if (selected)
-        {
-            sleep(150);
         }
 
         debug("Production widget selection | item={} selected={} productionOpen={}",
