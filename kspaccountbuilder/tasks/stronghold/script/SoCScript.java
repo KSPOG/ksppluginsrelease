@@ -190,7 +190,6 @@ public class SoCScript extends Script
             if (interactWithExactObject(objectId, objectLocation))
             {
                 rewardInteractionStarted = true;
-                sleepUntil(Rs2Dialogue::isInDialogue, 3_000);
             }
             return;
         }
@@ -254,7 +253,6 @@ public class SoCScript extends Script
         if (Rs2Dialogue.hasContinue())
         {
             Rs2Dialogue.clickContinue();
-            sleep(150, 300);
             return true;
         }
 
@@ -267,7 +265,6 @@ public class SoCScript extends Script
         String answer = question == null ? null : StrongholdAnswer.findAnswer(question);
         if (answer != null && Rs2Dialogue.clickOption(answer, true))
         {
-            sleep(150, 300);
             return true;
         }
 
@@ -303,15 +300,11 @@ public class SoCScript extends Script
         }
 
         Microbot.status = "Descending Stronghold ladder";
-        boolean interacted = Microbot.getRs2TileObjectCache()
+        Microbot.getRs2TileObjectCache()
                 .query()
                 .fromWorldView()
                 .withName("Ladder")
                 .interact("Climb-down");
-        if (interacted)
-        {
-            sleepUntil(() -> !pendingLadderArea.getArea().contains(Rs2Player.getWorldLocation()), 5_000);
-        }
     }
 
     private void returnToBank()
