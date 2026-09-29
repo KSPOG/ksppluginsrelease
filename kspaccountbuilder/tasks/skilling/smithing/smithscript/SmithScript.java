@@ -444,12 +444,8 @@ extends Script {
             this.debug("Smith recipe text fallback | recipe={} productName={} selected={}", recipe.getDisplayName(), productName, selectedRecipe);
         }
 
-        if (selectedRecipe) {
-            SmithScript.sleep((int)150);
-            if (this.isSmithingWidgetOpen()) {
-                Rs2Keyboard.keyPress((int)32);
-                SmithScript.sleep((int)150);
-            }
+        if (selectedRecipe && this.isSmithingWidgetOpen()) {
+            Rs2Keyboard.keyPress((int)32);
         }
 
         return selectedRecipe;
