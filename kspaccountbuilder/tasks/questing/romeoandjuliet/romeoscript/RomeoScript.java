@@ -520,7 +520,6 @@ public class RomeoScript extends Script
 
         state = RomeoState.PICKING_CADAVA_BERRIES;
         status = "Picking Cadava berries";
-        int previousQuantity = Rs2Inventory.itemQuantity(Inv.CADAVA_BERRIES.getItemId());
         TileObject bush = Rs2GameObject.findObjectByLocation(CADAVA_BUSH_POSITION);
         if (bush == null || bush.getId() != CADAVA_BUSH_OBJECT_ID)
         {
@@ -534,12 +533,7 @@ public class RomeoScript extends Script
         }
 
         lastActionAtMs = System.currentTimeMillis();
-        if (Rs2GameObject.interact(bush, "Pick-from"))
-        {
-            sleepUntil(
-                    () -> Rs2Inventory.itemQuantity(Inv.CADAVA_BERRIES.getItemId()) > previousQuantity,
-                    4_000);
-        }
+        Rs2GameObject.interact(bush, "Pick-from");
     }
 
     private void startQuestWithRomeo()
@@ -573,7 +567,6 @@ public class RomeoScript extends Script
         if (romeo.click("Talk-to"))
         {
             KspWalkerGuard.clear(WALK_KEY_ROMEO);
-            sleepUntil(Rs2Dialogue::isInDialogue, 4_000);
         }
     }
 
@@ -604,7 +597,6 @@ public class RomeoScript extends Script
         if (romeo.click("Talk-to"))
         {
             KspWalkerGuard.clear(WALK_KEY_ROMEO);
-            sleepUntil(Rs2Dialogue::isInDialogue, 4_000);
         }
     }
 
@@ -641,7 +633,6 @@ public class RomeoScript extends Script
         if (npc.click("Talk-to"))
         {
             KspWalkerGuard.clear(walkKey);
-            sleepUntil(Rs2Dialogue::isInDialogue, 4_000);
         }
     }
 
@@ -674,7 +665,6 @@ public class RomeoScript extends Script
             if (juliet.click("Talk-to"))
             {
                 KspWalkerGuard.clear(WALK_KEY_JULIET);
-                sleepUntil(Rs2Dialogue::isInDialogue, 4_000);
             }
             return;
         }
@@ -705,13 +695,6 @@ public class RomeoScript extends Script
         if (interactWithJulietStaircase())
         {
             KspWalkerGuard.clearActiveWalker("ksp_romeo_using_juliet_staircase");
-            sleepUntil(
-                    () ->
-                    {
-                        WorldPoint location = Rs2Player.getWorldLocation();
-                        return location != null && location.getPlane() == 1;
-                    },
-                    5_000);
             return;
         }
 
@@ -796,7 +779,6 @@ public class RomeoScript extends Script
             lastActionAtMs = System.currentTimeMillis();
             if (Rs2GameObject.interact(door, "Open"))
             {
-                sleep(600);
             }
         }
 
@@ -843,13 +825,6 @@ public class RomeoScript extends Script
             lastActionAtMs = System.currentTimeMillis();
             if (Rs2GameObject.interact(staircase, "Climb-down"))
             {
-                sleepUntil(
-                        () ->
-                        {
-                            WorldPoint location = Rs2Player.getWorldLocation();
-                            return location != null && location.getPlane() == 0;
-                        },
-                        5_000);
             }
             return;
         }
