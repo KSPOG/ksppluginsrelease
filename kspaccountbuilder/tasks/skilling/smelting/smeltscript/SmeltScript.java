@@ -49,7 +49,7 @@ extends Script {
     private static final int INVENTORY_SLOTS = 28;
     private static final int LOOP_DELAY_MS = 250;
     private static final int WEB_WALK_COOLDOWN_MS = 3000;
-    private static final int FURNACE_INTERACT_COOLDOWN_MS = 750;
+    private static final int FURNACE_INTERACT_COOLDOWN_MS = 350;
     private static final int SMELT_START_GRACE_MS = 1500;
     private static final int SMELT_ANIMATION_COOLDOWN_MS = 1800;
     private static final int PRODUCTION_WIDGET_GROUP_ID = 270;
@@ -63,6 +63,7 @@ extends Script {
     private boolean debugLogging;
     private boolean walkingToTargetArea;
     private boolean progressiveSmelting = true;
+    private boolean bankInventoryReset;
 
     public void setDebugLogging(boolean debugLogging) {
         this.debugLogging = debugLogging;
@@ -167,42 +168,50 @@ extends Script {
     }
 
     private boolean ensureOreInventoryForTargetBar(BarLevels bar) {
-        int secondaryToWithdraw;
         ReqOres req = ReqOres.valueOf(bar.name());
-        if (this.hasBalancedOreInventory(req)) {
+        if (hasBalancedOreInventory(req)) {
+            bankInventoryReset = false;
             return true;
         }
-        if (!Rs2Bank.walkToBankAndUseBank() && !Rs2Bank.openBank()) {
-            return false;
-        }
+
         if (!Rs2Bank.isOpen()) {
+            if (!Rs2Bank.openBank()) Rs2Bank.walkToBankAndUseBank();
             return false;
         }
-        if (KspBankWidgetHelper.closeBankTutorialOverlayIfOpenAndWait()) {
+
+        if (KspBankWidgetHelper.closeBankTutorialOverlayIfOpen()) return false;
+        if (!KspBankMode.ensureWithdrawAsItem()) return false;
+
+        if (!bankInventoryReset) {
+            Rs2Bank.depositAll();
+            bankInventoryReset = true;
             return false;
         }
-        if (!KspBankMode.ensureWithdrawAsItem()) {
-            this.debug("Waiting for withdraw-as-item mode before withdrawing ores for {}", bar.getDisplayName());
+
+        int bars = getBarsToWithdrawForInventory(req);
+        if (bars <= 0) return false;
+
+        int primaryTarget = bars * req.getPrimaryOreAmount();
+        int secondaryTarget = req.hasSecondaryOre() ? bars * req.getSecondaryOreAmount() : 0;
+
+        int primaryCurrent = Rs2Inventory.count(req.getPrimaryOreName());
+        if (primaryCurrent < primaryTarget) {
+            Rs2Bank.withdrawX(req.getPrimaryOreName(), primaryTarget - primaryCurrent);
             return false;
         }
-        Rs2Bank.depositAll();
-        SmeltScript.sleep((int)250);
-        int barsToWithdraw = this.getBarsToWithdrawForInventory(req);
-        if (barsToWithdraw <= 0) {
-            this.debug("Not enough ores in bank to withdraw for {}", bar.getDisplayName());
-            return false;
+
+        if (req.hasSecondaryOre()) {
+            int secondaryCurrent = Rs2Inventory.count(req.getSecondaryOreName());
+            if (secondaryCurrent < secondaryTarget) {
+                Rs2Bank.withdrawX(req.getSecondaryOreName(), secondaryTarget - secondaryCurrent);
+                return false;
+            }
         }
-        int primaryToWithdraw = barsToWithdraw * req.getPrimaryOreAmount();
-        int n = secondaryToWithdraw = req.hasSecondaryOre() ? barsToWithdraw * req.getSecondaryOreAmount() : 0;
-        if (!this.prepareExactOreInventory(req, primaryToWithdraw, secondaryToWithdraw)) {
-            this.debug("Failed to prepare exact ore amounts for {} (primary={}, secondary={})", bar.getDisplayName(), primaryToWithdraw, secondaryToWithdraw);
-            return false;
-        }
-        if (!this.hasRequiredOresInInventory(req)) {
-            return false;
-        }
+
+        if (!hasExactOreInventory(req, primaryTarget, secondaryTarget)) return false;
+
+        bankInventoryReset = false;
         Rs2Bank.closeBank();
-        SmeltScript.sleepUntil(() -> !Rs2Bank.isOpen(), (int)1500);
         return false;
     }
 
@@ -219,27 +228,14 @@ extends Script {
     }
 
     private boolean prepareExactOreInventory(ReqOres req, int primaryTargetAmount, int secondaryTargetAmount) {
-        for (int attempt = 0; attempt < 2; ++attempt) {
-            if (attempt > 0) {
-                Rs2Bank.depositAll();
-                SmeltScript.sleep((int)150);
-            }
-            if (!this.withdrawExactOreAmount(req.getPrimaryOreName(), primaryTargetAmount) || req.hasSecondaryOre() && !this.withdrawExactOreAmount(req.getSecondaryOreName(), secondaryTargetAmount) || !this.hasExactOreInventory(req, primaryTargetAmount, secondaryTargetAmount)) continue;
-            return true;
-        }
-        return false;
+        return hasExactOreInventory(req, primaryTargetAmount, secondaryTargetAmount);
     }
 
     private boolean withdrawExactOreAmount(String oreName, int targetAmount) {
-        if (targetAmount <= 0) {
-            return true;
-        }
-        boolean withdrew = Rs2Bank.withdrawX((String)oreName, (int)targetAmount);
-        if (!withdrew) {
-            return false;
-        }
-        SmeltScript.sleepUntil(() -> Rs2Inventory.count((String)oreName) == targetAmount, (int)2000);
-        return Rs2Inventory.count((String)oreName) == targetAmount;
+        if (targetAmount <= 0) return true;
+        int current = Rs2Inventory.count(oreName);
+        if (current >= targetAmount) return true;
+        return Rs2Bank.withdrawX(oreName, targetAmount - current);
     }
 
     private boolean hasExactOreInventory(ReqOres req, int primaryTargetAmount, int secondaryTargetAmount) {
@@ -322,70 +318,33 @@ extends Script {
 
     private void smeltAtFurnace(BarLevels bar) {
         if (Rs2Player.isAnimating() || Rs2Player.isInteracting()) {
-            this.lastSmeltAnimationAtMs = System.currentTimeMillis();
+            lastSmeltAnimationAtMs = System.currentTimeMillis();
             return;
         }
-        long sinceLastSmeltAnimation = System.currentTimeMillis() - this.lastSmeltAnimationAtMs;
-        if (sinceLastSmeltAnimation < 1800L) {
-            return;
-        }
+
         if (Rs2Bank.isOpen()) {
             Rs2Bank.closeBank();
             return;
         }
-        if (this.handleSmeltSelection(bar)) {
-            return;
-        }
-        if (this.handleProductionWidget(bar)) {
-            return;
-        }
-        if (this.isWaitingForSmeltStart()) {
-            return;
-        }
-        WorldPoint playerLocation = Rs2Player.getWorldLocation();
-        if (playerLocation == null || !this.targetArea.toWorldArea().contains(playerLocation)) {
-            return;
-        }
 
-        // Reaching the furnace area is the hand-off point: cancel any residual walker
-        // route and interact immediately. Do not wait for the moving flag to clear;
-        // clicking the furnace safely replaces the final walking click.
-        this.clearTargetAreaWalkIfNeeded();
+        if (handleSmeltSelection(bar) || handleProductionWidget(bar)) return;
+        if (isWaitingForSmeltStart()) return;
+
+        WorldPoint player = Rs2Player.getWorldLocation();
+        if (player == null || !targetArea.toWorldArea().contains(player)) return;
+
+        clearTargetAreaWalkIfNeeded();
+
         long now = System.currentTimeMillis();
-        if (now - this.lastFurnaceInteractAtMs < FURNACE_INTERACT_COOLDOWN_MS) {
-            return;
+        if (now - lastFurnaceInteractAtMs < FURNACE_INTERACT_COOLDOWN_MS) return;
+
+        Rs2TileObjectModel furnace = findNearbyFurnaceInTargetArea();
+        if (furnace == null) return;
+
+        if (furnace.click("Smelt")) {
+            lastFurnaceInteractAtMs = now;
+            awaitingSmeltStartAtMs = now;
         }
-        Rs2TileObjectModel furnace = this.findNearbyFurnaceInTargetArea();
-        if (furnace == null) {
-            this.debug("No reachable furnace found | bar={} player={} area={}", bar.getDisplayName(), Rs2Player.getWorldLocation(), this.targetArea.getDisplayName());
-            return;
-        }
-        this.lastFurnaceInteractAtMs = now;
-        this.debug("Attempting furnace interaction | bar={} furnaceName={} id={} loc={} reachable={} player={} distance={} area={}",
-                bar.getDisplayName(),
-                furnace.getName(),
-                furnace.getId(),
-                furnace.getWorldLocation(),
-                furnace.isReachable(),
-                Rs2Player.getWorldLocation(),
-                Rs2Player.getWorldLocation() != null ? Rs2Player.getWorldLocation().distanceTo(furnace.getWorldLocation()) : -1,
-                this.targetArea.getDisplayName());
-        boolean started = furnace.click("Smelt");
-        this.debug("Furnace interaction result | clicked={} bar={} furnaceId={} furnaceLoc={} player={} moving={} animating={} interacting={} productionOpen={}",
-                started,
-                bar.getDisplayName(),
-                furnace.getId(),
-                furnace.getWorldLocation(),
-                Rs2Player.getWorldLocation(),
-                Rs2Player.isMoving(),
-                Rs2Player.isAnimating(),
-                Rs2Player.isInteracting(),
-                Rs2Widget.isProductionWidgetOpen());
-        if (!started) {
-            return;
-        }
-        this.awaitingSmeltStartAtMs = System.currentTimeMillis();
-        this.debug("Interacted with furnace to smelt {}", bar.getDisplayName());
     }
 
     private Rs2TileObjectModel findNearbyFurnaceInTargetArea() {
@@ -402,47 +361,27 @@ extends Script {
     }
 
     private boolean handleSmeltSelection(BarLevels bar) {
-        // Hot-path probe only. The old 1.5s sleep ran before every furnace click,
-        // creating an artificial idle gap on arrival.
-        if (Rs2Widget.findWidget("What would you like to smelt?", null, false) == null) {
-            return false;
-        }
-        boolean clickedBar = Rs2Widget.clickWidget((String)bar.getDisplayName());
-        this.debug("Smelt selection widget | bar={} clicked={} productionOpen={}", bar.getDisplayName(), clickedBar, Rs2Widget.isProductionWidgetOpen());
-        if (!clickedBar) {
-            this.debug("Failed to click smelt option {}", bar.getDisplayName());
-            return true;
-        }
-        Rs2Widget.sleepUntilHasNotWidgetText((String)"What would you like to smelt?", (int)270, (int)5, (boolean)false, (int)3000);
-        this.handleProductionWidget(bar);
+        if (Rs2Widget.findWidget("What would you like to smelt?", null, false) == null) return false;
+
+        Rs2Widget.clickWidget(bar.getDisplayName());
         return true;
     }
 
     private boolean handleProductionWidget(BarLevels bar) {
-        // Non-blocking check: the 250ms script loop will observe the widget as soon
-        // as it opens instead of sleeping another 1.5 seconds before furnace use.
-        if (!Rs2Widget.isProductionWidgetOpen()) {
-            return false;
-        }
-        boolean selectedBar = this.selectProductionBar(bar);
-        this.debug("Production widget selection | bar={} selected={} productionOpen={}", bar.getDisplayName(), selectedBar, Rs2Widget.isProductionWidgetOpen());
-        if (!selectedBar) {
-            this.debug("Failed to select production widget option {}", bar.getDisplayName());
-            return true;
-        }
-        Rs2Keyboard.keyPress((int)32);
-        this.awaitingSmeltStartAtMs = System.currentTimeMillis();
-        SmeltScript.sleepUntil(() -> Rs2Player.isAnimating() || Rs2Player.isInteracting(), SMELT_START_GRACE_MS);
+        if (!Rs2Widget.isProductionWidgetOpen()) return false;
+
+        if (!selectProductionBar(bar)) return true;
+
+        Rs2Keyboard.keyPress(32);
+        awaitingSmeltStartAtMs = System.currentTimeMillis();
         return true;
     }
 
     private boolean selectProductionBar(BarLevels bar) {
-        boolean selected = Rs2Widget.clickWidget((String)bar.getDisplayName(), Optional.of(270), (int)13, (boolean)false);
+        boolean selected = Rs2Widget.clickWidget(bar.getDisplayName(), Optional.of(270), 13, false);
         if (!selected) {
-            boolean bl = selected = Rs2Widget.clickWidget((String)bar.getDisplayName(), (boolean)true) || Rs2Widget.clickWidget((String)bar.getDisplayName(), (boolean)false);
-        }
-        if (selected) {
-            SmeltScript.sleep((int)150);
+            selected = Rs2Widget.clickWidget(bar.getDisplayName(), true)
+                    || Rs2Widget.clickWidget(bar.getDisplayName(), false);
         }
         return selected;
     }
@@ -474,6 +413,7 @@ extends Script {
         this.awaitingSmeltStartAtMs = 0L;
         this.lastSmeltAnimationAtMs = 0L;
         this.walkingToTargetArea = false;
+        this.bankInventoryReset = false;
         KspWalkerGuard.clear("Smelting:target-area");
         super.shutdown();
     }
