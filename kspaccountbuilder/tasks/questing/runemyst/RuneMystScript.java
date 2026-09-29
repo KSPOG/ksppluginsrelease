@@ -249,10 +249,7 @@ public class RuneMystScript extends Script
         }
 
         lastActionAtMs = System.currentTimeMillis();
-        if (npc.click("Talk-to"))
-        {
-            sleepUntil(Rs2Dialogue::isInDialogue, 4_000);
-        }
+        npc.click("Talk-to");
     }
 
     private boolean isQuestComplete() { return Rs2Player.getQuestState(Quest.RUNE_MYSTERIES) == QuestState.FINISHED; }
