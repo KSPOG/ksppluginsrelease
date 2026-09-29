@@ -219,11 +219,6 @@ public class BuyScript extends Script {
                 return;
             }
 
-            if (Rs2Player.isMoving()) {
-                Microbot.status = "Waiting at GE";
-                return;
-            }
-
             if (Rs2Player.isInteracting()
                     && !Rs2GrandExchange.isOpen()
                     && !Rs2Bank.isOpen()
@@ -554,77 +549,30 @@ public class BuyScript extends Script {
             if (Rs2GrandExchange.isOpen()) {
                 Microbot.status = "Closing GE";
                 Rs2GrandExchange.closeExchange();
-                BuyScript.sleepUntil(() -> !Rs2GrandExchange.isOpen(), 2000);
-                return;
-            }
-
-            if (this.targetArea.toWorldArea().contains(Rs2Player.getWorldLocation())) {
-                Microbot.status = "Using GE Bank";
-
-                if (!Rs2Bank.openBank()) {
-                    Rs2Bank.walkToBankAndUseBank();
-                }
-
-                BuyScript.sleepUntil(Rs2Bank::isOpen, BANK_WAIT_TIMEOUT_MS);
                 return;
             }
 
             Microbot.status = "Opening Bank";
-
-            if (Rs2Bank.openBank()) {
-                BuyScript.sleepUntil(Rs2Bank::isOpen, BANK_WAIT_TIMEOUT_MS);
-            } else {
-                Microbot.status = "Walking to Bank";
+            if (!Rs2Bank.openBank()) {
                 Rs2Bank.walkToBankAndUseBank();
             }
-
             return;
         }
 
         Microbot.status = "Preparing GE Items";
-
         this.refreshBankAuditSnapshot(desiredPickaxe, desiredAxe);
 
-        this.debug(
-                "Preparing GE inventory | desiredPickaxe={} bankHasPickaxe={} desiredAxe={} bankHasAxe={} needCoins={} coinsInv={} coinsBank={}",
-                desiredPickaxe,
-                this.bankHasDesiredPickaxe,
-                desiredAxe,
-                this.bankHasDesiredAxe,
-                needCoinsForBuying,
-                Rs2Inventory.itemQuantity(995),
-                Rs2Bank.count(COINS_NAME)
-        );
-
-        if (KspBankWidgetHelper.closeBankTutorialOverlayIfOpenAndWait()) {
+        if (KspBankWidgetHelper.closeBankTutorialOverlayIfOpen()) {
             return;
         }
 
         if (!Rs2Inventory.isEmpty()) {
             Rs2Bank.depositAll();
-            BuyScript.sleepUntil(Rs2Inventory::isEmpty, BANK_WAIT_TIMEOUT_MS);
-            this.refreshBankAuditSnapshot(desiredPickaxe, desiredAxe);
+            return;
         }
 
         this.calculateSmithingOreNeeds();
         this.calculateCraftingNeeds();
-
-        this.debug(
-                "Tool/Ore/Fishing audit | hammerInBank={} tinderboxInBank={} baitBank={} feathersBank={} netInBank={} rodInBank={} flyRodInBank={} barsNeeded={} copperNeeded={} tinNeeded={} pendingTools={} pendingSupply={} pendingOres={}",
-                this.bankHasHammer,
-                this.bankHasTinderbox,
-                this.bankFishingBaitCount,
-                this.bankFeatherCount,
-                this.bankHasSmallFishingNet,
-                this.bankHasFishingRod,
-                this.bankHasFlyFishingRod,
-                this.requiredBronzeBars,
-                this.copperOreNeeded,
-                this.tinOreNeeded,
-                this.pendingMissingToolBuys,
-                this.pendingFishingSupplyBuys,
-                this.pendingOreBuys
-        );
 
         if (needCoinsForBuying && !this.ensureEnoughCoinsForMissingBuys(desiredPickaxe, desiredAxe)) {
             return;
@@ -632,19 +580,19 @@ public class BuyScript extends Script {
 
         if (!Rs2Bank.hasWithdrawAsNote()) {
             Rs2Bank.setWithdrawAsNote();
-            BuyScript.sleepUntil(Rs2Bank::hasWithdrawAsNote, 2000);
+            return;
         }
 
-        this.withdrawOutdatedToolsAsNotes(desiredPickaxe, desiredAxe);
+        if (this.withdrawOneOutdatedToolAsNote(desiredPickaxe, desiredAxe)) {
+            return;
+        }
 
         if (needCoinsForBuying && Rs2Inventory.itemQuantity(995) <= 0 && Rs2Bank.count(COINS_NAME) > 0) {
             Rs2Bank.withdrawAll(COINS_NAME);
-            BuyScript.sleepUntil(() -> Rs2Inventory.itemQuantity(995) > 0, BANK_WAIT_TIMEOUT_MS);
+            return;
         }
 
         Rs2Bank.closeBank();
-        BuyScript.sleepUntil(() -> !Rs2Bank.isOpen(), 2000);
-
         this.bankToolsAudited = true;
         Microbot.status = "Opening GE";
     }
@@ -839,7 +787,6 @@ public class BuyScript extends Script {
             Microbot.status = "Collecting fishing supplies";
             this.markCompletedPendingFishingSupplyBuys();
             Rs2GrandExchange.collectAllToBank();
-            BuyScript.sleepUntil(() -> !Rs2GrandExchange.hasBoughtOffer(), 5000);
             this.clearSatisfiedPendingFishingSupplyBuys();
             return true;
         }
@@ -1032,7 +979,6 @@ public class BuyScript extends Script {
             Microbot.status = "Collecting ore buys";
             this.markCompletedPendingOreBuys();
             Rs2GrandExchange.collectAllToBank();
-            BuyScript.sleepUntil(() -> !Rs2GrandExchange.hasBoughtOffer(), 5000);
             this.calculateSmithingOreNeeds();
             this.clearSatisfiedPendingOreBuys();
             return true;
@@ -1241,7 +1187,7 @@ public class BuyScript extends Script {
             return false;
         }
 
-        this.waitForActionCooldown();
+        if (!this.actionReady()) return false;
 
         Microbot.status = "Buying " + quantity + "x " + itemName;
 
@@ -1277,7 +1223,6 @@ public class BuyScript extends Script {
             this.lastActionAtMs = System.currentTimeMillis();
             this.pendingOreBuys.add(itemName);
             this.pendingOreBuyQuantities.merge(this.normalizeItemName(itemName), quantity, Integer::sum);
-            BuyScript.sleepUntil(() -> !Rs2GrandExchange.isOfferScreenOpen(), 2000);
         }
 
         return offered;
@@ -1288,7 +1233,7 @@ public class BuyScript extends Script {
             return false;
         }
 
-        this.waitForActionCooldown();
+        if (!this.actionReady()) return false;
 
         Microbot.status = "Buying " + quantity + "x " + itemName;
 
@@ -1324,7 +1269,6 @@ public class BuyScript extends Script {
             this.lastActionAtMs = System.currentTimeMillis();
             this.pendingFishingSupplyBuys.add(itemName);
             this.pendingFishingSupplyBuyQuantities.merge(this.normalizeItemName(itemName), quantity, Integer::sum);
-            BuyScript.sleepUntil(() -> !Rs2GrandExchange.isOfferScreenOpen(), 2000);
         }
 
         return offered;
@@ -1658,28 +1602,25 @@ public class BuyScript extends Script {
         return itemName == null ? "" : itemName.trim().toLowerCase(Locale.ENGLISH);
     }
 
-    private void withdrawOutdatedToolsAsNotes(String desiredPickaxe, String desiredAxe) {
+    private boolean withdrawOneOutdatedToolAsNote(String desiredPickaxe, String desiredAxe) {
         for (String pickaxeName : PICKAXE_NAMES) {
-            if (pickaxeName.equalsIgnoreCase(desiredPickaxe)
-                    || Rs2Bank.count(pickaxeName) <= 0
-                    || Rs2Inventory.isFull()) {
-                continue;
+            if (!pickaxeName.equalsIgnoreCase(desiredPickaxe)
+                    && Rs2Bank.count(pickaxeName) > 0
+                    && !Rs2Inventory.isFull()) {
+                Rs2Bank.withdrawAll(pickaxeName, true);
+                return true;
             }
-
-            Rs2Bank.withdrawAll(pickaxeName, true);
-            BuyScript.sleepUntil(() -> Rs2Inventory.hasItem(pickaxeName, true), BANK_WAIT_TIMEOUT_MS);
         }
 
         for (String axeName : AXE_NAMES) {
-            if (axeName.equalsIgnoreCase(desiredAxe)
-                    || Rs2Bank.count(axeName) <= 0
-                    || Rs2Inventory.isFull()) {
-                continue;
+            if (!axeName.equalsIgnoreCase(desiredAxe)
+                    && Rs2Bank.count(axeName) > 0
+                    && !Rs2Inventory.isFull()) {
+                Rs2Bank.withdrawAll(axeName, true);
+                return true;
             }
-
-            Rs2Bank.withdrawAll(axeName, true);
-            BuyScript.sleepUntil(() -> Rs2Inventory.hasItem(axeName, true), BANK_WAIT_TIMEOUT_MS);
         }
+        return false;
     }
 
     private boolean ensureGrandExchangeOpen() {
@@ -1690,38 +1631,15 @@ public class BuyScript extends Script {
         if (Rs2Bank.isOpen()) {
             Microbot.status = "Closing Bank";
             KspGrandExchangeHelper.closeBankBeforeExchange();
-            BuyScript.sleepUntil(() -> !Rs2Bank.isOpen(), 2000);
             return false;
         }
 
         Microbot.status = "Opening GE";
-
-        this.debug(
-                "Opening GE | player={} bankOpen={} geOpen={}",
-                Rs2Player.getWorldLocation(),
-                Rs2Bank.isOpen(),
-                Rs2GrandExchange.isOpen()
-        );
-
         if (KspGrandExchangeHelper.openExchangeDirectly()) {
-            BuyScript.sleepUntil(Rs2GrandExchange::isOpen, BANK_WAIT_TIMEOUT_MS);
-            return Rs2GrandExchange.isOpen();
+            return false;
         }
 
-        if (this.targetArea.toWorldArea().contains(Rs2Player.getWorldLocation())
-                && KspGrandExchangeHelper.interactClerk()) {
-            BuyScript.sleepUntil(Rs2GrandExchange::isOpen, BANK_WAIT_TIMEOUT_MS);
-
-            if (Rs2GrandExchange.isOpen()) {
-                return true;
-            }
-        }
-
-        if (KspGrandExchangeHelper.interactClerk()) {
-            BuyScript.sleepUntil(Rs2GrandExchange::isOpen, BANK_WAIT_TIMEOUT_MS);
-            return Rs2GrandExchange.isOpen();
-        }
-
+        KspGrandExchangeHelper.interactClerk();
         return false;
     }
 
@@ -1730,7 +1648,7 @@ public class BuyScript extends Script {
             return false;
         }
 
-        this.waitForActionCooldown();
+        if (!this.actionReady()) return false;
 
         Microbot.status = "Selling " + item.getName();
 
@@ -1748,7 +1666,6 @@ public class BuyScript extends Script {
 
         if (offered) {
             this.lastActionAtMs = System.currentTimeMillis();
-            BuyScript.sleepUntil(() -> !Rs2Inventory.hasItem(item.getName(), true), 5000);
         }
 
         this.debug(
@@ -1767,7 +1684,7 @@ public class BuyScript extends Script {
             return false;
         }
 
-        this.waitForActionCooldown();
+        if (!this.actionReady()) return false;
 
         Microbot.status = "Buying " + itemName;
         int buyPrice = this.getAdjustedBuyPrice(itemName);
@@ -1803,7 +1720,6 @@ public class BuyScript extends Script {
         if (offered) {
             this.lastActionAtMs = System.currentTimeMillis();
             this.pendingMissingToolBuys.add(itemName);
-            BuyScript.sleepUntil(() -> !Rs2GrandExchange.isOfferScreenOpen(), 2000);
         }
 
         return offered;
@@ -1865,11 +1781,6 @@ public class BuyScript extends Script {
 
             Rs2GrandExchange.collectAllToBank();
 
-            BuyScript.sleepUntil(
-                    () -> !Rs2GrandExchange.hasBoughtOffer() && !Rs2GrandExchange.hasSoldOffer(),
-                    5000
-            );
-
             this.clearOwnedPendingMissingToolBuys();
             if (collectableFishingSupplyBuy) {
                 this.clearSatisfiedPendingFishingSupplyBuys();
@@ -1884,16 +1795,13 @@ public class BuyScript extends Script {
         return false;
     }
 
-    private void waitForActionCooldown() {
-        long remaining = ACTION_COOLDOWN_MS - (System.currentTimeMillis() - this.lastActionAtMs);
-
-        if (remaining > 0L) {
-            BuyScript.sleep((int) Math.min(remaining, ACTION_COOLDOWN_MS));
-        }
+    private boolean actionReady() {
+        return System.currentTimeMillis() - this.lastActionAtMs >= ACTION_COOLDOWN_MS;
     }
 
     private void waitForGrandExchangeOfferInput() {
-        BuyScript.sleep(GE_OFFER_INPUT_DELAY_MS);
+        // processOffer performs the actual GE setup. Keep only a very short input settle.
+        BuyScript.sleep(150);
     }
 
     private void syncPendingMissingToolBuysFromActiveOffers(String desiredPickaxe, String desiredAxe) {
@@ -2055,14 +1963,12 @@ public class BuyScript extends Script {
     }
 
     private void returnToGrandExchangeOverview() {
-        if (System.currentTimeMillis() - this.lastActionAtMs < ACTION_COOLDOWN_MS) {
+        if (!this.actionReady()) {
             return;
         }
 
         Rs2GrandExchange.backToOverview();
         this.lastActionAtMs = System.currentTimeMillis();
-
-        BuyScript.sleepUntil(() -> !Rs2GrandExchange.isOfferScreenOpen(), 2000);
     }
 
     private Rs2ItemModel getNextOutdatedInventoryTool(String desiredPickaxe, String desiredAxe) {
@@ -2118,15 +2024,12 @@ public class BuyScript extends Script {
     private boolean unequipOutdatedTools() {
         if (Rs2Tab.getCurrentTab() != InterfaceTab.EQUIPMENT) {
             Rs2Tab.switchTo(InterfaceTab.EQUIPMENT);
-            BuyScript.sleepUntil(() -> Rs2Tab.getCurrentTab() == InterfaceTab.EQUIPMENT, 1500);
         }
 
         Rs2Equipment.unEquip(new EquipmentInventorySlot[]{EquipmentInventorySlot.WEAPON});
-        BuyScript.sleep(250);
 
         if (Rs2Tab.getCurrentTab() != InterfaceTab.INVENTORY) {
             Rs2Tab.switchTo(InterfaceTab.INVENTORY);
-            BuyScript.sleepUntil(() -> Rs2Tab.getCurrentTab() == InterfaceTab.INVENTORY, 1500);
         }
 
         return !Rs2Equipment.isWearing("pickaxe", false)
