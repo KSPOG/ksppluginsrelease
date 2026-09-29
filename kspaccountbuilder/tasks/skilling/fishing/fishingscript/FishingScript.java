@@ -142,6 +142,12 @@ public class FishingScript extends Script
                 return;
             }
 
+            if (Rs2Bank.isOpen())
+            {
+                Rs2Bank.closeBank();
+                return;
+            }
+
             if (!ensureInTargetArea())
             {
                 state = FishingState.WALKING_TO_AREA;
