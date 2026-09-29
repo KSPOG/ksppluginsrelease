@@ -1820,59 +1820,15 @@ public class KspAccountBuilderScript extends Script
         return true;
     }
 
-    private BuilderTask getRandomTaskWithResourcesExcluding(BuilderTask excludedTask)
+    private BuilderTask getRandomTaskWithResourcesExcluding(BuilderTask excluded)
     {
         if (TutorialIslandScript.isOnTutorialIsland())
         {
-            return excludedTask == BuilderTask.TUTORIAL_ISLAND ? null : BuilderTask.TUTORIAL_ISLAND;
+            return excluded == BuilderTask.TUTORIAL_ISLAND ? null : BuilderTask.TUTORIAL_ISLAND;
         }
 
-        BuilderTask primaryTask = getRandomTaskWithResourcesExcluding(excludedTask, false);
-        if (primaryTask != null)
-        {
-            return primaryTask;
-        }
-
-        return getRandomTaskWithResourcesExcluding(excludedTask, true);
-    }
-
-    private BuilderTask getRandomTaskWithResourcesExcluding(BuilderTask excludedTask, boolean includeSupportTasks)
-    {
-        if (TutorialIslandScript.isOnTutorialIsland())
-        {
-            return excludedTask == BuilderTask.TUTORIAL_ISLAND ? null : BuilderTask.TUTORIAL_ISLAND;
-        }
-
-        BuilderTask[] candidates = new BuilderTask[BuilderTask.values().length];
-        int candidateCount = 0;
-
-        for (BuilderTask task : BuilderTask.values())
-        {
-            if (task == excludedTask
-                    || task == BuilderTask.TUTORIAL_ISLAND
-                    || isTaskTemporarilyDisabled(task)
-                    || isOneTimeTaskCompleted(task))
-            {
-                continue;
-            }
-
-            if (!includeSupportTasks && isSupportTask(task))
-            {
-                continue;
-            }
-
-            if (hasResourcesForTask(task))
-            {
-                candidates[candidateCount++] = task;
-            }
-        }
-
-        if (candidateCount == 0)
-        {
-            return null;
-        }
-
-        return selectWeightedTask(candidates, candidateCount);
+        BuilderTask task = selectTask(excluded, true, false, false);
+        return task != null ? task : selectTask(excluded, true, true, false);
     }
 
     private boolean isSupportTask(BuilderTask task) { return task == BuilderTask.GE_BUY; }
@@ -1889,48 +1845,34 @@ public class KspAccountBuilderScript extends Script
         if (!hasAnyGeSellResourcesAvailable())
         {
             meleeScript.clearPendingSellHandoff();
-            debug("Cleared melee GE sell handoff; no sellable bank items remain");
             return false;
         }
 
         Microbot.status = "Preparing GE sell";
-        if (!switchTask(BuilderTask.GE_SELL))
-        {
-            return true;
-        }
+        if (!switchTask(BuilderTask.GE_SELL)) return true;
 
         meleeScript.clearPendingSellHandoff();
         taskStarted = false;
         clearActivitySwitchTimerState();
         awaitingNextActivityStart = true;
-        debug("Melee loot banked; switching directly to GE_SELL");
         return true;
     }
 
     private void stopCurrentTaskScript()
     {
         Script script = scriptFor(currentTask);
-        if (script != null)
-        {
-            script.shutdown();
-        }
+        if (script != null) script.shutdown();
     }
 
     private boolean stopCurrentTaskForHandoff(BuilderTask nextTask)
     {
-        BuilderTask outgoingTask = currentTask;
+        BuilderTask outgoing = currentTask;
         stopCurrentTaskScript();
         taskStarted = false;
+        if (!isTaskScriptRunning(outgoing)) return true;
 
-        if (isTaskScriptRunning(outgoingTask))
-        {
-            debug("Waiting for outgoing task to stop before handoff | currentTask={} nextTask={}",
-                    outgoingTask, nextTask);
-            return false;
-        }
-
-        debug("Outgoing task stopped for handoff | currentTask={} nextTask={}", outgoingTask, nextTask);
-        return true;
+        debug("Waiting for outgoing task to stop before handoff | currentTask={} nextTask={}", outgoing, nextTask);
+        return false;
     }
 
     private boolean isTaskScriptRunning(BuilderTask task)
@@ -1978,151 +1920,76 @@ public class KspAccountBuilderScript extends Script
 
     private boolean switchTask(BuilderTask nextTask)
     {
-        if (!stopCurrentTaskForHandoff(nextTask))
-        {
-            return false;
-        }
-
-        if (!prepareForTaskSwitchAtBank())
-        {
-            debug("Waiting to switch task; still preparing bank/gear handoff to {}", nextTask);
-            return false;
-        }
-
+        if (!stopCurrentTaskForHandoff(nextTask) || !prepareForTaskSwitchAtBank()) return false;
         currentTask = nextTask;
         debug("Switching task to {}", currentTask);
         return true;
     }
 
-    private BuilderTask getRandomTaskExcluding(BuilderTask excludedTask)
+    private BuilderTask getRandomTaskExcluding(BuilderTask excluded)
     {
-        if (TutorialIslandScript.isOnTutorialIsland())
-        {
-            return BuilderTask.TUTORIAL_ISLAND;
-        }
+        if (TutorialIslandScript.isOnTutorialIsland()) return BuilderTask.TUTORIAL_ISLAND;
 
-        BuilderTask nextTask = getRandomPrimaryTaskExcluding(excludedTask);
-        if (nextTask != null)
-        {
-            return nextTask;
-        }
-
-        BuilderTask[] candidates = new BuilderTask[BuilderTask.values().length];
-        int candidateCount = 0;
-        for (BuilderTask task : BuilderTask.values())
-        {
-            if (task == excludedTask || task == BuilderTask.TUTORIAL_ISLAND)
-            {
-                continue;
-            }
-
-            candidates[candidateCount++] = task;
-        }
-
-        return selectWeightedTask(candidates, candidateCount);
+        BuilderTask task = selectTask(excluded, false, false, false);
+        return task != null ? task : selectTask(excluded, false, true, true);
     }
 
-    private BuilderTask getRandomPrimaryTaskExcluding(BuilderTask excludedTask)
+    private BuilderTask selectTask(BuilderTask excluded, boolean requireResources, boolean includeSupport, boolean includeUnavailable)
     {
-        BuilderTask[] candidates = new BuilderTask[BuilderTask.values().length];
-        int candidateCount = 0;
-
-        for (BuilderTask task : BuilderTask.values())
-        {
-            if (task == excludedTask
-                    || task == BuilderTask.TUTORIAL_ISLAND
-                    || isSupportTask(task)
-                    || isTaskTemporarilyDisabled(task)
-                    || isOneTimeTaskCompleted(task))
-            {
-                continue;
-            }
-
-            candidates[candidateCount++] = task;
-        }
-
-        if (candidateCount == 0)
-        {
-            return null;
-        }
-
-        return selectWeightedTask(candidates, candidateCount);
-    }
-
-    private BuilderTask selectWeightedTask(BuilderTask[] candidates, int candidateCount)
-    {
-        if (candidateCount <= 0)
-        {
-            return null;
-        }
-
         int totalWeight = 0;
-        for (int index = 0; index < candidateCount; index++)
+        for (BuilderTask task : BuilderTask.values())
         {
-            totalWeight += getTaskSelectionWeight(candidates[index]);
+            if (isTaskCandidate(task, excluded, requireResources, includeSupport, includeUnavailable))
+            {
+                totalWeight += getTaskSelectionWeight(task);
+            }
         }
 
-        if (totalWeight <= 0)
-        {
-            return candidates[ThreadLocalRandom.current().nextInt(candidateCount)];
-        }
+        if (totalWeight <= 0) return null;
 
         int roll = ThreadLocalRandom.current().nextInt(totalWeight);
-        for (int index = 0; index < candidateCount; index++)
+        for (BuilderTask task : BuilderTask.values())
         {
-            BuilderTask candidate = candidates[index];
-            int weight = getTaskSelectionWeight(candidate);
-            if (roll < weight)
-            {
-                debug("Weighted task selection | selected={} weight={} totalWeight={} candidates={}",
-                        candidate,
-                        weight,
-                        totalWeight,
-                        candidateCount);
-                return candidate;
-            }
-            roll -= weight;
+            if (!isTaskCandidate(task, excluded, requireResources, includeSupport, includeUnavailable)) continue;
+            roll -= getTaskSelectionWeight(task);
+            if (roll < 0) return task;
         }
+        return null;
+    }
 
-        return candidates[candidateCount - 1];
+    private boolean isTaskCandidate(
+            BuilderTask task,
+            BuilderTask excluded,
+            boolean requireResources,
+            boolean includeSupport,
+            boolean includeUnavailable)
+    {
+        if (task == excluded || task == BuilderTask.TUTORIAL_ISLAND) return false;
+        if (!includeUnavailable && (isTaskTemporarilyDisabled(task) || isOneTimeTaskCompleted(task))) return false;
+        if (!includeSupport && isSupportTask(task)) return false;
+        return !requireResources || hasResourcesForTask(task);
     }
 
     private int getTaskSelectionWeight(BuilderTask task)
     {
-        if (task == null)
-        {
-            return 0;
-        }
-
-        int skillLevel = getTaskSkillLevel(task);
-        int catchUpBonus = skillLevel > 0
-                ? Math.max(0, 40 - skillLevel) / 4
-                : 0;
-        return Math.max(1, task.getSelectionWeight() + catchUpBonus);
+        if (task == null) return 0;
+        int level = getTaskSkillLevel(task);
+        return Math.max(1, task.getSelectionWeight() + (level > 0 ? Math.max(0, 40 - level) / 4 : 0));
     }
 
     private int getTaskSkillLevel(BuilderTask task)
     {
-        if (Microbot.getClient() == null)
-        {
-            return 0;
-        }
+        if (Microbot.getClient() == null) return 0;
 
         switch (task)
         {
             case MINING:
-            case RUNE_ESSENCE:
-                return Microbot.getClient().getRealSkillLevel(Skill.MINING);
-            case WOODCUTTING:
-                return Microbot.getClient().getRealSkillLevel(Skill.WOODCUTTING);
-            case FIREMAKING:
-                return Microbot.getClient().getRealSkillLevel(Skill.FIREMAKING);
-            case FISHING:
-                return Microbot.getClient().getRealSkillLevel(Skill.FISHING);
-            case COOKING:
-                return Microbot.getClient().getRealSkillLevel(Skill.COOKING);
-            case CRAFTING:
-                return Microbot.getClient().getRealSkillLevel(Skill.CRAFTING);
+            case RUNE_ESSENCE: return Microbot.getClient().getRealSkillLevel(Skill.MINING);
+            case WOODCUTTING: return Microbot.getClient().getRealSkillLevel(Skill.WOODCUTTING);
+            case FIREMAKING: return Microbot.getClient().getRealSkillLevel(Skill.FIREMAKING);
+            case FISHING: return Microbot.getClient().getRealSkillLevel(Skill.FISHING);
+            case COOKING: return Microbot.getClient().getRealSkillLevel(Skill.COOKING);
+            case CRAFTING: return Microbot.getClient().getRealSkillLevel(Skill.CRAFTING);
             case MELEE:
                 return Math.min(
                         Microbot.getClient().getRealSkillLevel(Skill.ATTACK),
@@ -2130,10 +1997,8 @@ public class KspAccountBuilderScript extends Script
                                 Microbot.getClient().getRealSkillLevel(Skill.STRENGTH),
                                 Microbot.getClient().getRealSkillLevel(Skill.DEFENCE)));
             case SMITHING:
-            case SMELTING:
-                return Microbot.getClient().getRealSkillLevel(Skill.SMITHING);
-            default:
-                return 0;
+            case SMELTING: return Microbot.getClient().getRealSkillLevel(Skill.SMITHING);
+            default: return 0;
         }
     }
 
