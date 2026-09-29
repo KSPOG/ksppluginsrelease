@@ -701,31 +701,37 @@ public class TutorialIslandScript extends Script
     {
         int progress = Microbot.getVarbitPlayerValue(281);
 
-        if (progress == 10 || progress == 20 || progress == 60)
+        if (progress == 10 || progress == 20)
         {
             talkToSurvivalExpert();
             return;
         }
 
-        if (progress == 30)
+        if (progress < 40)
         {
             clickTab("Inventory");
             return;
         }
 
-        if (progress == 40)
+        if (progress < 50)
         {
             fishShrimp();
             return;
         }
 
-        if (progress == 50)
+        if (progress < 60)
         {
             clickTab("Skills");
             return;
         }
 
-        if (progress >= 70 && progress <= 90)
+        if (progress < 70)
+        {
+            talkToSurvivalExpert();
+            return;
+        }
+
+        if (progress <= 90)
         {
             if (!Rs2Inventory.hasItem("Bronze Axe") || !Rs2Inventory.hasItem("Tinderbox"))
             {
