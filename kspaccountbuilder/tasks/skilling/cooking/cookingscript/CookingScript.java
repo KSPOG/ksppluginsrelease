@@ -47,7 +47,6 @@ public class CookingScript extends Script
     private volatile Areas targetArea = Areas.EDGEVILLE_RANGE;
     private volatile CookingState state = CookingState.WAITING;
     private boolean debugLogging;
-    private boolean expectingXpDrop;
     private long lastDoorInteractionAtMs;
 
     public void setDebugLogging(boolean debugLogging) { this.debugLogging = debugLogging; }
@@ -57,7 +56,6 @@ public class CookingScript extends Script
         shutdown();
         targetArea = resolveCookingArea(area);
         state = CookingState.CHECKING_SUPPLIES;
-        expectingXpDrop = false;
 
         mainScheduledFuture = scheduledExecutorService.scheduleWithFixedDelay(() ->
         {
@@ -97,12 +95,6 @@ public class CookingScript extends Script
                 return;
             }
 
-            if (expectingXpDrop && Rs2Player.waitForXpDrop(Skill.COOKING, 4_500))
-            {
-                state = CookingState.COOKING;
-                return;
-            }
-
             if (Rs2Widget.findWidget("How many would you like to cook?", null, false) != null)
             {
                 state = CookingState.OPENING_COOKING_INTERFACE;
@@ -110,11 +102,7 @@ public class CookingScript extends Script
                 if (selectProductionOption(fish.getCookedItemName()))
                 {
                     Rs2Keyboard.keyPress(KeyEvent.VK_SPACE);
-                    expectingXpDrop = true;
                     state = CookingState.COOKING;
-                    sleepUntil(() -> Rs2Player.isAnimating()
-                            || Rs2Widget.findWidget(
-                                    "How many would you like to cook?", null, false) == null, 2_000);
                 }
                 return;
             }
@@ -134,11 +122,7 @@ public class CookingScript extends Script
 
             state = CookingState.OPENING_COOKING_INTERFACE;
             Microbot.status = "Cooking " + fish.getCookedItemName();
-            if (stove.click("Cook"))
-            {
-                sleepUntil(() -> Rs2Widget.findWidget(
-                        "How many would you like to cook?", null, false) != null, 3_000);
-            }
+            stove.click("Cook");
         }, 0L, LOOP_DELAY_MS, TimeUnit.MILLISECONDS);
 
         return true;
@@ -168,26 +152,29 @@ public class CookingScript extends Script
 
     private void bankForFish(CookLevels fish)
     {
-        if (openCookingAreaExitDoor())
+        if (openCookingAreaExitDoor()) return;
+
+        if (!Rs2Bank.isOpen())
         {
+            if (!Rs2Bank.openBank()) Rs2Bank.walkToBankAndUseBank();
             return;
         }
 
-        if (!Rs2Bank.walkToBankAndUseBank() && !Rs2Bank.openBank())
+        if (KspBankWidgetHelper.closeBankTutorialOverlayIfOpen()) return;
+
+        if (!Rs2Inventory.isEmpty())
         {
-            return;
-        }
-        if (!Rs2Bank.isOpen() || KspBankWidgetHelper.closeBankTutorialOverlayIfOpenAndWait())
-        {
+            Rs2Bank.depositAll();
             return;
         }
 
-        Rs2Bank.depositAll();
-        sleepUntil(Rs2Inventory::isEmpty, 2_000);
-        Rs2Bank.withdrawAll(fish.getRawItemName());
-        sleepUntil(() -> Rs2Inventory.hasItem(fish.getRawItemName()), 3_000);
+        if (!Rs2Inventory.hasItem(fish.getRawItemName()))
+        {
+            Rs2Bank.withdrawAll(fish.getRawItemName());
+            return;
+        }
+
         Rs2Bank.closeBank();
-        expectingXpDrop = false;
     }
 
     private boolean openCookingAreaExitDoor()
@@ -335,21 +322,15 @@ public class CookingScript extends Script
                 Optional.of(PRODUCTION_WIDGET_GROUP),
                 PRODUCTION_WIDGET_CONTAINER_CHILD,
                 false);
+
         if (!selected)
         {
             selected = Rs2Widget.clickWidget(itemName, true)
                     || Rs2Widget.clickWidget(itemName, false);
         }
 
-        if (selected)
-        {
-            sleep(150);
-        }
-
         debug("Production widget selection | item={} selected={} productionOpen={}",
-                itemName,
-                selected,
-                Rs2Widget.isProductionWidgetOpen());
+                itemName, selected, Rs2Widget.isProductionWidgetOpen());
         return selected;
     }
 
@@ -369,7 +350,6 @@ public class CookingScript extends Script
     public void shutdown()
     {
         state = CookingState.WAITING;
-        expectingXpDrop = false;
         lastDoorInteractionAtMs = 0L;
         KspWalkerGuard.clear(EXIT_WALK_KEY);
         KspWalkerGuard.clear(WALK_KEY);
