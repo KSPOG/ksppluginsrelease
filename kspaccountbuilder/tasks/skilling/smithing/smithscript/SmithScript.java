@@ -177,6 +177,10 @@ extends Script {
     private boolean ensureToolAndBarsForTargetRecipe(SmithRecipe recipe) {
         if (hasRequiredInventory(recipe)) {
             bankInventoryReset = false;
+            if (Rs2Bank.isOpen()) {
+                Rs2Bank.closeBank();
+                return false;
+            }
             return true;
         }
 
