@@ -1443,9 +1443,7 @@ public class KspAccountBuilderScript extends Script
 
     private int countOwnedQuestItem(String itemName)
     {
-        return Rs2Inventory.count(itemName)
-                + Rs2Inventory.count(itemName, true)
-                + Math.max(0, Rs2Bank.count(itemName));
+        return stored(itemName);
     }
 
     private int countOwnedQuestItem(String itemName, int itemId)
@@ -1462,14 +1460,7 @@ public class KspAccountBuilderScript extends Script
 
     private boolean hasAnyToolAvailable(String[] toolNames)
     {
-        for (String toolName : toolNames)
-        {
-            if (Rs2Equipment.isWearing(toolName) || Rs2Inventory.hasItem(toolName) || Rs2Bank.count(toolName) > 0)
-            {
-                return true;
-            }
-        }
-
+        for (String name : toolNames) if (hasAnywhere(name)) return true;
         return false;
     }
 
@@ -1541,124 +1532,55 @@ public class KspAccountBuilderScript extends Script
 
     private boolean hasMeleeItemAvailable(String itemName)
     {
-        return itemName != null
-                && (Rs2Equipment.isWearing(itemName)
-                || Rs2Inventory.hasItem(itemName)
-                || Rs2Inventory.hasItem(itemName, true)
-                || Rs2Bank.count(itemName) > 0);
+        return hasAnywhere(itemName);
     }
 
-    private boolean hasBankItem(String itemName) { return itemName != null && Rs2Bank.count(itemName) > 0; }
-
-    private boolean hasAnySmeltingResourcesAvailable()
+        private boolean hasAnySmeltingResourcesAvailable()
     {
-        int smithingLevel = Microbot.getClient().getRealSkillLevel(Skill.SMITHING);
+        int level = Microbot.getClient().getRealSkillLevel(Skill.SMITHING);
         for (int i = BarLevels.values().length - 1; i >= 0; i--)
         {
             BarLevels bar = BarLevels.values()[i];
-            if (smithingLevel < bar.getRequiredSmithingLevel())
-            {
-                continue;
-            }
+            if (level < bar.getRequiredSmithingLevel()) continue;
 
             ReqOres req = ReqOres.valueOf(bar.name());
-            int primaryAvailable = Rs2Inventory.count(req.getPrimaryOreName()) + Math.max(0, Rs2Bank.count(req.getPrimaryOreName()));
-            if (primaryAvailable < req.getPrimaryOreAmount())
-            {
-                continue;
-            }
-
-            if (!req.hasSecondaryOre())
-            {
-                return true;
-            }
-
-            int secondaryAvailable = Rs2Inventory.count(req.getSecondaryOreName()) + Math.max(0, Rs2Bank.count(req.getSecondaryOreName()));
-            if (secondaryAvailable >= req.getSecondaryOreAmount())
-            {
-                return true;
-            }
+            if (stored(req.getPrimaryOreName()) < req.getPrimaryOreAmount()) continue;
+            if (!req.hasSecondaryOre() || stored(req.getSecondaryOreName()) >= req.getSecondaryOreAmount()) return true;
         }
-
         return false;
     }
 
     private boolean hasAnyFiremakingResourcesAvailable()
     {
-        if (!hasTinderboxAnywhere())
-        {
-            return false;
-        }
+        if (!hasTinderboxAnywhere()) return false;
 
-        int firemakingLevel = Microbot.getClient().getRealSkillLevel(Skill.FIREMAKING);
+        int level = Microbot.getClient().getRealSkillLevel(Skill.FIREMAKING);
         for (int i = LogsLvl.values().length - 1; i >= 0; i--)
         {
-            LogsLvl logsLvl = LogsLvl.values()[i];
-            if (firemakingLevel < logsLvl.getRequiredLevel())
-            {
-                continue;
-            }
-
-            if (firemakingLevel >= LogsLvl.WILLOW_LOGS.getRequiredLevel()
-                    && logsLvl != LogsLvl.WILLOW_LOGS)
-            {
-                continue;
-            }
-
-            if (firemakingLevel >= LogsLvl.OAK_LOGS.getRequiredLevel()
-                    && logsLvl == LogsLvl.LOGS)
-            {
-                continue;
-            }
-
-            int availableLogs = Rs2Inventory.count(logsLvl.getDisplayName()) + Math.max(0, Rs2Bank.count(logsLvl.getDisplayName()));
-            if (availableLogs > 0)
-            {
-                return true;
-            }
+            LogsLvl logs = LogsLvl.values()[i];
+            if (level < logs.getRequiredLevel()) continue;
+            if (level >= LogsLvl.WILLOW_LOGS.getRequiredLevel() && logs != LogsLvl.WILLOW_LOGS) continue;
+            if (level >= LogsLvl.OAK_LOGS.getRequiredLevel() && logs == LogsLvl.LOGS) continue;
+            if (stored(logs.getDisplayName()) > 0) return true;
         }
-
         return false;
     }
 
     private boolean hasAnyFishingResourcesAvailable()
     {
-        int fishingLevel = Microbot.getClient().getRealSkillLevel(Skill.FISHING);
-        LevelReqs targetFish = LevelReqs.bestForFishingLevel(fishingLevel);
-        net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.fishing.needed.Inventory requiredInventory =
-                net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.fishing.needed.Inventory.valueOf(targetFish.name());
-
-        for (String itemName : requiredInventory.getRequiredItems())
-        {
-            int available = Rs2Inventory.count(itemName)
-                    + Rs2Inventory.count(itemName, true)
-                    + Math.max(0, Rs2Bank.count(itemName));
-            if (available <= 0)
-            {
-                return false;
-            }
-        }
-
+        LevelReqs fish = LevelReqs.bestForFishingLevel(Microbot.getClient().getRealSkillLevel(Skill.FISHING));
+        net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.fishing.needed.Inventory required =
+                net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.fishing.needed.Inventory.valueOf(fish.name());
+        for (String item : required.getRequiredItems()) if (stored(item) <= 0) return false;
         return true;
     }
 
     private boolean hasAnyCookingResourcesAvailable()
     {
-        int cookingLevel = Microbot.getClient().getRealSkillLevel(Skill.COOKING);
+        int level = Microbot.getClient().getRealSkillLevel(Skill.COOKING);
         for (CookLevels fish : CookLevels.values())
         {
-            if (cookingLevel < fish.getRequiredLevel())
-            {
-                continue;
-            }
-
-            int available = Rs2Inventory.count(fish.getRawItemName())
-                    + Rs2Inventory.count(fish.getRawItemName(), true)
-                    + Math.max(0, Rs2Bank.count(fish.getRawItemName()));
-            if (available > 0)
-            {
-                return true;
-            }
+            if (level >= fish.getRequiredLevel() && stored(fish.getRawItemName()) > 0) return true;
         }
         return false;
     }
@@ -1689,12 +1611,7 @@ public class KspAccountBuilderScript extends Script
     {
         for (Ingredient ingredient : recipe.getIngredients())
         {
-            int available = Rs2Inventory.count(ingredient.getItemName())
-                    + Math.max(0, Rs2Bank.count(ingredient.getItemName()));
-            if (available < ingredient.getAmount())
-            {
-                return false;
-            }
+            if (stored(ingredient.getItemName()) < ingredient.getAmount()) return false;
         }
         return true;
     }
@@ -1773,86 +1690,46 @@ public class KspAccountBuilderScript extends Script
 
     private boolean hasSmithingRecipeResources(SmithLevels level)
     {
-        int smithingLevel = Microbot.getClient().getRealSkillLevel(Skill.SMITHING);
-        if (smithingLevel < level.getRequiredLevel())
-        {
-            debug("Skipping Smithing recipe; level requirement not met | recipe={} requiredLevel={} level={}",
-                    level.getDisplayName(),
-                    level.getRequiredLevel(),
-                    smithingLevel);
-            return false;
-        }
+        int skill = Microbot.getClient().getRealSkillLevel(Skill.SMITHING);
+        if (skill < level.getRequiredLevel()) return false;
 
         SmithRecipe recipe = SmithRecipe.valueOf(level.name());
-        String barName = recipe.getDisplayName().split(" ")[0] + " bar";
-        int barsAvailable = Rs2Inventory.count(barName) + Math.max(0, Rs2Bank.count(barName));
-        boolean hasResources = barsAvailable >= recipe.getBarRequirement();
-        if (!hasResources)
-        {
-            debug("Skipping Smithing recipe; insufficient bars | recipe={} bar={} required={} available={}",
-                    recipe.getDisplayName(),
-                    barName,
-                    recipe.getBarRequirement(),
-                    barsAvailable);
-        }
-        return hasResources;
+        String bar = recipe.getDisplayName().split(" ")[0] + " bar";
+        boolean ready = stored(bar) >= recipe.getBarRequirement();
+        if (!ready) debug("Skipping Smithing recipe; insufficient {} | recipe={}", bar, recipe.getDisplayName());
+        return ready;
     }
 
     private boolean hasAnyGeSellResourcesAvailable()
     {
-        if (sellScript.hasSellListItemsAvailable())
-        {
-            return true;
-        }
-
-        if (hasAnyOutdatedToolAvailable())
-        {
-            return true;
-        }
-
-        return false;
+        return sellScript.hasSellListItemsAvailable() || hasAnyOutdatedToolAvailable();
     }
 
     private boolean hasAnyGeBuyResourcesAvailable() { return Buy.hasAnyGeBuyRequirementMissing() && buyScript.canAffordMissingBuys(); }
 
     private boolean hasAnyOutdatedToolAvailable()
     {
-        String desiredPickaxe = resolveDesiredPickaxeForSellingTask();
-        String desiredAxe = resolveDesiredAxeForSellingTask();
+        return hasOutdatedTool(Buy.PICKAXE_NAMES, resolveDesiredPickaxeForSellingTask())
+                || hasOutdatedTool(Buy.AXE_NAMES, resolveDesiredAxeForSellingTask());
+    }
 
-        for (String pickaxeName : Buy.PICKAXE_NAMES)
+    private boolean hasOutdatedTool(String[] tools, String desired)
+    {
+        for (String tool : tools)
         {
-            if (pickaxeName.equalsIgnoreCase(desiredPickaxe))
-            {
-                continue;
-            }
-
-            if (Rs2Equipment.isWearing(pickaxeName)
-                    || Rs2Inventory.hasItem(pickaxeName)
-                    || Rs2Inventory.hasItem(pickaxeName, true)
-                    || Rs2Bank.count(pickaxeName) > 0)
-            {
-                return true;
-            }
+            if (!tool.equalsIgnoreCase(desired) && hasAnywhere(tool)) return true;
         }
-
-        for (String axeName : Buy.AXE_NAMES)
-        {
-            if (axeName.equalsIgnoreCase(desiredAxe))
-            {
-                continue;
-            }
-
-            if (Rs2Equipment.isWearing(axeName)
-                    || Rs2Inventory.hasItem(axeName)
-                    || Rs2Inventory.hasItem(axeName, true)
-                    || Rs2Bank.count(axeName) > 0)
-            {
-                return true;
-            }
-        }
-
         return false;
+    }
+
+    private int stored(String itemName)
+    {
+        return itemName == null ? 0 : Rs2Inventory.count(itemName, true) + Math.max(0, Rs2Bank.count(itemName));
+    }
+
+    private boolean hasAnywhere(String itemName)
+    {
+        return itemName != null && (Rs2Equipment.isWearing(itemName) || stored(itemName) > 0);
     }
 
     private String resolveDesiredPickaxeForSellingTask() { return Buy.resolveDesiredPickaxeNameForGear(); }
