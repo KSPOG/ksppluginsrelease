@@ -29,13 +29,9 @@ public final class KspBankWidgetHelper
 
     public static boolean closeBankTutorialOverlayIfOpenAndWait()
     {
-        if (!closeBankTutorialOverlayIfOpen())
-        {
-            return false;
-        }
-
-        sleep(300);
-        return true;
+        // Legacy compatibility wrapper. Tutorial/task loops are state-driven,
+        // so never block the scheduler thread after dispatching the close click.
+        return closeBankTutorialOverlayIfOpen();
     }
 
     private static boolean isBankTutorialOverlayOpen()
@@ -44,15 +40,4 @@ public final class KspBankWidgetHelper
                 || Rs2Widget.isWidgetVisible(SCREEN_HIGHLIGHT_GROUP, SCREEN_HIGHLIGHT_CLOSE_CHILD);
     }
 
-    private static void sleep(int millis)
-    {
-        try
-        {
-            Thread.sleep(millis);
-        }
-        catch (InterruptedException e)
-        {
-            Thread.currentThread().interrupt();
-        }
-    }
 }
