@@ -128,7 +128,7 @@ public class TutorialIslandScript extends Script
     private String lastCharacterAction = "Waiting";
     private String lastExperienceSelection = "None";
     private String completionState = "Active";
-    private Status status = Status.NAME;
+    private TutState status = TutState.NAME;
     private boolean toggledSettings;
     private boolean debugEnabled;
     private boolean completionLogoutRequested;
@@ -152,112 +152,102 @@ public class TutorialIslandScript extends Script
     {
         shutdown();
         resetAccountState();
-
-        mainScheduledFuture = scheduledExecutorService.scheduleWithFixedDelay(() -> {
-            try
-            {
-                if (!super.run())
-                {
-                    return;
-                }
-
-                if (!Microbot.isLoggedIn())
-                {
-                    handleQueuedLogin();
-                    return;
-                }
-
-                completeQueuedLoginIfNeeded();
-                calculateStatus();
-
-                if (Rs2Widget.isWidgetVisible(929, 5))
-                {
-                    Rs2Widget.clickWidget(929, 5);
-                    return;
-                }
-
-                if (Rs2Widget.isWidgetVisible(310, 0))
-                {
-                    Rs2Keyboard.keyPress(KeyEvent.VK_ESCAPE);
-                    return;
-                }
-
-                if (isExperiencePromptOpen())
-                {
-                    selectRandomExperienceOption();
-                    return;
-                }
-
-                if (isDisplayNameWidgetOpen())
-                {
-                    status = Status.NAME;
-                    enterGeneratedName();
-                    return;
-                }
-
-                if (isCharacterCreationWidgetOpen())
-                {
-                    status = Status.CHARACTER;
-                    randomizeCharacter();
-                    return;
-                }
-
-                if (openSettingsTabForTutorialPrompt())
-                {
-                    return;
-                }
-
-                if (hasContinue())
-                {
-                    clickContinue();
-                    return;
-                }
-
-                switch (status)
-                {
-                    case NAME:
-                        break;
-                    case CHARACTER:
-                        break;
-                    case GETTING_STARTED:
-                        gettingStarted();
-                        break;
-                    case SURVIVAL_GUIDE:
-                        survivalGuide();
-                        break;
-                    case COOKING_GUIDE:
-                        cookingGuide();
-                        break;
-                    case QUEST_GUIDE:
-                        questGuide();
-                        break;
-                    case MINING_GUIDE:
-                        miningGuide();
-                        break;
-                    case COMBAT_GUIDE:
-                        combatGuide();
-                        break;
-                    case BANKER_GUIDE:
-                        bankerGuide();
-                        break;
-                    case PRAYER_GUIDE:
-                        prayerGuide();
-                        break;
-                    case MAGE_GUIDE:
-                        mageGuide();
-                        break;
-                    case FINISHED:
-                        handleTutorialComplete();
-                        break;
-                }
-            }
-            catch (Exception e)
-            {
-                debug("Error in TutorialIslandScript: %s", e.getMessage());
-            }
-        }, 0, LOOP_DELAY_MS, TimeUnit.MILLISECONDS);
-
+        mainScheduledFuture = scheduledExecutorService.scheduleWithFixedDelay(
+                this::runLoop, 0, LOOP_DELAY_MS, TimeUnit.MILLISECONDS);
         return true;
+    }
+
+    private void runLoop()
+    {
+        try
+        {
+            if (!super.run()) return;
+            if (!Microbot.isLoggedIn())
+            {
+                handleQueuedLogin();
+                return;
+            }
+
+            completeQueuedLoginIfNeeded();
+            calculateStatus();
+
+            if (closeBlockingTutorialWidget()
+                    || handleSetupWidget()
+                    || openSettingsTabForTutorialPrompt())
+            {
+                return;
+            }
+
+            if (hasContinue())
+            {
+                clickContinue();
+                return;
+            }
+
+            runStage();
+        }
+        catch (Exception e)
+        {
+            debug("Error in TutorialIslandScript: %s", e.getMessage());
+        }
+    }
+
+    private boolean closeBlockingTutorialWidget()
+    {
+        if (Rs2Widget.isWidgetVisible(929, 5))
+        {
+            Rs2Widget.clickWidget(929, 5);
+            return true;
+        }
+
+        if (Rs2Widget.isWidgetVisible(310, 0))
+        {
+            Rs2Keyboard.keyPress(KeyEvent.VK_ESCAPE);
+            return true;
+        }
+        return false;
+    }
+
+    private boolean handleSetupWidget()
+    {
+        if (isExperiencePromptOpen())
+        {
+            selectRandomExperienceOption();
+            return true;
+        }
+
+        if (isDisplayNameWidgetOpen())
+        {
+            status = TutState.NAME;
+            enterGeneratedName();
+            return true;
+        }
+
+        if (isCharacterCreationWidgetOpen())
+        {
+            status = TutState.CHARACTER;
+            randomizeCharacter();
+            return true;
+        }
+        return false;
+    }
+
+    private void runStage()
+    {
+        switch (status)
+        {
+            case GETTING_STARTED: gettingStarted(); break;
+            case SURVIVAL_GUIDE: survivalGuide(); break;
+            case COOKING_GUIDE: cookingGuide(); break;
+            case QUEST_GUIDE: questGuide(); break;
+            case MINING_GUIDE: miningGuide(); break;
+            case COMBAT_GUIDE: combatGuide(); break;
+            case BANKER_GUIDE: bankerGuide(); break;
+            case PRAYER_GUIDE: prayerGuide(); break;
+            case MAGE_GUIDE: mageGuide(); break;
+            case FINISHED: handleTutorialComplete(); break;
+            default: break;
+        }
     }
 
     public static boolean isOnTutorialIsland()
@@ -375,61 +365,28 @@ public class TutorialIslandScript extends Script
     private void calculateStatus()
     {
         int progress = Microbot.getVarbitPlayerValue(281);
-
         if (progress < 1000 && completionLogoutRequested)
         {
             completionLogoutRequested = false;
             completionState = "Active";
         }
 
-        if (isDisplayNameWidgetOpen())
-        {
-            status = Status.NAME;
-        }
-        else if (isCharacterCreationWidgetOpen())
-        {
-            status = Status.CHARACTER;
-        }
-        else if (progress < 10)
-        {
-            status = Status.GETTING_STARTED;
-        }
-        else if (progress < 120)
-        {
-            status = Status.SURVIVAL_GUIDE;
-        }
-        else if (progress < 200)
-        {
-            status = Status.COOKING_GUIDE;
-        }
-        else if (progress <= 250)
-        {
-            status = Status.QUEST_GUIDE;
-        }
-        else if (progress <= 360)
-        {
-            status = Status.MINING_GUIDE;
-        }
-        else if (progress < 510)
-        {
-            status = Status.COMBAT_GUIDE;
-        }
-        else if (progress < 540)
-        {
-            status = Status.BANKER_GUIDE;
-        }
-        else if (progress < 610)
-        {
-            status = Status.PRAYER_GUIDE;
-        }
-        else if (progress < 1000)
-        {
-            status = Status.MAGE_GUIDE;
-        }
-        else
-        {
-            status = Status.FINISHED;
-        }
+        if (isDisplayNameWidgetOpen()) status = TutState.NAME;
+        else if (isCharacterCreationWidgetOpen()) status = TutState.CHARACTER;
+        else status = stageFor(progress);
+    }
+
+    private TutState stageFor(int progress)
+    {
+        if (progress < 10) return TutState.GETTING_STARTED;
+        if (progress < 120) return TutState.SURVIVAL_GUIDE;
+        if (progress < 200) return TutState.COOKING_GUIDE;
+        if (progress <= 250) return TutState.QUEST_GUIDE;
+        if (progress <= 360) return TutState.MINING_GUIDE;
+        if (progress < 510) return TutState.COMBAT_GUIDE;
+        if (progress < 540) return TutState.BANKER_GUIDE;
+        if (progress < 610) return TutState.PRAYER_GUIDE;
+        return progress < 1000 ? TutState.MAGE_GUIDE : TutState.FINISHED;
     }
 
     // -------------------------------------------------------------------------
@@ -2630,19 +2587,4 @@ public class TutorialIslandScript extends Script
         }
     }
 
-    private enum Status
-    {
-        NAME,
-        CHARACTER,
-        GETTING_STARTED,
-        SURVIVAL_GUIDE,
-        COOKING_GUIDE,
-        QUEST_GUIDE,
-        MINING_GUIDE,
-        COMBAT_GUIDE,
-        BANKER_GUIDE,
-        PRAYER_GUIDE,
-        MAGE_GUIDE,
-        FINISHED
-    }
 }
