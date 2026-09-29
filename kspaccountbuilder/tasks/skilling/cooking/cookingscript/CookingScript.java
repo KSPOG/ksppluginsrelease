@@ -89,6 +89,12 @@ public class CookingScript extends Script
                 return;
             }
 
+            if (Rs2Bank.isOpen())
+            {
+                Rs2Bank.closeBank();
+                return;
+            }
+
             if (!ensureInCookingArea())
             {
                 state = CookingState.WALKING_TO_AREA;
