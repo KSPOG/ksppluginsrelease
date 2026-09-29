@@ -50,7 +50,7 @@ extends Script {
     private static final int INVENTORY_SLOTS = 28;
     private static final int LOOP_DELAY_MS = 250;
     private static final int WEB_WALK_COOLDOWN_MS = 3000;
-    private static final int ANVIL_INTERACT_COOLDOWN_MS = 750;
+    private static final int ANVIL_INTERACT_COOLDOWN_MS = 350;
     private static final int SMITH_START_GRACE_MS = 1500;
     private static final int SMITH_ANIMATION_COOLDOWN_MS = 1800;
     private static final int ANVIL_SEARCH_RADIUS = 12;
@@ -70,6 +70,7 @@ extends Script {
     private boolean expectingSmithXpDrop;
     private boolean debugLogging;
     private boolean walkingToTargetArea;
+    private boolean bankInventoryReset;
     private SmithArea targetArea = SmithArea.SMITH_AREA_VARROCK_WEST_ANVIL;
     private SmithRecipe targetRecipe = SmithRecipe.BRONZE_DAGGER;
     private SmithLevels forcedSmithLevel;
@@ -120,7 +121,7 @@ extends Script {
             }
             this.smithAtAnvil(this.targetRecipe);
             this.debug("SmithScript active | area={} | recipe={}", this.targetArea.name(), this.targetRecipe.name());
-        }, 0L, 600L, TimeUnit.MILLISECONDS);
+        }, 0L, LOOP_DELAY_MS, TimeUnit.MILLISECONDS);
         return true;
     }
 
@@ -174,80 +175,65 @@ extends Script {
     }
 
     private boolean ensureToolAndBarsForTargetRecipe(SmithRecipe recipe) {
-        if (this.hasRequiredInventory(recipe)) {
+        if (hasRequiredInventory(recipe)) {
+            bankInventoryReset = false;
             return true;
         }
-        this.expectingSmithXpDrop = false;
-        this.awaitingSmithStartAtMs = 0L;
-        if (Rs2Bank.isOpen()) {
-            return this.prepareAndCloseBank(recipe);
-        }
-        if (Rs2Player.isMoving() || Rs2Player.isInteracting()) {
+
+        expectingSmithXpDrop = false;
+        awaitingSmithStartAtMs = 0L;
+
+        if (!Rs2Bank.isOpen()) {
+            if (Rs2Player.isInteracting()) return false;
+            if (!Rs2Bank.openBank()) Rs2Bank.walkToBankAndUseBank();
             return false;
         }
-        if (Rs2Bank.openBank()) {
-            SmithScript.sleepUntil(Rs2Bank::isOpen, (int)3000);
-            return false;
-        }
-        if (Rs2Bank.walkToBankAndUseBank()) {
-            return false;
-        }
-        return false;
+
+        return prepareAndCloseBank(recipe);
     }
 
     private boolean prepareAndCloseBank(SmithRecipe recipe) {
-        if (!Rs2Bank.isOpen()) {
-            return false;
-        }
-        if (!this.prepareSmithingInventory(recipe)) {
-            return false;
-        }
-        if (!this.hasRequiredInventory(recipe)) {
-            return false;
-        }
+        if (!Rs2Bank.isOpen()) return false;
+        if (!prepareSmithingInventory(recipe)) return false;
+        if (!hasRequiredInventory(recipe)) return false;
+
+        bankInventoryReset = false;
         Rs2Bank.closeBank();
-        SmithScript.sleepUntil(() -> !Rs2Bank.isOpen(), (int)1500);
         return false;
     }
 
     private boolean prepareSmithingInventory(SmithRecipe recipe) {
-        int productsToWithdraw;
-        String hammerName = SmithTool.HAMMER.getDisplayName();
-        String barName = this.getBarName(recipe);
-        int hammerItemId = SmithTool.HAMMER.getItemId();
-        if (KspBankWidgetHelper.closeBankTutorialOverlayIfOpenAndWait()) {
+        String hammer = SmithTool.HAMMER.getDisplayName();
+        String bar = getBarName(recipe);
+        int hammerId = SmithTool.HAMMER.getItemId();
+
+        if (KspBankWidgetHelper.closeBankTutorialOverlayIfOpen()) return false;
+        if (!KspBankMode.ensureWithdrawAsItem()) return false;
+
+        if (!bankInventoryReset) {
+            if (hasHammerInInventory()) Rs2Bank.depositAllExcept(new Integer[]{hammerId});
+            else Rs2Bank.depositAll();
+            bankInventoryReset = true;
             return false;
         }
-        if (!KspBankMode.ensureWithdrawAsItem()) {
-            this.debug("Waiting for withdraw-as-item mode before preparing smithing inventory");
+
+        if (!hasHammerInInventory()) {
+            if (!hasHammerInBank()) return false;
+            Rs2Bank.withdrawOne(hammer);
             return false;
         }
-        if (this.hasHammerInInventory()) {
-            Rs2Bank.depositAllExcept((Integer[])new Integer[]{hammerItemId});
-        } else {
-            Rs2Bank.depositAll();
-        }
-        SmithScript.sleep((int)200);
-        if (!this.hasHammerInInventory()) {
-            if (!this.hasHammerInBank()) {
-                this.debug("Hammer not found in bank", new Object[0]);
-                return false;
-            }
-            if (!Rs2Bank.withdrawOne((String)hammerName)) {
-                return false;
-            }
-            SmithScript.sleepUntil(this::hasHammerInInventory, (int)2000);
-        }
-        if ((productsToWithdraw = this.getProductsToWithdraw(recipe)) <= 0) {
-            this.debug("Not enough bars in bank for {}", recipe.getDisplayName());
+
+        int products = getProductsToWithdraw(recipe);
+        if (products <= 0) return false;
+
+        int bars = products * recipe.getBarRequirement();
+        int current = Rs2Inventory.count(bar);
+        if (current < bars) {
+            Rs2Bank.withdrawX(bar, bars - current);
             return false;
         }
-        int barsToWithdraw = productsToWithdraw * recipe.getBarRequirement();
-        if (!Rs2Bank.withdrawX((String)barName, (int)barsToWithdraw)) {
-            return false;
-        }
-        SmithScript.sleepUntil(() -> Rs2Inventory.count((String)barName) == barsToWithdraw, (int)2000);
-        return Rs2Inventory.count((String)barName) == barsToWithdraw;
+
+        return true;
     }
 
     private int getProductsToWithdraw(SmithRecipe recipe) {
@@ -264,13 +250,11 @@ extends Script {
     }
 
     private boolean hasHammerInInventory() {
-        return Rs2Inventory.all().stream()
-                .anyMatch(item -> item != null && item.getId() == SmithTool.HAMMER.getItemId());
+        return Rs2Inventory.hasItem(SmithTool.HAMMER.getItemId());
     }
 
     private boolean hasHammerInBank() {
-        return Rs2Bank.bankItems().stream()
-                .anyMatch(item -> item != null && item.getId() == SmithTool.HAMMER.getItemId());
+        return Rs2Bank.count(SmithTool.HAMMER.getItemId()) > 0;
     }
 
     private boolean hasRequiredBarsInInventory(SmithRecipe recipe) {
@@ -382,98 +366,40 @@ extends Script {
     }
 
     private void smithAtAnvil(SmithRecipe recipe) {
-        if (this.expectingSmithXpDrop && Rs2Player.waitForXpDrop((Skill)Skill.SMITHING, (int)7500)) {
-            this.lastSmithAnimationAtMs = System.currentTimeMillis();
+        if (isSmithingWidgetOpen()) {
+            handleSmithingSelection(recipe);
             return;
         }
-        if (this.isSmithingWidgetOpen()) {
-            this.handleSmithingSelection(recipe);
+
+        if (Rs2Player.isAnimating() || Rs2Player.isInteracting()) {
+            lastSmithAnimationAtMs = System.currentTimeMillis();
             return;
         }
-        if (Rs2Player.isAnimating()) {
-            this.lastSmithAnimationAtMs = System.currentTimeMillis();
-            return;
-        }
-        if (this.isWaitingForSmithStart()) {
-            return;
-        }
-        if (Rs2Player.isMoving()) {
-            return;
-        }
-        long sinceLastSmithAnimation = System.currentTimeMillis() - this.lastSmithAnimationAtMs;
-        if (sinceLastSmithAnimation < 1800L) {
-            return;
-        }
+
         if (Rs2Bank.isOpen()) {
             Rs2Bank.closeBank();
             return;
         }
-        if (this.handleSmithingSelection(recipe)) {
-            return;
-        }
-        if (!this.isIdleInTargetArea()) {
-            return;
-        }
-        Rs2TileObjectModel anvil = this.findNearbyAnvilInTargetArea();
-        if (anvil == null) {
-            this.debug("No reachable anvil found inside {}", this.targetArea.getDisplayName());
-            return;
-        }
-        if (Rs2Player.getWorldLocation().distanceTo(anvil.getWorldLocation()) > 6) {
+
+        WorldPoint player = Rs2Player.getWorldLocation();
+        if (player == null || !targetArea.toWorldArea().contains(player)) return;
+
+        Rs2TileObjectModel anvil = findNearbyAnvilInTargetArea();
+        if (anvil == null) return;
+
+        if (player.distanceTo(anvil.getWorldLocation()) > ANVIL_APPROACH_DISTANCE) {
             KspWalkerGuard.walkFastCanvasToPoint(
-                    ANVIL_WALK_KEY,
-                    (WorldPoint) anvil.getWorldLocation(),
-                    6,
-                    WEB_WALK_COOLDOWN_MS);
+                    ANVIL_WALK_KEY, anvil.getWorldLocation(), ANVIL_APPROACH_DISTANCE, WEB_WALK_COOLDOWN_MS);
             return;
         }
-        if (!this.isIdleInTargetArea()) {
-            KspTaskDebug.throttled(log, this.debugLogging, "Smithing", "not-idle", 2_000L,
-                    "waiting for idle before anvil | player={} moving={} animating={} interacting={} area={}",
-                    Rs2Player.getWorldLocation(),
-                    Rs2Player.isMoving(),
-                    Rs2Player.isAnimating(),
-                    Rs2Player.isInteracting(),
-                    this.targetArea.getDisplayName());
-            return;
-        }
+
         long now = System.currentTimeMillis();
-        if (now - this.lastAnvilInteractAtMs < 2000L) {
-            return;
+        if (now - lastAnvilInteractAtMs < ANVIL_INTERACT_COOLDOWN_MS) return;
+
+        if (anvil.click("Smith")) {
+            lastAnvilInteractAtMs = now;
+            awaitingSmithStartAtMs = now;
         }
-        this.debug("Attempting anvil interaction | recipe={} anvilName={} id={} loc={} reachable={} player={} distance={}",
-                recipe.getDisplayName(),
-                anvil.getName(),
-                anvil.getId(),
-                anvil.getWorldLocation(),
-                anvil.isReachable(),
-                Rs2Player.getWorldLocation(),
-                Rs2Player.getWorldLocation() != null ? Rs2Player.getWorldLocation().distanceTo(anvil.getWorldLocation()) : -1);
-        boolean interacted = anvil.click("Smith");
-        this.debug("Anvil interaction result | clicked={} recipe={} loc={} player={} moving={} animating={} interacting={} smithWidgetOpen={}",
-                interacted,
-                recipe.getDisplayName(),
-                anvil.getWorldLocation(),
-                Rs2Player.getWorldLocation(),
-                Rs2Player.isMoving(),
-                Rs2Player.isAnimating(),
-                Rs2Player.isInteracting(),
-                this.isSmithingWidgetOpen());
-        if (!interacted) {
-            return;
-        }
-        boolean widgetOpened = SmithScript.sleepUntil(() -> this.isSmithingWidgetOpen() || Rs2Player.isMoving() || Rs2Player.isAnimating(), (int)2500);
-        this.debug("Anvil post-click wait | widgetOpened={} moving={} animating={} interacting={} smithWidgetOpen={}",
-                widgetOpened,
-                Rs2Player.isMoving(),
-                Rs2Player.isAnimating(),
-                Rs2Player.isInteracting(),
-                this.isSmithingWidgetOpen());
-        if (!widgetOpened) {
-            return;
-        }
-        this.lastAnvilInteractAtMs = now;
-        this.debug("Interacted with anvil to smith {}", recipe.getDisplayName());
     }
 
     private boolean isIdleInTargetArea() {
@@ -486,32 +412,22 @@ extends Script {
     }
 
     private boolean handleSmithingSelection(SmithRecipe recipe) {
-        if (!this.isSmithingWidgetOpen()) {
-            return false;
-        }
+        if (!isSmithingWidgetOpen()) return false;
 
-        this.awaitingSmithStartAtMs = 0L;
+        awaitingSmithStartAtMs = 0L;
+        int bars = Rs2Inventory.count(getBarName(recipe));
+        int products = bars / recipe.getBarRequirement();
+        if (products <= 0) return true;
 
-        int inventoryBarCount = Rs2Inventory.count((String)this.getBarName(recipe));
-        int productCount = inventoryBarCount / recipe.getBarRequirement();
-        if (productCount <= 0) {
-            this.debug("No bars available for smithing {}", recipe.getDisplayName());
+        if (Microbot.getVarbitPlayerValue(ANVIL_MAKE_VARBIT_PLAYER) < products) {
+            Rs2Widget.clickWidget(SMITHING_WIDGET_GROUP_ID, SMITHING_ALL_BUTTON_CHILD_ID);
             return true;
         }
-        if (Microbot.getVarbitPlayerValue((int)2224) < productCount) {
-            this.debug("Selecting smith quantity all | currentVarbit={} productCount={}", Microbot.getVarbitPlayerValue((int)2224), productCount);
-            Rs2Widget.clickWidget((int)312, (int)7);
-            SmithScript.sleep((int)150);
-        }
 
-        if (!this.selectSmithingRecipe(recipe)) {
-            this.debug("Failed to select smithing menu option {}", recipe.getDisplayName());
-            return true;
-        }
-        SmithScript.sleep((int)150);
-        this.awaitingSmithStartAtMs = System.currentTimeMillis();
-        this.expectingSmithXpDrop = true;
-        SmithScript.sleepUntil(() -> Rs2Player.isAnimating() || !this.isSmithingWidgetOpen(), (int)2500);
+        if (!selectSmithingRecipe(recipe)) return true;
+
+        awaitingSmithStartAtMs = System.currentTimeMillis();
+        expectingSmithXpDrop = true;
         return true;
     }
 
