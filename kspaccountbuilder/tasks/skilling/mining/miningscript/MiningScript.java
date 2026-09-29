@@ -570,15 +570,12 @@ public class MiningScript extends Script
 
         KspWalkerGuard.clear(DEPOSIT_BOX_WALK_KEY);
 
-        if (!Rs2DepositBox.openDepositBox())
-        {
-            debug("Could not open Port Sarim deposit box | player={}", playerLocation);
-            return;
-        }
-
-        sleepUntil(Rs2DepositBox::isOpen, 2_000);
         if (!Rs2DepositBox.isOpen())
         {
+            if (!Rs2DepositBox.openDepositBox())
+            {
+                debug("Could not open Port Sarim deposit box | player={}", playerLocation);
+            }
             return;
         }
 
