@@ -1940,13 +1940,14 @@ public class KspAccountBuilderScript extends Script
 
     private BuilderTask selectTask(BuilderTask excluded, boolean requireResources, boolean includeSupport, boolean includeUnavailable)
     {
+        long mask = 0L;
         int totalWeight = 0;
+
         for (BuilderTask task : BuilderTask.values())
         {
-            if (isTaskCandidate(task, excluded, requireResources, includeSupport, includeUnavailable))
-            {
-                totalWeight += getTaskSelectionWeight(task);
-            }
+            if (!isTaskCandidate(task, excluded, requireResources, includeSupport, includeUnavailable)) continue;
+            mask |= 1L << task.ordinal();
+            totalWeight += getTaskSelectionWeight(task);
         }
 
         if (totalWeight <= 0) return null;
@@ -1954,7 +1955,7 @@ public class KspAccountBuilderScript extends Script
         int roll = ThreadLocalRandom.current().nextInt(totalWeight);
         for (BuilderTask task : BuilderTask.values())
         {
-            if (!isTaskCandidate(task, excluded, requireResources, includeSupport, includeUnavailable)) continue;
+            if ((mask & (1L << task.ordinal())) == 0L) continue;
             roll -= getTaskSelectionWeight(task);
             if (roll < 0) return task;
         }
