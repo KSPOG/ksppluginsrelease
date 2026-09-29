@@ -763,16 +763,7 @@ public class RomeoScript extends Script
         if (isJulietUpstairsStaircase(staircase))
         {
             lastActionAtMs = System.currentTimeMillis();
-            if (Rs2GameObject.interact(staircase, "Climb-down"))
-            {
-                sleepUntil(
-                        () ->
-                        {
-                            WorldPoint location = Rs2Player.getWorldLocation();
-                            return location != null && location.getPlane() == 0;
-                        },
-                        5_000);
-            }
+            Rs2GameObject.interact(staircase, "Climb-down");
             return;
         }
 
