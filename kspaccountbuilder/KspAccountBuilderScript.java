@@ -125,6 +125,7 @@ public class KspAccountBuilderScript extends Script
     private static final int CHICKEN_TARGET_COMBAT_STAT_LEVEL = 15;
     private static final long PLAY_TIME_READ_RETRY_MS = TimeUnit.SECONDS.toMillis(1);
     private static final long BREAK_LOGOUT_COMBAT_GRACE_MS = TimeUnit.SECONDS.toMillis(11);
+    private static final long TASK_SWITCH_ACTION_COOLDOWN_MS = 500L;
     private static final String BRONZE_SWORD = "Bronze sword";
     private static final String WOODEN_SHIELD = "Wooden shield";
     private static final int DRAYNOR_CORRIDOR_MIN_X = 3050;
@@ -240,6 +241,7 @@ public class KspAccountBuilderScript extends Script
     private volatile long currentAccountHashSnapshot;
     private long nextPlayTimeReadAtMillis;
     private BankLocation taskSwitchBankLocation;
+    private long lastTaskSwitchActionAtMs;
 
     public BuilderTask getCurrentTask() { return currentTask; }
 
@@ -369,6 +371,7 @@ public class KspAccountBuilderScript extends Script
         currentAccountHashSnapshot = 0L;
         nextPlayTimeReadAtMillis = 0L;
         taskSwitchBankLocation = null;
+        lastTaskSwitchActionAtMs = 0L;
         pausedActivitySwitchRemainingMillis = -1L;
         activitySwitchTimerPaused = false;
         sharedBreakActive = false;
@@ -2028,10 +2031,11 @@ public class KspAccountBuilderScript extends Script
     private boolean ensureTaskSwitchBankOpen()
     {
         if (Rs2Bank.isOpen()) return true;
-        if (Rs2Player.isMoving()) return false;
+        if (Rs2Player.isMoving() || !taskSwitchActionReady()) return false;
 
-        if (tryOpenTaskSwitchBank("direct-open")) return false;
-        tryWalkToTaskSwitchBank();
+        boolean acted = tryOpenTaskSwitchBank("direct-open");
+        if (!acted) acted = tryWalkToTaskSwitchBank();
+        if (acted) markTaskSwitchAction();
         return false;
     }
 
@@ -2253,18 +2257,21 @@ public class KspAccountBuilderScript extends Script
     {
         if (!Rs2Bank.isOpen() || closeTaskSwitchBankTutorialOverlayIfOpen()) return false;
         if (Rs2Inventory.isEmpty()) return true;
+        if (!taskSwitchActionReady()) return false;
 
         Microbot.status = "Depositing inventory before next task";
         Rs2Bank.depositAll();
+        markTaskSwitchAction();
         return false;
     }
 
     private boolean unequipGatheringTools()
     {
         if (!isGatheringToolEquipped()) return true;
-        if (!Rs2Bank.isOpen() || closeTaskSwitchBankTutorialOverlayIfOpen()) return false;
+        if (!Rs2Bank.isOpen() || closeTaskSwitchBankTutorialOverlayIfOpen() || !taskSwitchActionReady()) return false;
 
         Rs2Bank.depositEquipment();
+        markTaskSwitchAction();
         return false;
     }
 
@@ -2274,7 +2281,17 @@ public class KspAccountBuilderScript extends Script
                 || Rs2Equipment.isWearing("axe", false) || Rs2Equipment.isWearing("axe");
     }
 
-        private boolean closeTaskSwitchBankTutorialOverlayIfOpen()
+        private boolean taskSwitchActionReady()
+    {
+        return System.currentTimeMillis() - lastTaskSwitchActionAtMs >= TASK_SWITCH_ACTION_COOLDOWN_MS;
+    }
+
+    private void markTaskSwitchAction()
+    {
+        lastTaskSwitchActionAtMs = System.currentTimeMillis();
+    }
+
+    private boolean closeTaskSwitchBankTutorialOverlayIfOpen()
     {
         if (!KspBankWidgetHelper.closeBankTutorialOverlayIfOpen()) return false;
 
