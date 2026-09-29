@@ -57,6 +57,7 @@ public class CookingScript extends Script
         shutdown();
         targetArea = resolveCookingArea(area);
         state = CookingState.CHECKING_SUPPLIES;
+        expectingXpDrop = false;
 
         mainScheduledFuture = scheduledExecutorService.scheduleWithFixedDelay(() ->
         {
@@ -118,7 +119,7 @@ public class CookingScript extends Script
                 return;
             }
 
-            if (Rs2Player.isMoving() || Rs2Player.isAnimating() || Rs2Player.isInteracting())
+            if (Rs2Player.isAnimating() || Rs2Player.isInteracting())
             {
                 return;
             }
