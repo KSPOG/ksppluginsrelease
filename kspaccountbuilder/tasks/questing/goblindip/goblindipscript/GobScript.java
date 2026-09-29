@@ -164,6 +164,11 @@ public class GobScript extends Script {
             return;
         }
 
+        if (Rs2Bank.isOpen()) {
+            Rs2Bank.closeBank();
+            return;
+        }
+
         if (prepareDyedGoblinMail()) {
             state = GobState.PREPARING;
             return;
