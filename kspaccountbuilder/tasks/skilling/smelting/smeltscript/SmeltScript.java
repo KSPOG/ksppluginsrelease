@@ -171,6 +171,10 @@ extends Script {
         ReqOres req = ReqOres.valueOf(bar.name());
         if (hasBalancedOreInventory(req)) {
             bankInventoryReset = false;
+            if (Rs2Bank.isOpen()) {
+                Rs2Bank.closeBank();
+                return false;
+            }
             return true;
         }
 
