@@ -66,6 +66,7 @@ public class TutorialIslandScript extends Script
     private static final int QUEUE_LOGIN_SKIP_MS = 60000;
     private static final int QUEUED_LOGIN_EMAIL_PASSWORD_DELAY_MIN_MS = 1400;
     private static final int QUEUED_LOGIN_EMAIL_PASSWORD_DELAY_MAX_MS = 2600;
+    private static final long SURVIVAL_ACTION_COOLDOWN_MS = 600L;
 
     private static final int NAME_CREATION_GROUP = 558;
     private static final int NAME_CREATION_CONTAINER_CHILD = 2;
@@ -140,6 +141,8 @@ public class TutorialIslandScript extends Script
     private long queuedLoginStartedAtMs;
     private String queuedAccountName = "None";
     private WorldPoint ownFireLocation;
+    private long lastSurvivalFiremakingActionAtMs;
+    private long lastSurvivalCookingActionAtMs;
 
     public boolean run()
     {
@@ -1656,6 +1659,8 @@ public class TutorialIslandScript extends Script
         lastGeneratedName = "None";
         lastCharacterAction = "Waiting";
         lastExperienceSelection = "None";
+        lastSurvivalFiremakingActionAtMs = 0L;
+        lastSurvivalCookingActionAtMs = 0L;
     }
 
     // -------------------------------------------------------------------------
@@ -1794,14 +1799,26 @@ public class TutorialIslandScript extends Script
 
     private void lightFire()
     {
+        long now = System.currentTimeMillis();
+        if (now - lastSurvivalFiremakingActionAtMs < SURVIVAL_ACTION_COOLDOWN_MS)
+        {
+            return;
+        }
+
         WorldPoint fireLocation = Rs2Player.getWorldLocation();
+        if (fireLocation == null)
+        {
+            return;
+        }
 
         if (Rs2Player.isStandingOnGameObject())
         {
-            WorldPoint nearestWalkable = Rs2Tile.getNearestWalkableTileWithLineOfSight(Rs2Player.getWorldLocation());
-            Rs2Walker.walkFastCanvas(nearestWalkable);
-            Rs2Player.waitForWalking();
-            fireLocation = Rs2Player.getWorldLocation();
+            WorldPoint nearestWalkable = Rs2Tile.getNearestWalkableTileWithLineOfSight(fireLocation);
+            if (nearestWalkable != null)
+            {
+                Rs2Walker.walkFastCanvas(nearestWalkable);
+            }
+            return;
         }
 
         if (!Rs2Inventory.combine("Logs", "Tinderbox"))
@@ -1810,13 +1827,8 @@ public class TutorialIslandScript extends Script
             return;
         }
 
-        WorldPoint confirmedLocation = fireLocation;
-        boolean fireStarted = sleepUntil(() -> Rs2Player.isAnimating() || !Rs2Inventory.hasItem("Logs"), 1_500);
-
-        if (fireStarted)
-        {
-            ownFireLocation = confirmedLocation;
-        }
+        lastSurvivalFiremakingActionAtMs = now;
+        ownFireLocation = fireLocation;
     }
 
     private void cutTree()
@@ -1914,6 +1926,12 @@ public class TutorialIslandScript extends Script
             return;
         }
 
+        long now = System.currentTimeMillis();
+        if (now - lastSurvivalCookingActionAtMs < SURVIVAL_ACTION_COOLDOWN_MS)
+        {
+            return;
+        }
+
         Rs2TileObjectModel fire = Microbot.getRs2TileObjectCache()
                 .query()
                 .fromWorldView()
@@ -1926,15 +1944,18 @@ public class TutorialIslandScript extends Script
             return;
         }
 
+        if (!prepareTutorialObjectInteraction(fire, 4))
+        {
+            return;
+        }
+
         if (!Rs2Inventory.useItemOnObject(ItemID.RAW_SHRIMPS_2514, fire.getId()))
         {
             debug("Failed to use raw shrimps on Tutorial Island fire.");
             return;
         }
 
-        sleepUntil(() -> Rs2Player.isAnimating()
-                || !Rs2Inventory.hasItem(ItemID.RAW_SHRIMPS_2514)
-                || Microbot.getVarbitPlayerValue(281) > 90, 1_500);
+        lastSurvivalCookingActionAtMs = now;
     }
 
     private boolean hasNearbyFire() { return Microbot.getRs2TileObjectCache().query().fromWorldView().withId(ObjectID.FIRE_26185).nearest() != null; }
