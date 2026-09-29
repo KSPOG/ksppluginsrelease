@@ -1,12 +1,10 @@
 package net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.combat.melee.meleescript;
 
 import java.util.Arrays;
-import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
 import java.util.concurrent.TimeUnit;
-import java.util.stream.Collectors;
 import javax.inject.Singleton;
 import net.runelite.api.Actor;
 import net.runelite.api.Player;
@@ -332,26 +330,18 @@ public class MeleeScript
     private boolean equipInventoryUpgrades() {
         if (Rs2Bank.isOpen()) {
             Rs2Bank.closeBank();
-            MeleeScript.sleepUntil(() -> !Rs2Bank.isOpen(), 2000);
             return true;
         }
 
-        GearPlan gearPlan = this.buildGearPlan();
+        GearPlan gearPlan = buildGearPlan();
         for (String desiredItem : gearPlan.desiredItems) {
-            if (desiredItem == null || Rs2Equipment.isWearing((String[])new String[]{desiredItem}) || !Rs2Inventory.hasItem((String[])new String[]{desiredItem})) continue;
-            this.setStatus("Equipping " + desiredItem);
-            boolean interactionStarted = Rs2Inventory.wield((String[])new String[]{desiredItem});
-            boolean equipped = interactionStarted
-                    && MeleeScript.sleepUntil(() -> Rs2Equipment.isWearing((String[])new String[]{desiredItem}), 2000);
-            this.debug("Equipment interaction | item={} interactionStarted={} equipped={} inventoryPresent={}",
-                    desiredItem,
-                    interactionStarted,
-                    equipped,
-                    Rs2Inventory.hasItem((String[]) new String[]{desiredItem}));
-            if (!equipped) {
-                this.setStatus("Retrying equipment: " + desiredItem);
-            }
-            return equipped;
+            if (desiredItem == null
+                    || Rs2Equipment.isWearing(desiredItem)
+                    || !Rs2Inventory.hasItem(desiredItem)) continue;
+
+            setStatus("Equipping " + desiredItem);
+            Rs2Inventory.wield(desiredItem);
+            return true;
         }
         return false;
     }
@@ -607,15 +597,7 @@ public class MeleeScript
                 playerLocation.distanceTo(target.getWorldLocation()),
                 target.getInteracting());
         target.click("Attack");
-        boolean activityStarted = MeleeScript.sleepUntil(() -> Rs2Player.isInteracting() || Rs2Player.isAnimating(), 2000);
-        this.debug("Npc attack post-click wait | activityStarted={} target={} player={} moving={} animating={} interacting={} inCombat={}",
-                activityStarted,
-                target.getName(),
-                Rs2Player.getWorldLocation(),
-                Rs2Player.isMoving(),
-                Rs2Player.isAnimating(),
-                Rs2Player.isInteracting(),
-                Rs2Combat.inCombat());
+
     }
 
     private boolean isNpcInTargetArea(Rs2NpcModel npc, TrainingStage stage) {
