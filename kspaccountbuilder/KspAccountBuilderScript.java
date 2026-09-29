@@ -1043,23 +1043,21 @@ public class KspAccountBuilderScript extends Script
         if (forcedTask == BuilderTask.RUNE_ESSENCE && essenceMining.isInEssenceMine())
         {
             auditedSingleSkillTask = forcedTask;
-            pendingSingleSkillAuditTask = null;
-            singleSkillAuditBankEpoch = -1;
-            singleSkillAuditBankWasOpen = false;
-            debug("Skipping Single Skill bank resource audit while inside rune essence mine");
+            clearPendingSingleSkillAudit();
             return false;
         }
 
-        if (forcedTask == null
-                || forcedTask == BuilderTask.TUTORIAL_ISLAND
+        if (forcedTask == null)
+        {
+            clearSingleSkillResourceAudit();
+            return false;
+        }
+
+        if (forcedTask == BuilderTask.TUTORIAL_ISLAND
                 || forcedTask == BuilderTask.ROMEO_AND_JULIET
                 || forcedTask == BuilderTask.GE_BUY
                 || auditedSingleSkillTask == forcedTask)
         {
-            if (forcedTask == null)
-            {
-                clearSingleSkillResourceAudit();
-            }
             return false;
         }
 
@@ -1071,10 +1069,6 @@ public class KspAccountBuilderScript extends Script
             singleSkillAuditBankWasOpen = Rs2Bank.isOpen();
             singleSkillAuditBankEpoch = Rs2Bank.getBankLiveEpoch();
             Microbot.status = "Checking bank for " + forcedTask;
-            debug("Starting Single Skill bank resource audit | target={} bankOpen={} bankEpoch={}",
-                    forcedTask,
-                    singleSkillAuditBankWasOpen,
-                    singleSkillAuditBankEpoch);
         }
 
         if (!ensureTaskSwitchBankOpen())
@@ -1083,50 +1077,32 @@ public class KspAccountBuilderScript extends Script
             return true;
         }
 
-        boolean bankMirrorReady = Rs2Bank.verifyBankMirrorAfterOpen(
-                singleSkillAuditBankWasOpen,
-                singleSkillAuditBankEpoch);
-        if (!bankMirrorReady)
-        {
-            sleepUntil(() -> Rs2Bank.verifyBankMirrorAfterOpen(
-                    singleSkillAuditBankWasOpen,
-                    singleSkillAuditBankEpoch), 1_500);
-            bankMirrorReady = Rs2Bank.verifyBankMirrorAfterOpen(
-                    singleSkillAuditBankWasOpen,
-                    singleSkillAuditBankEpoch);
-        }
-
-        if (!bankMirrorReady)
+        if (!Rs2Bank.verifyBankMirrorAfterOpen(singleSkillAuditBankWasOpen, singleSkillAuditBankEpoch))
         {
             Microbot.status = "Syncing bank for " + forcedTask;
-            KspTaskDebug.throttled(log, debugEnabled, "Builder", "single-skill-bank-sync", 3_000L,
-                    "Waiting for fresh bank snapshot before Single Skill resource check | target={} epochBefore={} epochNow={}",
-                    forcedTask,
-                    singleSkillAuditBankEpoch,
-                    Rs2Bank.getBankLiveEpoch());
             return true;
         }
 
-        boolean resourcesAvailable = hasResourcesForTask(forcedTask);
+        boolean ready = hasResourcesForTask(forcedTask);
         auditedSingleSkillTask = forcedTask;
-        pendingSingleSkillAuditTask = null;
-        singleSkillAuditBankEpoch = -1;
-        singleSkillAuditBankWasOpen = false;
-        debug("Completed Single Skill bank resource audit | target={} resourcesAvailable={} bankEpoch={}",
-                forcedTask,
-                resourcesAvailable,
-                Rs2Bank.getBankLiveEpoch());
+        clearPendingSingleSkillAudit();
 
-        if (!resourcesAvailable)
+        if (!ready)
         {
             startSingleSkillResourceRecovery(forcedTask);
             return true;
         }
 
         Rs2Bank.closeBank();
-        sleepUntil(() -> !Rs2Bank.isOpen(), 2_000);
         Microbot.status = "Resources ready for " + forcedTask;
         return true;
+    }
+
+    private void clearPendingSingleSkillAudit()
+    {
+        pendingSingleSkillAuditTask = null;
+        singleSkillAuditBankEpoch = -1;
+        singleSkillAuditBankWasOpen = false;
     }
 
     private void clearSingleSkillResourceAudit()
@@ -2286,20 +2262,10 @@ public class KspAccountBuilderScript extends Script
 
     private boolean ensureInventoryTabOpenForTaskSelection()
     {
-        if (!Microbot.isLoggedIn())
-        {
-            return false;
-        }
-
-        if (Rs2Tab.getCurrentTab() == InterfaceTab.INVENTORY)
-        {
-            return true;
-        }
-
+        if (!Microbot.isLoggedIn()) return false;
+        if (Rs2Tab.getCurrentTab() == InterfaceTab.INVENTORY) return true;
         Rs2Tab.switchTo(InterfaceTab.INVENTORY);
-        sleepUntil(() -> Rs2Tab.getCurrentTab() == InterfaceTab.INVENTORY, 1_500);
-
-        return Rs2Tab.getCurrentTab() == InterfaceTab.INVENTORY;
+        return false;
     }
 
     private boolean prepareForTaskSwitchAtBank()
@@ -2309,66 +2275,22 @@ public class KspAccountBuilderScript extends Script
             postTutorialBankCameraPending = !setPostTutorialBankCamera();
         }
 
-        if (!ensureTaskSwitchBankOpen())
-        {
-            return false;
-        }
+        if (!ensureTaskSwitchBankOpen() || !depositInventoryForTaskSwitch()) return false;
+        if (!unequipGatheringTools()) return false;
+        if (!ensureTaskSwitchBankOpen() || !depositInventoryForTaskSwitch()) return false;
 
-        if (!Rs2Bank.isOpen())
-        {
-            return false;
-        }
-
-        sleep(300);
-
-        if (!depositInventoryForTaskSwitch())
-        {
-            return false;
-        }
-
-        if (!unequipGatheringTools())
-        {
-            return false;
-        }
-
-        if (!ensureTaskSwitchBankOpen())
-        {
-            return false;
-        }
-
-        depositGatheringToolsInInventory();
-
-        boolean prepared = depositInventoryForTaskSwitch();
-        if (prepared)
-        {
-            taskSwitchBankLocation = null;
-        }
-        return prepared;
+        taskSwitchBankLocation = null;
+        return true;
     }
 
     private boolean ensureTaskSwitchBankOpen()
     {
-        if (Rs2Bank.isOpen())
-        {
-            return true;
-        }
+        if (Rs2Bank.isOpen()) return true;
+        if (Rs2Player.isMoving()) return false;
 
-        if (tryOpenTaskSwitchBank("direct-open"))
-        {
-            sleepUntil(Rs2Bank::isOpen, 2_000);
-            if (Rs2Bank.isOpen())
-            {
-                return true;
-            }
-        }
-
-        if (tryWalkToTaskSwitchBank())
-        {
-            sleepUntil(Rs2Bank::isOpen, 3_000);
-            return Rs2Bank.isOpen();
-        }
-
-        return Rs2Bank.isOpen();
+        if (tryOpenTaskSwitchBank("direct-open")) return false;
+        tryWalkToTaskSwitchBank();
+        return false;
     }
 
     private boolean tryOpenTaskSwitchBank(String source)
@@ -2587,59 +2509,20 @@ public class KspAccountBuilderScript extends Script
 
     private boolean depositInventoryForTaskSwitch()
     {
-        if (!Rs2Bank.isOpen())
-        {
-            return false;
-        }
+        if (!Rs2Bank.isOpen() || closeTaskSwitchBankTutorialOverlayIfOpen()) return false;
+        if (Rs2Inventory.isEmpty()) return true;
 
-        if (closeTaskSwitchBankTutorialOverlayIfOpen())
-        {
-            return false;
-        }
-
-        for (int attempt = 1; attempt <= 3 && !Rs2Inventory.isEmpty(); attempt++)
-        {
-            Microbot.status = "Depositing inventory before next task";
-            Rs2Bank.depositAll();
-            sleepUntil(Rs2Inventory::isEmpty, 1_500);
-
-            if (!Rs2Inventory.isEmpty())
-            {
-                debug("Task switch inventory deposit incomplete | attempt={}/3", attempt);
-                sleep(200);
-            }
-        }
-
-        boolean inventoryEmpty = Rs2Inventory.isEmpty();
-        if (!inventoryEmpty)
-        {
-            debug("Task switch blocked; inventory still contains items after deposit retries");
-        }
-
-        return Rs2Bank.isOpen() && inventoryEmpty;
+        Microbot.status = "Depositing inventory before next task";
+        Rs2Bank.depositAll();
+        return false;
     }
 
     private boolean unequipGatheringTools()
     {
-        boolean hasPickaxeEquipped = Rs2Equipment.isWearing("pickaxe", false) || Rs2Equipment.isWearing("pickaxe");
-        boolean hasAxeEquipped = Rs2Equipment.isWearing("axe", false) || Rs2Equipment.isWearing("axe");
-        if (!hasPickaxeEquipped && !hasAxeEquipped)
-        {
-            return true;
-        }
+        if (!isGatheringToolEquipped()) return true;
+        if (!Rs2Bank.isOpen() || closeTaskSwitchBankTutorialOverlayIfOpen()) return false;
 
-        if (Rs2Bank.isOpen())
-        {
-            if (closeTaskSwitchBankTutorialOverlayIfOpen())
-            {
-                return false;
-            }
-
-            Rs2Bank.depositEquipment();
-            sleepUntil(() -> !isGatheringToolEquipped(), 1_500);
-            return !isGatheringToolEquipped();
-        }
-
+        Rs2Bank.depositEquipment();
         return false;
     }
 
@@ -2649,47 +2532,12 @@ public class KspAccountBuilderScript extends Script
                 || Rs2Equipment.isWearing("axe", false) || Rs2Equipment.isWearing("axe");
     }
 
-    private void depositGatheringToolsInInventory()
+        private boolean closeTaskSwitchBankTutorialOverlayIfOpen()
     {
-        if (closeTaskSwitchBankTutorialOverlayIfOpen())
-        {
-            return;
-        }
+        if (!KspBankWidgetHelper.closeBankTutorialOverlayIfOpen()) return false;
 
-        for (String pickaxeName : Buy.PICKAXE_NAMES)
-        {
-            if (Rs2Inventory.hasItem(pickaxeName))
-            {
-                Rs2Bank.depositAll(pickaxeName);
-                sleep(100);
-            }
-        }
-
-        for (String axeName : Buy.AXE_NAMES)
-        {
-            if (Rs2Inventory.hasItem(axeName))
-            {
-                Rs2Bank.depositAll(axeName);
-                sleep(100);
-            }
-        }
-    }
-
-    private boolean closeTaskSwitchBankTutorialOverlayIfOpen()
-    {
-        if (!KspBankWidgetHelper.closeBankTutorialOverlayIfOpen())
-        {
-            return false;
-        }
-
-        sleep(300);
-        if (Rs2Bank.isOpen())
-        {
-            debug("Closed bank tutorial overlay during task switch; resetting bank");
-            Rs2Bank.closeBank();
-            sleepUntil(() -> !Rs2Bank.isOpen(), 2_000);
-        }
-
+        debug("Closed bank tutorial overlay during task switch; resetting bank");
+        if (Rs2Bank.isOpen()) Rs2Bank.closeBank();
         return true;
     }
 
