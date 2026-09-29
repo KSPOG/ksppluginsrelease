@@ -242,6 +242,7 @@ public class KspAccountBuilderScript extends Script
     private long nextPlayTimeReadAtMillis;
     private BankLocation taskSwitchBankLocation;
     private long lastTaskSwitchActionAtMs;
+    private boolean taskSwitchBankResetPending;
 
     public BuilderTask getCurrentTask() { return currentTask; }
 
@@ -372,6 +373,7 @@ public class KspAccountBuilderScript extends Script
         nextPlayTimeReadAtMillis = 0L;
         taskSwitchBankLocation = null;
         lastTaskSwitchActionAtMs = 0L;
+        taskSwitchBankResetPending = false;
         pausedActivitySwitchRemainingMillis = -1L;
         activitySwitchTimerPaused = false;
         sharedBreakActive = false;
@@ -2030,6 +2032,20 @@ public class KspAccountBuilderScript extends Script
 
     private boolean ensureTaskSwitchBankOpen()
     {
+        if (taskSwitchBankResetPending)
+        {
+            if (Rs2Bank.isOpen())
+            {
+                if (taskSwitchActionReady())
+                {
+                    Rs2Bank.closeBank();
+                    markTaskSwitchAction();
+                }
+                return false;
+            }
+            taskSwitchBankResetPending = false;
+        }
+
         if (Rs2Bank.isOpen()) return true;
         if (Rs2Player.isMoving() || !taskSwitchActionReady()) return false;
 
@@ -2296,7 +2312,8 @@ public class KspAccountBuilderScript extends Script
         if (!KspBankWidgetHelper.closeBankTutorialOverlayIfOpen()) return false;
 
         debug("Closed bank tutorial overlay during task switch; resetting bank");
-        if (Rs2Bank.isOpen()) Rs2Bank.closeBank();
+        taskSwitchBankResetPending = true;
+        markTaskSwitchAction();
         return true;
     }
 
