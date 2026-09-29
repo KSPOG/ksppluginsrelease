@@ -80,6 +80,7 @@ public class MeleeScript
     private CombatAreas forcedCombatArea;
     private long lastConfirmedFoodAtMs;
     private volatile boolean pendingSellHandoff;
+    private boolean pendingLootDepositForSell;
 
     public void setDebugLogging(boolean debugLogging) {
         this.debugLogging = debugLogging;
@@ -92,6 +93,7 @@ public class MeleeScript
     public boolean run(CombatAreas forcedCombatArea) {
         this.shutdown();
         this.pendingSellHandoff = false;
+        this.pendingLootDepositForSell = false;
         this.forcedCombatArea = forcedCombatArea;
         this.lastConfirmedFoodAtMs = System.currentTimeMillis();
         this.setStatus("Starting melee training");
@@ -232,7 +234,6 @@ public class MeleeScript
         this.setStatus("Eating " + bestInventoryFood.getDisplayName() + " at " + currentHp + "/" + maxHp + " hp");
 
         if (Rs2Inventory.interact(bestInventoryFood.getItemId(), "Eat")) {
-            MeleeScript.sleepUntil(() -> Microbot.getClient().getBoostedSkillLevel(Skill.HITPOINTS) > currentHp, 1800);
             return true;
         }
 
@@ -255,19 +256,13 @@ public class MeleeScript
 
             int boneId = bone.getId();
             int quantityBefore = Rs2Inventory.itemQuantity(boneId);
-            if (!Rs2Inventory.interact(bone, "Bury")) {
-                continue;
-            }
-
-            boolean buried = MeleeScript.sleepUntil(
-                    () -> Rs2Inventory.itemQuantity(boneId) < quantityBefore,
-                    800);
-            this.debug("Bone bury interaction | item={} id={} quantityBefore={} buried={}",
+            boolean buried = Rs2Inventory.interact(bone, "Bury");
+            this.debug("Bone bury interaction | item={} id={} quantityBefore={} dispatched={}",
                     bone.getName(),
                     boneId,
                     quantityBefore,
                     buried);
-            return true;
+            if (buried) return true;
         }
         return false;
     }
@@ -314,32 +309,25 @@ public class MeleeScript
         this.setStatus("Banking for " + stage.primaryNpc.getDisplayName());
 
         if (!Rs2Bank.isOpen()) {
-            if (!Rs2Bank.walkToBankAndUseBank() && !Rs2Bank.openBank()) {
-                return;
-            }
-            MeleeScript.sleepUntil(Rs2Bank::isOpen, 3000);
+            if (!Rs2Bank.openBank()) Rs2Bank.walkToBankAndUseBank();
             return;
         }
 
-        if (!KspBankMode.ensureWithdrawAsItem()) {
-            this.debug("Waiting for withdraw-as-item mode before melee banking withdrawals");
+        if (!KspBankMode.ensureWithdrawAsItem()
+                || KspBankWidgetHelper.closeBankTutorialOverlayIfOpen()) {
             return;
         }
 
-        if (KspBankWidgetHelper.closeBankTutorialOverlayIfOpenAndWait()) {
-            return;
+        if (pendingLootDepositForSell && Rs2Inventory.isEmpty()) {
+            pendingLootDepositForSell = false;
+            pendingSellHandoff = true;
+            this.debug("Deposited melee loot; requesting GE sell handoff");
         }
 
         GearPlan gearPlan = this.buildGearPlan();
-
         if (!Rs2Inventory.isEmpty() && !this.hasMeleeSetupItemsInInventory(gearPlan)) {
-            boolean hadSellableLoot = this.hasSellListItemInInventory();
+            pendingLootDepositForSell = this.hasSellListItemInInventory();
             Rs2Bank.depositAll();
-            boolean deposited = MeleeScript.sleepUntil(Rs2Inventory::isEmpty, 3000);
-            if (deposited && hadSellableLoot) {
-                this.pendingSellHandoff = true;
-                this.debug("Deposited melee loot; requesting GE sell handoff");
-            }
             return;
         }
 
@@ -352,60 +340,49 @@ public class MeleeScript
 
             if (Rs2Bank.count(desiredItem) > 0) {
                 Rs2Bank.withdrawX(desiredItem, 1);
-                MeleeScript.sleepUntil(() -> Rs2Inventory.hasItem((String[]) new String[]{desiredItem}), 2000);
-                continue;
+                return;
             }
 
             this.debug("Missing melee gear outside bank; GE_BUY should handle purchase | item={}", desiredItem);
         }
 
         Food bankFood = this.getBestFoodAvailableInBank();
-        int currentFoodCount = this.getFoodCountInInventory();
-        int missingFoodCount = Math.max(0, TARGET_FOOD_COUNT - currentFoodCount);
+        int missingFoodCount = Math.max(0, TARGET_FOOD_COUNT - this.getFoodCountInInventory());
 
         if (bankFood != null && missingFoodCount > 0) {
-            this.debug("Withdrawing combat food by item id | food={} id={} amount={}",
-                    bankFood.getDisplayName(),
-                    bankFood.getItemId(),
-                    missingFoodCount);
-
             Rs2Bank.withdrawX(bankFood.getItemId(), missingFoodCount);
-            MeleeScript.sleepUntil(() -> Rs2Inventory.itemQuantity(bankFood.getItemId()) >= 1, 2000);
-        } else if (bankFood == null && missingFoodCount > 0) {
-            this.debug("Not enough Trout/Salmon available in bank; GE_BUY should handle food purchases");
-            if (requiresCombatFood(stage)) {
-                this.setStatus("Waiting for 5 Trout/Salmon");
-                return;
-            }
+            return;
+        }
+
+        if (bankFood == null && missingFoodCount > 0 && requiresCombatFood(stage)) {
+            this.setStatus("Waiting for 5 Trout/Salmon");
+            return;
         }
 
         Rs2Bank.closeBank();
-        MeleeScript.sleepUntil(() -> !Rs2Bank.isOpen(), 2000);
     }
 
     private boolean equipInventoryUpgrades() {
         if (Rs2Bank.isOpen()) {
             Rs2Bank.closeBank();
-            MeleeScript.sleepUntil(() -> !Rs2Bank.isOpen(), 2000);
             return true;
         }
 
         GearPlan gearPlan = this.buildGearPlan();
         for (String desiredItem : gearPlan.desiredItems) {
-            if (desiredItem == null || Rs2Equipment.isWearing((String[])new String[]{desiredItem}) || !Rs2Inventory.hasItem((String[])new String[]{desiredItem})) continue;
-            this.setStatus("Equipping " + desiredItem);
-            boolean interactionStarted = Rs2Inventory.wield((String[])new String[]{desiredItem});
-            boolean equipped = interactionStarted
-                    && MeleeScript.sleepUntil(() -> Rs2Equipment.isWearing((String[])new String[]{desiredItem}), 2000);
-            this.debug("Equipment interaction | item={} interactionStarted={} equipped={} inventoryPresent={}",
-                    desiredItem,
-                    interactionStarted,
-                    equipped,
-                    Rs2Inventory.hasItem((String[]) new String[]{desiredItem}));
-            if (!equipped) {
-                this.setStatus("Retrying equipment: " + desiredItem);
+            if (desiredItem == null
+                    || Rs2Equipment.isWearing((String[]) new String[]{desiredItem})
+                    || !Rs2Inventory.hasItem((String[]) new String[]{desiredItem})) {
+                continue;
             }
-            return equipped;
+
+            this.setStatus("Equipping " + desiredItem);
+            boolean dispatched = Rs2Inventory.wield((String[]) new String[]{desiredItem});
+            this.debug("Equipment interaction | item={} dispatched={} inventoryPresent={}",
+                    desiredItem,
+                    dispatched,
+                    Rs2Inventory.hasItem((String[]) new String[]{desiredItem}));
+            return dispatched;
         }
         return false;
     }
@@ -428,9 +405,6 @@ public class MeleeScript
                 loot.getQuantity(),
                 loot.getWorldLocation(),
                 Rs2Player.getWorldLocation());
-        if (clicked) {
-            MeleeScript.sleepUntil(() -> Rs2Player.isMoving() || Rs2Player.isInteracting() || this.findNearestLoot(stage) == null, 1_200);
-        }
         return clicked;
     }
 
@@ -531,13 +505,7 @@ public class MeleeScript
                 EDGEVILLE_TRAPDOOR_INTERACTION_DISTANCE);
         if (trapdoor != null && Rs2GameObject.hasAction(trapdoor, "Climb-down")) {
             this.setStatus("Entering Edgeville dungeon");
-            boolean entered = Rs2GameObject.interact(trapdoor, "Climb-down");
-            if (entered) {
-                MeleeScript.sleepUntil(() -> {
-                    WorldPoint current = Rs2Player.getWorldLocation();
-                    return current != null && current.getY() > 5000;
-                }, 5_000);
-            }
+            Rs2GameObject.interact(trapdoor, "Climb-down");
             return true;
         }
 
@@ -548,10 +516,6 @@ public class MeleeScript
         if (trapdoor != null && Rs2GameObject.hasAction(trapdoor, "Open")) {
             this.setStatus("Opening Edgeville trapdoor");
             Rs2GameObject.interact(trapdoor, "Open");
-            MeleeScript.sleepUntil(() -> Rs2GameObject.getTileObject(
-                    EDGEVILLE_TRAPDOOR_OPEN_ID,
-                    EDGEVILLE_TRAPDOOR,
-                    EDGEVILLE_TRAPDOOR_INTERACTION_DISTANCE) != null, 2_000);
         }
         return true;
     }
@@ -600,15 +564,6 @@ public class MeleeScript
                 selectedGate.getId(),
                 selectedGate.getWorldLocation(),
                 playerLocation);
-        if (opened) {
-            MeleeScript.sleepUntil(
-                    () -> {
-                        WorldPoint currentLocation = Rs2Player.getWorldLocation();
-                        return (currentLocation != null && currentLocation.getY() <= CHICKEN_GATE_EAST.getY())
-                                || !Rs2GameObject.hasAction(selectedGate, "Open");
-                    },
-                    2_000);
-        }
         return opened;
     }
 
@@ -716,10 +671,9 @@ public class MeleeScript
                 playerLocation,
                 playerLocation.distanceTo(target.getWorldLocation()),
                 target.getInteracting());
-        target.click("Attack");
-        boolean activityStarted = MeleeScript.sleepUntil(() -> Rs2Player.isInteracting() || Rs2Player.isAnimating(), 2000);
-        this.debug("Npc attack post-click wait | activityStarted={} target={} player={} moving={} animating={} interacting={} inCombat={}",
-                activityStarted,
+        boolean dispatched = target.click("Attack");
+        this.debug("Npc attack | dispatched={} target={} player={} moving={} animating={} interacting={} inCombat={}",
+                dispatched,
                 target.getName(),
                 Rs2Player.getWorldLocation(),
                 Rs2Player.isMoving(),
@@ -856,40 +810,19 @@ public class MeleeScript
             targetStyleIndex = 3;
         }
 
-        int currentStyleIndex = Microbot.getVarbitPlayerValue(43);
-
-        if (currentStyleIndex == targetStyleIndex) {
+        if (Microbot.getVarbitPlayerValue(43) == targetStyleIndex) {
             this.setStatus("Training " + targetSkill.getName().toLowerCase(Locale.ENGLISH));
-            return false;
-        }
-
-        if (Rs2Player.isMoving()) {
-            this.setStatus("Waiting to switch combat style");
             return false;
         }
 
         if (Rs2Tab.getCurrentTab() != InterfaceTab.COMBAT) {
             Rs2Tab.switchToCombatOptionsTab();
-            MeleeScript.sleepUntil(() -> Rs2Tab.getCurrentTab() == InterfaceTab.COMBAT, 1500);
+            return true;
         }
 
         this.setStatus("Switching combat style to " + targetSkill.getName().toLowerCase(Locale.ENGLISH));
-
         Rs2Combat.setAttackStyle(targetWidget);
-
-        boolean switched = MeleeScript.sleepUntil(
-                () -> Microbot.getVarbitPlayerValue(43) == targetStyleIndex,
-                2000
-        );
-
-        this.debug("Combat style switch | targetSkill={} targetIndex={} oldIndex={} newIndex={} switched={}",
-                targetSkill.getName(),
-                targetStyleIndex,
-                currentStyleIndex,
-                Microbot.getVarbitPlayerValue(43),
-                switched);
-
-        return switched;
+        return true;
     }
 
     private GearPlan buildGearPlan() {
