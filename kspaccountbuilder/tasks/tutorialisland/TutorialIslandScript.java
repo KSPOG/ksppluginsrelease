@@ -66,9 +66,6 @@ public class TutorialIslandScript extends Script
     private static final int QUEUE_LOGIN_SKIP_MS = 60000;
     private static final int QUEUED_LOGIN_EMAIL_PASSWORD_DELAY_MIN_MS = 1400;
     private static final int QUEUED_LOGIN_EMAIL_PASSWORD_DELAY_MAX_MS = 2600;
-    private static final long SURVIVAL_ACTION_COOLDOWN_MS = 600L;
-    private static final long SURVIVAL_FIRE_APPEAR_TIMEOUT_MS = 5_000L;
-    private static final long BREAD_COOK_RETRY_MS = 3_000L;
 
     private static final int NAME_CREATION_GROUP = 558;
     private static final int NAME_CREATION_CONTAINER_CHILD = 2;
@@ -143,10 +140,12 @@ public class TutorialIslandScript extends Script
     private long queuedLoginStartedAtMs;
     private String queuedAccountName = "None";
     private WorldPoint ownFireLocation;
-    private long lastSurvivalFiremakingActionAtMs;
-    private long lastSurvivalCookingActionAtMs;
     private boolean waitingForSurvivalFire;
-    private long lastBreadCookActionAtMs;
+    private boolean survivalCookingDispatched;
+    private boolean breadCookingDispatched;
+    private boolean treeActionDispatched;
+    private boolean fishingActionDispatched;
+    private boolean homeTeleportDispatched;
 
     public boolean run()
     {
@@ -173,14 +172,12 @@ public class TutorialIslandScript extends Script
                 if (Rs2Widget.isWidgetVisible(929, 5))
                 {
                     Rs2Widget.clickWidget(929, 5);
-                    Rs2Random.waitEx(1200, 300);
                     return;
                 }
 
                 if (Rs2Widget.isWidgetVisible(310, 0))
                 {
                     Rs2Keyboard.keyPress(KeyEvent.VK_ESCAPE);
-                    Rs2Random.waitEx(1200, 300);
                     return;
                 }
 
@@ -220,15 +217,6 @@ public class TutorialIslandScript extends Script
                 if (hasContinue())
                 {
                     clickContinue();
-                    return;
-                }
-
-                int tutorialProgress = Microbot.getVarbitPlayerValue(281);
-                boolean fastTutorialTransition = status == Status.SURVIVAL_GUIDE
-                        || (status == Status.COOKING_GUIDE && tutorialProgress < 200);
-
-                if (!fastTutorialTransition && (Rs2Player.isMoving() || Rs2Player.isAnimating()))
-                {
                     return;
                 }
 
