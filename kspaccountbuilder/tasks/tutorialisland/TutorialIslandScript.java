@@ -1244,26 +1244,166 @@ public class TutorialIslandScript extends Script
 
         if (progress <= 370)
         {
-            if (!walkToArea(COMBAT_INSTRUCTOR_AREA)) return;
             walkAndTalk(npc);
+            return;
         }
-        else if (progress <= 410)
+
+        if (progress == 390)
         {
-            if (isInDialogue())
+            clickTab("Worn Equipment");
+            return;
+        }
+
+        if (progress == 400)
+        {
+            if (Rs2Widget.getWidget(84, 1) == null)
             {
-                clickContinue();
+                Rs2Widget.clickWidget(387, 1);
+            }
+            return;
+        }
+
+        if (progress == 405)
+        {
+            if (Rs2Equipment.isWearing("Bronze dagger"))
+            {
+                closeEquipmentStats();
                 return;
             }
+
+            if (Rs2Widget.getWidget(84, 1) != null)
+            {
+                Rs2Widget.clickWidget("Bronze dagger");
+                return;
+            }
+
             clickTab("Worn Equipment");
-            Rs2Widget.clickWidget(387, 1);
-            sleepUntil(() -> Rs2Widget.getWidget(84, 1) != null);
-            Rs2Random.waitEx(1200, 300);
-            Rs2Widget.clickWidget("Bronze dagger");
-            Rs2Random.waitEx(2400, 300);
-            closeEquipmentStats();
-            walkAndTalk(npc);
+            return;
         }
-        else if (progress == 500)
+
+        if (progress == 410)
+        {
+            if (Rs2Widget.isWidgetVisible(84, 3))
+            {
+                closeEquipmentStats();
+                return;
+            }
+
+            walkAndTalk(npc);
+            return;
+        }
+
+        if (progress == 420)
+        {
+            if (Rs2Tab.getCurrentTab() != InterfaceTab.INVENTORY)
+            {
+                Rs2Tab.switchTo(InterfaceTab.INVENTORY);
+                return;
+            }
+
+            if (Rs2Inventory.hasItem("Bronze sword") && !Rs2Equipment.isWearing("Bronze sword"))
+            {
+                Rs2Inventory.wield("Bronze sword");
+                return;
+            }
+
+            if (Rs2Inventory.hasItem("Wooden shield") && !Rs2Equipment.isWearing("Wooden shield"))
+            {
+                Rs2Inventory.wield("Wooden shield");
+            }
+            return;
+        }
+
+        if (progress == 430)
+        {
+            clickTab("Combat Options");
+            return;
+        }
+
+        if (progress == 440)
+        {
+            ensureInsideRatPen();
+            return;
+        }
+
+        if (progress == 450)
+        {
+            if (!Rs2Player.isAnimating() && !Rs2Player.isInteracting())
+            {
+                attackNearestRat();
+            }
+            return;
+        }
+
+        if (progress == 470)
+        {
+            WorldPoint playerLocation = Rs2Player.getWorldLocation();
+            if (isInsideRatPen(playerLocation))
+            {
+                Microbot.getRs2TileObjectCache().query().fromWorldView()
+                        .withId(RAT_PEN_GATE_ID)
+                        .interact("Open");
+                return;
+            }
+
+            walkAndTalk(npc);
+            return;
+        }
+
+        if (progress == 480)
+        {
+            if (Rs2Tab.getCurrentTab() != InterfaceTab.INVENTORY)
+            {
+                Rs2Tab.switchTo(InterfaceTab.INVENTORY);
+                return;
+            }
+
+            if (Rs2Inventory.hasItem("Shortbow"))
+            {
+                Rs2Inventory.wield("Shortbow");
+                return;
+            }
+
+            if (Rs2Inventory.hasItem("Bronze arrow"))
+            {
+                Rs2Inventory.wield("Bronze arrow");
+                return;
+            }
+
+            selectLongrangeCombatStyle();
+            return;
+        }
+
+        if (progress == 490)
+        {
+            Actor rat = Rs2Player.getInteracting();
+            if (rat != null && rat.getName() != null && rat.getName().equalsIgnoreCase("giant rat"))
+            {
+                return;
+            }
+
+            if (!Rs2Equipment.isWearing("Shortbow") && Rs2Inventory.hasItem("Shortbow"))
+            {
+                Rs2Inventory.wield("Shortbow");
+                return;
+            }
+
+            if (Rs2Inventory.hasItem("Bronze arrow"))
+            {
+                Rs2Inventory.wield("Bronze arrow");
+                return;
+            }
+
+            selectLongrangeCombatStyle();
+
+            if (!Rs2Player.isAnimating() && !Rs2Player.isInteracting())
+            {
+                attackNearestRat();
+            }
+            return;
+        }
+
+        if (progress == 500)
         {
             Rs2TileObjectModel ladder = Microbot.getRs2TileObjectCache()
                     .query()
@@ -1271,78 +1411,9 @@ public class TutorialIslandScript extends Script
                     .withName("Ladder")
                     .nearestOnClientThread();
 
-            if (!prepareTutorialObjectInteraction(ladder, 4))
+            if (prepareTutorialObjectInteraction(ladder, 4))
             {
-                return;
-            }
-
-            if (ladder.click("Climb-up"))
-            {
-                sleepUntil(() -> Microbot.getVarbitPlayerValue(281) != 500
-                        || !isInArea(RAT_PIT_AREA), 1_500);
-            }
-        }
-        else if (progress == 480 || progress == 490)
-        {
-            Actor rat = Rs2Player.getInteracting();
-            if (rat != null && rat.getName().equalsIgnoreCase("giant rat"))
-            {
-                return;
-            }
-            if (Rs2Inventory.hasItem("Shortbow"))
-            {
-                Rs2Inventory.wield("Shortbow");
-                Rs2Random.waitEx(600, 100);
-            }
-            if (Rs2Inventory.hasItem("Bronze arrow"))
-            {
-                Rs2Inventory.wield("Bronze arrow");
-                Rs2Random.waitEx(600, 100);
-            }
-            selectLongrangeCombatStyle();
-            attackNearestRat();
-        }
-        else if (progress == 470)
-        {
-            walkTutorialLocal(new WorldPoint(3108, 9508, 0), 2);
-            Rs2Player.waitForWalking();
-            walkAndTalk(npc);
-        }
-        else if (progress == 430)
-        {
-            clickTab("Combat Options");
-        }
-        else if (progress >= 420)
-        {
-            if (isInDialogue())
-            {
-                clickContinue();
-                return;
-            }
-            if (Microbot.getClient().getLocalPlayer().isInteracting() || Rs2Player.isAnimating())
-            {
-                return;
-            }
-            if (Rs2Equipment.isWearing("Bronze sword"))
-            {
-                if (!ensureInsideRatPen())
-                {
-                    return;
-                }
-
-                walkAndAttackRat();
-            }
-            else if (Rs2Inventory.hasItem("Bronze sword"))
-            {
-                Rs2Tab.switchTo(InterfaceTab.INVENTORY);
-                Rs2Random.waitEx(600, 100);
-                Rs2Inventory.wield("Bronze sword");
-                Rs2Random.waitEx(600, 100);
-                Rs2Inventory.wield("Wooden shield");
-            }
-            else
-            {
-                walkAndTalk(npc);
+                ladder.click("Climb-up");
             }
         }
     }
@@ -1863,8 +1934,6 @@ public class TutorialIslandScript extends Script
 
     private boolean selectLongrangeCombatStyle()
     {
-        clickTab("Combat Options");
-
         Widget longrange = Rs2Widget.findWidget("Longrange", true);
 
         if (longrange == null)
@@ -1874,16 +1943,11 @@ public class TutorialIslandScript extends Script
 
         if (longrange == null)
         {
+            clickTab("Combat Options");
             return false;
         }
 
-        if (!Rs2Widget.clickWidget(longrange))
-        {
-            return false;
-        }
-
-        sleepUntil(() -> Microbot.getVarbitPlayerValue(281) > 430, 1_000);
-        return true;
+        return Rs2Widget.clickWidget(longrange);
     }
 
     // -------------------------------------------------------------------------
