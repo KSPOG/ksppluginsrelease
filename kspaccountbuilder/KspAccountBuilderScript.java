@@ -62,7 +62,6 @@ import net.runelite.client.plugins.microbot.util.player.Rs2Player;
 import net.runelite.client.plugins.microbot.util.security.LoginManager;
 import net.runelite.client.plugins.microbot.util.tabs.Rs2Tab;
 import net.runelite.client.plugins.microbot.util.walker.Rs2Walker;
-import net.runelite.client.plugins.microbot.util.widget.Rs2Widget;
 import net.runelite.client.ui.ClientUI;
 
 import javax.inject.Inject;
@@ -125,6 +124,7 @@ public class KspAccountBuilderScript extends Script
     private static final int CHICKEN_TARGET_COMBAT_STAT_LEVEL = 15;
     private static final long PLAY_TIME_READ_RETRY_MS = TimeUnit.SECONDS.toMillis(1);
     private static final long BREAK_LOGOUT_COMBAT_GRACE_MS = TimeUnit.SECONDS.toMillis(11);
+    private static final long TASK_SWITCH_ACTION_COOLDOWN_MS = 500L;
     private static final String BRONZE_SWORD = "Bronze sword";
     private static final String WOODEN_SHIELD = "Wooden shield";
     private static final int DRAYNOR_CORRIDOR_MIN_X = 3050;
@@ -217,6 +217,7 @@ public class KspAccountBuilderScript extends Script
     private long lastStatusLogAt;
     private KspAccountBuilderConfig config;
     private boolean debugEnabled;
+    private boolean debugLoggingApplied;
     private volatile BuilderTask pendingTask;
     private BuilderTask singleSkillRecoveryTask;
     private BuilderTask auditedSingleSkillTask;
@@ -239,6 +240,8 @@ public class KspAccountBuilderScript extends Script
     private volatile long currentAccountHashSnapshot;
     private long nextPlayTimeReadAtMillis;
     private BankLocation taskSwitchBankLocation;
+    private long lastTaskSwitchActionAtMs;
+    private boolean taskSwitchBankResetPending;
 
     public BuilderTask getCurrentTask() { return currentTask; }
 
@@ -251,33 +254,100 @@ public class KspAccountBuilderScript extends Script
         shutdown();
         shuttingDown = false;
         this.config = config;
-        this.debugEnabled = config.debugLogging();
-        breakActive = false;
+        resetRuntimeState();
+
         stopExternalAutoLoginPlugin("builder-start");
         startAutoLoginHelper();
-        if (experienceLampScript != null)
-        {
-            experienceLampScript.run();
-        }
-        miningScript.setDebugLogging(debugEnabled);
-        woodCuttingScript.setDebugLogging(debugEnabled);
-        fireMakingScript.setDebugLogging(debugEnabled);
-        fishingScript.setDebugLogging(debugEnabled);
-        cookingScript.setDebugLogging(debugEnabled);
-        craftingScript.setDebugLogging(debugEnabled);
-        meleeScript.setDebugLogging(debugEnabled);
-        buyScript.setDebugLogging(debugEnabled);
-        sellScript.setDebugLogging(debugEnabled);
-        smithScript.setDebugLogging(debugEnabled);
-        smeltScript.setDebugLogging(debugEnabled);
-        tutorialIslandScript.setDebugLogging(debugEnabled);
-        cooksScript.setDebugLogging(debugEnabled);
-        gobScript.setDebugLogging(debugEnabled);
-        romeoScript.setDebugLogging(debugEnabled);
-        runeMystScript.setDebugLogging(debugEnabled);
-        essenceMining.setDebugLogging(debugEnabled);
-        applyAntibanSettings();
+        if (experienceLampScript != null) experienceLampScript.run();
 
+        syncDebugLogging(true);
+        applyAntibanSettings();
+        captureOriginalWindowTitle();
+        startedAtMillis = System.currentTimeMillis();
+        scheduleNextBreak();
+
+        mainScheduledFuture = scheduledExecutorService.scheduleWithFixedDelay(
+                this::runLoop,
+                0,
+                LOOP_DELAY_MS,
+                TimeUnit.MILLISECONDS);
+        return true;
+    }
+
+    private void runLoop()
+    {
+        try
+        {
+            if (!super.run()) return;
+
+            syncDebugLogging(false);
+
+            if (KspWorldMapGuard.closeIfOpen())
+            {
+                KspWalkerGuard.clearActiveWalker("ksp_account_builder_world_map_open");
+                maybeLogStatus();
+                return;
+            }
+
+            boolean playTimeConfirmed = sampleAccountPlayTime();
+            if (handleExperienceLampInterruption())
+            {
+                updateWindowTitle();
+                maybeLogStatus();
+                return;
+            }
+
+            processTimers(playTimeConfirmed);
+            updateWindowTitle();
+
+            if (isAnyBreakActive()
+                    || !Microbot.isLoggedIn()
+                    || !isReadyAfterLoginHandoff())
+            {
+                maybeLogStatus();
+                return;
+            }
+
+            if (!playTimeConfirmed)
+            {
+                Microbot.status = "Confirming account play time";
+                maybeLogStatus();
+                return;
+            }
+
+            if (handleUnexpectedEssenceMineRecovery()
+                    || pendingTask != null
+                    || pendingRandomTaskSelection)
+            {
+                maybeLogStatus();
+                return;
+            }
+
+            KspWalkerGuard.recoverActiveWalkIfIdle();
+
+            if (currentTask == null)
+            {
+                currentTask = resolveStartingTask();
+                awaitingActivitySwitchTimerStart = canUseActivitySwitchTimer();
+                debug("Selected initial task after play-time confirmation | currentTask={}", currentTask);
+            }
+
+            runAccountBuilderCycle();
+            maybeLogStatus();
+        }
+        catch (Exception ex)
+        {
+            log.error("[KSP Account Builder] Main account-builder loop failed; keeping scheduler alive", ex);
+            taskStarted = false;
+            pendingTask = null;
+            pendingRandomTaskSelection = false;
+            awaitingNextActivityStart = false;
+            awaitingActivitySwitchTimerStart = canUseActivitySwitchTimer();
+        }
+    }
+
+    private void resetRuntimeState()
+    {
         currentTask = null;
         taskStarted = false;
         breakActive = false;
@@ -301,124 +371,42 @@ public class KspAccountBuilderScript extends Script
         currentAccountHashSnapshot = 0L;
         nextPlayTimeReadAtMillis = 0L;
         taskSwitchBankLocation = null;
+        lastTaskSwitchActionAtMs = 0L;
+        taskSwitchBankResetPending = false;
         pausedActivitySwitchRemainingMillis = -1L;
         activitySwitchTimerPaused = false;
         sharedBreakActive = false;
         essenceMineRecoveryActive = false;
-        captureOriginalWindowTitle();
-
-        startedAtMillis = System.currentTimeMillis();
-        lastStatusLogAt = 0L;
-
-        scheduleNextBreak();
         nextActivitySwitchAtMillis = -1L;
+        lastStatusLogAt = 0L;
+        debugLoggingApplied = false;
+    }
 
-        mainScheduledFuture = scheduledExecutorService.scheduleWithFixedDelay(() ->
-        {
-            try
-            {
-                if (!super.run())
-                {
-                    return;
-                }
+    private void syncDebugLogging(boolean force)
+    {
+        boolean enabled = config != null && config.debugLogging();
+        if (!force && debugLoggingApplied && enabled == debugEnabled) return;
 
-                debugEnabled = config.debugLogging();
-                miningScript.setDebugLogging(debugEnabled);
-                woodCuttingScript.setDebugLogging(debugEnabled);
-                fireMakingScript.setDebugLogging(debugEnabled);
-                fishingScript.setDebugLogging(debugEnabled);
-                cookingScript.setDebugLogging(debugEnabled);
-                craftingScript.setDebugLogging(debugEnabled);
-                meleeScript.setDebugLogging(debugEnabled);
-                buyScript.setDebugLogging(debugEnabled);
-                sellScript.setDebugLogging(debugEnabled);
-                smithScript.setDebugLogging(debugEnabled);
-                smeltScript.setDebugLogging(debugEnabled);
-                tutorialIslandScript.setDebugLogging(debugEnabled);
-                cooksScript.setDebugLogging(debugEnabled);
-                gobScript.setDebugLogging(debugEnabled);
-                romeoScript.setDebugLogging(debugEnabled);
-                runeMystScript.setDebugLogging(debugEnabled);
-                essenceMining.setDebugLogging(debugEnabled);
-                autoLoginScript.setDebugLogging(debugEnabled);
-
-                if (KspWorldMapGuard.closeIfOpen())
-                {
-                    KspWalkerGuard.clearActiveWalker("ksp_account_builder_world_map_open");
-                    maybeLogStatus();
-                    return;
-                }
-
-                boolean playTimeConfirmed = sampleAccountPlayTime();
-                if (handleExperienceLampInterruption())
-                {
-                    updateWindowTitle();
-                    maybeLogStatus();
-                    return;
-                }
-                processTimers(playTimeConfirmed);
-                updateWindowTitle();
-                if (isAnyBreakActive())
-                {
-                    maybeLogStatus();
-                    return;
-                }
-
-                if (!Microbot.isLoggedIn())
-                {
-                    maybeLogStatus();
-                    return;
-                }
-
-                if (!isReadyAfterLoginHandoff())
-                {
-                    maybeLogStatus();
-                    return;
-                }
-
-                if (!playTimeConfirmed)
-                {
-                    Microbot.status = "Confirming account play time";
-                    maybeLogStatus();
-                    return;
-                }
-
-                if (handleUnexpectedEssenceMineRecovery())
-                {
-                    maybeLogStatus();
-                    return;
-                }
-
-                if (pendingTask != null || pendingRandomTaskSelection)
-                {
-                    maybeLogStatus();
-                    return;
-                }
-
-                KspWalkerGuard.recoverActiveWalkIfIdle();
-
-                if (currentTask == null)
-                {
-                    currentTask = resolveStartingTask();
-                    awaitingActivitySwitchTimerStart = canUseActivitySwitchTimer();
-                    debug("Selected initial task after play-time confirmation | currentTask={}", currentTask);
-                }
-
-                runAccountBuilderCycle();
-                maybeLogStatus();
-            }
-            catch (Exception ex)
-            {
-                log.error("[KSP Account Builder] Main account-builder loop failed; keeping scheduler alive", ex);
-                taskStarted = false;
-                pendingTask = null;
-                pendingRandomTaskSelection = false;
-                awaitingNextActivityStart = false;
-                awaitingActivitySwitchTimerStart = canUseActivitySwitchTimer();
-            }
-        }, 0, LOOP_DELAY_MS, TimeUnit.MILLISECONDS);
-
-        return true;
+        debugEnabled = enabled;
+        miningScript.setDebugLogging(enabled);
+        woodCuttingScript.setDebugLogging(enabled);
+        fireMakingScript.setDebugLogging(enabled);
+        fishingScript.setDebugLogging(enabled);
+        cookingScript.setDebugLogging(enabled);
+        craftingScript.setDebugLogging(enabled);
+        meleeScript.setDebugLogging(enabled);
+        buyScript.setDebugLogging(enabled);
+        sellScript.setDebugLogging(enabled);
+        smithScript.setDebugLogging(enabled);
+        smeltScript.setDebugLogging(enabled);
+        tutorialIslandScript.setDebugLogging(enabled);
+        cooksScript.setDebugLogging(enabled);
+        gobScript.setDebugLogging(enabled);
+        romeoScript.setDebugLogging(enabled);
+        runeMystScript.setDebugLogging(enabled);
+        essenceMining.setDebugLogging(enabled);
+        if (autoLoginScript != null) autoLoginScript.setDebugLogging(enabled);
+        debugLoggingApplied = true;
     }
 
     private boolean handleExperienceLampInterruption()
@@ -468,133 +456,32 @@ public class KspAccountBuilderScript extends Script
 
     private void processTimers(boolean playTimeConfirmed)
     {
-        if (shuttingDown)
-        {
-            return;
-        }
+        if (shuttingDown) return;
 
         long now = System.currentTimeMillis();
-        if (Microbot.isLoggedIn() && Rs2Combat.inCombat())
-        {
-            lastCombatObservedAtMillis = now;
-        }
-        boolean singleSkillTaskForced = isSingleSkillTaskForced();
-        updateSharedBreakState(now);
+        if (Microbot.isLoggedIn() && Rs2Combat.inCombat()) lastCombatObservedAtMillis = now;
 
-        if (sharedBreakActive)
-        {
-            return;
-        }
+        updateSharedBreakState(now);
+        if (sharedBreakActive) return;
 
         if (config.doBreaks())
         {
-            if (!breakActive && now >= nextBreakAtMillis)
-            {
-                pauseActivitySwitchTimer(now);
-                breakActive = true;
-                taskStarted = false;
-                pendingTask = null;
-                pendingRandomTaskSelection = false;
-                awaitingNextActivityStart = false;
-                breakLogoutRequested = false;
-                breakCombatWaitLogged = false;
-                lastBreakLoginAttemptAt = 0L;
-                stopExternalAutoLoginPlugin("ksp-break-start");
-                stopAutoLoginHelperForBreak();
-                miningScript.shutdown();
-                woodCuttingScript.shutdown();
-                fireMakingScript.shutdown();
-                fishingScript.shutdown();
-                cookingScript.shutdown();
-                meleeScript.shutdown();
-                buyScript.shutdown();
-                sellScript.shutdown();
-                smithScript.shutdown();
-                smeltScript.shutdown();
-                tutorialIslandScript.shutdown();
-                cooksScript.shutdown();
-                gobScript.shutdown();
-                romeoScript.shutdown();
-                runeMystScript.shutdown();
-                essenceMining.shutdown();
-                breakEndsAtMillis = now + TimeUnit.MINUTES.toMillis(randomMinutes(config.breakDurationMinMinutes(), config.breakDurationMaxMinutes()));
-                debug("Starting break for {} seconds", getBreakTimeRemainingSeconds());
-            }
-
-            if (!shuttingDown && breakActive && Microbot.isLoggedIn() && !breakLogoutRequested)
-            {
-                long combatGraceRemainingMillis = BREAK_LOGOUT_COMBAT_GRACE_MS
-                        - (now - lastCombatObservedAtMillis);
-                if (Rs2Combat.inCombat() || combatGraceRemainingMillis > 0L)
-                {
-                    Microbot.status = "Waiting to leave combat before break";
-                    if (!breakCombatWaitLogged)
-                    {
-                        breakCombatWaitLogged = true;
-                        debug("Delaying break logout until combat is clear | graceRemainingSeconds={}",
-                                Math.max(0L, TimeUnit.MILLISECONDS.toSeconds(combatGraceRemainingMillis) + 1L));
-                    }
-                }
-                else
-                {
-                    Rs2Player.logout();
-                    breakLogoutRequested = true;
-                    breakCombatWaitLogged = false;
-                    sleepUntil(() -> !Microbot.isLoggedIn(), 5_000);
-                }
-            }
-
-            if (breakActive && now >= breakEndsAtMillis)
-            {
-                breakActive = false;
-                breakLogoutRequested = false;
-                breakCombatWaitLogged = false;
-                scheduleNextBreak();
-                resumeActivitySwitchTimer(now);
-                debug("Break completed, resuming tasks");
-                startAutoLoginHelper();
-
-                if (!Microbot.isLoggedIn())
-                {
-                    attemptLoginAfterBreak();
-                }
-            }
-
-            if (breakActive)
-            {
-                return;
-            }
+            if (!breakActive && now >= nextBreakAtMillis) startBreak(now);
+            if (breakActive) handleBreak(now);
+            if (breakActive) return;
         }
 
-        if (!Microbot.isLoggedIn())
-        {
-            return;
-        }
+        if (!Microbot.isLoggedIn()) return;
 
-        if (!playTimeConfirmed || currentTask == null)
+        if (!playTimeConfirmed || currentTask == null || isSingleSkillTaskForced())
         {
-            pendingTask = null;
-            pendingRandomTaskSelection = false;
-            awaitingNextActivityStart = false;
-            awaitingActivitySwitchTimerStart = false;
-            nextActivitySwitchAtMillis = -1L;
-            return;
-        }
-
-        if (singleSkillTaskForced)
-        {
-            pendingTask = null;
-            pendingRandomTaskSelection = false;
-            awaitingNextActivityStart = false;
-            awaitingActivitySwitchTimerStart = false;
-            nextActivitySwitchAtMillis = -1L;
+            clearPendingActivitySwitch();
             return;
         }
 
         if (currentTask == BuilderTask.TUTORIAL_ISLAND)
         {
-            pendingTask = null;
-            pendingRandomTaskSelection = false;
+            clearPendingActivitySwitch();
             clearActivitySwitchTimerState();
             return;
         }
@@ -609,34 +496,11 @@ public class KspAccountBuilderScript extends Script
                 && nextActivitySwitchAtMillis > 0L
                 && now >= nextActivitySwitchAtMillis)
         {
-            if (!isSafeToStartActivitySwitch())
-            {
-                return;
-            }
-
-            if (!ensureInventoryTabOpenForTaskSelection())
-            {
-                return;
-            }
+            if (!isSafeToStartActivitySwitch() || !ensureInventoryTabOpenForTaskSelection()) return;
 
             pendingRandomTaskSelection = true;
             taskStarted = false;
-            miningScript.shutdown();
-            woodCuttingScript.shutdown();
-            fireMakingScript.shutdown();
-            fishingScript.shutdown();
-            cookingScript.shutdown();
-            meleeScript.shutdown();
-            buyScript.shutdown();
-            sellScript.shutdown();
-            smithScript.shutdown();
-            smeltScript.shutdown();
-            tutorialIslandScript.shutdown();
-            cooksScript.shutdown();
-            gobScript.shutdown();
-            romeoScript.shutdown();
-            runeMystScript.shutdown();
-            essenceMining.shutdown();
+            stopAllTaskScriptsExcept(null);
             debug("Preparing activity switch from {}; next task will be selected after bank cleanup", currentTask);
         }
 
@@ -644,19 +508,83 @@ public class KspAccountBuilderScript extends Script
         {
             pendingRandomTaskSelection = false;
             pendingTask = null;
-            awaitingNextActivityStart = true;
-            awaitingActivitySwitchTimerStart = canUseActivitySwitchTimer();
-            nextActivitySwitchAtMillis = -1L;
+            awaitNextActivityStart();
             return;
         }
 
         if (pendingTask != null && switchTask(pendingTask))
         {
             pendingTask = null;
-            awaitingNextActivityStart = true;
-            awaitingActivitySwitchTimerStart = canUseActivitySwitchTimer();
-            nextActivitySwitchAtMillis = -1L;
+            awaitNextActivityStart();
         }
+    }
+
+    private void startBreak(long now)
+    {
+        pauseActivitySwitchTimer(now);
+        breakActive = true;
+        taskStarted = false;
+        clearPendingActivitySwitch();
+        breakLogoutRequested = false;
+        breakCombatWaitLogged = false;
+        lastBreakLoginAttemptAt = 0L;
+        stopExternalAutoLoginPlugin("ksp-break-start");
+        stopAutoLoginHelperForBreak();
+        stopAllTaskScriptsExcept(null);
+        breakEndsAtMillis = now + TimeUnit.MINUTES.toMillis(
+                randomMinutes(config.breakDurationMinMinutes(), config.breakDurationMaxMinutes()));
+        debug("Starting break for {} seconds", getBreakTimeRemainingSeconds());
+    }
+
+    private void handleBreak(long now)
+    {
+        if (Microbot.isLoggedIn() && !breakLogoutRequested)
+        {
+            long grace = BREAK_LOGOUT_COMBAT_GRACE_MS - (now - lastCombatObservedAtMillis);
+            if (Rs2Combat.inCombat() || grace > 0L)
+            {
+                Microbot.status = "Waiting to leave combat before break";
+                if (!breakCombatWaitLogged)
+                {
+                    breakCombatWaitLogged = true;
+                    debug("Delaying break logout until combat is clear | graceRemainingSeconds={}",
+                            Math.max(0L, TimeUnit.MILLISECONDS.toSeconds(grace) + 1L));
+                }
+            }
+            else
+            {
+                Rs2Player.logout();
+                breakLogoutRequested = true;
+                breakCombatWaitLogged = false;
+            }
+        }
+
+        if (now < breakEndsAtMillis) return;
+
+        breakActive = false;
+        breakLogoutRequested = false;
+        breakCombatWaitLogged = false;
+        scheduleNextBreak();
+        resumeActivitySwitchTimer(now);
+        debug("Break completed, resuming tasks");
+        startAutoLoginHelper();
+        if (!Microbot.isLoggedIn()) attemptLoginAfterBreak();
+    }
+
+    private void clearPendingActivitySwitch()
+    {
+        pendingTask = null;
+        pendingRandomTaskSelection = false;
+        awaitingNextActivityStart = false;
+        awaitingActivitySwitchTimerStart = false;
+        nextActivitySwitchAtMillis = -1L;
+    }
+
+    private void awaitNextActivityStart()
+    {
+        awaitingNextActivityStart = true;
+        awaitingActivitySwitchTimerStart = canUseActivitySwitchTimer();
+        nextActivitySwitchAtMillis = -1L;
     }
 
     private boolean isSafeToStartActivitySwitch()
@@ -705,61 +633,21 @@ public class KspAccountBuilderScript extends Script
 
     private void runAccountBuilderCycle()
     {
-        if (!taskStarted && currentTask != BuilderTask.COOKING)
-        {
-            cookingScript.shutdown();
-        }
-
         if (currentTask == BuilderTask.FISHING)
         {
             fishingScript.stopWalkerIfInsideTargetArea();
         }
 
-        BuilderTask forcedSingleSkillTask = resolveSingleSkillTask();
-        refreshSingleSkillTargetIfChanged(forcedSingleSkillTask);
-        if (forcedSingleSkillTask == BuilderTask.ROMEO_AND_JULIET
-                && isOneTimeTaskCompleted(BuilderTask.ROMEO_AND_JULIET))
+        BuilderTask forcedTask = resolveSingleSkillTask();
+        refreshSingleSkillTargetIfChanged(forcedTask);
+
+        if (handleForcedTaskBlockers(forcedTask))
         {
-            currentTask = BuilderTask.ROMEO_AND_JULIET;
-            taskStarted = false;
-            Microbot.status = "Romeo and Juliet complete";
             return;
         }
 
-        if (forcedSingleSkillTask == BuilderTask.RUNE_MYSTERIES
-                && isOneTimeTaskCompleted(BuilderTask.RUNE_MYSTERIES))
-        {
-            currentTask = BuilderTask.RUNE_MYSTERIES;
-            taskStarted = false;
-            Microbot.status = "Rune Mysteries complete";
-            return;
-        }
-
-        if (forcedSingleSkillTask == BuilderTask.RUNE_ESSENCE
-                && !isRuneMysteriesComplete())
-        {
-            stopCurrentTaskScript();
-            currentTask = BuilderTask.RUNE_ESSENCE;
-            taskStarted = false;
-            Microbot.status = "Rune Essence requires Rune Mysteries";
-            return;
-        }
-
-        if (isSingleSkillTargetRequired(forcedSingleSkillTask)
-                && resolveSingleSkillTarget(config.singleSkillTask()) == KspSingleSkillTarget.NONE)
-        {
-            if (taskStarted || currentTask != forcedSingleSkillTask)
-            {
-                stopCurrentTaskScript();
-                taskStarted = false;
-                currentTask = forcedSingleSkillTask;
-            }
-            Microbot.status = "Select a " + config.singleSkillTask() + " target";
-            return;
-        }
-
-        boolean recoveringSingleSkillResources = handleSingleSkillResourceRecovery(forcedSingleSkillTask);
-        if (recoveringSingleSkillResources)
+        boolean recovering = handleSingleSkillResourceRecovery(forcedTask);
+        if (recovering)
         {
             if (currentTask != BuilderTask.GE_BUY || buyScript.isComplete())
             {
@@ -768,16 +656,15 @@ public class KspAccountBuilderScript extends Script
         }
         else
         {
-            if (auditSingleSkillResourcesIfNeeded(forcedSingleSkillTask))
+            if (auditSingleSkillResourcesIfNeeded(forcedTask))
             {
                 return;
             }
 
             applySingleSkillOverride();
-
-            if (forcedSingleSkillTask != null && !hasResourcesForTask(forcedSingleSkillTask))
+            if (forcedTask != null && !hasResourcesForTask(forcedTask))
             {
-                startSingleSkillResourceRecovery(forcedSingleSkillTask);
+                startSingleSkillResourceRecovery(forcedTask);
                 return;
             }
         }
@@ -797,480 +684,244 @@ public class KspAccountBuilderScript extends Script
             return;
         }
 
-        if (!isSingleSkillTaskForced() && !hasResourcesForTask(currentTask))
+        if (!isSingleSkillTaskForced() && !hasResourcesForTask(currentTask)
+                && !switchToTaskWithResources())
         {
-            if (!switchToTaskWithResources())
-            {
-                taskStarted = false;
-                return;
-            }
+            taskStarted = false;
+            return;
         }
 
         if (taskStarted)
         {
-            if (!isSingleSkillTaskForced()
-                    && currentTask == BuilderTask.TUTORIAL_ISLAND
-                    && tutorialIslandScript.isComplete())
+            if (!handleCompletedTask())
             {
-                tutorialIslandScript.shutdown();
-                taskStarted = false;
-                postTutorialBankCameraPending = true;
-                postTutorialBankCameraPending = !setPostTutorialBankCamera();
-                if (!switchToRandomTaskAfterBank(BuilderTask.TUTORIAL_ISLAND))
-                {
-                    stopCurrentTaskScript();
-                }
-                return;
+                maybeStartActivitySwitchTimer();
             }
-
-            if (!isSingleSkillTaskForced()
-                    && currentTask == BuilderTask.COOKS_ASSISTANT
-                    && cooksScript.isComplete())
-            {
-                cooksScript.shutdown();
-                taskStarted = false;
-                if (!switchToTaskWithResources())
-                {
-                    stopCurrentTaskScript();
-                }
-                return;
-            }
-
-            if (!isSingleSkillTaskForced()
-                    && currentTask == BuilderTask.GOBLIN_DIPLOMACY
-                    && gobScript.isComplete())
-            {
-                gobScript.shutdown();
-                taskStarted = false;
-                if (!switchToTaskWithResources())
-                {
-                    stopCurrentTaskScript();
-                }
-                return;
-            }
-
-            if (currentTask == BuilderTask.ROMEO_AND_JULIET
-                    && romeoScript.isComplete())
-            {
-                accountTaskCache.setCompleted(
-                        getCurrentAccountHash(),
-                        KspAccountTaskCache.OneTimeTask.ROMEO_AND_JULIET,
-                        true);
-                romeoScript.shutdown();
-                taskStarted = false;
-                if (isSingleSkillTaskForced())
-                {
-                    Microbot.status = "Romeo and Juliet complete";
-                    return;
-                }
-                if (!switchToTaskWithResources())
-                {
-                    stopCurrentTaskScript();
-                }
-                return;
-            }
-
-            if (currentTask == BuilderTask.RUNE_MYSTERIES
-                    && runeMystScript.isComplete())
-            {
-                accountTaskCache.setCompleted(
-                        getCurrentAccountHash(),
-                        KspAccountTaskCache.OneTimeTask.RUNE_MYSTERIES,
-                        true);
-                runeMystScript.shutdown();
-                taskStarted = false;
-                if (isSingleSkillTaskForced())
-                {
-                    Microbot.status = "Rune Mysteries complete";
-                    return;
-                }
-                if (!switchToTaskWithResources())
-                {
-                    stopCurrentTaskScript();
-                }
-                return;
-            }
-
-            if (!isSingleSkillTaskForced()
-                    && currentTask == BuilderTask.STRONGHOLD_OF_SECURITY
-                    && strongholdScript.isComplete())
-            {
-                accountTaskCache.setCompleted(
-                        getCurrentAccountHash(),
-                        KspAccountTaskCache.OneTimeTask.STRONGHOLD_OF_SECURITY,
-                        true);
-                strongholdScript.shutdown();
-                taskStarted = false;
-                if (!switchToTaskWithResources())
-                {
-                    stopCurrentTaskScript();
-                }
-                return;
-            }
-
-            if (!isSingleSkillTaskForced() && currentTask == BuilderTask.GE_BUY && buyScript.isComplete())
-            {
-                if (!switchToTaskWithResources())
-                {
-                    stopCurrentTaskScript();
-                    taskStarted = false;
-                }
-                return;
-            }
-            if (!isSingleSkillTaskForced() && currentTask == BuilderTask.GE_SELL && sellScript.isComplete())
-            {
-                if (!switchToTaskWithResources())
-                {
-                    stopCurrentTaskScript();
-                    taskStarted = false;
-                }
-                return;
-            }
-            maybeStartActivitySwitchTimer();
             return;
         }
 
-        if (currentTask != BuilderTask.STRONGHOLD_OF_SECURITY)
-        {
-            strongholdScript.shutdown();
-        }
-
-        if (currentTask != BuilderTask.ROMEO_AND_JULIET)
-        {
-            romeoScript.shutdown();
-        }
-
-        if (currentTask != BuilderTask.RUNE_MYSTERIES)
-        {
-            runeMystScript.shutdown();
-        }
-
-        if (currentTask != BuilderTask.RUNE_ESSENCE)
-        {
-            essenceMining.shutdown();
-        }
-
-        if (currentTask != BuilderTask.CRAFTING)
-        {
-            craftingScript.shutdown();
-        }
-
-        if (currentTask == BuilderTask.TUTORIAL_ISLAND)
-        {
-            miningScript.shutdown();
-            woodCuttingScript.shutdown();
-            fireMakingScript.shutdown();
-            fishingScript.shutdown();
-            meleeScript.shutdown();
-            buyScript.shutdown();
-            sellScript.shutdown();
-            smithScript.shutdown();
-            smeltScript.shutdown();
-            cooksScript.shutdown();
-            gobScript.shutdown();
-            clearActivitySwitchTimerState();
-            taskStarted = tutorialIslandScript.run();
-        }
-        else if (currentTask == BuilderTask.COOKS_ASSISTANT)
-        {
-            miningScript.shutdown();
-            woodCuttingScript.shutdown();
-            fireMakingScript.shutdown();
-            fishingScript.shutdown();
-            meleeScript.shutdown();
-            buyScript.shutdown();
-            sellScript.shutdown();
-            smithScript.shutdown();
-            smeltScript.shutdown();
-            tutorialIslandScript.shutdown();
-            gobScript.shutdown();
-            taskStarted = cooksScript.run();
-        }
-        else if (currentTask == BuilderTask.GOBLIN_DIPLOMACY)
-        {
-            miningScript.shutdown();
-            woodCuttingScript.shutdown();
-            fireMakingScript.shutdown();
-            fishingScript.shutdown();
-            meleeScript.shutdown();
-            buyScript.shutdown();
-            sellScript.shutdown();
-            smithScript.shutdown();
-            smeltScript.shutdown();
-            tutorialIslandScript.shutdown();
-            cooksScript.shutdown();
-            taskStarted = gobScript.run();
-        }
-        else if (currentTask == BuilderTask.ROMEO_AND_JULIET)
-        {
-            miningScript.shutdown();
-            woodCuttingScript.shutdown();
-            fireMakingScript.shutdown();
-            fishingScript.shutdown();
-            cookingScript.shutdown();
-            meleeScript.shutdown();
-            buyScript.shutdown();
-            sellScript.shutdown();
-            smithScript.shutdown();
-            smeltScript.shutdown();
-            tutorialIslandScript.shutdown();
-            cooksScript.shutdown();
-            gobScript.shutdown();
-            strongholdScript.shutdown();
-            clearActivitySwitchTimerState();
-            taskStarted = romeoScript.run();
-        }
-        else if (currentTask == BuilderTask.RUNE_MYSTERIES)
-        {
-            miningScript.shutdown();
-            woodCuttingScript.shutdown();
-            fireMakingScript.shutdown();
-            fishingScript.shutdown();
-            cookingScript.shutdown();
-            meleeScript.shutdown();
-            buyScript.shutdown();
-            sellScript.shutdown();
-            smithScript.shutdown();
-            smeltScript.shutdown();
-            tutorialIslandScript.shutdown();
-            cooksScript.shutdown();
-            gobScript.shutdown();
-            romeoScript.shutdown();
-            strongholdScript.shutdown();
-            clearActivitySwitchTimerState();
-            taskStarted = runeMystScript.run();
-        }
-        else if (currentTask == BuilderTask.RUNE_ESSENCE)
-        {
-            miningScript.shutdown();
-            woodCuttingScript.shutdown();
-            fireMakingScript.shutdown();
-            fishingScript.shutdown();
-            cookingScript.shutdown();
-            meleeScript.shutdown();
-            buyScript.shutdown();
-            sellScript.shutdown();
-            smithScript.shutdown();
-            smeltScript.shutdown();
-            tutorialIslandScript.shutdown();
-            cooksScript.shutdown();
-            gobScript.shutdown();
-            romeoScript.shutdown();
-            strongholdScript.shutdown();
-            runeMystScript.shutdown();
-            taskStarted = essenceMining.run();
-        }
-        else if (currentTask == BuilderTask.STRONGHOLD_OF_SECURITY)
-        {
-            miningScript.shutdown();
-            woodCuttingScript.shutdown();
-            fireMakingScript.shutdown();
-            fishingScript.shutdown();
-            cookingScript.shutdown();
-            meleeScript.shutdown();
-            buyScript.shutdown();
-            sellScript.shutdown();
-            smithScript.shutdown();
-            smeltScript.shutdown();
-            tutorialIslandScript.shutdown();
-            cooksScript.shutdown();
-            gobScript.shutdown();
-            clearActivitySwitchTimerState();
-            taskStarted = strongholdScript.run();
-        }
-        else if (currentTask == BuilderTask.MINING)
-        {
-            woodCuttingScript.shutdown();
-            fireMakingScript.shutdown();
-            fishingScript.shutdown();
-            meleeScript.shutdown();
-            buyScript.shutdown();
-            sellScript.shutdown();
-            smithScript.shutdown();
-            smeltScript.shutdown();
-            tutorialIslandScript.shutdown();
-            cooksScript.shutdown();
-            gobScript.shutdown();
-            Areas selectedArea = resolveSingleSkillTarget(KspTrainSingleSkillTask.MINING)
-                    .getValue(Areas.class);
-            miningScript.setProgressiveMining(selectedArea == null);
-            taskStarted = miningScript.run(selectedArea == null ? resolveMiningStartArea() : selectedArea);
-        }
-        else if (currentTask == BuilderTask.WOODCUTTING)
-        {
-            miningScript.shutdown();
-            fireMakingScript.shutdown();
-            fishingScript.shutdown();
-            meleeScript.shutdown();
-            buyScript.shutdown();
-            sellScript.shutdown();
-            smithScript.shutdown();
-            smeltScript.shutdown();
-            tutorialIslandScript.shutdown();
-            cooksScript.shutdown();
-            gobScript.shutdown();
-            TreeAreas selectedArea = resolveSingleSkillTarget(KspTrainSingleSkillTask.WOODCUTTING)
-                    .getValue(TreeAreas.class);
-            woodCuttingScript.setProgressiveWoodcutting(selectedArea == null);
-            taskStarted = woodCuttingScript.run(
-                    selectedArea == null ? resolveWoodcuttingStartArea() : selectedArea);
-        }
-        else if (currentTask == BuilderTask.FIREMAKING)
-        {
-            miningScript.shutdown();
-            woodCuttingScript.shutdown();
-            fishingScript.shutdown();
-            meleeScript.shutdown();
-            buyScript.shutdown();
-            sellScript.shutdown();
-            smithScript.shutdown();
-            smeltScript.shutdown();
-            tutorialIslandScript.shutdown();
-            cooksScript.shutdown();
-            gobScript.shutdown();
-            taskStarted = fireMakingScript.run(FireArea.FM_AREA_DRAYNOR_BANK);
-        }
-        else if (currentTask == BuilderTask.FISHING)
-        {
-            miningScript.shutdown();
-            woodCuttingScript.shutdown();
-            fireMakingScript.shutdown();
-            meleeScript.shutdown();
-            buyScript.shutdown();
-            sellScript.shutdown();
-            smithScript.shutdown();
-            smeltScript.shutdown();
-            tutorialIslandScript.shutdown();
-            cooksScript.shutdown();
-            gobScript.shutdown();
-            net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.fishing.areas.Areas selectedArea =
-                    resolveSingleSkillTarget(KspTrainSingleSkillTask.FISHING)
-                            .getValue(net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.fishing.areas.Areas.class);
-            taskStarted = fishingScript.run(
-                    selectedArea == null ? resolveFishingStartArea() : selectedArea,
-                    selectedArea == null);
-        }
-        else if (currentTask == BuilderTask.COOKING)
-        {
-            miningScript.shutdown();
-            woodCuttingScript.shutdown();
-            fireMakingScript.shutdown();
-            fishingScript.shutdown();
-            meleeScript.shutdown();
-            buyScript.shutdown();
-            sellScript.shutdown();
-            smithScript.shutdown();
-            smeltScript.shutdown();
-            tutorialIslandScript.shutdown();
-            cooksScript.shutdown();
-            gobScript.shutdown();
-            net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.cooking.areas.Areas selectedArea =
-                    resolveSingleSkillTarget(KspTrainSingleSkillTask.COOKING)
-                            .getValue(net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.cooking.areas.Areas.class);
-            taskStarted = cookingScript.run(selectedArea == null
-                    ? net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.cooking.areas.Areas.EDGEVILLE_RANGE
-                    : selectedArea);
-        }
-        else if (currentTask == BuilderTask.CRAFTING)
-        {
-            CraftingLevels selectedLevel = resolveSingleSkillTarget(KspTrainSingleSkillTask.CRAFTING)
-                    .getValue(CraftingLevels.class);
-            taskStarted = craftingScript.run(
-                    selectedLevel == null ? CraftingLevels.LEATHER_GLOVES : selectedLevel,
-                    selectedLevel == null);
-        }
-        else if (currentTask == BuilderTask.MELEE)
-        {
-            miningScript.shutdown();
-            woodCuttingScript.shutdown();
-            fireMakingScript.shutdown();
-            fishingScript.shutdown();
-            buyScript.shutdown();
-            sellScript.shutdown();
-            smithScript.shutdown();
-            smeltScript.shutdown();
-            tutorialIslandScript.shutdown();
-            cooksScript.shutdown();
-            gobScript.shutdown();
-            CombatAreas selectedArea = resolveSingleSkillTarget(KspTrainSingleSkillTask.MELEE)
-                    .getValue(CombatAreas.class);
-            taskStarted = selectedArea == null ? meleeScript.run() : meleeScript.run(selectedArea);
-        }
-        else if (currentTask == BuilderTask.GE_SELL)
-        {
-            miningScript.shutdown();
-            woodCuttingScript.shutdown();
-            fireMakingScript.shutdown();
-            fishingScript.shutdown();
-            meleeScript.shutdown();
-            buyScript.shutdown();
-            smithScript.shutdown();
-            smeltScript.shutdown();
-            tutorialIslandScript.shutdown();
-            cooksScript.shutdown();
-            gobScript.shutdown();
-            taskStarted = sellScript.run(GEArea.GRAND_EXCHANGE);
-        }
-        else if (currentTask == BuilderTask.GE_BUY)
-        {
-            miningScript.shutdown();
-            woodCuttingScript.shutdown();
-            fireMakingScript.shutdown();
-            fishingScript.shutdown();
-            meleeScript.shutdown();
-            sellScript.shutdown();
-            smithScript.shutdown();
-            smeltScript.shutdown();
-            tutorialIslandScript.shutdown();
-            cooksScript.shutdown();
-            gobScript.shutdown();
-            taskStarted = buyScript.run(GEArea.GRAND_EXCHANGE);
-        }
-        else if (currentTask == BuilderTask.SMITHING)
-        {
-            miningScript.shutdown();
-            woodCuttingScript.shutdown();
-            fireMakingScript.shutdown();
-            fishingScript.shutdown();
-            meleeScript.shutdown();
-            buyScript.shutdown();
-            sellScript.shutdown();
-            smeltScript.shutdown();
-            tutorialIslandScript.shutdown();
-            cooksScript.shutdown();
-            gobScript.shutdown();
-            SmithLevels selectedLevel = resolveSingleSkillTarget(KspTrainSingleSkillTask.SMITHING)
-                    .getValue(SmithLevels.class);
-            taskStarted = smithScript.run(SmithArea.SMITH_AREA_VARROCK_WEST_ANVIL, selectedLevel);
-        }
-        else
-        {
-            miningScript.shutdown();
-            woodCuttingScript.shutdown();
-            fireMakingScript.shutdown();
-            fishingScript.shutdown();
-            meleeScript.shutdown();
-            buyScript.shutdown();
-            sellScript.shutdown();
-            smithScript.shutdown();
-            tutorialIslandScript.shutdown();
-            cooksScript.shutdown();
-            gobScript.shutdown();
-            BarLevels selectedBar = resolveSingleSkillTarget(KspTrainSingleSkillTask.SMELTING)
-                    .getValue(BarLevels.class);
-            taskStarted = smeltScript.run(
-                    SmeltArea.SMELT_AREA_EDGEVILLE_FURNACE,
-                    selectedBar == null ? resolveSmeltingFallbackBar() : selectedBar,
-                    selectedBar == null);
-        }
-
+        taskStarted = startTask(currentTask);
         if (taskStarted && awaitingNextActivityStart)
         {
             awaitingNextActivityStart = false;
             debug("Activity switch completed; waiting to reach task area before starting next switch timer");
         }
-
         maybeStartActivitySwitchTimer();
+    }
+
+    private boolean handleForcedTaskBlockers(BuilderTask forcedTask)
+    {
+        if ((forcedTask == BuilderTask.ROMEO_AND_JULIET || forcedTask == BuilderTask.RUNE_MYSTERIES)
+                && isOneTimeTaskCompleted(forcedTask))
+        {
+            currentTask = forcedTask;
+            taskStarted = false;
+            Microbot.status = forcedTask == BuilderTask.ROMEO_AND_JULIET
+                    ? "Romeo and Juliet complete"
+                    : "Rune Mysteries complete";
+            return true;
+        }
+
+        if (forcedTask == BuilderTask.RUNE_ESSENCE && !isRuneMysteriesComplete())
+        {
+            stopCurrentTaskScript();
+            currentTask = forcedTask;
+            taskStarted = false;
+            Microbot.status = "Rune Essence requires Rune Mysteries";
+            return true;
+        }
+
+        if (isSingleSkillTargetRequired(forcedTask)
+                && resolveSingleSkillTarget(config.singleSkillTask()) == KspSingleSkillTarget.NONE)
+        {
+            if (taskStarted || currentTask != forcedTask)
+            {
+                stopCurrentTaskScript();
+                currentTask = forcedTask;
+                taskStarted = false;
+            }
+            Microbot.status = "Select a " + config.singleSkillTask() + " target";
+            return true;
+        }
+        return false;
+    }
+
+    private boolean handleCompletedTask()
+    {
+        if (currentTask == null)
+        {
+            return false;
+        }
+
+        boolean forced = isSingleSkillTaskForced();
+        switch (currentTask)
+        {
+            case TUTORIAL_ISLAND:
+                if (forced || !tutorialIslandScript.isComplete()) return false;
+                stopCurrentTaskScript();
+                taskStarted = false;
+                postTutorialBankCameraPending = !setPostTutorialBankCamera();
+                if (!switchToRandomTaskAfterBank(BuilderTask.TUTORIAL_ISLAND)) stopCurrentTaskScript();
+                return true;
+
+            case COOKS_ASSISTANT:
+                if (forced || !cooksScript.isComplete()) return false;
+                return finishAndSwitch();
+
+            case GOBLIN_DIPLOMACY:
+                if (forced || !gobScript.isComplete()) return false;
+                return finishAndSwitch();
+
+            case ROMEO_AND_JULIET:
+                if (!romeoScript.isComplete()) return false;
+                markOneTimeComplete(KspAccountTaskCache.OneTimeTask.ROMEO_AND_JULIET);
+                return finishOneTimeTask(forced, "Romeo and Juliet complete");
+
+            case RUNE_MYSTERIES:
+                if (!runeMystScript.isComplete()) return false;
+                markOneTimeComplete(KspAccountTaskCache.OneTimeTask.RUNE_MYSTERIES);
+                return finishOneTimeTask(forced, "Rune Mysteries complete");
+
+            case STRONGHOLD_OF_SECURITY:
+                if (forced || !strongholdScript.isComplete()) return false;
+                markOneTimeComplete(KspAccountTaskCache.OneTimeTask.STRONGHOLD_OF_SECURITY);
+                return finishAndSwitch();
+
+            case GE_BUY:
+                return !forced && buyScript.isComplete() && finishAndSwitch();
+
+            case GE_SELL:
+                return !forced && sellScript.isComplete() && finishAndSwitch();
+
+            default:
+                return false;
+        }
+    }
+
+    private boolean finishAndSwitch()
+    {
+        stopCurrentTaskScript();
+        taskStarted = false;
+        if (!switchToTaskWithResources())
+        {
+            stopCurrentTaskScript();
+        }
+        return true;
+    }
+
+    private boolean finishOneTimeTask(boolean forced, String status)
+    {
+        stopCurrentTaskScript();
+        taskStarted = false;
+        if (forced)
+        {
+            Microbot.status = status;
+            return true;
+        }
+        if (!switchToTaskWithResources())
+        {
+            stopCurrentTaskScript();
+        }
+        return true;
+    }
+
+    private void markOneTimeComplete(KspAccountTaskCache.OneTimeTask task)
+    {
+        accountTaskCache.setCompleted(getCurrentAccountHash(), task, true);
+    }
+
+    private boolean startTask(BuilderTask task)
+    {
+        if (task == null)
+        {
+            return false;
+        }
+
+        stopAllTaskScriptsExcept(task);
+        if (task == BuilderTask.TUTORIAL_ISLAND
+                || task == BuilderTask.ROMEO_AND_JULIET
+                || task == BuilderTask.RUNE_MYSTERIES
+                || task == BuilderTask.STRONGHOLD_OF_SECURITY)
+        {
+            clearActivitySwitchTimerState();
+        }
+
+        switch (task)
+        {
+            case TUTORIAL_ISLAND:
+                return tutorialIslandScript.run();
+            case COOKS_ASSISTANT:
+                return cooksScript.run();
+            case GOBLIN_DIPLOMACY:
+                return gobScript.run();
+            case ROMEO_AND_JULIET:
+                return romeoScript.run();
+            case RUNE_MYSTERIES:
+                return runeMystScript.run();
+            case RUNE_ESSENCE:
+                return essenceMining.run();
+            case STRONGHOLD_OF_SECURITY:
+                return strongholdScript.run();
+            case MINING:
+            {
+                Areas area = resolveSingleSkillTarget(KspTrainSingleSkillTask.MINING).getValue(Areas.class);
+                miningScript.setProgressiveMining(area == null);
+                return miningScript.run(area == null ? resolveMiningStartArea() : area);
+            }
+            case WOODCUTTING:
+            {
+                TreeAreas area = resolveSingleSkillTarget(KspTrainSingleSkillTask.WOODCUTTING).getValue(TreeAreas.class);
+                woodCuttingScript.setProgressiveWoodcutting(area == null);
+                return woodCuttingScript.run(area == null ? resolveWoodcuttingStartArea() : area);
+            }
+            case FIREMAKING:
+                return fireMakingScript.run(FireArea.FM_AREA_DRAYNOR_BANK);
+            case FISHING:
+            {
+                net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.fishing.areas.Areas area =
+                        resolveSingleSkillTarget(KspTrainSingleSkillTask.FISHING)
+                                .getValue(net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.fishing.areas.Areas.class);
+                return fishingScript.run(area == null ? resolveFishingStartArea() : area, area == null);
+            }
+            case COOKING:
+            {
+                net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.cooking.areas.Areas area =
+                        resolveSingleSkillTarget(KspTrainSingleSkillTask.COOKING)
+                                .getValue(net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.cooking.areas.Areas.class);
+                return cookingScript.run(area == null
+                        ? net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.cooking.areas.Areas.EDGEVILLE_RANGE
+                        : area);
+            }
+            case CRAFTING:
+            {
+                CraftingLevels level = resolveSingleSkillTarget(KspTrainSingleSkillTask.CRAFTING).getValue(CraftingLevels.class);
+                return craftingScript.run(level == null ? CraftingLevels.LEATHER_GLOVES : level, level == null);
+            }
+            case MELEE:
+            {
+                CombatAreas area = resolveSingleSkillTarget(KspTrainSingleSkillTask.MELEE).getValue(CombatAreas.class);
+                return area == null ? meleeScript.run() : meleeScript.run(area);
+            }
+            case GE_SELL:
+                return sellScript.run(GEArea.GRAND_EXCHANGE);
+            case GE_BUY:
+                return buyScript.run(GEArea.GRAND_EXCHANGE);
+            case SMITHING:
+            {
+                SmithLevels level = resolveSingleSkillTarget(KspTrainSingleSkillTask.SMITHING).getValue(SmithLevels.class);
+                return smithScript.run(SmithArea.SMITH_AREA_VARROCK_WEST_ANVIL, level);
+            }
+            case SMELTING:
+            {
+                BarLevels bar = resolveSingleSkillTarget(KspTrainSingleSkillTask.SMELTING).getValue(BarLevels.class);
+                return smeltScript.run(
+                        SmeltArea.SMELT_AREA_EDGEVILLE_FURNACE,
+                        bar == null ? resolveSmeltingFallbackBar() : bar,
+                        bar == null);
+            }
+            default:
+                return false;
+        }
     }
 
     private boolean isReadyAfterLoginHandoff()
@@ -1396,23 +1047,21 @@ public class KspAccountBuilderScript extends Script
         if (forcedTask == BuilderTask.RUNE_ESSENCE && essenceMining.isInEssenceMine())
         {
             auditedSingleSkillTask = forcedTask;
-            pendingSingleSkillAuditTask = null;
-            singleSkillAuditBankEpoch = -1;
-            singleSkillAuditBankWasOpen = false;
-            debug("Skipping Single Skill bank resource audit while inside rune essence mine");
+            clearPendingSingleSkillAudit();
             return false;
         }
 
-        if (forcedTask == null
-                || forcedTask == BuilderTask.TUTORIAL_ISLAND
+        if (forcedTask == null)
+        {
+            clearSingleSkillResourceAudit();
+            return false;
+        }
+
+        if (forcedTask == BuilderTask.TUTORIAL_ISLAND
                 || forcedTask == BuilderTask.ROMEO_AND_JULIET
                 || forcedTask == BuilderTask.GE_BUY
                 || auditedSingleSkillTask == forcedTask)
         {
-            if (forcedTask == null)
-            {
-                clearSingleSkillResourceAudit();
-            }
             return false;
         }
 
@@ -1424,10 +1073,6 @@ public class KspAccountBuilderScript extends Script
             singleSkillAuditBankWasOpen = Rs2Bank.isOpen();
             singleSkillAuditBankEpoch = Rs2Bank.getBankLiveEpoch();
             Microbot.status = "Checking bank for " + forcedTask;
-            debug("Starting Single Skill bank resource audit | target={} bankOpen={} bankEpoch={}",
-                    forcedTask,
-                    singleSkillAuditBankWasOpen,
-                    singleSkillAuditBankEpoch);
         }
 
         if (!ensureTaskSwitchBankOpen())
@@ -1436,50 +1081,32 @@ public class KspAccountBuilderScript extends Script
             return true;
         }
 
-        boolean bankMirrorReady = Rs2Bank.verifyBankMirrorAfterOpen(
-                singleSkillAuditBankWasOpen,
-                singleSkillAuditBankEpoch);
-        if (!bankMirrorReady)
-        {
-            sleepUntil(() -> Rs2Bank.verifyBankMirrorAfterOpen(
-                    singleSkillAuditBankWasOpen,
-                    singleSkillAuditBankEpoch), 1_500);
-            bankMirrorReady = Rs2Bank.verifyBankMirrorAfterOpen(
-                    singleSkillAuditBankWasOpen,
-                    singleSkillAuditBankEpoch);
-        }
-
-        if (!bankMirrorReady)
+        if (!Rs2Bank.verifyBankMirrorAfterOpen(singleSkillAuditBankWasOpen, singleSkillAuditBankEpoch))
         {
             Microbot.status = "Syncing bank for " + forcedTask;
-            KspTaskDebug.throttled(log, debugEnabled, "Builder", "single-skill-bank-sync", 3_000L,
-                    "Waiting for fresh bank snapshot before Single Skill resource check | target={} epochBefore={} epochNow={}",
-                    forcedTask,
-                    singleSkillAuditBankEpoch,
-                    Rs2Bank.getBankLiveEpoch());
             return true;
         }
 
-        boolean resourcesAvailable = hasResourcesForTask(forcedTask);
+        boolean ready = hasResourcesForTask(forcedTask);
         auditedSingleSkillTask = forcedTask;
-        pendingSingleSkillAuditTask = null;
-        singleSkillAuditBankEpoch = -1;
-        singleSkillAuditBankWasOpen = false;
-        debug("Completed Single Skill bank resource audit | target={} resourcesAvailable={} bankEpoch={}",
-                forcedTask,
-                resourcesAvailable,
-                Rs2Bank.getBankLiveEpoch());
+        clearPendingSingleSkillAudit();
 
-        if (!resourcesAvailable)
+        if (!ready)
         {
             startSingleSkillResourceRecovery(forcedTask);
             return true;
         }
 
         Rs2Bank.closeBank();
-        sleepUntil(() -> !Rs2Bank.isOpen(), 2_000);
         Microbot.status = "Resources ready for " + forcedTask;
         return true;
+    }
+
+    private void clearPendingSingleSkillAudit()
+    {
+        pendingSingleSkillAuditTask = null;
+        singleSkillAuditBankEpoch = -1;
+        singleSkillAuditBankWasOpen = false;
     }
 
     private void clearSingleSkillResourceAudit()
@@ -1564,84 +1191,22 @@ public class KspAccountBuilderScript extends Script
 
     private BuilderTask resolveSingleSkillTask()
     {
-        if (config == null)
+        if (config == null) return null;
+        if (config.runSingleQuest()) return builderTask(config.singleQuestTask());
+        return config.trainSingleSkill() ? builderTask(config.singleSkillTask()) : null;
+    }
+
+    private BuilderTask builderTask(Enum<?> task)
+    {
+        if (task == null) return null;
+        try
+        {
+            return BuilderTask.valueOf(task.name());
+        }
+        catch (IllegalArgumentException ignored)
         {
             return null;
         }
-
-        if (config.runSingleQuest())
-        {
-            switch (config.singleQuestTask())
-            {
-                case COOKS_ASSISTANT:
-                    return BuilderTask.COOKS_ASSISTANT;
-                case GOBLIN_DIPLOMACY:
-                    return BuilderTask.GOBLIN_DIPLOMACY;
-                case ROMEO_AND_JULIET:
-                    return BuilderTask.ROMEO_AND_JULIET;
-                case RUNE_MYSTERIES:
-                    return BuilderTask.RUNE_MYSTERIES;
-                default:
-                    return null;
-            }
-        }
-
-        if (!config.trainSingleSkill())
-        {
-            return null;
-        }
-
-        if (config.singleSkillTask() == KspTrainSingleSkillTask.RUNE_ESSENCE)
-        {
-            return BuilderTask.RUNE_ESSENCE;
-        }
-
-        if (config.singleSkillTask() == KspTrainSingleSkillTask.MINING)
-        {
-            return BuilderTask.MINING;
-        }
-
-        if (config.singleSkillTask() == KspTrainSingleSkillTask.WOODCUTTING)
-        {
-            return BuilderTask.WOODCUTTING;
-        }
-
-        if (config.singleSkillTask() == KspTrainSingleSkillTask.FIREMAKING)
-        {
-            return BuilderTask.FIREMAKING;
-        }
-
-        if (config.singleSkillTask() == KspTrainSingleSkillTask.FISHING)
-        {
-            return BuilderTask.FISHING;
-        }
-
-        if (config.singleSkillTask() == KspTrainSingleSkillTask.COOKING)
-        {
-            return BuilderTask.COOKING;
-        }
-
-        if (config.singleSkillTask() == KspTrainSingleSkillTask.CRAFTING)
-        {
-            return BuilderTask.CRAFTING;
-        }
-
-        if (config.singleSkillTask() == KspTrainSingleSkillTask.MELEE)
-        {
-            return BuilderTask.MELEE;
-        }
-
-        if (config.singleSkillTask() == KspTrainSingleSkillTask.SMELTING)
-        {
-            return BuilderTask.SMELTING;
-        }
-
-        if (config.singleSkillTask() == KspTrainSingleSkillTask.SMITHING)
-        {
-            return BuilderTask.SMITHING;
-        }
-
-        return null;
     }
 
     private KspSingleSkillTarget resolveSingleSkillTarget(KspTrainSingleSkillTask task)
@@ -1767,128 +1332,52 @@ public class KspAccountBuilderScript extends Script
 
     private boolean hasResourcesForTask(BuilderTask task)
     {
-        if (isTaskTemporarilyDisabled(task))
-        {
-            return false;
-        }
+        if (task == null || isTaskTemporarilyDisabled(task)) return false;
 
-        if (task == BuilderTask.TUTORIAL_ISLAND)
+        switch (task)
         {
-            return TutorialIslandScript.isOnTutorialIsland();
+            case TUTORIAL_ISLAND: return TutorialIslandScript.isOnTutorialIsland();
+            case COOKS_ASSISTANT: return !cooksScript.isComplete() && hasEnoughCoinsForCooksAssistant();
+            case GOBLIN_DIPLOMACY: return !gobScript.isComplete() && hasEnoughCoinsForGoblinDiplomacy();
+            case ROMEO_AND_JULIET:
+            case RUNE_MYSTERIES:
+            case STRONGHOLD_OF_SECURITY:
+                return !isOneTimeTaskCompleted(task);
+            case RUNE_ESSENCE:
+                return isRuneMysteriesComplete() && hasAnyToolAvailable(Buy.PICKAXE_NAMES);
+            case MINING: return hasAnyToolAvailable(Buy.PICKAXE_NAMES);
+            case WOODCUTTING: return hasAnyToolAvailable(Buy.AXE_NAMES);
+            case FIREMAKING: return hasAnyFiremakingResourcesAvailable();
+            case FISHING: return hasAnyFishingResourcesAvailable();
+            case COOKING: return hasAnyCookingResourcesAvailable();
+            case CRAFTING: return hasAnyCraftingResourcesAvailable();
+            case MELEE: return hasAnyMeleeResourcesAvailable();
+            case GE_SELL: return hasAnyGeSellResourcesAvailable();
+            case GE_BUY: return hasAnyGeBuyResourcesAvailable();
+            case SMITHING: return hasAnySmithingResourcesAvailable();
+            case SMELTING: return hasAnySmeltingResourcesAvailable();
+            default: return false;
         }
-
-        if (task == BuilderTask.COOKS_ASSISTANT)
-        {
-            return !cooksScript.isComplete() && hasEnoughCoinsForCooksAssistant();
-        }
-
-        if (task == BuilderTask.GOBLIN_DIPLOMACY)
-        {
-            return !gobScript.isComplete() && hasEnoughCoinsForGoblinDiplomacy();
-        }
-
-        if (task == BuilderTask.ROMEO_AND_JULIET)
-        {
-            // The script gathers its own Cadava berries. Completion is handled by the
-            // one-time task cache and must not be interpreted as missing GE resources.
-            return !isOneTimeTaskCompleted(task);
-        }
-
-        if (task == BuilderTask.RUNE_MYSTERIES)
-        {
-            return !isOneTimeTaskCompleted(task);
-        }
-
-        if (task == BuilderTask.RUNE_ESSENCE)
-        {
-            return isRuneMysteriesComplete() && hasAnyToolAvailable(Buy.PICKAXE_NAMES);
-        }
-
-        if (task == BuilderTask.STRONGHOLD_OF_SECURITY)
-        {
-            return !isOneTimeTaskCompleted(task);
-        }
-
-        if (task == BuilderTask.MINING)
-        {
-            return hasAnyToolAvailable(Buy.PICKAXE_NAMES);
-        }
-
-        if (task == BuilderTask.WOODCUTTING)
-        {
-            return hasAnyToolAvailable(Buy.AXE_NAMES);
-        }
-
-        if (task == BuilderTask.FIREMAKING)
-        {
-            return hasAnyFiremakingResourcesAvailable();
-        }
-
-        if (task == BuilderTask.FISHING)
-        {
-            return hasAnyFishingResourcesAvailable();
-        }
-
-        if (task == BuilderTask.COOKING)
-        {
-            return hasAnyCookingResourcesAvailable();
-        }
-
-        if (task == BuilderTask.CRAFTING)
-        {
-            return hasAnyCraftingResourcesAvailable();
-        }
-
-        if (task == BuilderTask.MELEE)
-        {
-            return hasAnyMeleeResourcesAvailable();
-        }
-
-        if (task == BuilderTask.GE_SELL)
-        {
-            return hasAnyGeSellResourcesAvailable();
-        }
-
-        if (task == BuilderTask.GE_BUY)
-        {
-            return hasAnyGeBuyResourcesAvailable();
-        }
-
-        if (task == BuilderTask.SMITHING)
-        {
-            return hasAnySmithingResourcesAvailable();
-        }
-
-        return hasAnySmeltingResourcesAvailable();
     }
 
     private boolean isTaskTemporarilyDisabled(BuilderTask task) { return task == BuilderTask.STRONGHOLD_OF_SECURITY; }
 
     private boolean isOneTimeTaskCompleted(BuilderTask task)
     {
+        if (task == null) return false;
+
         KspAccountTaskCache.OneTimeTask oneTimeTask;
-        if (task == BuilderTask.STRONGHOLD_OF_SECURITY)
+        try
         {
-            oneTimeTask = KspAccountTaskCache.OneTimeTask.STRONGHOLD_OF_SECURITY;
+            oneTimeTask = KspAccountTaskCache.OneTimeTask.valueOf(task.name());
         }
-        else if (task == BuilderTask.ROMEO_AND_JULIET)
-        {
-            oneTimeTask = KspAccountTaskCache.OneTimeTask.ROMEO_AND_JULIET;
-        }
-        else if (task == BuilderTask.RUNE_MYSTERIES)
-        {
-            oneTimeTask = KspAccountTaskCache.OneTimeTask.RUNE_MYSTERIES;
-        }
-        else
+        catch (IllegalArgumentException ignored)
         {
             return false;
         }
 
         long accountHash = getCurrentAccountHash();
-        return accountHash == 0L
-                || accountTaskCache.isCompleted(
-                        accountHash,
-                        oneTimeTask);
+        return accountHash == 0L || accountTaskCache.isCompleted(accountHash, oneTimeTask);
     }
 
     private boolean isRuneMysteriesComplete() { return Rs2Player.getQuestState(Quest.RUNE_MYSTERIES) == QuestState.FINISHED; }
@@ -1958,9 +1447,7 @@ public class KspAccountBuilderScript extends Script
 
     private int countOwnedQuestItem(String itemName)
     {
-        return Rs2Inventory.count(itemName)
-                + Rs2Inventory.count(itemName, true)
-                + Math.max(0, Rs2Bank.count(itemName));
+        return stored(itemName);
     }
 
     private int countOwnedQuestItem(String itemName, int itemId)
@@ -1977,14 +1464,7 @@ public class KspAccountBuilderScript extends Script
 
     private boolean hasAnyToolAvailable(String[] toolNames)
     {
-        for (String toolName : toolNames)
-        {
-            if (Rs2Equipment.isWearing(toolName) || Rs2Inventory.hasItem(toolName) || Rs2Bank.count(toolName) > 0)
-            {
-                return true;
-            }
-        }
-
+        for (String name : toolNames) if (hasAnywhere(name)) return true;
         return false;
     }
 
@@ -2056,124 +1536,55 @@ public class KspAccountBuilderScript extends Script
 
     private boolean hasMeleeItemAvailable(String itemName)
     {
-        return itemName != null
-                && (Rs2Equipment.isWearing(itemName)
-                || Rs2Inventory.hasItem(itemName)
-                || Rs2Inventory.hasItem(itemName, true)
-                || Rs2Bank.count(itemName) > 0);
+        return hasAnywhere(itemName);
     }
 
-    private boolean hasBankItem(String itemName) { return itemName != null && Rs2Bank.count(itemName) > 0; }
-
-    private boolean hasAnySmeltingResourcesAvailable()
+        private boolean hasAnySmeltingResourcesAvailable()
     {
-        int smithingLevel = Microbot.getClient().getRealSkillLevel(Skill.SMITHING);
+        int level = Microbot.getClient().getRealSkillLevel(Skill.SMITHING);
         for (int i = BarLevels.values().length - 1; i >= 0; i--)
         {
             BarLevels bar = BarLevels.values()[i];
-            if (smithingLevel < bar.getRequiredSmithingLevel())
-            {
-                continue;
-            }
+            if (level < bar.getRequiredSmithingLevel()) continue;
 
             ReqOres req = ReqOres.valueOf(bar.name());
-            int primaryAvailable = Rs2Inventory.count(req.getPrimaryOreName()) + Math.max(0, Rs2Bank.count(req.getPrimaryOreName()));
-            if (primaryAvailable < req.getPrimaryOreAmount())
-            {
-                continue;
-            }
-
-            if (!req.hasSecondaryOre())
-            {
-                return true;
-            }
-
-            int secondaryAvailable = Rs2Inventory.count(req.getSecondaryOreName()) + Math.max(0, Rs2Bank.count(req.getSecondaryOreName()));
-            if (secondaryAvailable >= req.getSecondaryOreAmount())
-            {
-                return true;
-            }
+            if (stored(req.getPrimaryOreName()) < req.getPrimaryOreAmount()) continue;
+            if (!req.hasSecondaryOre() || stored(req.getSecondaryOreName()) >= req.getSecondaryOreAmount()) return true;
         }
-
         return false;
     }
 
     private boolean hasAnyFiremakingResourcesAvailable()
     {
-        if (!hasTinderboxAnywhere())
-        {
-            return false;
-        }
+        if (!hasTinderboxAnywhere()) return false;
 
-        int firemakingLevel = Microbot.getClient().getRealSkillLevel(Skill.FIREMAKING);
+        int level = Microbot.getClient().getRealSkillLevel(Skill.FIREMAKING);
         for (int i = LogsLvl.values().length - 1; i >= 0; i--)
         {
-            LogsLvl logsLvl = LogsLvl.values()[i];
-            if (firemakingLevel < logsLvl.getRequiredLevel())
-            {
-                continue;
-            }
-
-            if (firemakingLevel >= LogsLvl.WILLOW_LOGS.getRequiredLevel()
-                    && logsLvl != LogsLvl.WILLOW_LOGS)
-            {
-                continue;
-            }
-
-            if (firemakingLevel >= LogsLvl.OAK_LOGS.getRequiredLevel()
-                    && logsLvl == LogsLvl.LOGS)
-            {
-                continue;
-            }
-
-            int availableLogs = Rs2Inventory.count(logsLvl.getDisplayName()) + Math.max(0, Rs2Bank.count(logsLvl.getDisplayName()));
-            if (availableLogs > 0)
-            {
-                return true;
-            }
+            LogsLvl logs = LogsLvl.values()[i];
+            if (level < logs.getRequiredLevel()) continue;
+            if (level >= LogsLvl.WILLOW_LOGS.getRequiredLevel() && logs != LogsLvl.WILLOW_LOGS) continue;
+            if (level >= LogsLvl.OAK_LOGS.getRequiredLevel() && logs == LogsLvl.LOGS) continue;
+            if (stored(logs.getDisplayName()) > 0) return true;
         }
-
         return false;
     }
 
     private boolean hasAnyFishingResourcesAvailable()
     {
-        int fishingLevel = Microbot.getClient().getRealSkillLevel(Skill.FISHING);
-        LevelReqs targetFish = LevelReqs.bestForFishingLevel(fishingLevel);
-        net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.fishing.needed.Inventory requiredInventory =
-                net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.fishing.needed.Inventory.valueOf(targetFish.name());
-
-        for (String itemName : requiredInventory.getRequiredItems())
-        {
-            int available = Rs2Inventory.count(itemName)
-                    + Rs2Inventory.count(itemName, true)
-                    + Math.max(0, Rs2Bank.count(itemName));
-            if (available <= 0)
-            {
-                return false;
-            }
-        }
-
+        LevelReqs fish = LevelReqs.bestForFishingLevel(Microbot.getClient().getRealSkillLevel(Skill.FISHING));
+        net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.fishing.needed.Inventory required =
+                net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.fishing.needed.Inventory.valueOf(fish.name());
+        for (String item : required.getRequiredItems()) if (stored(item) <= 0) return false;
         return true;
     }
 
     private boolean hasAnyCookingResourcesAvailable()
     {
-        int cookingLevel = Microbot.getClient().getRealSkillLevel(Skill.COOKING);
+        int level = Microbot.getClient().getRealSkillLevel(Skill.COOKING);
         for (CookLevels fish : CookLevels.values())
         {
-            if (cookingLevel < fish.getRequiredLevel())
-            {
-                continue;
-            }
-
-            int available = Rs2Inventory.count(fish.getRawItemName())
-                    + Rs2Inventory.count(fish.getRawItemName(), true)
-                    + Math.max(0, Rs2Bank.count(fish.getRawItemName()));
-            if (available > 0)
-            {
-                return true;
-            }
+            if (level >= fish.getRequiredLevel() && stored(fish.getRawItemName()) > 0) return true;
         }
         return false;
     }
@@ -2204,12 +1615,7 @@ public class KspAccountBuilderScript extends Script
     {
         for (Ingredient ingredient : recipe.getIngredients())
         {
-            int available = Rs2Inventory.count(ingredient.getItemName())
-                    + Math.max(0, Rs2Bank.count(ingredient.getItemName()));
-            if (available < ingredient.getAmount())
-            {
-                return false;
-            }
+            if (stored(ingredient.getItemName()) < ingredient.getAmount()) return false;
         }
         return true;
     }
@@ -2288,86 +1694,46 @@ public class KspAccountBuilderScript extends Script
 
     private boolean hasSmithingRecipeResources(SmithLevels level)
     {
-        int smithingLevel = Microbot.getClient().getRealSkillLevel(Skill.SMITHING);
-        if (smithingLevel < level.getRequiredLevel())
-        {
-            debug("Skipping Smithing recipe; level requirement not met | recipe={} requiredLevel={} level={}",
-                    level.getDisplayName(),
-                    level.getRequiredLevel(),
-                    smithingLevel);
-            return false;
-        }
+        int skill = Microbot.getClient().getRealSkillLevel(Skill.SMITHING);
+        if (skill < level.getRequiredLevel()) return false;
 
         SmithRecipe recipe = SmithRecipe.valueOf(level.name());
-        String barName = recipe.getDisplayName().split(" ")[0] + " bar";
-        int barsAvailable = Rs2Inventory.count(barName) + Math.max(0, Rs2Bank.count(barName));
-        boolean hasResources = barsAvailable >= recipe.getBarRequirement();
-        if (!hasResources)
-        {
-            debug("Skipping Smithing recipe; insufficient bars | recipe={} bar={} required={} available={}",
-                    recipe.getDisplayName(),
-                    barName,
-                    recipe.getBarRequirement(),
-                    barsAvailable);
-        }
-        return hasResources;
+        String bar = recipe.getDisplayName().split(" ")[0] + " bar";
+        boolean ready = stored(bar) >= recipe.getBarRequirement();
+        if (!ready) debug("Skipping Smithing recipe; insufficient {} | recipe={}", bar, recipe.getDisplayName());
+        return ready;
     }
 
     private boolean hasAnyGeSellResourcesAvailable()
     {
-        if (sellScript.hasSellListItemsAvailable())
-        {
-            return true;
-        }
-
-        if (hasAnyOutdatedToolAvailable())
-        {
-            return true;
-        }
-
-        return false;
+        return sellScript.hasSellListItemsAvailable() || hasAnyOutdatedToolAvailable();
     }
 
     private boolean hasAnyGeBuyResourcesAvailable() { return Buy.hasAnyGeBuyRequirementMissing() && buyScript.canAffordMissingBuys(); }
 
     private boolean hasAnyOutdatedToolAvailable()
     {
-        String desiredPickaxe = resolveDesiredPickaxeForSellingTask();
-        String desiredAxe = resolveDesiredAxeForSellingTask();
+        return hasOutdatedTool(Buy.PICKAXE_NAMES, resolveDesiredPickaxeForSellingTask())
+                || hasOutdatedTool(Buy.AXE_NAMES, resolveDesiredAxeForSellingTask());
+    }
 
-        for (String pickaxeName : Buy.PICKAXE_NAMES)
+    private boolean hasOutdatedTool(String[] tools, String desired)
+    {
+        for (String tool : tools)
         {
-            if (pickaxeName.equalsIgnoreCase(desiredPickaxe))
-            {
-                continue;
-            }
-
-            if (Rs2Equipment.isWearing(pickaxeName)
-                    || Rs2Inventory.hasItem(pickaxeName)
-                    || Rs2Inventory.hasItem(pickaxeName, true)
-                    || Rs2Bank.count(pickaxeName) > 0)
-            {
-                return true;
-            }
+            if (!tool.equalsIgnoreCase(desired) && hasAnywhere(tool)) return true;
         }
-
-        for (String axeName : Buy.AXE_NAMES)
-        {
-            if (axeName.equalsIgnoreCase(desiredAxe))
-            {
-                continue;
-            }
-
-            if (Rs2Equipment.isWearing(axeName)
-                    || Rs2Inventory.hasItem(axeName)
-                    || Rs2Inventory.hasItem(axeName, true)
-                    || Rs2Bank.count(axeName) > 0)
-            {
-                return true;
-            }
-        }
-
         return false;
+    }
+
+    private int stored(String itemName)
+    {
+        return itemName == null ? 0 : Rs2Inventory.count(itemName, true) + Math.max(0, Rs2Bank.count(itemName));
+    }
+
+    private boolean hasAnywhere(String itemName)
+    {
+        return itemName != null && (Rs2Equipment.isWearing(itemName) || stored(itemName) > 0);
     }
 
     private String resolveDesiredPickaxeForSellingTask() { return Buy.resolveDesiredPickaxeNameForGear(); }
@@ -2458,59 +1824,15 @@ public class KspAccountBuilderScript extends Script
         return true;
     }
 
-    private BuilderTask getRandomTaskWithResourcesExcluding(BuilderTask excludedTask)
+    private BuilderTask getRandomTaskWithResourcesExcluding(BuilderTask excluded)
     {
         if (TutorialIslandScript.isOnTutorialIsland())
         {
-            return excludedTask == BuilderTask.TUTORIAL_ISLAND ? null : BuilderTask.TUTORIAL_ISLAND;
+            return excluded == BuilderTask.TUTORIAL_ISLAND ? null : BuilderTask.TUTORIAL_ISLAND;
         }
 
-        BuilderTask primaryTask = getRandomTaskWithResourcesExcluding(excludedTask, false);
-        if (primaryTask != null)
-        {
-            return primaryTask;
-        }
-
-        return getRandomTaskWithResourcesExcluding(excludedTask, true);
-    }
-
-    private BuilderTask getRandomTaskWithResourcesExcluding(BuilderTask excludedTask, boolean includeSupportTasks)
-    {
-        if (TutorialIslandScript.isOnTutorialIsland())
-        {
-            return excludedTask == BuilderTask.TUTORIAL_ISLAND ? null : BuilderTask.TUTORIAL_ISLAND;
-        }
-
-        BuilderTask[] candidates = new BuilderTask[BuilderTask.values().length];
-        int candidateCount = 0;
-
-        for (BuilderTask task : BuilderTask.values())
-        {
-            if (task == excludedTask
-                    || task == BuilderTask.TUTORIAL_ISLAND
-                    || isTaskTemporarilyDisabled(task)
-                    || isOneTimeTaskCompleted(task))
-            {
-                continue;
-            }
-
-            if (!includeSupportTasks && isSupportTask(task))
-            {
-                continue;
-            }
-
-            if (hasResourcesForTask(task))
-            {
-                candidates[candidateCount++] = task;
-            }
-        }
-
-        if (candidateCount == 0)
-        {
-            return null;
-        }
-
-        return selectWeightedTask(candidates, candidateCount);
+        BuilderTask task = selectTask(excluded, true, false, false);
+        return task != null ? task : selectTask(excluded, true, true, false);
     }
 
     private boolean isSupportTask(BuilderTask task) { return task == BuilderTask.GE_BUY; }
@@ -2527,341 +1849,152 @@ public class KspAccountBuilderScript extends Script
         if (!hasAnyGeSellResourcesAvailable())
         {
             meleeScript.clearPendingSellHandoff();
-            debug("Cleared melee GE sell handoff; no sellable bank items remain");
             return false;
         }
 
         Microbot.status = "Preparing GE sell";
-        if (!switchTask(BuilderTask.GE_SELL))
-        {
-            return true;
-        }
+        if (!switchTask(BuilderTask.GE_SELL)) return true;
 
         meleeScript.clearPendingSellHandoff();
         taskStarted = false;
         clearActivitySwitchTimerState();
         awaitingNextActivityStart = true;
-        debug("Melee loot banked; switching directly to GE_SELL");
         return true;
     }
 
     private void stopCurrentTaskScript()
     {
-        if (currentTask == BuilderTask.TUTORIAL_ISLAND)
-        {
-            tutorialIslandScript.shutdown();
-            return;
-        }
-
-        if (currentTask == BuilderTask.COOKS_ASSISTANT)
-        {
-            cooksScript.shutdown();
-            return;
-        }
-
-        if (currentTask == BuilderTask.GOBLIN_DIPLOMACY)
-        {
-            gobScript.shutdown();
-            return;
-        }
-
-        if (currentTask == BuilderTask.ROMEO_AND_JULIET)
-        {
-            romeoScript.shutdown();
-            return;
-        }
-
-        if (currentTask == BuilderTask.RUNE_MYSTERIES)
-        {
-            runeMystScript.shutdown();
-            return;
-        }
-
-        if (currentTask == BuilderTask.RUNE_ESSENCE)
-        {
-            essenceMining.shutdown();
-            return;
-        }
-
-        if (currentTask == BuilderTask.STRONGHOLD_OF_SECURITY)
-        {
-            strongholdScript.shutdown();
-            return;
-        }
-
-        if (currentTask == BuilderTask.MINING)
-        {
-            miningScript.shutdown();
-            return;
-        }
-
-        if (currentTask == BuilderTask.WOODCUTTING)
-        {
-            woodCuttingScript.shutdown();
-            return;
-        }
-
-        if (currentTask == BuilderTask.FIREMAKING)
-        {
-            fireMakingScript.shutdown();
-            return;
-        }
-
-        if (currentTask == BuilderTask.FISHING)
-        {
-            fishingScript.shutdown();
-            return;
-        }
-
-        if (currentTask == BuilderTask.COOKING)
-        {
-            cookingScript.shutdown();
-            return;
-        }
-
-        if (currentTask == BuilderTask.CRAFTING)
-        {
-            craftingScript.shutdown();
-            return;
-        }
-
-        if (currentTask == BuilderTask.MELEE)
-        {
-            meleeScript.shutdown();
-            return;
-        }
-
-        if (currentTask == BuilderTask.GE_SELL || currentTask == BuilderTask.GE_BUY)
-        {
-            buyScript.shutdown();
-            sellScript.shutdown();
-            return;
-        }
-
-        if (currentTask == BuilderTask.SMITHING)
-        {
-            smithScript.shutdown();
-            return;
-        }
-
-        smeltScript.shutdown();
-        tutorialIslandScript.shutdown();
+        Script script = scriptFor(currentTask);
+        if (script != null) script.shutdown();
     }
 
     private boolean stopCurrentTaskForHandoff(BuilderTask nextTask)
     {
-        BuilderTask outgoingTask = currentTask;
+        BuilderTask outgoing = currentTask;
         stopCurrentTaskScript();
         taskStarted = false;
+        if (!isTaskScriptRunning(outgoing)) return true;
 
-        if (isTaskScriptRunning(outgoingTask))
-        {
-            debug("Waiting for outgoing task to stop before handoff | currentTask={} nextTask={}",
-                    outgoingTask, nextTask);
-            return false;
-        }
-
-        debug("Outgoing task stopped for handoff | currentTask={} nextTask={}", outgoingTask, nextTask);
-        return true;
+        debug("Waiting for outgoing task to stop before handoff | currentTask={} nextTask={}", outgoing, nextTask);
+        return false;
     }
 
     private boolean isTaskScriptRunning(BuilderTask task)
     {
-        if (task == null)
-        {
-            return false;
-        }
+        Script script = scriptFor(task);
+        return script != null && script.isRunning();
+    }
 
+    private Script scriptFor(BuilderTask task)
+    {
+        if (task == null) return null;
         switch (task)
         {
-            case TUTORIAL_ISLAND:
-                return tutorialIslandScript.isRunning();
-            case COOKS_ASSISTANT:
-                return cooksScript.isRunning();
-            case GOBLIN_DIPLOMACY:
-                return gobScript.isRunning();
-            case ROMEO_AND_JULIET:
-                return romeoScript.isRunning();
-            case RUNE_MYSTERIES:
-                return runeMystScript.isRunning();
-            case RUNE_ESSENCE:
-                return essenceMining.isRunning();
-            case STRONGHOLD_OF_SECURITY:
-                return strongholdScript.isRunning();
-            case MINING:
-                return miningScript.isRunning();
-            case WOODCUTTING:
-                return woodCuttingScript.isRunning();
-            case FIREMAKING:
-                return fireMakingScript.isRunning();
-            case FISHING:
-                return fishingScript.isRunning();
-            case COOKING:
-                return cookingScript.isRunning();
-            case CRAFTING:
-                return craftingScript.isRunning();
-            case MELEE:
-                return meleeScript.isRunning();
-            case GE_SELL:
-                return sellScript.isRunning();
-            case GE_BUY:
-                return buyScript.isRunning();
-            case SMITHING:
-                return smithScript.isRunning();
-            case SMELTING:
-                return smeltScript.isRunning();
-            default:
-                return false;
+            case TUTORIAL_ISLAND: return tutorialIslandScript;
+            case COOKS_ASSISTANT: return cooksScript;
+            case GOBLIN_DIPLOMACY: return gobScript;
+            case ROMEO_AND_JULIET: return romeoScript;
+            case RUNE_MYSTERIES: return runeMystScript;
+            case RUNE_ESSENCE: return essenceMining;
+            case STRONGHOLD_OF_SECURITY: return strongholdScript;
+            case MINING: return miningScript;
+            case WOODCUTTING: return woodCuttingScript;
+            case FIREMAKING: return fireMakingScript;
+            case FISHING: return fishingScript;
+            case COOKING: return cookingScript;
+            case CRAFTING: return craftingScript;
+            case MELEE: return meleeScript;
+            case GE_SELL: return sellScript;
+            case GE_BUY: return buyScript;
+            case SMITHING: return smithScript;
+            case SMELTING: return smeltScript;
+            default: return null;
+        }
+    }
+
+    private void stopAllTaskScriptsExcept(BuilderTask keep)
+    {
+        for (BuilderTask task : BuilderTask.values())
+        {
+            if (task == keep) continue;
+            Script script = scriptFor(task);
+            if (script != null) script.shutdown();
         }
     }
 
     private boolean switchTask(BuilderTask nextTask)
     {
-        if (!stopCurrentTaskForHandoff(nextTask))
-        {
-            return false;
-        }
-
-        if (!prepareForTaskSwitchAtBank())
-        {
-            debug("Waiting to switch task; still preparing bank/gear handoff to {}", nextTask);
-            return false;
-        }
-
+        if (!stopCurrentTaskForHandoff(nextTask) || !prepareForTaskSwitchAtBank()) return false;
         currentTask = nextTask;
         debug("Switching task to {}", currentTask);
         return true;
     }
 
-    private BuilderTask getRandomTaskExcluding(BuilderTask excludedTask)
+    private BuilderTask getRandomTaskExcluding(BuilderTask excluded)
     {
-        if (TutorialIslandScript.isOnTutorialIsland())
-        {
-            return BuilderTask.TUTORIAL_ISLAND;
-        }
+        if (TutorialIslandScript.isOnTutorialIsland()) return BuilderTask.TUTORIAL_ISLAND;
 
-        BuilderTask nextTask = getRandomPrimaryTaskExcluding(excludedTask);
-        if (nextTask != null)
-        {
-            return nextTask;
-        }
-
-        BuilderTask[] candidates = new BuilderTask[BuilderTask.values().length];
-        int candidateCount = 0;
-        for (BuilderTask task : BuilderTask.values())
-        {
-            if (task == excludedTask || task == BuilderTask.TUTORIAL_ISLAND)
-            {
-                continue;
-            }
-
-            candidates[candidateCount++] = task;
-        }
-
-        return selectWeightedTask(candidates, candidateCount);
+        BuilderTask task = selectTask(excluded, false, false, false);
+        return task != null ? task : selectTask(excluded, false, true, true);
     }
 
-    private BuilderTask getRandomPrimaryTaskExcluding(BuilderTask excludedTask)
+    private BuilderTask selectTask(BuilderTask excluded, boolean requireResources, boolean includeSupport, boolean includeUnavailable)
     {
-        BuilderTask[] candidates = new BuilderTask[BuilderTask.values().length];
-        int candidateCount = 0;
-
-        for (BuilderTask task : BuilderTask.values())
-        {
-            if (task == excludedTask
-                    || task == BuilderTask.TUTORIAL_ISLAND
-                    || isSupportTask(task)
-                    || isTaskTemporarilyDisabled(task)
-                    || isOneTimeTaskCompleted(task))
-            {
-                continue;
-            }
-
-            candidates[candidateCount++] = task;
-        }
-
-        if (candidateCount == 0)
-        {
-            return null;
-        }
-
-        return selectWeightedTask(candidates, candidateCount);
-    }
-
-    private BuilderTask selectWeightedTask(BuilderTask[] candidates, int candidateCount)
-    {
-        if (candidateCount <= 0)
-        {
-            return null;
-        }
-
+        long mask = 0L;
         int totalWeight = 0;
-        for (int index = 0; index < candidateCount; index++)
+
+        for (BuilderTask task : BuilderTask.values())
         {
-            totalWeight += getTaskSelectionWeight(candidates[index]);
+            if (!isTaskCandidate(task, excluded, requireResources, includeSupport, includeUnavailable)) continue;
+            mask |= 1L << task.ordinal();
+            totalWeight += getTaskSelectionWeight(task);
         }
 
-        if (totalWeight <= 0)
-        {
-            return candidates[ThreadLocalRandom.current().nextInt(candidateCount)];
-        }
+        if (totalWeight <= 0) return null;
 
         int roll = ThreadLocalRandom.current().nextInt(totalWeight);
-        for (int index = 0; index < candidateCount; index++)
+        for (BuilderTask task : BuilderTask.values())
         {
-            BuilderTask candidate = candidates[index];
-            int weight = getTaskSelectionWeight(candidate);
-            if (roll < weight)
-            {
-                debug("Weighted task selection | selected={} weight={} totalWeight={} candidates={}",
-                        candidate,
-                        weight,
-                        totalWeight,
-                        candidateCount);
-                return candidate;
-            }
-            roll -= weight;
+            if ((mask & (1L << task.ordinal())) == 0L) continue;
+            roll -= getTaskSelectionWeight(task);
+            if (roll < 0) return task;
         }
+        return null;
+    }
 
-        return candidates[candidateCount - 1];
+    private boolean isTaskCandidate(
+            BuilderTask task,
+            BuilderTask excluded,
+            boolean requireResources,
+            boolean includeSupport,
+            boolean includeUnavailable)
+    {
+        if (task == excluded || task == BuilderTask.TUTORIAL_ISLAND) return false;
+        if (!includeUnavailable && (isTaskTemporarilyDisabled(task) || isOneTimeTaskCompleted(task))) return false;
+        if (!includeSupport && isSupportTask(task)) return false;
+        return !requireResources || hasResourcesForTask(task);
     }
 
     private int getTaskSelectionWeight(BuilderTask task)
     {
-        if (task == null)
-        {
-            return 0;
-        }
-
-        int skillLevel = getTaskSkillLevel(task);
-        int catchUpBonus = skillLevel > 0
-                ? Math.max(0, 40 - skillLevel) / 4
-                : 0;
-        return Math.max(1, task.getSelectionWeight() + catchUpBonus);
+        if (task == null) return 0;
+        int level = getTaskSkillLevel(task);
+        return Math.max(1, task.getSelectionWeight() + (level > 0 ? Math.max(0, 40 - level) / 4 : 0));
     }
 
     private int getTaskSkillLevel(BuilderTask task)
     {
-        if (Microbot.getClient() == null)
-        {
-            return 0;
-        }
+        if (Microbot.getClient() == null) return 0;
 
         switch (task)
         {
             case MINING:
-            case RUNE_ESSENCE:
-                return Microbot.getClient().getRealSkillLevel(Skill.MINING);
-            case WOODCUTTING:
-                return Microbot.getClient().getRealSkillLevel(Skill.WOODCUTTING);
-            case FIREMAKING:
-                return Microbot.getClient().getRealSkillLevel(Skill.FIREMAKING);
-            case FISHING:
-                return Microbot.getClient().getRealSkillLevel(Skill.FISHING);
-            case COOKING:
-                return Microbot.getClient().getRealSkillLevel(Skill.COOKING);
-            case CRAFTING:
-                return Microbot.getClient().getRealSkillLevel(Skill.CRAFTING);
+            case RUNE_ESSENCE: return Microbot.getClient().getRealSkillLevel(Skill.MINING);
+            case WOODCUTTING: return Microbot.getClient().getRealSkillLevel(Skill.WOODCUTTING);
+            case FIREMAKING: return Microbot.getClient().getRealSkillLevel(Skill.FIREMAKING);
+            case FISHING: return Microbot.getClient().getRealSkillLevel(Skill.FISHING);
+            case COOKING: return Microbot.getClient().getRealSkillLevel(Skill.COOKING);
+            case CRAFTING: return Microbot.getClient().getRealSkillLevel(Skill.CRAFTING);
             case MELEE:
                 return Math.min(
                         Microbot.getClient().getRealSkillLevel(Skill.ATTACK),
@@ -2869,29 +2002,17 @@ public class KspAccountBuilderScript extends Script
                                 Microbot.getClient().getRealSkillLevel(Skill.STRENGTH),
                                 Microbot.getClient().getRealSkillLevel(Skill.DEFENCE)));
             case SMITHING:
-            case SMELTING:
-                return Microbot.getClient().getRealSkillLevel(Skill.SMITHING);
-            default:
-                return 0;
+            case SMELTING: return Microbot.getClient().getRealSkillLevel(Skill.SMITHING);
+            default: return 0;
         }
     }
 
     private boolean ensureInventoryTabOpenForTaskSelection()
     {
-        if (!Microbot.isLoggedIn())
-        {
-            return false;
-        }
-
-        if (Rs2Tab.getCurrentTab() == InterfaceTab.INVENTORY)
-        {
-            return true;
-        }
-
+        if (!Microbot.isLoggedIn()) return false;
+        if (Rs2Tab.getCurrentTab() == InterfaceTab.INVENTORY) return true;
         Rs2Tab.switchTo(InterfaceTab.INVENTORY);
-        sleepUntil(() -> Rs2Tab.getCurrentTab() == InterfaceTab.INVENTORY, 1_500);
-
-        return Rs2Tab.getCurrentTab() == InterfaceTab.INVENTORY;
+        return false;
     }
 
     private boolean prepareForTaskSwitchAtBank()
@@ -2901,66 +2022,37 @@ public class KspAccountBuilderScript extends Script
             postTutorialBankCameraPending = !setPostTutorialBankCamera();
         }
 
-        if (!ensureTaskSwitchBankOpen())
-        {
-            return false;
-        }
+        if (!ensureTaskSwitchBankOpen() || !depositInventoryForTaskSwitch()) return false;
+        if (!unequipGatheringTools()) return false;
+        if (!ensureTaskSwitchBankOpen() || !depositInventoryForTaskSwitch()) return false;
 
-        if (!Rs2Bank.isOpen())
-        {
-            return false;
-        }
-
-        sleep(300);
-
-        if (!depositInventoryForTaskSwitch())
-        {
-            return false;
-        }
-
-        if (!unequipGatheringTools())
-        {
-            return false;
-        }
-
-        if (!ensureTaskSwitchBankOpen())
-        {
-            return false;
-        }
-
-        depositGatheringToolsInInventory();
-
-        boolean prepared = depositInventoryForTaskSwitch();
-        if (prepared)
-        {
-            taskSwitchBankLocation = null;
-        }
-        return prepared;
+        taskSwitchBankLocation = null;
+        return true;
     }
 
     private boolean ensureTaskSwitchBankOpen()
     {
-        if (Rs2Bank.isOpen())
+        if (taskSwitchBankResetPending)
         {
-            return true;
-        }
-
-        if (tryOpenTaskSwitchBank("direct-open"))
-        {
-            sleepUntil(Rs2Bank::isOpen, 2_000);
             if (Rs2Bank.isOpen())
             {
-                return true;
+                if (taskSwitchActionReady())
+                {
+                    Rs2Bank.closeBank();
+                    markTaskSwitchAction();
+                }
+                return false;
             }
+            taskSwitchBankResetPending = false;
         }
 
-        if (tryWalkToTaskSwitchBank())
-        {
-            sleepUntil(Rs2Bank::isOpen, 3_000);
-            return Rs2Bank.isOpen();
-        }
+        if (Rs2Bank.isOpen()) return true;
+        if (Rs2Player.isMoving() || !taskSwitchActionReady()) return false;
 
-        return Rs2Bank.isOpen();
+        boolean acted = tryOpenTaskSwitchBank("direct-open");
+        if (!acted) acted = tryWalkToTaskSwitchBank();
+        if (acted) markTaskSwitchAction();
+        return false;
     }
 
     private boolean tryOpenTaskSwitchBank(String source)
@@ -3179,59 +2271,23 @@ public class KspAccountBuilderScript extends Script
 
     private boolean depositInventoryForTaskSwitch()
     {
-        if (!Rs2Bank.isOpen())
-        {
-            return false;
-        }
+        if (!Rs2Bank.isOpen() || closeTaskSwitchBankTutorialOverlayIfOpen()) return false;
+        if (Rs2Inventory.isEmpty()) return true;
+        if (!taskSwitchActionReady()) return false;
 
-        if (closeTaskSwitchBankTutorialOverlayIfOpen())
-        {
-            return false;
-        }
-
-        for (int attempt = 1; attempt <= 3 && !Rs2Inventory.isEmpty(); attempt++)
-        {
-            Microbot.status = "Depositing inventory before next task";
-            Rs2Bank.depositAll();
-            sleepUntil(Rs2Inventory::isEmpty, 1_500);
-
-            if (!Rs2Inventory.isEmpty())
-            {
-                debug("Task switch inventory deposit incomplete | attempt={}/3", attempt);
-                sleep(200);
-            }
-        }
-
-        boolean inventoryEmpty = Rs2Inventory.isEmpty();
-        if (!inventoryEmpty)
-        {
-            debug("Task switch blocked; inventory still contains items after deposit retries");
-        }
-
-        return Rs2Bank.isOpen() && inventoryEmpty;
+        Microbot.status = "Depositing inventory before next task";
+        Rs2Bank.depositAll();
+        markTaskSwitchAction();
+        return false;
     }
 
     private boolean unequipGatheringTools()
     {
-        boolean hasPickaxeEquipped = Rs2Equipment.isWearing("pickaxe", false) || Rs2Equipment.isWearing("pickaxe");
-        boolean hasAxeEquipped = Rs2Equipment.isWearing("axe", false) || Rs2Equipment.isWearing("axe");
-        if (!hasPickaxeEquipped && !hasAxeEquipped)
-        {
-            return true;
-        }
+        if (!isGatheringToolEquipped()) return true;
+        if (!Rs2Bank.isOpen() || closeTaskSwitchBankTutorialOverlayIfOpen() || !taskSwitchActionReady()) return false;
 
-        if (Rs2Bank.isOpen())
-        {
-            if (closeTaskSwitchBankTutorialOverlayIfOpen())
-            {
-                return false;
-            }
-
-            Rs2Bank.depositEquipment();
-            sleepUntil(() -> !isGatheringToolEquipped(), 1_500);
-            return !isGatheringToolEquipped();
-        }
-
+        Rs2Bank.depositEquipment();
+        markTaskSwitchAction();
         return false;
     }
 
@@ -3241,47 +2297,23 @@ public class KspAccountBuilderScript extends Script
                 || Rs2Equipment.isWearing("axe", false) || Rs2Equipment.isWearing("axe");
     }
 
-    private void depositGatheringToolsInInventory()
+        private boolean taskSwitchActionReady()
     {
-        if (closeTaskSwitchBankTutorialOverlayIfOpen())
-        {
-            return;
-        }
+        return System.currentTimeMillis() - lastTaskSwitchActionAtMs >= TASK_SWITCH_ACTION_COOLDOWN_MS;
+    }
 
-        for (String pickaxeName : Buy.PICKAXE_NAMES)
-        {
-            if (Rs2Inventory.hasItem(pickaxeName))
-            {
-                Rs2Bank.depositAll(pickaxeName);
-                sleep(100);
-            }
-        }
-
-        for (String axeName : Buy.AXE_NAMES)
-        {
-            if (Rs2Inventory.hasItem(axeName))
-            {
-                Rs2Bank.depositAll(axeName);
-                sleep(100);
-            }
-        }
+    private void markTaskSwitchAction()
+    {
+        lastTaskSwitchActionAtMs = System.currentTimeMillis();
     }
 
     private boolean closeTaskSwitchBankTutorialOverlayIfOpen()
     {
-        if (!KspBankWidgetHelper.closeBankTutorialOverlayIfOpen())
-        {
-            return false;
-        }
+        if (!KspBankWidgetHelper.closeBankTutorialOverlayIfOpen()) return false;
 
-        sleep(300);
-        if (Rs2Bank.isOpen())
-        {
-            debug("Closed bank tutorial overlay during task switch; resetting bank");
-            Rs2Bank.closeBank();
-            sleepUntil(() -> !Rs2Bank.isOpen(), 2_000);
-        }
-
+        debug("Closed bank tutorial overlay during task switch; resetting bank");
+        taskSwitchBankResetPending = true;
+        markTaskSwitchAction();
         return true;
     }
 
@@ -3424,85 +2456,31 @@ public class KspAccountBuilderScript extends Script
 
     private boolean isInCurrentTaskArea()
     {
-        if (Rs2Player.getWorldLocation() == null)
-        {
-            return false;
-        }
+        WorldPoint location = Rs2Player.getWorldLocation();
+        if (location == null || currentTask == null || currentTask == BuilderTask.TUTORIAL_ISLAND) return false;
 
-        if (currentTask == BuilderTask.TUTORIAL_ISLAND)
+        switch (currentTask)
         {
-            return false;
+            case STRONGHOLD_OF_SECURITY:
+            case COOKS_ASSISTANT:
+            case GOBLIN_DIPLOMACY:
+            case ROMEO_AND_JULIET:
+            case RUNE_MYSTERIES:
+            case CRAFTING:
+                return true;
+            case RUNE_ESSENCE: return essenceMining.isInTaskArea();
+            case MINING: return miningScript.getTargetArea().toWorldArea().contains(location);
+            case WOODCUTTING: return woodCuttingScript.getTargetArea().contains(location);
+            case FIREMAKING: return fireMakingScript.getTargetArea().toWorldArea().contains(location);
+            case FISHING: return fishingScript.getTargetArea().toWorldArea().contains(location);
+            case COOKING: return cookingScript.getTargetArea().getArea().contains(location);
+            case MELEE: return meleeScript.getTargetArea().contains(location);
+            case GE_SELL: return sellScript.getTargetArea().toWorldArea().contains(location);
+            case GE_BUY: return buyScript.getTargetArea().toWorldArea().contains(location);
+            case SMITHING: return smithScript.getTargetArea().toWorldArea().contains(location);
+            case SMELTING: return smeltScript.getTargetArea().toWorldArea().contains(location);
+            default: return false;
         }
-
-        if (currentTask == BuilderTask.STRONGHOLD_OF_SECURITY)
-        {
-            return true;
-        }
-
-        if (currentTask == BuilderTask.COOKS_ASSISTANT
-                || currentTask == BuilderTask.GOBLIN_DIPLOMACY
-                || currentTask == BuilderTask.ROMEO_AND_JULIET
-                || currentTask == BuilderTask.RUNE_MYSTERIES)
-        {
-            return true;
-        }
-
-        if (currentTask == BuilderTask.RUNE_ESSENCE)
-        {
-            return essenceMining.isInTaskArea();
-        }
-
-        if (currentTask == BuilderTask.MINING)
-        {
-            return miningScript.getTargetArea().toWorldArea().contains(Rs2Player.getWorldLocation());
-        }
-
-        if (currentTask == BuilderTask.WOODCUTTING)
-        {
-            return woodCuttingScript.getTargetArea().contains(Rs2Player.getWorldLocation());
-        }
-
-        if (currentTask == BuilderTask.FIREMAKING)
-        {
-            return fireMakingScript.getTargetArea().toWorldArea().contains(Rs2Player.getWorldLocation());
-        }
-
-        if (currentTask == BuilderTask.FISHING)
-        {
-            return fishingScript.getTargetArea().toWorldArea().contains(Rs2Player.getWorldLocation());
-        }
-
-        if (currentTask == BuilderTask.COOKING)
-        {
-            return cookingScript.getTargetArea().getArea().contains(Rs2Player.getWorldLocation());
-        }
-
-        if (currentTask == BuilderTask.CRAFTING)
-        {
-            return true;
-        }
-
-        if (currentTask == BuilderTask.MELEE)
-        {
-            return meleeScript.getTargetArea().contains(Rs2Player.getWorldLocation());
-        }
-
-        if (currentTask == BuilderTask.GE_SELL)
-        {
-            return sellScript.getTargetArea().toWorldArea().contains(Rs2Player.getWorldLocation());
-        }
-
-        if (currentTask == BuilderTask.GE_BUY)
-        {
-            return buyScript.getTargetArea().toWorldArea().contains(Rs2Player.getWorldLocation());
-        }
-
-        if (currentTask == BuilderTask.SMITHING)
-        {
-            return smithScript.getTargetArea().toWorldArea().contains(Rs2Player.getWorldLocation());
-        }
-
-        return smeltScript.getTargetArea().toWorldArea().contains(Rs2Player.getWorldLocation());
     }
 
     private int randomMinutes(int min, int max)
@@ -3817,6 +2795,7 @@ public class KspAccountBuilderScript extends Script
             accountPlayTimeCache.sample(Microbot.isLoggedIn(), currentAccountHashSnapshot);
             accountPlayTimeCache.endSession();
         }
+
         super.shutdown();
         taskStarted = false;
         breakActive = false;
@@ -3844,106 +2823,9 @@ public class KspAccountBuilderScript extends Script
         lastBreakLoginAttemptAt = 0L;
         updateWindowTitle();
 
-        if (miningScript != null)
-        {
-            miningScript.shutdown();
-        }
-
-        if (woodCuttingScript != null)
-        {
-            woodCuttingScript.shutdown();
-        }
-
-        if (fireMakingScript != null)
-        {
-            fireMakingScript.shutdown();
-        }
-
-        if (fishingScript != null)
-        {
-            fishingScript.shutdown();
-        }
-
-        if (cookingScript != null)
-        {
-            cookingScript.shutdown();
-        }
-
-        if (craftingScript != null)
-        {
-            craftingScript.shutdown();
-        }
-
-        if (meleeScript != null)
-        {
-            meleeScript.shutdown();
-        }
-
-        if (buyScript != null)
-        {
-            buyScript.shutdown();
-        }
-
-        if (sellScript != null)
-        {
-            sellScript.shutdown();
-        }
-
-        if (smithScript != null)
-        {
-            smithScript.shutdown();
-        }
-
-        if (smeltScript != null)
-        {
-            smeltScript.shutdown();
-        }
-
-        if (tutorialIslandScript != null)
-        {
-            tutorialIslandScript.shutdown();
-        }
-
-        if (cooksScript != null)
-        {
-            cooksScript.shutdown();
-        }
-
-        if (gobScript != null)
-        {
-            gobScript.shutdown();
-        }
-
-        if (romeoScript != null)
-        {
-            romeoScript.shutdown();
-        }
-
-        if (runeMystScript != null)
-        {
-            runeMystScript.shutdown();
-        }
-
-        if (essenceMining != null)
-        {
-            essenceMining.shutdown();
-        }
-
-        if (strongholdScript != null)
-        {
-            strongholdScript.shutdown();
-        }
-
-        if (autoLoginScript != null)
-        {
-            autoLoginScript.shutdown();
-        }
-
-        if (experienceLampScript != null)
-        {
-            experienceLampScript.shutdown();
-        }
-
+        stopAllTaskScriptsExcept(null);
+        if (autoLoginScript != null) autoLoginScript.shutdown();
+        if (experienceLampScript != null) experienceLampScript.shutdown();
         Rs2Antiban.resetAntibanSettings(true);
     }
 
