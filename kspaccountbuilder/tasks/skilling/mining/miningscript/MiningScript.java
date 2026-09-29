@@ -46,7 +46,8 @@ public class MiningScript extends Script
 
     private static final int LOOP_DELAY_MS = 250;
     private static final int WEB_WALK_COOLDOWN_MS = 3_000;
-    private static final int OBJECT_INTERACTION_COOLDOWN_MS = 900;
+    private static final int OBJECT_INTERACTION_COOLDOWN_MS = 350;
+    private static final long BANK_ACTION_COOLDOWN_MS = 500L;
     private static final int ROCK_SEARCH_PADDING_TILES = 8;
     private static final int OUT_OF_AREA_ROCK_FALLBACK_RADIUS = 4;
     private static final int MID_TIER_RANDOM_MAX_LEVEL = 60;
@@ -107,6 +108,7 @@ public class MiningScript extends Script
     private long lastWebWalkAtMs;
     private long lastObjectInteractionAtMs;
     private long lastUnderAttackAtMs;
+    private long lastBankActionAtMs;
 
     public void setDebugLogging(boolean debugLogging) { this.debugLogging = debugLogging; }
 
@@ -198,6 +200,7 @@ public class MiningScript extends Script
                 KspWalkerGuard.clearActiveWalker("ksp_account_builder_silver_mugger_guard");
                 KspWalkerGuard.clear("Mining:target-area");
                 walkingToTargetArea = false;
+        lastBankActionAtMs = 0L;
                 Microbot.status = "Waiting for Mugger to become passive";
                 return;
             }
@@ -225,106 +228,73 @@ public class MiningScript extends Script
 
     private boolean upgradePickaxe(int miningLevel, int attackLevel)
     {
-        MiningReq bestMiningReq = MiningReq.bestForMiningLevel(miningLevel);
-        String targetPickaxeName = resolveDesiredPickaxe(bestMiningReq);
+        String target = resolveDesiredPickaxe(MiningReq.bestForMiningLevel(miningLevel));
+        if (target == null) return true;
 
-        if (targetPickaxeName == null)
-        {
-            return true;
-        }
-
-        String activePickaxeName = resolveBestOwnedPickaxeName(targetPickaxeName);
-
-        if (activePickaxeName == null)
-        {
-            ensureInventoryTabOpen();
-
-            if (!Rs2Bank.walkToBankAndUseBank() && !Rs2Bank.openBank())
-            {
-                return false;
-            }
-
-            activePickaxeName = resolveBestOwnedPickaxeName(targetPickaxeName);
-
-            if (activePickaxeName == null)
-            {
-                debug("No eligible pickaxe available up to target {}", targetPickaxeName);
-                closeBankIfOpen();
-                return true;
-            }
-        }
-
-        MiningReq activePickaxeReq = resolveMiningReq(activePickaxeName);
-        boolean canEquipActivePickaxe = activePickaxeReq != null && canEquipDesiredPickaxe(activePickaxeReq, attackLevel);
-
-        if (!Rs2Equipment.isWearing(activePickaxeName) && !Rs2Inventory.hasItem(activePickaxeName))
+        String active = resolveBestOwnedPickaxeName(target);
+        if (active == null)
         {
             if (!Rs2Bank.isOpen())
             {
-                ensureInventoryTabOpen();
-
-                if (!Rs2Bank.walkToBankAndUseBank() && !Rs2Bank.openBank())
-                {
-                    return false;
-                }
-            }
-
-            if (Rs2Bank.isOpen() && Rs2Bank.count(activePickaxeName) > 0)
-            {
-                if (KspBankWidgetHelper.closeBankTutorialOverlayIfOpen())
-                {
-                    sleep(300);
-                    return false;
-                }
-
-                if (!KspBankMode.ensureWithdrawAsItem())
-                {
-                    debug("Waiting for withdraw-as-item mode before withdrawing {}", activePickaxeName);
-                    return false;
-                }
-
-                String pickaxeToWithdraw = activePickaxeName;
-
-                Rs2Bank.withdrawOne(activePickaxeName);
-                sleepUntil(() -> Rs2Inventory.hasItem(pickaxeToWithdraw), 3_000);
-            }
-        }
-
-        if (canEquipActivePickaxe
-                && Rs2Inventory.hasItem(activePickaxeName)
-                && !Rs2Equipment.isWearing(activePickaxeName))
-        {
-            if (Rs2Bank.isOpen())
-            {
-                closeBankIfOpen();
+                if (!ensureInventoryTabOpenFast() || !bankActionReady()) return false;
+                if (Rs2Bank.openBank() || Rs2Bank.walkToBankAndUseBank()) markBankAction();
                 return false;
             }
 
-            String pickaxeToWield = activePickaxeName;
+            active = resolveBestOwnedPickaxeName(target);
+            if (active == null)
+            {
+                Microbot.status = "No usable pickaxe available";
+                return false;
+            }
+        }
 
-            Rs2Inventory.wield(activePickaxeName);
-            sleepUntil(() -> Rs2Equipment.isWearing(pickaxeToWield), 2_000);
+        MiningReq req = resolveMiningReq(active);
+        boolean canEquip = req != null && canEquipDesiredPickaxe(req, attackLevel);
+
+        if (!Rs2Equipment.isWearing(active) && !Rs2Inventory.hasItem(active))
+        {
+            if (!Rs2Bank.isOpen())
+            {
+                if (!ensureInventoryTabOpenFast() || !bankActionReady()) return false;
+                if (Rs2Bank.openBank() || Rs2Bank.walkToBankAndUseBank()) markBankAction();
+                return false;
+            }
+
+            if (KspBankWidgetHelper.closeBankTutorialOverlayIfOpen()) return false;
+            if (!KspBankMode.ensureWithdrawAsItem() || !bankActionReady()) return false;
+
+            Rs2Bank.withdrawOne(active);
+            markBankAction();
+            return false;
+        }
+
+        if (canEquip && Rs2Inventory.hasItem(active) && !Rs2Equipment.isWearing(active))
+        {
+            if (Rs2Bank.isOpen())
+            {
+                if (!bankActionReady()) return false;
+                Rs2Bank.closeBank();
+                markBankAction();
+                return false;
+            }
+
+            Rs2Inventory.wield(active);
+            return false;
         }
 
         if (Rs2Bank.isOpen())
         {
-            if (KspBankWidgetHelper.closeBankTutorialOverlayIfOpen())
-            {
-                sleep(300);
-                return false;
-            }
+            if (KspBankWidgetHelper.closeBankTutorialOverlayIfOpen()) return false;
+            if (!bankActionReady()) return false;
 
-            depositOutdatedPickaxes(activePickaxeName);
-
-            if (!hasOutdatedPickaxeInInventory(activePickaxeName))
-            {
-                closeBankIfOpen();
-            }
-
+            depositOutdatedPickaxes(active);
+            if (!hasOutdatedPickaxeInInventory(active)) Rs2Bank.closeBank();
+            markBankAction();
             return false;
         }
 
-        return Rs2Equipment.isWearing(activePickaxeName) || Rs2Inventory.hasItem(activePickaxeName);
+        return Rs2Equipment.isWearing(active) || Rs2Inventory.hasItem(active);
     }
 
     private void depositOutdatedPickaxes(String desiredPickaxeName)
@@ -474,71 +444,52 @@ public class MiningScript extends Script
 
     private void ensureInventoryTabOpen()
     {
-        if (Rs2Tab.getCurrentTab() != InterfaceTab.INVENTORY)
-        {
-            Rs2Tab.switchTo(InterfaceTab.INVENTORY);
-            sleepUntil(() -> Rs2Tab.getCurrentTab() == InterfaceTab.INVENTORY, 1_200);
-        }
+        ensureInventoryTabOpenFast();
+    }
+
+    private boolean ensureInventoryTabOpenFast()
+    {
+        if (Rs2Tab.getCurrentTab() == InterfaceTab.INVENTORY) return true;
+        Rs2Tab.switchTo(InterfaceTab.INVENTORY);
+        return false;
     }
 
     private void bankOresOnly(int miningLevel)
     {
-        ensureInventoryTabOpen();
+        if (!ensureInventoryTabOpenFast()) return;
 
-        BankLocation bankLocation = resolveBankLocation();
-        WorldPoint bankPoint = bankLocation.getWorldPoint();
-        WorldPoint playerLocation = Rs2Player.getWorldLocation();
+        BankLocation bank = resolveBankLocation();
+        WorldPoint bankPoint = bank.getWorldPoint();
+        WorldPoint player = Rs2Player.getWorldLocation();
+        if (player == null) return;
 
-        if (playerLocation == null)
+        if (!Rs2Bank.isNearBank(bank, 8))
         {
-            return;
-        }
-
-        if (!Rs2Bank.isNearBank(bankLocation, 8))
-        {
-            Microbot.status = "Walking to " + bankLocation;
+            Microbot.status = "Walking to " + bank;
             KspWalkerGuard.walkToDestination(
                     BANK_WALK_KEY,
-                    bankLocation::getWorldPoint,
+                    bank::getWorldPoint,
                     point -> point != null && point.distanceTo(bankPoint) <= 8,
                     6,
                     WEB_WALK_COOLDOWN_MS);
             return;
         }
 
-        KspWalkerGuard.clearReachedDestination(
-                BANK_WALK_KEY,
-                "ksp_account_builder_mining_reached_bank");
+        KspWalkerGuard.clearReachedDestination(BANK_WALK_KEY, "ksp_account_builder_mining_reached_bank");
 
-        if (!Rs2Bank.isOpen() && !Rs2Bank.openBank())
+        if (!Rs2Bank.isOpen())
         {
+            if (bankActionReady() && Rs2Bank.openBank()) markBankAction();
             return;
         }
 
-        if (Rs2Bank.isOpen())
-        {
-            if (KspBankWidgetHelper.closeBankTutorialOverlayIfOpen())
-            {
-                sleep(300);
-                return;
-            }
+        if (KspBankWidgetHelper.closeBankTutorialOverlayIfOpen()) return;
+        if (!bankActionReady()) return;
 
-            String pickaxeToKeep = resolveInventoryPickaxeToKeep(miningLevel);
-
-            if (pickaxeToKeep != null)
-            {
-                Rs2Bank.depositAllExcept(pickaxeToKeep);
-                sleepUntil(() -> !Rs2Inventory.isFull(), 2_000);
-            }
-            else
-            {
-                Rs2Bank.depositAll();
-                sleepUntil(() -> Rs2Inventory.isEmpty(), 2_000);
-            }
-
-            sleep(300);
-            closeBankIfOpen();
-        }
+        String keep = resolveInventoryPickaxeToKeep(miningLevel);
+        if (keep != null) Rs2Bank.depositAllExcept(keep);
+        else Rs2Bank.depositAll();
+        markBankAction();
     }
 
     private BankLocation resolveBankLocation()
@@ -558,23 +509,19 @@ public class MiningScript extends Script
 
     private void depositGoldOresAtPortSarim(int miningLevel)
     {
-        ensureInventoryTabOpen();
+        if (!ensureInventoryTabOpenFast()) return;
 
-        WorldPoint playerLocation = Rs2Player.getWorldLocation();
-        WorldArea depositArea = Areas.PORT_SARIM_DEPOSIT_BOX.toWorldArea();
+        WorldPoint player = Rs2Player.getWorldLocation();
+        WorldArea area = Areas.PORT_SARIM_DEPOSIT_BOX.toWorldArea();
+        if (player == null) return;
 
-        if (playerLocation == null)
-        {
-            return;
-        }
-
-        if (!depositArea.contains(playerLocation))
+        if (!area.contains(player))
         {
             Microbot.status = "Walking to " + Areas.PORT_SARIM_DEPOSIT_BOX.getDisplayName();
             KspWalkerGuard.walkToDestination(
                     DEPOSIT_BOX_WALK_KEY,
                     Areas.PORT_SARIM_DEPOSIT_BOX::getRandomPoint,
-                    depositArea::contains,
+                    area::contains,
                     3,
                     WEB_WALK_COOLDOWN_MS);
             return;
@@ -582,45 +529,25 @@ public class MiningScript extends Script
 
         KspWalkerGuard.clear(DEPOSIT_BOX_WALK_KEY);
 
-        if (!Rs2DepositBox.openDepositBox())
-        {
-            debug("Could not open Port Sarim deposit box | player={}", playerLocation);
-            return;
-        }
-
-        sleepUntil(Rs2DepositBox::isOpen, 2_000);
         if (!Rs2DepositBox.isOpen())
         {
+            Rs2DepositBox.openDepositBox();
             return;
         }
 
-        String pickaxeToKeep = resolveInventoryPickaxeToKeep(miningLevel);
-        List<String> itemsToKeep = pickaxeToKeep == null
-                ? Collections.emptyList()
-                : Collections.singletonList(pickaxeToKeep);
-
+        String keep = resolveInventoryPickaxeToKeep(miningLevel);
+        List<String> itemsToKeep = keep == null ? Collections.emptyList() : Collections.singletonList(keep);
         Rs2DepositBox.depositAllExcept(itemsToKeep, false);
-        sleepUntil(() -> !Rs2Inventory.isFull(), 2_000);
-        debug("Deposited Rimmington gold ore | kept={} invFull={} depositBoxOpen={}",
-                itemsToKeep,
-                Rs2Inventory.isFull(),
-                Rs2DepositBox.isOpen());
-
-        if (Rs2DepositBox.isOpen())
-        {
-            Rs2DepositBox.closeDepositBox();
-        }
+        if (!Rs2Inventory.isFull()) Rs2DepositBox.closeDepositBox();
     }
 
     private boolean closeBankIfOpen()
     {
-        if (!Rs2Bank.isOpen())
-        {
-            return true;
-        }
-
+        if (!Rs2Bank.isOpen()) return true;
+        if (!bankActionReady()) return false;
         Rs2Bank.closeBank();
-        return sleepUntil(() -> !Rs2Bank.isOpen(), 2_000);
+        markBankAction();
+        return false;
     }
 
     private String resolveInventoryPickaxeToKeep(int miningLevel)
@@ -671,104 +598,38 @@ public class MiningScript extends Script
 
     private void mineForCurrentLevel(int miningLevel)
     {
-        // Check if player is under attack and handle combat state
         if (isPlayerUnderAttack())
         {
             lastUnderAttackAtMs = System.currentTimeMillis();
-            KspTaskDebug.throttled(log, debugLogging, "Mining", "under-attack", 2_000L,
-                    "player is under attack, waiting for combat to end | player={} interacting={}",
-                    Rs2Player.getWorldLocation(),
-                    Rs2Player.isInteracting());
             return;
         }
 
-        // Reset combat timer if player is no longer under attack
-        if (System.currentTimeMillis() - lastUnderAttackAtMs < 5_000)
+        if (System.currentTimeMillis() - lastUnderAttackAtMs < 1_000L) return;
+        if (!canStartMiningInTargetArea()) return;
+
+        long now = System.currentTimeMillis();
+        if (now - lastObjectInteractionAtMs < OBJECT_INTERACTION_COOLDOWN_MS) return;
+
+        Rs2TileObjectModel rock = findNearestRockInTargetArea(miningLevel);
+        if (rock == null || !canStartMiningInTargetArea()) return;
+
+        lastObjectInteractionAtMs = now;
+        Microbot.status = "Mining " + rock.getName();
+        if (!rock.click("Mine"))
         {
-            debug("Waiting for player to recover from combat");
-            return;
+            debug("Rock interaction rejected | rock={} id={} loc={}",
+                    rock.getName(), rock.getId(), rock.getWorldLocation());
         }
+    }
 
-        if (!canStartMiningInTargetArea())
-        {
-            KspTaskDebug.throttled(log, debugLogging, "Mining", "not-idle", 2_000L,
-                    "waiting until current action finishes before mining | player={} moving={} animating={} interacting={} area={}",
-                    Rs2Player.getWorldLocation(),
-                    Rs2Player.isMoving(),
-                    Rs2Player.isAnimating(),
-                    Rs2Player.isInteracting(),
-                    targetArea.getDisplayName());
-            return;
-        }
+    private boolean bankActionReady()
+    {
+        return System.currentTimeMillis() - lastBankActionAtMs >= BANK_ACTION_COOLDOWN_MS;
+    }
 
-        if (System.currentTimeMillis() - lastObjectInteractionAtMs < OBJECT_INTERACTION_COOLDOWN_MS)
-        {
-            KspTaskDebug.throttled(log, debugLogging, "Mining", "interaction-cooldown", 2_000L,
-                    "interaction cooldown active | elapsed={}ms cooldown={}ms",
-                    System.currentTimeMillis() - lastObjectInteractionAtMs,
-                    OBJECT_INTERACTION_COOLDOWN_MS);
-            return;
-        }
-
-        Rs2TileObjectModel targetRock = findNearestRockInTargetArea(miningLevel);
-
-        if (targetRock == null)
-        {
-            return;
-        }
-
-        if (!canStartMiningInTargetArea())
-        {
-            debug("Rock candidate found but player started another action | rock={} id={} loc={} moving={} animating={} interacting={}",
-                    targetRock.getName(),
-                    targetRock.getId(),
-                    targetRock.getWorldLocation(),
-                    Rs2Player.isMoving(),
-                    Rs2Player.isAnimating(),
-                    Rs2Player.isInteracting());
-            return;
-        }
-
-        lastObjectInteractionAtMs = System.currentTimeMillis();
-
-        Microbot.status = "Mining " + targetRock.getName();
-        debug("Attempting rock interaction | objectName={} id={} loc={} reachable={} player={} distance={} hasMineAction={} insideArea={}",
-                targetRock.getName(),
-                targetRock.getId(),
-                targetRock.getWorldLocation(),
-                targetRock.isReachable(),
-                Rs2Player.getWorldLocation(),
-                Rs2Player.getWorldLocation() != null ? Rs2Player.getWorldLocation().distanceTo(targetRock.getWorldLocation()) : -1,
-                hasObjectAction(targetRock, "Mine"),
-                targetArea.toWorldArea().contains(targetRock.getWorldLocation()));
-        boolean interactionStarted = targetRock.click("Mine");
-        debug("Rock interaction result | clicked={} objectName={} id={} loc={} player={} moving={} animating={} interacting={}",
-                interactionStarted,
-                targetRock.getName(),
-                targetRock.getId(),
-                targetRock.getWorldLocation(),
-                Rs2Player.getWorldLocation(),
-                Rs2Player.isMoving(),
-                Rs2Player.isAnimating(),
-                Rs2Player.isInteracting());
-
-        if (interactionStarted)
-        {
-            boolean activityStarted = sleepUntil(() -> Rs2Player.isAnimating() || Rs2Player.isInteracting(), 1_200);
-            debug("Rock post-click wait | activityStarted={} moving={} animating={} interacting={} player={}",
-                    activityStarted,
-                    Rs2Player.isMoving(),
-                    Rs2Player.isAnimating(),
-                    Rs2Player.isInteracting(),
-                    Rs2Player.getWorldLocation());
-        }
-        else
-        {
-            debug("Rock interaction was not accepted by tile object API | objectName={} id={} loc={}",
-                    targetRock.getName(),
-                    targetRock.getId(),
-                    targetRock.getWorldLocation());
-        }
+    private void markBankAction()
+    {
+        lastBankActionAtMs = System.currentTimeMillis();
     }
 
     private boolean canStartMiningInTargetArea()
