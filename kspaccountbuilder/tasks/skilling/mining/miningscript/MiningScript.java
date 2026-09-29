@@ -200,7 +200,6 @@ public class MiningScript extends Script
                 KspWalkerGuard.clearActiveWalker("ksp_account_builder_silver_mugger_guard");
                 KspWalkerGuard.clear("Mining:target-area");
                 walkingToTargetArea = false;
-        lastBankActionAtMs = 0L;
                 Microbot.status = "Waiting for Mugger to become passive";
                 return;
             }
@@ -1047,6 +1046,7 @@ public class MiningScript extends Script
     @Override
     public void shutdown()
     {
+        lastBankActionAtMs = 0L;
         startingTargetRockInitialized = false;
         initializedSelectionBand = -1;
         randomMidTierRock = null;
