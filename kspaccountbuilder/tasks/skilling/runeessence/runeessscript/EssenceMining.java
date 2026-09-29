@@ -176,9 +176,7 @@ public class EssenceMining extends Script
     {
         WorldPoint player = Rs2Player.getWorldLocation();
         Rs2NpcModel aubury = Microbot.getRs2NpcCache().query()
-                .fromWorldView()
-                .withName("Aubury")
-                .nearestOnClientThread();
+                .fromWorldView().withName("Aubury").nearestOnClientThread();
 
         if (player == null || aubury == null || aubury.getWorldLocation() == null
                 || player.distanceTo(aubury.getWorldLocation()) > NPC_REACH_DISTANCE)
@@ -186,26 +184,16 @@ public class EssenceMining extends Script
             state = EssenceState.WALKING_TO_AUBURY;
             status = "Walking to Aubury";
             KspWalkerGuard.walkToPoint(
-                    WALK_KEY_AUBURY,
-                    AUBURY_POSITION,
-                    NPC_REACH_DISTANCE,
-                    WALK_REFIRE_COOLDOWN_MS);
+                    WALK_KEY_AUBURY, AUBURY_POSITION, NPC_REACH_DISTANCE, WALK_REFIRE_COOLDOWN_MS);
             return;
         }
 
         state = EssenceState.TELEPORTING;
         status = "Teleporting to rune essence mine";
         KspWalkerGuard.clear(WALK_KEY_AUBURY);
-        if (!canAct())
-        {
-            return;
-        }
+        if (!canAct()) return;
 
-        if (aubury.click("Teleport"))
-        {
-            lastActionAtMs = System.currentTimeMillis();
-            sleepUntil(this::isInEssenceMine, 5_000);
-        }
+        if (aubury.click("Teleport")) lastActionAtMs = System.currentTimeMillis();
     }
 
     private void mineEssence()
@@ -231,16 +219,12 @@ public class EssenceMining extends Script
     {
         state = EssenceState.EXITING_MINE;
         status = "Leaving rune essence mine";
-        if (Rs2Player.isAnimating() || Rs2Player.isMoving() || !canAct())
-        {
-            return;
-        }
+        if (Rs2Player.isAnimating() || !canAct()) return;
 
         var portal = Microbot.getRs2TileObjectCache().query()
                 .withId(ESSENCE_MINE_PORTAL_ID)
                 .nearestOnClientThread();
-        if (portal == null)
-        {
+        if (portal == null) {
             portal = Microbot.getRs2TileObjectCache().query()
                     .withName("Portal")
                     .nearestOnClientThread();
@@ -248,33 +232,17 @@ public class EssenceMining extends Script
 
         if (portal == null)
         {
-            WorldPoint portalApproach = getNearestPortalLocation();
             status = "Walking to rune essence portal";
-            KspTaskDebug.throttled(log, debugLogging, "Rune Essence", "portal-missing", 3_000L,
-                    "Exit portal not loaded | preferredId={} player={} approach={}",
-                    ESSENCE_MINE_PORTAL_ID,
-                    Rs2Player.getWorldLocation(),
-                    portalApproach);
             KspWalkerGuard.walkFastCanvasToPoint(
                     WALK_KEY_PORTAL,
-                    portalApproach,
+                    getNearestPortalLocation(),
                     PORTAL_APPROACH_DISTANCE,
                     WALK_REFIRE_COOLDOWN_MS);
             return;
         }
 
         KspWalkerGuard.clear(WALK_KEY_PORTAL);
-        KspTaskDebug.throttled(log, debugLogging, "Rune Essence", "portal-found", 3_000L,
-                "Exit portal found | id={} location={} player={}",
-                portal.getId(),
-                portal.getWorldLocation(),
-                Rs2Player.getWorldLocation());
-        if (portal.click())
-        {
-            lastActionAtMs = System.currentTimeMillis();
-            Rs2Player.waitForAnimation(3_000);
-            sleepUntil(() -> !isInEssenceMine(), 5_000);
-        }
+        if (portal.click()) lastActionAtMs = System.currentTimeMillis();
     }
 
     public boolean recoverFromEssenceMine()

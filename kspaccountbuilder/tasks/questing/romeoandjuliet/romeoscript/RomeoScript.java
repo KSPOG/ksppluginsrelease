@@ -496,8 +496,8 @@ public class RomeoScript extends Script
 
     private void gatherCadavaBerries()
     {
-        WorldPoint playerLocation = Rs2Player.getWorldLocation();
-        if (!Areas.CADAVA_BUSH.getArea().contains(playerLocation))
+        WorldPoint player = Rs2Player.getWorldLocation();
+        if (!Areas.CADAVA_BUSH.getArea().contains(player))
         {
             state = RomeoState.WALKING_TO_CADAVA_BUSH;
             status = "Walking to Cadava bush";
@@ -510,36 +510,21 @@ public class RomeoScript extends Script
             return;
         }
 
-        KspWalkerGuard.clearReachedDestination(
-                WALK_KEY_CADAVA_BUSH,
-                "ksp_romeo_reached_cadava_bush");
-        if (!actionCooldownElapsed())
-        {
-            return;
-        }
+        KspWalkerGuard.clearReachedDestination(WALK_KEY_CADAVA_BUSH, "ksp_romeo_reached_cadava_bush");
+        if (!actionCooldownElapsed()) return;
 
         state = RomeoState.PICKING_CADAVA_BERRIES;
         status = "Picking Cadava berries";
-        int previousQuantity = Rs2Inventory.itemQuantity(Inv.CADAVA_BERRIES.getItemId());
         TileObject bush = Rs2GameObject.findObjectByLocation(CADAVA_BUSH_POSITION);
         if (bush == null || bush.getId() != CADAVA_BUSH_OBJECT_ID)
         {
-            status = "Locating Cadava bush";
             KspWalkerGuard.walkFastCanvasToPoint(
-                    WALK_KEY_CADAVA_BUSH,
-                    CADAVA_BUSH_POSITION,
-                    1,
-                    WALK_REFIRE_COOLDOWN_MS);
+                    WALK_KEY_CADAVA_BUSH, CADAVA_BUSH_POSITION, 1, WALK_REFIRE_COOLDOWN_MS);
             return;
         }
 
         lastActionAtMs = System.currentTimeMillis();
-        if (Rs2GameObject.interact(bush, "Pick-from"))
-        {
-            sleepUntil(
-                    () -> Rs2Inventory.itemQuantity(Inv.CADAVA_BERRIES.getItemId()) > previousQuantity,
-                    4_000);
-        }
+        Rs2GameObject.interact(bush, "Pick-from");
     }
 
     private void startQuestWithRomeo()
@@ -550,31 +535,16 @@ public class RomeoScript extends Script
             state = RomeoState.WALKING_TO_ROMEO;
             status = "Walking to Romeo";
             KspWalkerGuard.walkToPoint(
-                    WALK_KEY_ROMEO,
-                    ROMEO_POSITION,
-                    NPC_REACH_DISTANCE,
-                    WALK_REFIRE_COOLDOWN_MS);
+                    WALK_KEY_ROMEO, ROMEO_POSITION, NPC_REACH_DISTANCE, WALK_REFIRE_COOLDOWN_MS);
             return;
         }
 
-        if (!walkToNpc(WALK_KEY_ROMEO, romeo, "Romeo"))
-        {
-            return;
-        }
-
-        if (!actionCooldownElapsed())
-        {
-            return;
-        }
+        if (!walkToNpc(WALK_KEY_ROMEO, romeo, "Romeo") || !actionCooldownElapsed()) return;
 
         state = RomeoState.TALKING_TO_ROMEO;
         status = "Talking to Romeo";
         lastActionAtMs = System.currentTimeMillis();
-        if (romeo.click("Talk-to"))
-        {
-            KspWalkerGuard.clear(WALK_KEY_ROMEO);
-            sleepUntil(Rs2Dialogue::isInDialogue, 4_000);
-        }
+        if (romeo.click("Talk-to")) KspWalkerGuard.clear(WALK_KEY_ROMEO);
     }
 
     private void returnMessageToRomeo()
@@ -585,27 +555,17 @@ public class RomeoScript extends Script
             state = RomeoState.RETURNING_MESSAGE_TO_ROMEO;
             status = "Returning Juliet's message to Romeo";
             KspWalkerGuard.walkToPoint(
-                    WALK_KEY_ROMEO,
-                    ROMEO_POSITION,
-                    NPC_REACH_DISTANCE,
-                    WALK_REFIRE_COOLDOWN_MS);
+                    WALK_KEY_ROMEO, ROMEO_POSITION, NPC_REACH_DISTANCE, WALK_REFIRE_COOLDOWN_MS);
             return;
         }
 
-        if (!walkToNpc(WALK_KEY_ROMEO, romeo, "Romeo") || !actionCooldownElapsed())
-        {
-            return;
-        }
+        if (!walkToNpc(WALK_KEY_ROMEO, romeo, "Romeo") || !actionCooldownElapsed()) return;
 
         deliveringMessageToRomeo = true;
         state = RomeoState.TALKING_TO_ROMEO;
         status = "Giving Juliet's message to Romeo";
         lastActionAtMs = System.currentTimeMillis();
-        if (romeo.click("Talk-to"))
-        {
-            KspWalkerGuard.clear(WALK_KEY_ROMEO);
-            sleepUntil(Rs2Dialogue::isInDialogue, 4_000);
-        }
+        if (romeo.click("Talk-to")) KspWalkerGuard.clear(WALK_KEY_ROMEO);
     }
 
     private void talkToQuestNpc(
@@ -623,63 +583,42 @@ public class RomeoScript extends Script
             state = walkingState;
             status = walkingStatus;
             KspWalkerGuard.walkToPoint(
-                    walkKey,
-                    destination,
-                    NPC_REACH_DISTANCE,
-                    WALK_REFIRE_COOLDOWN_MS);
+                    walkKey, destination, NPC_REACH_DISTANCE, WALK_REFIRE_COOLDOWN_MS);
             return;
         }
 
-        if (!walkToNpc(walkKey, npc, npcName) || !actionCooldownElapsed())
-        {
-            return;
-        }
+        if (!walkToNpc(walkKey, npc, npcName) || !actionCooldownElapsed()) return;
 
         state = talkingState;
         status = talkingStatus;
         lastActionAtMs = System.currentTimeMillis();
-        if (npc.click("Talk-to"))
-        {
-            KspWalkerGuard.clear(walkKey);
-            sleepUntil(Rs2Dialogue::isInDialogue, 4_000);
-        }
+        if (npc.click("Talk-to")) KspWalkerGuard.clear(walkKey);
     }
 
     private void talkToJuliet()
     {
-        WorldPoint playerLocation = Rs2Player.getWorldLocation();
-        if (playerLocation != null && playerLocation.getPlane() == 1)
+        WorldPoint player = Rs2Player.getWorldLocation();
+        if (player != null && player.getPlane() == 1)
         {
             clearHallwayRouteAfterClimb();
-            if (enterJulietRoom(playerLocation))
-            {
-                return;
-            }
+            if (enterJulietRoom(player)) return;
 
             Rs2NpcModel juliet = findNpc("Juliet");
-            if (juliet == null)
-            {
+            if (juliet == null) {
                 status = "Searching for Juliet";
                 return;
             }
 
-            if (!walkDirectlyToJuliet(playerLocation, juliet) || !actionCooldownElapsed())
-            {
-                return;
-            }
+            if (!walkDirectlyToJuliet(player, juliet) || !actionCooldownElapsed()) return;
 
             state = RomeoState.TALKING_TO_JULIET;
             status = "Talking to Juliet";
             lastActionAtMs = System.currentTimeMillis();
-            if (juliet.click("Talk-to"))
-            {
-                KspWalkerGuard.clear(WALK_KEY_JULIET);
-                sleepUntil(Rs2Dialogue::isInDialogue, 4_000);
-            }
+            if (juliet.click("Talk-to")) KspWalkerGuard.clear(WALK_KEY_JULIET);
             return;
         }
 
-        if (!Areas.HALLWAY.getArea().contains(playerLocation))
+        if (!Areas.HALLWAY.getArea().contains(player))
         {
             state = RomeoState.WALKING_TO_JULIET_HALLWAY;
             status = "Walking to Juliet hallway";
@@ -693,29 +632,17 @@ public class RomeoScript extends Script
         }
 
         KspWalkerGuard.clear(WALK_KEY_JULIET_HALLWAY);
-        if (!actionCooldownElapsed())
-        {
-            return;
-        }
+        if (!actionCooldownElapsed()) return;
 
         state = RomeoState.CLIMBING_TO_JULIET;
         status = "Climbing staircase to Juliet";
         lastActionAtMs = System.currentTimeMillis();
 
-        if (interactWithJulietStaircase())
-        {
+        if (interactWithJulietStaircase()) {
             KspWalkerGuard.clearActiveWalker("ksp_romeo_using_juliet_staircase");
-            sleepUntil(
-                    () ->
-                    {
-                        WorldPoint location = Rs2Player.getWorldLocation();
-                        return location != null && location.getPlane() == 1;
-                    },
-                    5_000);
             return;
         }
 
-        status = "Finding Juliet staircase";
         Rs2Walker.walkFastCanvas(JULIET_STAIRCASE_POSITION);
     }
 
@@ -788,16 +715,11 @@ public class RomeoScript extends Script
         if (door != null)
         {
             status = "Opening door to Juliet";
-            if (!actionCooldownElapsed())
-            {
-                return true;
-            }
+            if (!actionCooldownElapsed()) return true;
 
             lastActionAtMs = System.currentTimeMillis();
-            if (Rs2GameObject.interact(door, "Open"))
-            {
-                sleep(600);
-            }
+            Rs2GameObject.interact(door, "Open");
+            return true;
         }
 
         Rs2Walker.walkFastCanvas(destination);
@@ -841,16 +763,7 @@ public class RomeoScript extends Script
         if (isJulietUpstairsStaircase(staircase))
         {
             lastActionAtMs = System.currentTimeMillis();
-            if (Rs2GameObject.interact(staircase, "Climb-down"))
-            {
-                sleepUntil(
-                        () ->
-                        {
-                            WorldPoint location = Rs2Player.getWorldLocation();
-                            return location != null && location.getPlane() == 0;
-                        },
-                        5_000);
-            }
+            Rs2GameObject.interact(staircase, "Climb-down");
             return;
         }
 

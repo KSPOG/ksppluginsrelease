@@ -34,7 +34,7 @@ public class CraftingScript extends Script
     private static final int LOOP_DELAY_MS = 250;
     private static final int WALK_COOLDOWN_MS = 3_000;
     private static final int FURNACE_SEARCH_RADIUS = 12;
-    private static final int ACTION_COOLDOWN_MS = 750;
+    private static final int ACTION_COOLDOWN_MS = 350;
     private static final int PRODUCTION_START_TIMEOUT_MS = 2_500;
 
     private volatile CraftingState state = CraftingState.WAITING;
@@ -44,6 +44,7 @@ public class CraftingScript extends Script
     private boolean debugLogging;
     private long lastActionAtMs;
     private boolean expectingXpDrop;
+    private boolean bankInventoryReset;
 
     public boolean run() { return run(CraftingLevels.LEATHER_GLOVES, true); }
 
@@ -82,6 +83,13 @@ public class CraftingScript extends Script
             {
                 state = CraftingState.BANKING;
                 prepareInventory(targetRecipe);
+                return;
+            }
+
+            if (Rs2Bank.isOpen())
+            {
+                bankInventoryReset = false;
+                Rs2Bank.closeBank();
                 return;
             }
 
@@ -138,6 +146,7 @@ public class CraftingScript extends Script
                 targetLevel = candidateLevel;
                 targetRecipe = candidateRecipe;
                 expectingXpDrop = false;
+                bankInventoryReset = false;
                 debug("Selected crafting recipe {} at level {}",
                         targetLevel.getDisplayName(), craftingLevel);
             }
@@ -186,42 +195,44 @@ public class CraftingScript extends Script
 
         if (!Rs2Bank.isOpen())
         {
-            if (!Rs2Bank.openBank())
-            {
-                return;
-            }
-            sleepUntil(Rs2Bank::isOpen, 3_000);
+            Rs2Bank.openBank();
             return;
         }
 
-        if (KspBankWidgetHelper.closeBankTutorialOverlayIfOpenAndWait()
+        if (KspBankWidgetHelper.closeBankTutorialOverlayIfOpen()
                 || !KspBankMode.ensureWithdrawAsItem())
         {
             return;
         }
 
-        Rs2Bank.depositAll();
-        sleep(200);
-
-        for (Ingredient ingredient : recipe.getIngredients())
+        if (!bankInventoryReset)
         {
-            int amount = resolveWithdrawAmount(recipe, ingredient);
-            if (amount <= 0 || !withdraw(ingredient.getItemName(), amount))
-            {
-                Microbot.status = "Missing crafting item: " + ingredient.getItemName();
-                debug("Unable to withdraw {} x{} for {}",
-                        ingredient.getItemName(), amount, targetLevel.getDisplayName());
-                return;
-            }
-        }
-
-        if (!hasRequiredInventory(recipe))
-        {
+            Rs2Bank.depositAll();
+            bankInventoryReset = true;
             return;
         }
 
+        for (Ingredient ingredient : recipe.getIngredients())
+        {
+            int desired = resolveWithdrawAmount(recipe, ingredient);
+            int current = Rs2Inventory.count(ingredient.getItemName());
+            if (current >= desired) continue;
+
+            int amount = desired - current;
+            if (amount <= 0 || Rs2Bank.count(ingredient.getItemName()) <= 0)
+            {
+                Microbot.status = "Missing crafting item: " + ingredient.getItemName();
+                return;
+            }
+
+            withdraw(ingredient.getItemName(), amount);
+            return;
+        }
+
+        if (!hasRequiredInventory(recipe)) return;
+
+        bankInventoryReset = false;
         Rs2Bank.closeBank();
-        sleepUntil(() -> !Rs2Bank.isOpen(), 1_500);
     }
 
     private int resolveWithdrawAmount(CraftInventory recipe, Ingredient ingredient)
@@ -256,16 +267,9 @@ public class CraftingScript extends Script
 
     private boolean withdraw(String itemName, int amount)
     {
-        boolean withdrew = amount == 1
+        return amount == 1
                 ? Rs2Bank.withdrawOne(itemName)
                 : Rs2Bank.withdrawX(itemName, amount);
-        if (!withdrew)
-        {
-            return false;
-        }
-
-        sleepUntil(() -> Rs2Inventory.count(itemName) >= amount, 2_000);
-        return Rs2Inventory.count(itemName) >= amount;
     }
 
     private boolean ensureInArea(Areas area, String walkKey)
@@ -294,58 +298,35 @@ public class CraftingScript extends Script
 
     private void craftFromInventory(CraftInventory recipe)
     {
-        if (!canStartAction())
+        if (Rs2Widget.isProductionWidgetOpen()
+                || Rs2Widget.findWidget(targetLevel.getDisplayName(), null, false) != null)
         {
+            selectProductAndMakeAll(recipe);
             return;
         }
+
+        if (!canStartAction()) return;
 
         Ingredient tool = recipe.getTool();
         Ingredient material = getFirstConsumable(recipe);
-        if (tool == null || material == null)
-        {
-            return;
-        }
-
-        if (expectingXpDrop && Rs2Player.waitForXpDrop(Skill.CRAFTING, 4_500))
-        {
-            return;
-        }
+        if (tool == null || material == null) return;
 
         Microbot.status = "Crafting " + targetLevel.getDisplayName();
-        Rs2Inventory.use(tool.getItemName());
-        sleep(150);
-        Rs2Inventory.use(material.getItemName());
-
-        boolean interfaceOpened = sleepUntil(
-                () -> Rs2Widget.isProductionWidgetOpen()
-                        || Rs2Widget.findWidget(targetLevel.getDisplayName(), null, false) != null
-                        || Rs2Player.isAnimating(),
-                PRODUCTION_START_TIMEOUT_MS);
-        if (!interfaceOpened)
+        if (Rs2Inventory.combine(tool.getItemName(), material.getItemName()))
         {
-            return;
+            lastActionAtMs = System.currentTimeMillis();
         }
-
-        selectProductAndMakeAll(recipe);
     }
 
     private void craftAtFurnace(CraftInventory recipe)
     {
-        if (!canStartAction())
-        {
-            return;
-        }
-
-        if (expectingXpDrop && Rs2Player.waitForXpDrop(Skill.CRAFTING, 4_500))
-        {
-            return;
-        }
-
         if (Rs2Widget.isGoldCraftingWidgetOpen() || Rs2Widget.isSilverCraftingWidgetOpen())
         {
             selectProductAndMakeAll(recipe);
             return;
         }
+
+        if (!canStartAction()) return;
 
         Rs2TileObjectModel furnace = findFurnace();
         if (furnace == null)
@@ -355,26 +336,17 @@ public class CraftingScript extends Script
         }
 
         Microbot.status = "Crafting " + targetLevel.getDisplayName();
-        lastActionAtMs = System.currentTimeMillis();
-        if (!furnace.click("Smelt"))
-        {
-            return;
-        }
-
-        sleepUntil(() -> Rs2Widget.isGoldCraftingWidgetOpen()
-                || Rs2Widget.isSilverCraftingWidgetOpen(), 3_000);
-        selectProductAndMakeAll(recipe);
+        if (furnace.click("Smelt")) lastActionAtMs = System.currentTimeMillis();
     }
 
     private void selectProductAndMakeAll(CraftInventory recipe)
     {
+        if (Rs2Player.isAnimating() || Rs2Player.isInteracting()) return;
+
         boolean selected = Rs2Widget.clickWidget(recipe.getProductName(), true)
                 || Rs2Widget.clickWidget(recipe.getProductName(), false);
-        if (!selected && recipe.getRecipeType() == RecipeType.GEM_CUTTING)
-        {
-            selected = true;
-        }
-        if (!selected)
+
+        if (!selected && recipe.getRecipeType() != RecipeType.GEM_CUTTING)
         {
             debug("Could not select crafting product {}", recipe.getProductName());
             return;
@@ -383,7 +355,6 @@ public class CraftingScript extends Script
         Rs2Keyboard.keyPress(KeyEvent.VK_SPACE);
         expectingXpDrop = true;
         lastActionAtMs = System.currentTimeMillis();
-        sleepUntil(() -> Rs2Player.isAnimating() || Rs2Player.isInteracting(), 2_500);
     }
 
     private boolean canStartAction()
@@ -449,6 +420,7 @@ public class CraftingScript extends Script
         state = CraftingState.WAITING;
         lastActionAtMs = 0L;
         expectingXpDrop = false;
+        bankInventoryReset = false;
         KspWalkerGuard.clear(BANK_WALK_KEY);
         KspWalkerGuard.clear(FURNACE_WALK_KEY);
         super.shutdown();

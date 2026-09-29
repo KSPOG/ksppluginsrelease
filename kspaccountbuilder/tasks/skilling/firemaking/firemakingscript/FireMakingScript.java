@@ -39,7 +39,7 @@ public class FireMakingScript extends Script
     private static final int FIRE_INTERACT_COOLDOWN_MS = 450;
     private static final int FIRE_START_GRACE_MS = 900;
     private static final int FRESH_FIRE_APPEAR_TIMEOUT_MS = 1_500;
-    private static final int BURN_PROMPT_ACTION_COOLDOWN_MS = 3_000;
+    private static final int BURN_PROMPT_ACTION_COOLDOWN_MS = 500;
     private static final int CAMPFIRE_DISTANCE = 6;
     private static final int NEARBY_CAMPFIRE_SCAN_RADIUS = 12;
 
@@ -230,6 +230,11 @@ public class FireMakingScript extends Script
         if (hasLogsForCurrentTarget(targetLogName)
                 && (hasActiveFire || Rs2Inventory.hasItem(TINDERBOX_NAME)))
         {
+            if (Rs2Bank.isOpen())
+            {
+                Rs2Bank.closeBank();
+                return false;
+            }
             return true;
         }
 
@@ -253,70 +258,28 @@ public class FireMakingScript extends Script
 
     private boolean prepareSuppliesFromBank(String targetLogName, boolean hasActiveFire)
     {
-        if (!Rs2Bank.isOpen())
-        {
-            return false;
-        }
-
-        if (KspBankWidgetHelper.closeBankTutorialOverlayIfOpenAndWait())
-        {
-            return false;
-        }
+        if (!Rs2Bank.isOpen()) return false;
+        if (KspBankWidgetHelper.closeBankTutorialOverlayIfOpen()) return false;
 
         Rs2Bank.depositAllExcept(TINDERBOX_NAME);
 
-        sleep(200);
-
         if (!Rs2Inventory.hasItem(TINDERBOX_NAME))
         {
-            if (Rs2Bank.count(TINDERBOX_NAME) <= 0)
-            {
-                debug("No tinderbox available in bank");
-                return false;
-            }
-
-            if (!KspBankMode.ensureWithdrawAsItem())
-            {
-                debug("Waiting for withdraw-as-item mode before withdrawing {}", TINDERBOX_NAME);
-                return false;
-            }
-
-            if (!Rs2Bank.withdrawOne(TINDERBOX_NAME))
-            {
-                return false;
-            }
-
-            sleepUntil(() -> Rs2Inventory.hasItem(TINDERBOX_NAME), 2_000);
-        }
-
-        if (Rs2Bank.count(targetLogName) <= 0)
-        {
-            debug("No {} available in bank", targetLogName);
+            if (Rs2Bank.count(TINDERBOX_NAME) <= 0) return false;
+            if (!KspBankMode.ensureWithdrawAsItem()) return false;
+            Rs2Bank.withdrawOne(TINDERBOX_NAME);
             return false;
         }
-
-        if (!KspBankMode.ensureWithdrawAsItem())
-        {
-            debug("Waiting for withdraw-as-item mode before withdrawing {}", targetLogName);
-            return false;
-        }
-
-        if (!Rs2Bank.withdrawAll(targetLogName))
-        {
-            return false;
-        }
-
-        sleepUntil(() -> Rs2Inventory.hasItem(targetLogName), 2_000);
 
         if (!Rs2Inventory.hasItem(targetLogName))
         {
-            debug("Failed to withdraw {}", targetLogName);
+            if (Rs2Bank.count(targetLogName) <= 0) return false;
+            if (!KspBankMode.ensureWithdrawAsItem()) return false;
+            Rs2Bank.withdrawAll(targetLogName);
             return false;
         }
 
         Rs2Bank.closeBank();
-        sleepUntil(() -> !Rs2Bank.isOpen(), 1_500);
-
         return false;
     }
 
@@ -380,29 +343,11 @@ public class FireMakingScript extends Script
 
     private void useCampfire(int targetLogId, WorldPoint fireLocation)
     {
-        if (fireLocation == null)
-        {
-            debug("Cannot use campfire; fire location is null");
-            return;
-        }
-
-        if (!isInTargetArea(fireLocation))
-        {
-            debug("Skipping campfire outside target area | fire={} area={}", fireLocation, targetArea.getDisplayName());
-            KspWalkerGuard.clear("Firemaking:campfire");
-            return;
-        }
-
-        // Early return if burn prompt is already open - don't spam click
-        if (isBurnInterfaceOpen(null, targetLogId))
-        {
-            debug("Burn prompt already open, skipping campfire click");
-            return;
-        }
+        if (fireLocation == null || !isInTargetArea(fireLocation)) return;
+        if (isBurnInterfaceOpen(null, targetLogId)) return;
 
         if (Rs2Dialogue.isInDialogue())
         {
-            debug("Forester campfire dialogue is open; resolving it before retrying");
             handleForesterCampfireDialogue();
             return;
         }
@@ -410,128 +355,53 @@ public class FireMakingScript extends Script
         if (Rs2Player.distanceTo(fireLocation) > CAMPFIRE_DISTANCE)
         {
             Microbot.status = "Walking to campfire";
-            debug("Walking to campfire | player={} fire={} distance={}", Rs2Player.getWorldLocation(), fireLocation, Rs2Player.distanceTo(fireLocation));
             KspWalkerGuard.walkToPoint("Firemaking:campfire", fireLocation, CAMPFIRE_DISTANCE, WEB_WALK_COOLDOWN_MS);
             return;
         }
 
-        if (isWaitingForFireStart())
+        Rs2TileObjectModel fire = findFireObjectAtLocation(fireLocation);
+        if (fire == null || !isValidFireId(fire.getId()))
         {
-            return;
-        }
-
-        if (!isIdleNearCampfire(fireLocation))
-        {
-            KspTaskDebug.throttled(log, debugLogging, "Firemaking", "not-idle", 2_000L,
-                    "waiting for idle before fire interaction | player={} fire={} distance={} moving={} animating={} interacting={} area={}",
-                    Rs2Player.getWorldLocation(),
-                    fireLocation,
-                    Rs2Player.distanceTo(fireLocation),
-                    Rs2Player.isMoving(),
-                    Rs2Player.isAnimating(),
-                    Rs2Player.isInteracting(),
-                    targetArea.getDisplayName());
-            return;
-        }
-
-        long now = System.currentTimeMillis();
-
-        if (now - lastFireInteractAtMs < FIRE_INTERACT_COOLDOWN_MS)
-        {
-            return;
-        }
-
-        Rs2TileObjectModel fireTile = findFireObjectAtLocation(fireLocation);
-
-        if (fireTile == null || !isValidFireId(fireTile.getId()))
-        {
-            debug("No valid fire tile at location | location={} tile={} targetLogId={}", fireLocation, fireTile, targetLogId);
             resetFireInteractionState("selected fire disappeared");
             return;
         }
 
-        boolean interacted;
+        // A visible fire is the authoritative completion signal for the build step.
+        awaitingFireStartAtMs = 0L;
 
-        if (fireTile.getId() == FORESTERS_CAMPFIRE_ID)
+        if (!isIdleNearCampfire(fireLocation)) return;
+
+        long now = System.currentTimeMillis();
+        if (now - lastFireInteractAtMs < FIRE_INTERACT_COOLDOWN_MS) return;
+
+        boolean interacted;
+        if (fire.getId() == FORESTERS_CAMPFIRE_ID)
         {
-            debug("Attempting Forester campfire interaction | id={} loc={} action=Tend-to player={} targetLogId={}",
-                    fireTile.getId(),
-                    fireLocation,
-                    Rs2Player.getWorldLocation(),
-                    targetLogId);
-            interacted = fireTile.click("Tend-to");
-            if (interacted)
-            {
-                tendingForestersCampfire = true;
-            }
+            interacted = fire.click("Tend-to");
+            tendingForestersCampfire = interacted;
         }
         else
         {
             tendingForestersCampfire = false;
-            debug("Attempting fire item-on-object | id={} loc={} targetLogId={} player={}",
-                    fireTile.getId(),
-                    fireLocation,
-                    targetLogId,
-                    Rs2Player.getWorldLocation());
-            interacted = Rs2Inventory.interact(targetLogId, "Use");
-            if (interacted)
-            {
-                sleep(150);
-                interacted = fireTile.click("Use");
-            }
+            interacted = Rs2Inventory.useItemOnObject(targetLogId, fire.getId());
         }
 
-        debug("Fire interaction result | clicked={} fireId={} loc={} player={} moving={} animating={} interacting={} burnPromptOpen={}",
-                interacted,
-                fireTile.getId(),
-                fireLocation,
-                Rs2Player.getWorldLocation(),
-                Rs2Player.isMoving(),
-                Rs2Player.isAnimating(),
-                Rs2Player.isInteracting(),
-                isBurnInterfaceOpen(null, targetLogId));
-
-        if (!interacted)
-        {
-            return;
-        }
+        if (!interacted) return;
 
         lastFireInteractAtMs = now;
         awaitingFireStartAtMs = now;
-
-        boolean promptOpened = sleepUntil(() -> !Rs2Player.isMoving() && isBurnInterfaceOpen(null, targetLogId), 5_000);
-        debug("Fire post-click wait | promptOpened={} moving={} animating={} interacting={} burnPromptOpen={}",
-                promptOpened,
-                Rs2Player.isMoving(),
-                Rs2Player.isAnimating(),
-                Rs2Player.isInteracting(),
-                isBurnInterfaceOpen(null, targetLogId));
     }
 
     private void buildFire(String targetLogName)
     {
-        if (!Rs2Inventory.hasItem(TINDERBOX_NAME))
-        {
-            debug("Missing tinderbox for fallback firemaking");
-            return;
-        }
+        if (!Rs2Inventory.hasItem(TINDERBOX_NAME) || isWaitingForFireStart()) return;
 
-        if (isWaitingForFireStart())
-        {
-            return;
-        }
-
-        WorldPoint playerLocation = Rs2Player.getWorldLocation();
+        WorldPoint player = Rs2Player.getWorldLocation();
         WorldArea area = targetArea.toWorldArea();
+        if (player == null) return;
 
-        if (playerLocation == null || !isIdleInTargetArea())
+        if (!area.contains(player))
         {
-            return;
-        }
-
-        if (!area.contains(playerLocation))
-        {
-            Microbot.status = "Walking to firemaking area";
             KspWalkerGuard.walkToDestination(
                     "Firemaking:target-area",
                     targetArea::getRandomPoint,
@@ -541,60 +411,17 @@ public class FireMakingScript extends Script
             return;
         }
 
+        if (Rs2Player.isAnimating() || Rs2Player.isInteracting()) return;
+
         long now = System.currentTimeMillis();
+        if (now - lastFireInteractAtMs < FIRE_INTERACT_COOLDOWN_MS) return;
 
-        if (now - lastFireInteractAtMs < FIRE_INTERACT_COOLDOWN_MS)
-        {
-            return;
-        }
-
-        int logsBefore = Rs2Inventory.count(targetLogName);
-        boolean combined = Rs2Inventory.combine(TINDERBOX_NAME, targetLogName);
-        debug("Attempting tinderbox/log combine | tinderbox={} log={} player={} logsBefore={} dispatched={}",
-                TINDERBOX_NAME,
-                targetLogName,
-                Rs2Player.getWorldLocation(),
-                logsBefore,
-                combined);
-
-        if (!combined)
-        {
-            return;
-        }
+        if (!Rs2Inventory.combine(TINDERBOX_NAME, targetLogName)) return;
 
         lastFireInteractAtMs = now;
         awaitingFireStartAtMs = now;
         expectingFiremakingXpDrop = true;
         tendingForestersCampfire = false;
-
-        // Inventory consumption is a much better success signal than waiting for a
-        // later XP drop. As soon as the first log leaves inventory, locate the fire
-        // and hand the remaining logs to it without an artificial multi-second idle.
-        sleepUntil(() -> Rs2Inventory.count(targetLogName) < logsBefore, 4_500);
-
-        if (Rs2Inventory.count(targetLogName) < logsBefore)
-        {
-            sleepUntil(() -> findUsableFireLocation() != null, FRESH_FIRE_APPEAR_TIMEOUT_MS);
-            WorldPoint freshFire = findUsableFireLocation();
-
-            if (freshFire != null)
-            {
-                awaitingFireStartAtMs = 0L;
-                // The build action and the "use log on fire" action are two distinct
-                // game actions. Do not make the latter inherit the build cooldown.
-                lastFireInteractAtMs = 0L;
-                debug("Fresh fire ready; handing remaining logs to it immediately | fire={} player={} remainingLogs={}",
-                        freshFire,
-                        Rs2Player.getWorldLocation(),
-                        Rs2Inventory.count(targetLogName));
-                useCampfire(getTargetLogId(targetLogName), freshFire);
-                return;
-            }
-        }
-
-        // Fallback for slow/lagged clients: retain the short start grace and let the
-        // normal scheduler retry. This is deliberately sub-second rather than 2.5s.
-        sleepUntil(() -> Rs2Player.isAnimating() || Rs2Player.isInteracting(), FIRE_START_GRACE_MS);
     }
 
     private boolean handleBurnPrompt(String targetLogName, int targetLogId)
@@ -605,39 +432,12 @@ public class FireMakingScript extends Script
             return false;
         }
 
-        if (Rs2Player.isMoving())
-        {
-            return true;
-        }
-
-        if (isBurnPromptActionCoolingDown())
-        {
-            KspTaskDebug.throttled(log, debugLogging, "Firemaking", "burn-prompt-action-cooldown", 1_000L,
-                    "waiting after burn prompt VK_SPACE | targetLog={} targetId={} elapsed={}ms promptOpen={}",
-                    targetLogName,
-                    targetLogId,
-                    System.currentTimeMillis() - lastBurnPromptActionAtMs,
-                    isBurnInterfaceOpen(targetLogName, targetLogId));
-            return true;
-        }
+        if (isBurnPromptActionCoolingDown()) return true;
 
         Rs2Keyboard.keyPress(KeyEvent.VK_SPACE);
         lastBurnPromptActionAtMs = System.currentTimeMillis();
-        debug("Burn prompt handled with VK_SPACE | targetLog={} targetId={} promptStillOpen={}",
-                targetLogName,
-                targetLogId,
-                isBurnInterfaceOpen(targetLogName, targetLogId));
-
         awaitingFireStartAtMs = lastBurnPromptActionAtMs;
         expectingFiremakingXpDrop = true;
-
-        sleepUntil(() -> Rs2Player.isAnimating() || Rs2Player.isInteracting() || !isBurnInterfaceOpen(targetLogName, targetLogId), 2_000);
-
-        if (!isBurnInterfaceOpen(targetLogName, targetLogId))
-        {
-            lastBurnPromptActionAtMs = 0L;
-        }
-
         return true;
     }
 
@@ -904,45 +704,30 @@ public class FireMakingScript extends Script
 
     private void handleForesterCampfireDialogue()
     {
-        if (!Rs2Dialogue.isInDialogue())
-        {
-            return;
-        }
-
-        if (Rs2Dialogue.hasContinue())
-        {
-            debug("Clicking continue in Forester campfire dialogue");
+        if (!Rs2Dialogue.isInDialogue()) return;
+        if (Rs2Dialogue.hasContinue()) {
             Rs2Dialogue.clickContinue();
-            sleepUntil(() -> !Rs2Dialogue.isInDialogue(), 2_000);
             return;
         }
-
-        if (Rs2Dialogue.hasSelectAnOption())
-        {
-            debug("Selecting first option in Forester campfire dialogue");
-            Rs2Dialogue.keyPressForDialogueOption(1);
-            sleepUntil(() -> !Rs2Dialogue.isInDialogue(), 2_000);
-        }
+        if (Rs2Dialogue.hasSelectAnOption()) Rs2Dialogue.keyPressForDialogueOption(1);
     }
 
     private boolean isIdleInTargetArea()
     {
-        WorldPoint playerLocation = Rs2Player.getWorldLocation();
-        return playerLocation != null
-                && targetArea.toWorldArea().contains(playerLocation)
-                && !Rs2Player.isMoving()
+        WorldPoint player = Rs2Player.getWorldLocation();
+        return player != null
+                && targetArea.toWorldArea().contains(player)
                 && !Rs2Player.isAnimating()
                 && !Rs2Player.isInteracting();
     }
 
     private boolean isIdleNearCampfire(WorldPoint fireLocation)
     {
-        WorldPoint playerLocation = Rs2Player.getWorldLocation();
-        return playerLocation != null
+        WorldPoint player = Rs2Player.getWorldLocation();
+        return player != null
                 && fireLocation != null
                 && isInTargetArea(fireLocation)
                 && Rs2Player.distanceTo(fireLocation) <= CAMPFIRE_DISTANCE
-                && !Rs2Player.isMoving()
                 && !Rs2Player.isAnimating()
                 && !Rs2Player.isInteracting();
     }

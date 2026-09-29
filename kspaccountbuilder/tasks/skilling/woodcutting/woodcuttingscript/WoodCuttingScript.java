@@ -38,7 +38,8 @@ public class WoodCuttingScript extends Script {
 
     private static final int LOOP_DELAY_MS = 250;
     private static final int WEB_WALK_COOLDOWN_MS = 3000;
-    private static final int OBJECT_INTERACTION_COOLDOWN_MS = 900;
+    private static final int OBJECT_INTERACTION_COOLDOWN_MS = 350;
+    private static final long BANK_ACTION_COOLDOWN_MS = 500L;
     private static final int TREE_SEARCH_PADDING_TILES = 8;
     private static final int OUT_OF_AREA_TREE_FALLBACK_RADIUS = 4;
     private static final int MID_TIER_RANDOM_MAX_LEVEL = 60;
@@ -67,6 +68,7 @@ public class WoodCuttingScript extends Script {
     private long lastWebWalkAtMs;
     private long lastObjectInteractionAtMs;
     private boolean walkingToTargetArea;
+    private long lastBankActionAtMs;
 
     public void setDebugLogging(boolean debugLogging) {
         this.debugLogging = debugLogging;
@@ -143,10 +145,6 @@ public class WoodCuttingScript extends Script {
                 return;
             }
 
-            if (!this.isIdleInTargetArea()) {
-                return;
-            }
-
             this.chopForCurrentLevel(woodcuttingLevel);
 
         }, 0L, LOOP_DELAY_MS, TimeUnit.MILLISECONDS);
@@ -155,88 +153,69 @@ public class WoodCuttingScript extends Script {
     }
 
     private boolean upgradeAxe(int woodcuttingLevel, int attackLevel) {
-        WoodCuttingReq bestWoodcuttingReq = WoodCuttingReq.bestForWoodcuttingLevel(woodcuttingLevel);
-        String targetAxeName = this.resolveDesiredAxe(bestWoodcuttingReq);
+        WoodCuttingReq best = WoodCuttingReq.bestForWoodcuttingLevel(woodcuttingLevel);
+        String targetAxe = resolveDesiredAxe(best);
+        if (targetAxe == null) return true;
 
-        if (targetAxeName == null) {
-            return true;
-        }
-
-        String activeAxeName = this.resolveBestOwnedAxeName(targetAxeName);
-
-        if (activeAxeName == null) {
-            this.ensureInventoryTabOpen();
-
-            if (!Rs2Bank.walkToBankAndUseBank() && !Rs2Bank.openBank()) {
-                return false;
-            }
-
-            activeAxeName = this.resolveBestOwnedAxeName(targetAxeName);
-
-            if (activeAxeName == null) {
-                this.debug("No eligible axe available up to target {}", targetAxeName);
-                Rs2Bank.closeBank();
-                return true;
-            }
-        }
-
-        WoodCuttingReq activeAxeReq = this.resolveWoodcuttingReq(activeAxeName);
-        boolean canEquipActiveAxe = activeAxeReq != null && this.canEquipDesiredAxe(activeAxeReq, attackLevel);
-
-        if (!Rs2Equipment.isWearing(activeAxeName) && !Rs2Inventory.hasItem(activeAxeName)) {
+        String activeAxe = resolveBestOwnedAxeName(targetAxe);
+        if (activeAxe == null) {
             if (!Rs2Bank.isOpen()) {
-                this.ensureInventoryTabOpen();
-
-                if (!Rs2Bank.walkToBankAndUseBank() && !Rs2Bank.openBank()) {
-                    return false;
-                }
-            }
-
-            if (Rs2Bank.isOpen() && Rs2Bank.count(activeAxeName) > 0) {
-                if (KspBankWidgetHelper.closeBankTutorialOverlayIfOpenAndWait()) {
-                    return false;
-                }
-
-                if (!KspBankMode.ensureWithdrawAsItem()) {
-                    this.debug("Waiting for withdraw-as-item mode before withdrawing {}", activeAxeName);
-                    return false;
-                }
-
-                String axeToWithdraw = activeAxeName;
-                Rs2Bank.withdrawOne(activeAxeName);
-                WoodCuttingScript.sleepUntil(() -> Rs2Inventory.hasItem(axeToWithdraw), 3000);
-            }
-        }
-
-        if (canEquipActiveAxe
-                && Rs2Inventory.hasItem(activeAxeName)
-                && !Rs2Equipment.isWearing(activeAxeName)) {
-
-            if (Rs2Bank.isOpen()) {
-                Rs2Bank.closeBank();
+                if (!ensureInventoryTabOpen() || !bankActionReady()) return false;
+                if (Rs2Bank.openBank() || Rs2Bank.walkToBankAndUseBank()) markBankAction();
                 return false;
             }
 
-            String axeToWield = activeAxeName;
-            Rs2Inventory.wield(activeAxeName);
-            WoodCuttingScript.sleepUntil(() -> Rs2Equipment.isWearing(axeToWield), 2000);
+            activeAxe = resolveBestOwnedAxeName(targetAxe);
+            if (activeAxe == null) {
+                Microbot.status = "No usable axe available";
+                return false;
+            }
         }
 
-        if (Rs2Bank.isOpen()) {
-            if (KspBankWidgetHelper.closeBankTutorialOverlayIfOpenAndWait()) {
+        WoodCuttingReq req = resolveWoodcuttingReq(activeAxe);
+        boolean canEquip = req != null && canEquipDesiredAxe(req, attackLevel);
+
+        if (!Rs2Equipment.isWearing(activeAxe) && !Rs2Inventory.hasItem(activeAxe)) {
+            if (!Rs2Bank.isOpen()) {
+                if (!ensureInventoryTabOpen() || !bankActionReady()) return false;
+                if (Rs2Bank.openBank() || Rs2Bank.walkToBankAndUseBank()) markBankAction();
                 return false;
             }
 
-            this.depositOutdatedAxes(activeAxeName);
+            if (KspBankWidgetHelper.closeBankTutorialOverlayIfOpenAndWait()) return false;
+            if (!KspBankMode.ensureWithdrawAsItem()) return false;
+            if (!bankActionReady()) return false;
 
-            if (!this.hasOutdatedAxeInInventory(activeAxeName)) {
-                Rs2Bank.closeBank();
-            }
-
+            Rs2Bank.withdrawOne(activeAxe);
+            markBankAction();
             return false;
         }
 
-        return Rs2Equipment.isWearing(activeAxeName) || Rs2Inventory.hasItem(activeAxeName);
+        if (canEquip && Rs2Inventory.hasItem(activeAxe) && !Rs2Equipment.isWearing(activeAxe)) {
+            if (Rs2Bank.isOpen()) {
+                if (!bankActionReady()) return false;
+                Rs2Bank.closeBank();
+                markBankAction();
+                return false;
+            }
+
+            Rs2Inventory.wield(activeAxe);
+            return false;
+        }
+
+        if (Rs2Bank.isOpen()) {
+            if (KspBankWidgetHelper.closeBankTutorialOverlayIfOpenAndWait()) return false;
+            if (!bankActionReady()) return false;
+
+            depositOutdatedAxes(activeAxe);
+            if (!hasOutdatedAxeInInventory(activeAxe)) {
+                Rs2Bank.closeBank();
+            }
+            markBankAction();
+            return false;
+        }
+
+        return Rs2Equipment.isWearing(activeAxe) || Rs2Inventory.hasItem(activeAxe);
     }
 
     private void depositOutdatedAxes(String desiredAxeName) {
@@ -392,6 +371,7 @@ public class WoodCuttingScript extends Script {
         }
 
         this.walkingToTargetArea = false;
+        this.lastBankActionAtMs = 0L;
         KspWalkerGuard.clear("Woodcutting:target-area");
         this.lastWebWalkAtMs = 0L;
     }
@@ -404,97 +384,58 @@ public class WoodCuttingScript extends Script {
         return new WorldPoint(centerX, centerY, plane);
     }
 
-    private void ensureInventoryTabOpen() {
-        if (Rs2Tab.getCurrentTab() != InterfaceTab.INVENTORY) {
-            Rs2Tab.switchTo(InterfaceTab.INVENTORY);
-            WoodCuttingScript.sleepUntil(() -> Rs2Tab.getCurrentTab() == InterfaceTab.INVENTORY, 1200);
-        }
+    private boolean ensureInventoryTabOpen() {
+        if (Rs2Tab.getCurrentTab() == InterfaceTab.INVENTORY) return true;
+        Rs2Tab.switchTo(InterfaceTab.INVENTORY);
+        return false;
     }
 
     private void bankLogsOnly(int woodcuttingLevel) {
-        this.ensureInventoryTabOpen();
+        if (!ensureInventoryTabOpen()) return;
 
-        boolean useLocalWillowBank = this.targetArea == TreeAreas.WILLOW_TREES_DRAYNOR
-                && this.targetArea.contains(Rs2Player.getWorldLocation());
+        boolean localWillowBank = targetArea == TreeAreas.WILLOW_TREES_DRAYNOR
+                && targetArea.contains(Rs2Player.getWorldLocation());
 
-        if (useLocalWillowBank) {
-            KspWalkerGuard.clearReachedDestination(
-                    "Woodcutting:target-area",
-                    "ksp_woodcutting_willow_local_bank");
+        if (localWillowBank) {
+            KspWalkerGuard.clearReachedDestination("Woodcutting:target-area", "ksp_woodcutting_willow_local_bank");
             KspWalkerGuard.clearActiveWalker("ksp_woodcutting_willow_local_bank");
         }
 
-        boolean bankOpened = useLocalWillowBank
-                ? Rs2Bank.openBank()
-                : Rs2Bank.walkToBankAndUseBank() || Rs2Bank.openBank();
-
-        if (!bankOpened) {
+        if (!Rs2Bank.isOpen()) {
+            if (!bankActionReady()) return;
+            boolean opened = localWillowBank
+                    ? Rs2Bank.openBank()
+                    : Rs2Bank.openBank() || Rs2Bank.walkToBankAndUseBank();
+            if (opened) markBankAction();
             return;
         }
 
-        if (Rs2Bank.isOpen()) {
-            if (KspBankWidgetHelper.closeBankTutorialOverlayIfOpenAndWait()) {
-                return;
-            }
+        if (KspBankWidgetHelper.closeBankTutorialOverlayIfOpenAndWait()) return;
+        if (!bankActionReady()) return;
 
-            String axeToKeep = this.resolveInventoryAxeToKeep(woodcuttingLevel);
-
-            if (axeToKeep != null) {
-                Rs2Bank.depositAllExcept(axeToKeep);
-            } else {
-                Rs2Bank.depositAll();
-            }
-
-            WoodCuttingScript.sleep(300);
-            Rs2Bank.closeBank();
-            WoodCuttingScript.sleepUntil(() -> !Rs2Bank.isOpen(), 2_000);
-
-            if (useLocalWillowBank) {
-                this.interactWithBestWillowAfterBank();
-            }
-        }
+        String keep = resolveInventoryAxeToKeep(woodcuttingLevel);
+        if (keep != null) Rs2Bank.depositAllExcept(keep);
+        else Rs2Bank.depositAll();
+        markBankAction();
     }
 
     private void interactWithBestWillowAfterBank() {
-        if (Rs2Bank.isOpen() || Rs2Player.isMoving() || Rs2Player.isAnimating()) {
-            return;
-        }
+        if (Rs2Bank.isOpen() || Rs2Player.isAnimating() || Rs2Player.isInteracting()) return;
 
-        WorldPoint playerLocation = Rs2Player.getWorldLocation();
-        if (playerLocation == null) {
-            return;
-        }
+        WorldPoint player = Rs2Player.getWorldLocation();
+        if (player == null) return;
 
-        int searchRadius = this.getAreaSearchRadius() + TREE_SEARCH_PADDING_TILES;
-        Rs2TileObjectModel willow = this.findMatchingTree(
-                playerLocation,
-                searchRadius,
+        Rs2TileObjectModel willow = findMatchingTree(
+                player,
+                getAreaSearchRadius() + TREE_SEARCH_PADDING_TILES,
                 TreeLevel.WILLOW,
                 false);
 
-        if (willow == null) {
-            this.debug("No reachable Willow found after local Draynor bank deposit | player={}",
-                    playerLocation);
-            return;
-        }
+        if (willow == null) return;
 
-        this.lastObjectInteractionAtMs = System.currentTimeMillis();
+        lastObjectInteractionAtMs = System.currentTimeMillis();
         Microbot.status = "Chopping " + willow.getName();
-        boolean clicked = willow.click("Chop down");
-        this.debug("Direct Willow interaction after banking | clicked={} tree={} id={} loc={} player={}",
-                clicked,
-                willow.getName(),
-                willow.getId(),
-                willow.getWorldLocation(),
-                playerLocation);
-
-        if (clicked) {
-            WoodCuttingScript.sleepUntil(
-                    () -> Rs2Player.isMoving()
-                            || Rs2Player.isAnimating()
-                            || Rs2Player.isInteracting(),
-                    1_200);
-        }
+        willow.click("Chop down");
     }
 
     private String resolveInventoryAxeToKeep(int woodcuttingLevel) {
@@ -525,100 +466,42 @@ public class WoodCuttingScript extends Script {
     }
 
     private void chopForCurrentLevel(int woodcuttingLevel) {
-        if (!this.isIdleInTargetArea()) {
-            KspTaskDebug.throttled(log, this.debugLogging, "Woodcutting", "not-idle", 2_000L,
-                    "waiting for idle before chopping | player={} moving={} animating={} interacting={} area={}",
-                    Rs2Player.getWorldLocation(),
-                    Rs2Player.isMoving(),
-                    Rs2Player.isAnimating(),
-                    Rs2Player.isInteracting(),
-                    this.targetArea.getDisplayName());
-            return;
-        }
+        if (!canStartChopInTargetArea()) return;
 
-        if (System.currentTimeMillis() - this.lastObjectInteractionAtMs < OBJECT_INTERACTION_COOLDOWN_MS) {
-            KspTaskDebug.throttled(log, this.debugLogging, "Woodcutting", "interaction-cooldown", 2_000L,
-                    "interaction cooldown active | elapsed={}ms cooldown={}ms",
-                    System.currentTimeMillis() - this.lastObjectInteractionAtMs,
-                    OBJECT_INTERACTION_COOLDOWN_MS);
-            return;
-        }
+        long now = System.currentTimeMillis();
+        if (now - lastObjectInteractionAtMs < OBJECT_INTERACTION_COOLDOWN_MS) return;
 
-        Rs2TileObjectModel targetTree = this.findNearestTreeInTargetArea(woodcuttingLevel);
-
-        if (targetTree == null) {
+        Rs2TileObjectModel tree = findNearestTreeInTargetArea(woodcuttingLevel);
+        if (tree == null) {
             Microbot.status = "No reachable tree found";
             return;
         }
 
-        if (!this.isIdleInTargetArea()) {
-            this.debug("Tree candidate found but player stopped being idle | tree={} id={} loc={} moving={} animating={} interacting={}",
-                    targetTree.getName(),
-                    targetTree.getId(),
-                    targetTree.getWorldLocation(),
-                    Rs2Player.isMoving(),
-                    Rs2Player.isAnimating(),
-                    Rs2Player.isInteracting());
-            return;
-        }
-
-        this.lastObjectInteractionAtMs = System.currentTimeMillis();
-
-        this.debug("Attempting tree interaction | expected={} objectName={} id={} loc={} reachable={} player={} distance={} hasChopAction={} insideArea={}",
-                this.getTargetTreeLevel(woodcuttingLevel).getDisplayName(),
-                targetTree.getName(),
-                targetTree.getId(),
-                targetTree.getWorldLocation(),
-                targetTree.isReachable(),
-                Rs2Player.getWorldLocation(),
-                Rs2Player.getWorldLocation() != null
-                        ? Rs2Player.getWorldLocation().distanceTo(targetTree.getWorldLocation())
-                        : -1,
-                hasObjectAction(targetTree, "Chop down"),
-                this.targetArea.contains(targetTree.getWorldLocation()));
-
-        boolean interactionStarted = targetTree.click("Chop down");
-
-        this.debug("Tree interaction result | clicked={} objectName={} id={} loc={} player={} moving={} animating={} interacting={}",
-                interactionStarted,
-                targetTree.getName(),
-                targetTree.getId(),
-                targetTree.getWorldLocation(),
-                Rs2Player.getWorldLocation(),
-                Rs2Player.isMoving(),
-                Rs2Player.isAnimating(),
-                Rs2Player.isInteracting());
-
-        if (interactionStarted) {
-            Microbot.status = "Chopping " + targetTree.getName();
-
-            boolean activityStarted = WoodCuttingScript.sleepUntil(
-                    () -> Rs2Player.isAnimating() || Rs2Player.isInteracting(),
-                    1200
-            );
-
-            this.debug("Tree post-click wait | activityStarted={} moving={} animating={} interacting={} player={}",
-                    activityStarted,
-                    Rs2Player.isMoving(),
-                    Rs2Player.isAnimating(),
-                    Rs2Player.isInteracting(),
-                    Rs2Player.getWorldLocation());
+        lastObjectInteractionAtMs = now;
+        if (tree.click("Chop down")) {
+            Microbot.status = "Chopping " + tree.getName();
+            debug("Tree interaction accepted | tree={} id={} loc={} player={}",
+                    tree.getName(), tree.getId(), tree.getWorldLocation(), Rs2Player.getWorldLocation());
         } else {
-            this.debug("Tree interaction was not accepted by tile object API | objectName={} id={} loc={}",
-                    targetTree.getName(),
-                    targetTree.getId(),
-                    targetTree.getWorldLocation());
+            debug("Tree interaction rejected | tree={} id={} loc={}",
+                    tree.getName(), tree.getId(), tree.getWorldLocation());
         }
     }
 
-    private boolean isIdleInTargetArea() {
-        WorldPoint playerLocation = Rs2Player.getWorldLocation();
-
-        return playerLocation != null
-                && this.targetArea.contains(playerLocation)
-                && !Rs2Player.isMoving()
+    private boolean canStartChopInTargetArea() {
+        WorldPoint player = Rs2Player.getWorldLocation();
+        return player != null
+                && targetArea.contains(player)
                 && !Rs2Player.isAnimating()
                 && !Rs2Player.isInteracting();
+    }
+
+    private boolean bankActionReady() {
+        return System.currentTimeMillis() - lastBankActionAtMs >= BANK_ACTION_COOLDOWN_MS;
+    }
+
+    private void markBankAction() {
+        lastBankActionAtMs = System.currentTimeMillis();
     }
 
     private Rs2TileObjectModel findNearestTreeInTargetArea(int woodcuttingLevel) {
@@ -889,6 +772,7 @@ public class WoodCuttingScript extends Script {
     }
 
     public void shutdown() {
+        lastBankActionAtMs = 0L;
         this.startingTargetTreeInitialized = false;
         this.randomMidTierTree = null;
         this.randomOakArea = null;
