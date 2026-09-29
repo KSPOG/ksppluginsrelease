@@ -1057,166 +1057,183 @@ public class TutorialIslandScript extends Script
             openTutorialPassage(
                     9716,
                     () -> Microbot.getVarbitPlayerValue(281) >= 220 || isNpcReachable(npc, 4));
+            return;
         }
-        else if (progress == 220 || progress == 240)
+
+        if (progress == 220 || progress == 240)
         {
             walkAndTalk(npc);
+            return;
         }
-        else if (progress == 230)
+
+        if (progress == 230)
         {
             clickTab("Quest List");
+            return;
         }
-        else
+
+        if (Rs2Tab.getCurrentTab() != InterfaceTab.INVENTORY)
         {
-            if (Rs2Tab.getCurrentTab() != InterfaceTab.INVENTORY)
-            {
-                Rs2Tab.switchTo(InterfaceTab.INVENTORY);
-                return;
-            }
-
-            if (Microbot.getRs2TileObjectCache().query().fromWorldView().interact(9726, "Climb-down"))
-            {
-                sleepUntil(() -> Microbot.getVarbitPlayerValue(281) >= 260
-                        || isInArea(MINING_SMITHING_AREA), 1_500);
-            }
+            Rs2Tab.switchTo(InterfaceTab.INVENTORY);
+            return;
         }
-    }
 
-    private boolean walkToQuestGuideDoorTile()
-    {
-        WorldPoint location = Rs2Player.getWorldLocation();
+        Rs2TileObjectModel ladder = Microbot.getRs2TileObjectCache()
+                .query()
+                .fromWorldView()
+                .withId(9726)
+                .nearestOnClientThread();
 
-        if (location != null && location.distanceTo(QUEST_GUIDE_WALK_TILE) <= 1)
+        if (prepareTutorialObjectInteraction(ladder, 4))
         {
-            KspWalkerGuard.clearActiveWalker("ksp_account_builder_tutorial_quest_door");
-            return true;
+            ladder.click("Climb-down");
         }
-
-        walkTutorialLocal(QUEST_GUIDE_WALK_TILE, 1);
-        location = Rs2Player.getWorldLocation();
-        if (location != null && location.distanceTo(QUEST_GUIDE_WALK_TILE) <= 1)
-        {
-            KspWalkerGuard.clearActiveWalker("ksp_account_builder_tutorial_quest_door");
-            return true;
-        }
-
-        return false;
     }
 
     private void miningGuide()
     {
         Rs2NpcModel npc = Microbot.getRs2NpcCache().query().fromWorldView().withId(NpcID.MINING_INSTRUCTOR).nearest();
+        int progress = Microbot.getVarbitPlayerValue(281);
 
-        if (Microbot.getVarbitPlayerValue(281) == 260)
-        {
-            walkTutorialLocal(new WorldPoint(3082, 9505, 0), 2);
-            Rs2Player.waitForWalking();
-            walkAndTalk(npc);
-            return;
-        }
-
-        if (Rs2Inventory.contains("Bronze dagger"))
-        {
-            openTutorialPassage(
-                    ObjectID.GATE_9718,
-                    () -> Microbot.getVarbitPlayerValue(281) > 360 || isInArea(COMBAT_INSTRUCTOR_AREA));
-            return;
-        }
-
-        if (Rs2Inventory.contains("Bronze bar") && Rs2Inventory.contains("Hammer"))
-        {
-            Rs2TileObjectModel anvil = Microbot.getRs2TileObjectCache()
-                    .query()
-                    .fromWorldView()
-                    .withName("Anvil")
-                    .nearestOnClientThread();
-
-            if (!prepareTutorialObjectInteraction(anvil, 4))
-            {
-                return;
-            }
-
-            if (!anvil.click("Smith"))
-            {
-                return;
-            }
-
-            if (!sleepUntil(Rs2Widget::isSmithingWidgetOpen, 1_500))
-            {
-                return;
-            }
-
-            if (Rs2Widget.clickWidget(312, 9))
-            {
-                sleepUntil(() -> Rs2Player.isAnimating()
-                        || Rs2Inventory.contains("Bronze dagger"), 1_500);
-            }
-            return;
-        }
-
-        if (Rs2Inventory.contains("Bronze bar") && !Rs2Inventory.contains("Hammer"))
+        if (progress == 260 || progress == 330)
         {
             walkAndTalk(npc);
             return;
         }
 
-        if (Rs2Inventory.contains("Bronze pickaxe")
-                && (!Rs2Inventory.contains("Copper ore") || !Rs2Inventory.contains("Tin ore")))
+        if (progress == 300)
         {
-            List<Integer> rockIds = new ArrayList<>();
-            if (!Rs2Inventory.contains("Copper ore"))
+            if (Rs2Inventory.contains("Tin ore"))
             {
-                rockIds.add(ObjectID.COPPER_ROCKS);
-            }
-            if (!Rs2Inventory.contains("Tin ore"))
-            {
-                rockIds.add(ObjectID.TIN_ROCKS);
+                return;
             }
 
-            Collections.shuffle(rockIds);
-            int rockId = rockIds.get(0);
             Rs2TileObjectModel rock = Microbot.getRs2TileObjectCache()
                     .query()
                     .fromWorldView()
-                    .withId(rockId)
+                    .withId(ObjectID.TIN_ROCKS)
                     .nearestOnClientThread();
 
-            if (!prepareTutorialObjectInteraction(rock, 4))
+            if (prepareTutorialObjectInteraction(rock, 4)
+                    && !Rs2Player.isAnimating()
+                    && !Rs2Player.isInteracting())
             {
-                return;
-            }
-
-            if (rock.click("Mine"))
-            {
-                sleepUntil(() -> Rs2Player.isAnimating()
-                        || (rockId == ObjectID.COPPER_ROCKS
-                        ? Rs2Inventory.contains("Copper ore")
-                        : Rs2Inventory.contains("Tin ore")), 1_500);
+                rock.click("Mine");
             }
             return;
         }
 
-        if (Rs2Inventory.contains("Copper ore") && Rs2Inventory.contains("Tin ore"))
+        if (progress == 310)
         {
+            if (Rs2Inventory.contains("Copper ore"))
+            {
+                return;
+            }
+
+            Rs2TileObjectModel rock = Microbot.getRs2TileObjectCache()
+                    .query()
+                    .fromWorldView()
+                    .withId(ObjectID.COPPER_ROCKS)
+                    .nearestOnClientThread();
+
+            if (prepareTutorialObjectInteraction(rock, 4)
+                    && !Rs2Player.isAnimating()
+                    && !Rs2Player.isInteracting())
+            {
+                rock.click("Mine");
+            }
+            return;
+        }
+
+        if (progress == 320)
+        {
+            if (Rs2Inventory.contains("Bronze bar"))
+            {
+                return;
+            }
+
             Rs2TileObjectModel furnace = Microbot.getRs2TileObjectCache()
                     .query()
                     .fromWorldView()
                     .withId(ObjectID.FURNACE_10082)
                     .nearestOnClientThread();
 
-            if (!prepareTutorialObjectInteraction(furnace, 4))
+            if (!prepareTutorialObjectInteraction(furnace, 4)
+                    || Rs2Player.isAnimating()
+                    || Rs2Player.isInteracting())
             {
                 return;
             }
 
-            List<Integer> ores = Arrays.asList(ItemID.TIN_ORE, ItemID.COPPER_ORE);
-            Collections.shuffle(ores);
+            int oreId = Rs2Inventory.hasItem(ItemID.TIN_ORE) ? ItemID.TIN_ORE : ItemID.COPPER_ORE;
+            Rs2Inventory.useItemOnObject(oreId, furnace.getId());
+            return;
+        }
 
-            if (Rs2Inventory.useItemOnObject(ores.get(0), furnace.getId()))
+        if (progress == 340)
+        {
+            if (Rs2Widget.isSmithingWidgetOpen())
             {
-                sleepUntil(() -> Rs2Player.isAnimating()
-                        || Rs2Inventory.contains("Bronze bar"), 1_500);
+                return;
             }
+
+            Rs2TileObjectModel anvil = Microbot.getRs2TileObjectCache()
+                    .query()
+                    .fromWorldView()
+                    .withName("Anvil")
+                    .nearestOnClientThread();
+
+            if (!prepareTutorialObjectInteraction(anvil, 4)
+                    || Rs2Player.isAnimating()
+                    || Rs2Player.isInteracting())
+            {
+                return;
+            }
+
+            if (Rs2Inventory.hasItem(ItemID.BRONZE_BAR))
+            {
+                Rs2Inventory.useItemOnObject(ItemID.BRONZE_BAR, anvil.getId());
+            }
+            else
+            {
+                anvil.click("Smith");
+            }
+            return;
+        }
+
+        if (progress == 350)
+        {
+            if (Rs2Inventory.contains("Bronze dagger"))
+            {
+                return;
+            }
+
+            if (Rs2Widget.isSmithingWidgetOpen())
+            {
+                Rs2Widget.clickWidget(312, 9);
+                return;
+            }
+
+            Rs2TileObjectModel anvil = Microbot.getRs2TileObjectCache()
+                    .query()
+                    .fromWorldView()
+                    .withName("Anvil")
+                    .nearestOnClientThread();
+
+            if (prepareTutorialObjectInteraction(anvil, 4)
+                    && !Rs2Player.isAnimating()
+                    && !Rs2Player.isInteracting())
+            {
+                anvil.click("Smith");
+            }
+            return;
+        }
+
+        if (progress >= 360 || Rs2Inventory.contains("Bronze dagger"))
+        {
+            openTutorialPassage(
+                    ObjectID.GATE_9718,
+                    () -> Microbot.getVarbitPlayerValue(281) > 360 || isInArea(COMBAT_INSTRUCTOR_AREA));
         }
     }
 
