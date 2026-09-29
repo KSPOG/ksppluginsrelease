@@ -600,63 +600,66 @@ public class TutorialIslandScript extends Script
 
     private void randomizeCharacter()
     {
-        lastCharacterAction = "Randomizing";
-
-        selectRandomBodyType();
-        sleep(randomDelay(450, 900));
-
-        List<Integer> arrows = new ArrayList<>(CHARACTER_CREATION_ARROWS.length);
-        for (int arrowBaseChild : CHARACTER_CREATION_ARROWS)
+        if (!isCharacterCreationWidgetOpen())
         {
-            arrows.add(arrowBaseChild);
-        }
-        Collections.shuffle(arrows);
-
-        int arrowsToClick = ThreadLocalRandom.current().nextInt(5, arrows.size() + 1);
-        for (int i = 0; i < arrowsToClick; i++)
-        {
-            clickRandomCharacterArrow(arrows.get(i));
-            sleep(randomDelay(90, 240));
-        }
-
-        sleep(randomDelay(700, 1400));
-        lastCharacterAction = "Confirming";
-        if (confirmCharacterSelection())
-        {
+            characterCustomized = false;
+            characterConfirmDispatched = false;
             lastCharacterAction = "Confirmed";
+            return;
         }
-        else
+
+        if (!characterCustomized)
         {
-            lastCharacterAction = "Confirm failed";
-            debug("Character customization failed: the Confirm button did not close the creator.");
+            lastCharacterAction = "Randomizing";
+            selectRandomBodyType();
+
+            List<Integer> arrows = new ArrayList<>(CHARACTER_CREATION_ARROWS.length);
+            for (int arrowBaseChild : CHARACTER_CREATION_ARROWS)
+            {
+                arrows.add(arrowBaseChild);
+            }
+            Collections.shuffle(arrows);
+
+            int arrowsToClick = ThreadLocalRandom.current().nextInt(5, arrows.size() + 1);
+            for (int i = 0; i < arrowsToClick; i++)
+            {
+                clickRandomCharacterArrow(arrows.get(i));
+            }
+
+            characterCustomized = true;
+            lastCharacterAction = "Customized";
+            return;
         }
+
+        if (characterConfirmDispatched)
+        {
+            if (!isCharacterCreationWidgetOpen())
+            {
+                characterCustomized = false;
+                characterConfirmDispatched = false;
+                lastCharacterAction = "Confirmed";
+                return;
+            }
+
+            characterConfirmDispatched = false;
+            return;
+        }
+
+        lastCharacterAction = "Confirming";
+        characterConfirmDispatched = confirmCharacterSelection();
     }
 
     private boolean confirmCharacterSelection()
     {
-        for (int attempt = 0; attempt < CHARACTER_CONFIRM_RETRIES; attempt++)
+        if (Rs2Widget.clickWidget(
+                CHARACTER_CREATION_GROUP,
+                CHARACTER_CONFIRM_BUTTON_CHILD))
         {
-            boolean clicked = Rs2Widget.clickWidget(
-                    CHARACTER_CREATION_GROUP,
-                    CHARACTER_CONFIRM_BUTTON_CHILD);
-
-            if (!clicked)
-            {
-                Widget confirmWidget = Rs2Widget.findWidget("Confirm", null, false);
-                clicked = confirmWidget != null && Rs2Widget.clickWidget(confirmWidget);
-            }
-
-            if (clicked && sleepUntil(
-                    () -> !isCharacterCreationWidgetOpen(),
-                    CHARACTER_CONFIRM_TIMEOUT_MS))
-            {
-                return true;
-            }
-
-            sleep(randomDelay(300, 650));
+            return true;
         }
 
-        return false;
+        Widget confirmWidget = Rs2Widget.findWidget("Confirm", null, false);
+        return confirmWidget != null && Rs2Widget.clickWidget(confirmWidget);
     }
 
     private void selectRandomBodyType()
@@ -681,12 +684,23 @@ public class TutorialIslandScript extends Script
             {
                 return;
             }
-            sleep(randomDelay(120, 360));
         }
     }
 
     private void selectRandomExperienceOption()
     {
+        if (!isExperiencePromptOpen())
+        {
+            experienceSelectionDispatched = false;
+            return;
+        }
+
+        if (experienceSelectionDispatched)
+        {
+            experienceSelectionDispatched = false;
+            return;
+        }
+
         int optionIndex = ThreadLocalRandom.current().nextInt(EXPERIENCE_OPTION_TEXTS.length);
         String optionText = EXPERIENCE_OPTION_TEXTS[optionIndex];
         Widget optionWidget = Rs2Widget.findWidget(optionText, null, false);
@@ -697,10 +711,7 @@ public class TutorialIslandScript extends Script
         }
 
         lastExperienceSelection = "Option " + (optionIndex + 1);
-        sleep(randomDelay(450, 1100));
-
-        Rs2Widget.clickWidget(optionWidget);
-        sleep(randomDelay(600, 1400));
+        experienceSelectionDispatched = Rs2Widget.clickWidget(optionWidget);
     }
 
     // -------------------------------------------------------------------------
@@ -1873,8 +1884,12 @@ public class TutorialIslandScript extends Script
         toggledSettings = false;
         ownFireLocation = null;
         lastQueueLoginAttemptAtMs = 0L;
-        lastNameAttemptAtMs = 0L;
         lastGeneratedName = "None";
+        nameLookupPending = false;
+        nameSetPending = false;
+        characterCustomized = false;
+        characterConfirmDispatched = false;
+        experienceSelectionDispatched = false;
         lastCharacterAction = "Waiting";
         lastExperienceSelection = "None";
         waitingForSurvivalFire = false;
