@@ -790,7 +790,6 @@ public class BuyScript extends Script {
             Microbot.status = "Collecting fishing supplies";
             this.markCompletedPendingFishingSupplyBuys();
             Rs2GrandExchange.collectAllToBank();
-            BuyScript.sleepUntil(() -> !Rs2GrandExchange.hasBoughtOffer(), 5000);
             this.clearSatisfiedPendingFishingSupplyBuys();
             return true;
         }
@@ -983,7 +982,6 @@ public class BuyScript extends Script {
             Microbot.status = "Collecting ore buys";
             this.markCompletedPendingOreBuys();
             Rs2GrandExchange.collectAllToBank();
-            BuyScript.sleepUntil(() -> !Rs2GrandExchange.hasBoughtOffer(), 5000);
             this.calculateSmithingOreNeeds();
             this.clearSatisfiedPendingOreBuys();
             return true;
@@ -1229,7 +1227,6 @@ public class BuyScript extends Script {
             this.lastActionAtMs = System.currentTimeMillis();
             this.pendingOreBuys.add(itemName);
             this.pendingOreBuyQuantities.merge(this.normalizeItemName(itemName), quantity, Integer::sum);
-            BuyScript.sleepUntil(() -> !Rs2GrandExchange.isOfferScreenOpen(), 2000);
         }
 
         return offered;
@@ -1277,7 +1274,6 @@ public class BuyScript extends Script {
             this.lastActionAtMs = System.currentTimeMillis();
             this.pendingFishingSupplyBuys.add(itemName);
             this.pendingFishingSupplyBuyQuantities.merge(this.normalizeItemName(itemName), quantity, Integer::sum);
-            BuyScript.sleepUntil(() -> !Rs2GrandExchange.isOfferScreenOpen(), 2000);
         }
 
         return offered;
@@ -1671,7 +1667,6 @@ public class BuyScript extends Script {
 
         if (offered) {
             this.lastActionAtMs = System.currentTimeMillis();
-            BuyScript.sleepUntil(() -> !Rs2Inventory.hasItem(item.getName(), true), 5000);
         }
 
         this.debug(
@@ -1727,7 +1722,6 @@ public class BuyScript extends Script {
         if (offered) {
             this.lastActionAtMs = System.currentTimeMillis();
             this.pendingMissingToolBuys.add(itemName);
-            BuyScript.sleepUntil(() -> !Rs2GrandExchange.isOfferScreenOpen(), 2000);
         }
 
         return offered;
@@ -1788,11 +1782,6 @@ public class BuyScript extends Script {
             }
 
             Rs2GrandExchange.collectAllToBank();
-
-            BuyScript.sleepUntil(
-                    () -> !Rs2GrandExchange.hasBoughtOffer() && !Rs2GrandExchange.hasSoldOffer(),
-                    5000
-            );
 
             this.clearOwnedPendingMissingToolBuys();
             if (collectableFishingSupplyBuy) {
