@@ -230,6 +230,11 @@ public class FireMakingScript extends Script
         if (hasLogsForCurrentTarget(targetLogName)
                 && (hasActiveFire || Rs2Inventory.hasItem(TINDERBOX_NAME)))
         {
+            if (Rs2Bank.isOpen())
+            {
+                Rs2Bank.closeBank();
+                return false;
+            }
             return true;
         }
 
