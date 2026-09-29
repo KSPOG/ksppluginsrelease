@@ -452,133 +452,32 @@ public class KspAccountBuilderScript extends Script
 
     private void processTimers(boolean playTimeConfirmed)
     {
-        if (shuttingDown)
-        {
-            return;
-        }
+        if (shuttingDown) return;
 
         long now = System.currentTimeMillis();
-        if (Microbot.isLoggedIn() && Rs2Combat.inCombat())
-        {
-            lastCombatObservedAtMillis = now;
-        }
-        boolean singleSkillTaskForced = isSingleSkillTaskForced();
-        updateSharedBreakState(now);
+        if (Microbot.isLoggedIn() && Rs2Combat.inCombat()) lastCombatObservedAtMillis = now;
 
-        if (sharedBreakActive)
-        {
-            return;
-        }
+        updateSharedBreakState(now);
+        if (sharedBreakActive) return;
 
         if (config.doBreaks())
         {
-            if (!breakActive && now >= nextBreakAtMillis)
-            {
-                pauseActivitySwitchTimer(now);
-                breakActive = true;
-                taskStarted = false;
-                pendingTask = null;
-                pendingRandomTaskSelection = false;
-                awaitingNextActivityStart = false;
-                breakLogoutRequested = false;
-                breakCombatWaitLogged = false;
-                lastBreakLoginAttemptAt = 0L;
-                stopExternalAutoLoginPlugin("ksp-break-start");
-                stopAutoLoginHelperForBreak();
-                miningScript.shutdown();
-                woodCuttingScript.shutdown();
-                fireMakingScript.shutdown();
-                fishingScript.shutdown();
-                cookingScript.shutdown();
-                meleeScript.shutdown();
-                buyScript.shutdown();
-                sellScript.shutdown();
-                smithScript.shutdown();
-                smeltScript.shutdown();
-                tutorialIslandScript.shutdown();
-                cooksScript.shutdown();
-                gobScript.shutdown();
-                romeoScript.shutdown();
-                runeMystScript.shutdown();
-                essenceMining.shutdown();
-                breakEndsAtMillis = now + TimeUnit.MINUTES.toMillis(randomMinutes(config.breakDurationMinMinutes(), config.breakDurationMaxMinutes()));
-                debug("Starting break for {} seconds", getBreakTimeRemainingSeconds());
-            }
-
-            if (!shuttingDown && breakActive && Microbot.isLoggedIn() && !breakLogoutRequested)
-            {
-                long combatGraceRemainingMillis = BREAK_LOGOUT_COMBAT_GRACE_MS
-                        - (now - lastCombatObservedAtMillis);
-                if (Rs2Combat.inCombat() || combatGraceRemainingMillis > 0L)
-                {
-                    Microbot.status = "Waiting to leave combat before break";
-                    if (!breakCombatWaitLogged)
-                    {
-                        breakCombatWaitLogged = true;
-                        debug("Delaying break logout until combat is clear | graceRemainingSeconds={}",
-                                Math.max(0L, TimeUnit.MILLISECONDS.toSeconds(combatGraceRemainingMillis) + 1L));
-                    }
-                }
-                else
-                {
-                    Rs2Player.logout();
-                    breakLogoutRequested = true;
-                    breakCombatWaitLogged = false;
-                    sleepUntil(() -> !Microbot.isLoggedIn(), 5_000);
-                }
-            }
-
-            if (breakActive && now >= breakEndsAtMillis)
-            {
-                breakActive = false;
-                breakLogoutRequested = false;
-                breakCombatWaitLogged = false;
-                scheduleNextBreak();
-                resumeActivitySwitchTimer(now);
-                debug("Break completed, resuming tasks");
-                startAutoLoginHelper();
-
-                if (!Microbot.isLoggedIn())
-                {
-                    attemptLoginAfterBreak();
-                }
-            }
-
-            if (breakActive)
-            {
-                return;
-            }
+            if (!breakActive && now >= nextBreakAtMillis) startBreak(now);
+            if (breakActive) handleBreak(now);
+            if (breakActive) return;
         }
 
-        if (!Microbot.isLoggedIn())
-        {
-            return;
-        }
+        if (!Microbot.isLoggedIn()) return;
 
-        if (!playTimeConfirmed || currentTask == null)
+        if (!playTimeConfirmed || currentTask == null || isSingleSkillTaskForced())
         {
-            pendingTask = null;
-            pendingRandomTaskSelection = false;
-            awaitingNextActivityStart = false;
-            awaitingActivitySwitchTimerStart = false;
-            nextActivitySwitchAtMillis = -1L;
-            return;
-        }
-
-        if (singleSkillTaskForced)
-        {
-            pendingTask = null;
-            pendingRandomTaskSelection = false;
-            awaitingNextActivityStart = false;
-            awaitingActivitySwitchTimerStart = false;
-            nextActivitySwitchAtMillis = -1L;
+            clearPendingActivitySwitch();
             return;
         }
 
         if (currentTask == BuilderTask.TUTORIAL_ISLAND)
         {
-            pendingTask = null;
-            pendingRandomTaskSelection = false;
+            clearPendingActivitySwitch();
             clearActivitySwitchTimerState();
             return;
         }
@@ -593,34 +492,11 @@ public class KspAccountBuilderScript extends Script
                 && nextActivitySwitchAtMillis > 0L
                 && now >= nextActivitySwitchAtMillis)
         {
-            if (!isSafeToStartActivitySwitch())
-            {
-                return;
-            }
-
-            if (!ensureInventoryTabOpenForTaskSelection())
-            {
-                return;
-            }
+            if (!isSafeToStartActivitySwitch() || !ensureInventoryTabOpenForTaskSelection()) return;
 
             pendingRandomTaskSelection = true;
             taskStarted = false;
-            miningScript.shutdown();
-            woodCuttingScript.shutdown();
-            fireMakingScript.shutdown();
-            fishingScript.shutdown();
-            cookingScript.shutdown();
-            meleeScript.shutdown();
-            buyScript.shutdown();
-            sellScript.shutdown();
-            smithScript.shutdown();
-            smeltScript.shutdown();
-            tutorialIslandScript.shutdown();
-            cooksScript.shutdown();
-            gobScript.shutdown();
-            romeoScript.shutdown();
-            runeMystScript.shutdown();
-            essenceMining.shutdown();
+            stopAllTaskScriptsExcept(null);
             debug("Preparing activity switch from {}; next task will be selected after bank cleanup", currentTask);
         }
 
@@ -628,19 +504,83 @@ public class KspAccountBuilderScript extends Script
         {
             pendingRandomTaskSelection = false;
             pendingTask = null;
-            awaitingNextActivityStart = true;
-            awaitingActivitySwitchTimerStart = canUseActivitySwitchTimer();
-            nextActivitySwitchAtMillis = -1L;
+            awaitNextActivityStart();
             return;
         }
 
         if (pendingTask != null && switchTask(pendingTask))
         {
             pendingTask = null;
-            awaitingNextActivityStart = true;
-            awaitingActivitySwitchTimerStart = canUseActivitySwitchTimer();
-            nextActivitySwitchAtMillis = -1L;
+            awaitNextActivityStart();
         }
+    }
+
+    private void startBreak(long now)
+    {
+        pauseActivitySwitchTimer(now);
+        breakActive = true;
+        taskStarted = false;
+        clearPendingActivitySwitch();
+        breakLogoutRequested = false;
+        breakCombatWaitLogged = false;
+        lastBreakLoginAttemptAt = 0L;
+        stopExternalAutoLoginPlugin("ksp-break-start");
+        stopAutoLoginHelperForBreak();
+        stopAllTaskScriptsExcept(null);
+        breakEndsAtMillis = now + TimeUnit.MINUTES.toMillis(
+                randomMinutes(config.breakDurationMinMinutes(), config.breakDurationMaxMinutes()));
+        debug("Starting break for {} seconds", getBreakTimeRemainingSeconds());
+    }
+
+    private void handleBreak(long now)
+    {
+        if (Microbot.isLoggedIn() && !breakLogoutRequested)
+        {
+            long grace = BREAK_LOGOUT_COMBAT_GRACE_MS - (now - lastCombatObservedAtMillis);
+            if (Rs2Combat.inCombat() || grace > 0L)
+            {
+                Microbot.status = "Waiting to leave combat before break";
+                if (!breakCombatWaitLogged)
+                {
+                    breakCombatWaitLogged = true;
+                    debug("Delaying break logout until combat is clear | graceRemainingSeconds={}",
+                            Math.max(0L, TimeUnit.MILLISECONDS.toSeconds(grace) + 1L));
+                }
+            }
+            else
+            {
+                Rs2Player.logout();
+                breakLogoutRequested = true;
+                breakCombatWaitLogged = false;
+            }
+        }
+
+        if (now < breakEndsAtMillis) return;
+
+        breakActive = false;
+        breakLogoutRequested = false;
+        breakCombatWaitLogged = false;
+        scheduleNextBreak();
+        resumeActivitySwitchTimer(now);
+        debug("Break completed, resuming tasks");
+        startAutoLoginHelper();
+        if (!Microbot.isLoggedIn()) attemptLoginAfterBreak();
+    }
+
+    private void clearPendingActivitySwitch()
+    {
+        pendingTask = null;
+        pendingRandomTaskSelection = false;
+        awaitingNextActivityStart = false;
+        awaitingActivitySwitchTimerStart = false;
+        nextActivitySwitchAtMillis = -1L;
+    }
+
+    private void awaitNextActivityStart()
+    {
+        awaitingNextActivityStart = true;
+        awaitingActivitySwitchTimerStart = canUseActivitySwitchTimer();
+        nextActivitySwitchAtMillis = -1L;
     }
 
     private boolean isSafeToStartActivitySwitch()
