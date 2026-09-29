@@ -122,6 +122,7 @@ extends Script {
     private boolean cachedBuyAffordability;
     private SellState state = SellState.GOING_TO_GE;
     private boolean complete;
+    private boolean sellInventoryReset;
 
     public void setDebugLogging(boolean debugLogging) {
         this.debugLogging = debugLogging;
@@ -131,6 +132,7 @@ extends Script {
         this.shutdown();
         this.targetArea = area;
         this.complete = false;
+        this.sellInventoryReset = false;
         Microbot.status = "Walking to GE";
         this.mainScheduledFuture = this.scheduledExecutorService.scheduleWithFixedDelay(() -> {
             if (!super.run() || !Microbot.isLoggedIn()) {
@@ -244,9 +246,12 @@ extends Script {
         Microbot.status = "Withdrawing Sell Items";
         if (KspBankWidgetHelper.closeBankTutorialOverlayIfOpen()) return;
 
-        if (!Rs2Inventory.isEmpty()) {
-            Rs2Bank.depositAll();
-            return;
+        if (!sellInventoryReset) {
+            if (!Rs2Inventory.isEmpty()) {
+                Rs2Bank.depositAll();
+                return;
+            }
+            sellInventoryReset = true;
         }
 
         if (!Rs2Bank.hasWithdrawAsNote()) {
@@ -302,9 +307,12 @@ extends Script {
             return;
         }
         if (!this.hasSellableInventoryItems()) {
-            this.state = this.shouldWaitAtGrandExchange()
-                    ? SellState.SELLING_ITEMS
-                    : SellState.RESTOCKING_FROM_BANK;
+            if (!this.shouldWaitAtGrandExchange()) {
+                this.state = SellState.RESTOCKING_FROM_BANK;
+                this.sellInventoryReset = false;
+            } else {
+                this.state = SellState.SELLING_ITEMS;
+            }
             return;
         }
         this.state = SellState.SELLING_ITEMS;
@@ -653,6 +661,7 @@ extends Script {
     }
 
     public void shutdown() {
+        sellInventoryReset = false;
         this.state = SellState.GOING_TO_GE;
         this.lastWebWalkAtMs = 0L;
         this.lastActionAtMs = 0L;
