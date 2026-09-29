@@ -1425,7 +1425,11 @@ public class TutorialIslandScript extends Script
             return false;
         }
 
-        Rs2Widget.clickWidget(homeTeleport);
+        if (!Rs2Widget.clickWidget(homeTeleport))
+        {
+            return false;
+        }
+
         return sleepUntil(() -> {
             WorldPoint location = Rs2Player.getWorldLocation();
             return Microbot.getVarbitPlayerValue(281) >= 1000
@@ -1775,8 +1779,12 @@ public class TutorialIslandScript extends Script
             return false;
         }
 
-        Rs2Widget.clickWidget(longrange);
-        Rs2Random.waitEx(600, 100);
+        if (!Rs2Widget.clickWidget(longrange))
+        {
+            return false;
+        }
+
+        sleepUntil(() -> Microbot.getVarbitPlayerValue(281) > 430, 1_000);
         return true;
     }
 
@@ -1990,8 +1998,10 @@ public class TutorialIslandScript extends Script
             }
         }
 
-        Rs2Widget.clickWidget(windStrike);
-        Rs2Random.waitEx(150, 50);
+        if (!Rs2Widget.clickWidget(windStrike))
+        {
+            return false;
+        }
 
         Rs2NpcModel chicken = Microbot.getRs2NpcCache().query().fromWorldView().withName("chicken").nearestOnClientThread();
 
@@ -2002,10 +2012,12 @@ public class TutorialIslandScript extends Script
 
         if (!chicken.click("Cast"))
         {
-            chicken.click("Cast");
+            return false;
         }
 
-        sleepUntil(() -> Rs2Player.isAnimating() || Microbot.getVarbitPlayerValue(281) != 650, 2000);
+        sleepUntil(() -> Rs2Player.isAnimating()
+                || Rs2Player.isInteracting()
+                || Microbot.getVarbitPlayerValue(281) != 650, 1_500);
         return true;
     }
 
