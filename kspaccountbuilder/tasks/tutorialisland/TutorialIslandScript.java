@@ -1734,10 +1734,13 @@ public class TutorialIslandScript extends Script
         lastGeneratedName = "None";
         lastCharacterAction = "Waiting";
         lastExperienceSelection = "None";
-        lastSurvivalFiremakingActionAtMs = 0L;
-        lastSurvivalCookingActionAtMs = 0L;
         waitingForSurvivalFire = false;
-        lastBreadCookActionAtMs = 0L;
+        survivalCookingDispatched = false;
+        doughMixDispatched = false;
+        breadCookingDispatched = false;
+        treeActionDispatched = false;
+        fishingActionDispatched = false;
+        homeTeleportDispatched = false;
     }
 
     // -------------------------------------------------------------------------
