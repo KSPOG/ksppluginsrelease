@@ -42,7 +42,7 @@ public class FishingScript extends Script
 
     private static final int LOOP_DELAY_MS = 250;
     private static final int WEB_WALK_COOLDOWN_MS = 3_000;
-    private static final int NPC_INTERACTION_COOLDOWN_MS = 900;
+    private static final int NPC_INTERACTION_COOLDOWN_MS = 300;
     private static final int FISHING_SPOT_SEARCH_PADDING_TILES = 8;
     private static final int OUT_OF_AREA_SPOT_FALLBACK_RADIUS = 4;
     private static final int FISHING_SPOT_INTERACTION_DISTANCE = 8;
@@ -135,7 +135,7 @@ public class FishingScript extends Script
                 return;
             }
 
-            if (!hasRequiredSupplies(targetFish))
+            if (!hasRequiredSupplies(targetFish) || Rs2Bank.isOpen())
             {
                 state = FishingState.CHECKING_SUPPLIES;
                 prepareRequiredSupplies(targetFish);
@@ -145,12 +145,6 @@ public class FishingScript extends Script
             if (!ensureInTargetArea())
             {
                 state = FishingState.WALKING_TO_AREA;
-                return;
-            }
-
-            if (!isIdleInTargetArea())
-            {
-                state = FishingState.WAITING;
                 return;
             }
 
@@ -282,11 +276,6 @@ public class FishingScript extends Script
             return true;
         }
 
-        if (expectingCookingXpDrop && Rs2Player.waitForXpDrop(Skill.COOKING, 4_500))
-        {
-            return true;
-        }
-
         if (Rs2Widget.isProductionWidgetOpen()
                 || Rs2Widget.findWidget("How many would you like to cook?", null, false) != null)
         {
@@ -327,11 +316,7 @@ public class FishingScript extends Script
         }
 
         expectingCookingXpDrop = false;
-        if (Rs2Inventory.useItemOnObject(cookingBatchItemId, fire.getId()))
-        {
-            sleepUntil(() -> Rs2Widget.isProductionWidgetOpen()
-                    || Rs2Widget.findWidget("How many would you like to cook?", null, false) != null, 5_000);
-        }
+        Rs2Inventory.useItemOnObject(cookingBatchItemId, fire.getId());
         return true;
     }
 
@@ -359,15 +344,8 @@ public class FishingScript extends Script
 
     private void fishCurrentTarget()
     {
-        if (!isIdleInTargetArea())
+        if (!canStartFishingInTargetArea())
         {
-            KspTaskDebug.throttled(log, debugLogging, "Fishing", "not-idle", 2_000L,
-                    "waiting for idle before fishing | player={} moving={} animating={} interacting={} area={}",
-                    Rs2Player.getWorldLocation(),
-                    Rs2Player.isMoving(),
-                    Rs2Player.isAnimating(),
-                    Rs2Player.isInteracting(),
-                    targetArea.getDisplayName());
             return;
         }
 
@@ -430,16 +408,7 @@ public class FishingScript extends Script
                 Rs2Player.isAnimating(),
                 Rs2Player.isInteracting());
 
-        if (clicked)
-        {
-            boolean activityStarted = sleepUntil(() -> Rs2Player.isAnimating() || Rs2Player.isInteracting(), 1_200);
-            debug("Fishing post-click wait | activityStarted={} moving={} animating={} interacting={} player={}",
-                    activityStarted,
-                    Rs2Player.isMoving(),
-                    Rs2Player.isAnimating(),
-                    Rs2Player.isInteracting(),
-                    Rs2Player.getWorldLocation());
-        }
+
     }
 
     private boolean ensureInTargetArea()
@@ -538,39 +507,38 @@ public class FishingScript extends Script
     {
         ensureInventoryTabOpen();
 
-        if (!Rs2Bank.walkToBankAndUseBank() && !Rs2Bank.openBank())
-        {
-            debug("Could not open bank to prepare fishing supplies | fish={} player={}",
-                    fish.getDisplayName(),
-                    Rs2Player.getWorldLocation());
-            return false;
-        }
-
         if (!Rs2Bank.isOpen())
         {
+            if (!Rs2Bank.walkToBankAndUseBank() && !Rs2Bank.openBank())
+            {
+                debug("Could not open bank to prepare fishing supplies | fish={} player={}",
+                        fish.getDisplayName(), Rs2Player.getWorldLocation());
+            }
             return false;
         }
 
-        if (KspBankWidgetHelper.closeBankTutorialOverlayIfOpenAndWait())
+        if (KspBankWidgetHelper.closeBankTutorialOverlayIfOpen())
         {
             return false;
         }
 
         if (!KspBankMode.ensureWithdrawAsItem())
         {
-            debug("Waiting for withdraw-as-item mode before withdrawing fishing supplies");
             return false;
         }
 
         List<String> requiredItems = getRequiredItems(fish);
         Rs2Bank.depositAllExcept(requiredItems.toArray(new String[0]));
-        sleep(300);
 
         for (String itemName : requiredItems)
         {
             if (isCoins(itemName))
             {
-                ensureKaramjaCoins();
+                if (Rs2Inventory.itemQuantity(ItemID.COINS_995) < MIN_KARAMJA_COINS)
+                {
+                    ensureKaramjaCoins();
+                    return false;
+                }
                 continue;
             }
 
@@ -579,7 +547,7 @@ public class FishingScript extends Script
                 if (Rs2Inventory.count(itemName) <= 0 && Rs2Bank.count(itemName) > 0)
                 {
                     Rs2Bank.withdrawAll(itemName);
-                    sleepUntil(() -> Rs2Inventory.count(itemName) > 0 || Rs2Bank.count(itemName) <= 0, 2_000);
+                    return false;
                 }
                 continue;
             }
@@ -587,24 +555,17 @@ public class FishingScript extends Script
             if (!Rs2Inventory.hasItem(itemName) && Rs2Bank.count(itemName) > 0)
             {
                 Rs2Bank.withdrawOne(itemName);
-                sleepUntil(() -> Rs2Inventory.hasItem(itemName), 2_000);
+                return false;
             }
         }
 
-        boolean hasSupplies = hasRequiredSupplies(fish);
-        debug("Fishing supply preparation result | fish={} required={} hasSupplies={} inventoryFull={} bankOpen={}",
-                fish.getDisplayName(),
-                requiredItems,
-                hasSupplies,
-                Rs2Inventory.isFull(),
-                Rs2Bank.isOpen());
-
-        if (Rs2Bank.isOpen())
+        boolean ready = hasRequiredSupplies(fish);
+        if (ready && Rs2Bank.isOpen())
         {
             Rs2Bank.closeBank();
+            return false;
         }
-
-        return hasSupplies;
+        return ready;
     }
 
     private void bankFishOnly()
@@ -618,34 +579,20 @@ public class FishingScript extends Script
             return;
         }
 
-        if (!Rs2Bank.walkToBankAndUseBank() && !Rs2Bank.openBank())
-        {
-            debug("Could not open bank to deposit fish | player={}", Rs2Player.getWorldLocation());
-            return;
-        }
-
         if (!Rs2Bank.isOpen())
         {
+            Rs2Bank.walkToBankAndUseBank();
+            Rs2Bank.openBank();
             return;
         }
 
-        if (KspBankWidgetHelper.closeBankTutorialOverlayIfOpenAndWait())
+        if (KspBankWidgetHelper.closeBankTutorialOverlayIfOpen())
         {
             return;
         }
 
         List<String> requiredItems = getRequiredItems(targetFish);
         Rs2Bank.depositAllExcept(requiredItems.toArray(new String[0]));
-        sleepUntil(() -> !Rs2Inventory.isFull(), 2_000);
-        debug("Deposited fish | kept={} invFull={} bankOpen={}",
-                requiredItems,
-                Rs2Inventory.isFull(),
-                Rs2Bank.isOpen());
-
-        if (Rs2Bank.isOpen())
-        {
-            Rs2Bank.closeBank();
-        }
     }
 
     private void depositKaramjaFishOnly()
@@ -658,30 +605,14 @@ public class FishingScript extends Script
             return;
         }
 
-        if (!Rs2DepositBox.openDepositBox())
-        {
-            debug("Could not open Port Sarim deposit box | player={}", Rs2Player.getWorldLocation());
-            return;
-        }
-
-        sleepUntil(Rs2DepositBox::isOpen, 2_000);
         if (!Rs2DepositBox.isOpen())
         {
+            Rs2DepositBox.openDepositBox();
             return;
         }
 
         List<String> requiredItems = getRequiredItems(targetFish);
         Rs2DepositBox.depositAllExcept(requiredItems, false);
-        sleepUntil(() -> !Rs2Inventory.isFull(), 2_000);
-        debug("Deposited Karamja fish | kept={} invFull={} depositBoxOpen={}",
-                requiredItems,
-                Rs2Inventory.isFull(),
-                Rs2DepositBox.isOpen());
-
-        if (Rs2DepositBox.isOpen())
-        {
-            Rs2DepositBox.closeDepositBox();
-        }
     }
 
     private boolean hasRequiredSupplies(LevelReqs fish)
@@ -828,12 +759,11 @@ public class FishingScript extends Script
         }).orElse("");
     }
 
-    private boolean isIdleInTargetArea()
+    private boolean canStartFishingInTargetArea()
     {
         WorldPoint playerLocation = Rs2Player.getWorldLocation();
         return playerLocation != null
                 && targetArea.contains(playerLocation)
-                && !Rs2Player.isMoving()
                 && !Rs2Player.isAnimating()
                 && !Rs2Player.isInteracting();
     }
@@ -900,8 +830,6 @@ public class FishingScript extends Script
         }
 
         Rs2Bank.withdrawX(true, ItemID.COINS_995, amountToWithdraw);
-        sleepUntil(() -> Rs2Inventory.itemQuantity(ItemID.COINS_995) >= MIN_KARAMJA_COINS
-                || Rs2Bank.count(ItemID.COINS_995) <= 0, 2_000);
     }
 
     private WorldPoint getAreaCenter()
@@ -949,7 +877,6 @@ public class FishingScript extends Script
         if (Rs2Tab.getCurrentTab() != InterfaceTab.INVENTORY)
         {
             Rs2Tab.switchTo(InterfaceTab.INVENTORY);
-            sleepUntil(() -> Rs2Tab.getCurrentTab() == InterfaceTab.INVENTORY, 1_200);
         }
     }
 
