@@ -2384,6 +2384,34 @@ public class TutorialIslandScript extends Script
         return false;
     }
 
+    private boolean isInArea(WorldArea area)
+    {
+        WorldPoint location = Rs2Player.getWorldLocation();
+        return location != null && area.contains(location);
+    }
+
+    private boolean walkToQuestGuideDoorTile()
+    {
+        WorldPoint location = Rs2Player.getWorldLocation();
+
+        if (location != null && location.distanceTo(QUEST_GUIDE_WALK_TILE) <= 1)
+        {
+            KspWalkerGuard.clearActiveWalker("ksp_account_builder_tutorial_quest_door");
+            return true;
+        }
+
+        walkTutorialLocal(QUEST_GUIDE_WALK_TILE, 1);
+
+        location = Rs2Player.getWorldLocation();
+        if (location != null && location.distanceTo(QUEST_GUIDE_WALK_TILE) <= 1)
+        {
+            KspWalkerGuard.clearActiveWalker("ksp_account_builder_tutorial_quest_door");
+            return true;
+        }
+
+        return false;
+    }
+
     private boolean walkToArea(WorldArea area) { return walkToArea(area, randomPoint(area)); }
 
     private boolean walkToArea(WorldArea area, WorldPoint target)
