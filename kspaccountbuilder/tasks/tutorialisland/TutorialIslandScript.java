@@ -833,9 +833,9 @@ public class TutorialIslandScript extends Script
 
     private boolean talkToSurvivalExpert()
     {
-        if (!walkToArea(SURVIVAL_AREA))
+        if (isInDialogue())
         {
-            return false;
+            return true;
         }
 
         Rs2NpcModel npc = Microbot.getRs2NpcCache().query().fromWorldView().withId(NpcID.SURVIVAL_EXPERT).nearest();
@@ -845,7 +845,34 @@ public class TutorialIslandScript extends Script
             npc = Microbot.getRs2NpcCache().query().fromWorldView().withName("Survival Expert").nearest();
         }
 
-        return walkAndTalk(npc, 4);
+        WorldPoint playerLocation = Rs2Player.getWorldLocation();
+        WorldPoint npcLocation = npc != null ? npc.getWorldLocation() : null;
+
+        if (playerLocation == null)
+        {
+            return false;
+        }
+
+        if (npcLocation == null)
+        {
+            walkToArea(SURVIVAL_AREA);
+            return false;
+        }
+
+        if (playerLocation.distanceTo(npcLocation) > 4)
+        {
+            walkTutorialLocal(npcLocation, 4);
+            return false;
+        }
+
+        KspWalkerGuard.clearActiveWalker("ksp_account_builder_survival_expert");
+        if (!npc.click("Talk-to"))
+        {
+            return false;
+        }
+
+        sleepUntil(Rs2Dialogue::isInDialogue, 1_500);
+        return true;
     }
 
     private void cookingGuide()
