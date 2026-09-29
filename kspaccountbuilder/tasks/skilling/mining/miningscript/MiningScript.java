@@ -46,7 +46,7 @@ public class MiningScript extends Script
 
     private static final int LOOP_DELAY_MS = 250;
     private static final int WEB_WALK_COOLDOWN_MS = 3_000;
-    private static final int OBJECT_INTERACTION_COOLDOWN_MS = 900;
+    private static final int OBJECT_INTERACTION_COOLDOWN_MS = 300;
     private static final int ROCK_SEARCH_PADDING_TILES = 8;
     private static final int OUT_OF_AREA_ROCK_FALLBACK_RADIUS = 4;
     private static final int MID_TIER_RANDOM_MAX_LEVEL = 60;
@@ -273,7 +273,6 @@ public class MiningScript extends Script
             {
                 if (KspBankWidgetHelper.closeBankTutorialOverlayIfOpen())
                 {
-                    sleep(300);
                     return false;
                 }
 
@@ -283,10 +282,8 @@ public class MiningScript extends Script
                     return false;
                 }
 
-                String pickaxeToWithdraw = activePickaxeName;
-
                 Rs2Bank.withdrawOne(activePickaxeName);
-                sleepUntil(() -> Rs2Inventory.hasItem(pickaxeToWithdraw), 3_000);
+                return false;
             }
         }
 
@@ -300,10 +297,8 @@ public class MiningScript extends Script
                 return false;
             }
 
-            String pickaxeToWield = activePickaxeName;
-
             Rs2Inventory.wield(activePickaxeName);
-            sleepUntil(() -> Rs2Equipment.isWearing(pickaxeToWield), 2_000);
+            return false;
         }
 
         if (Rs2Bank.isOpen())
@@ -477,7 +472,6 @@ public class MiningScript extends Script
         if (Rs2Tab.getCurrentTab() != InterfaceTab.INVENTORY)
         {
             Rs2Tab.switchTo(InterfaceTab.INVENTORY);
-            sleepUntil(() -> Rs2Tab.getCurrentTab() == InterfaceTab.INVENTORY, 1_200);
         }
     }
 
@@ -515,29 +509,24 @@ public class MiningScript extends Script
             return;
         }
 
-        if (Rs2Bank.isOpen())
+        if (!Rs2Bank.isOpen())
         {
-            if (KspBankWidgetHelper.closeBankTutorialOverlayIfOpen())
-            {
-                sleep(300);
-                return;
-            }
+            return;
+        }
 
-            String pickaxeToKeep = resolveInventoryPickaxeToKeep(miningLevel);
+        if (KspBankWidgetHelper.closeBankTutorialOverlayIfOpen())
+        {
+            return;
+        }
 
-            if (pickaxeToKeep != null)
-            {
-                Rs2Bank.depositAllExcept(pickaxeToKeep);
-                sleepUntil(() -> !Rs2Inventory.isFull(), 2_000);
-            }
-            else
-            {
-                Rs2Bank.depositAll();
-                sleepUntil(() -> Rs2Inventory.isEmpty(), 2_000);
-            }
-
-            sleep(300);
-            closeBankIfOpen();
+        String pickaxeToKeep = resolveInventoryPickaxeToKeep(miningLevel);
+        if (pickaxeToKeep != null)
+        {
+            Rs2Bank.depositAllExcept(pickaxeToKeep);
+        }
+        else
+        {
+            Rs2Bank.depositAll();
         }
     }
 
@@ -620,7 +609,7 @@ public class MiningScript extends Script
         }
 
         Rs2Bank.closeBank();
-        return sleepUntil(() -> !Rs2Bank.isOpen(), 2_000);
+        return false;
     }
 
     private String resolveInventoryPickaxeToKeep(int miningLevel)
@@ -679,13 +668,6 @@ public class MiningScript extends Script
                     "player is under attack, waiting for combat to end | player={} interacting={}",
                     Rs2Player.getWorldLocation(),
                     Rs2Player.isInteracting());
-            return;
-        }
-
-        // Reset combat timer if player is no longer under attack
-        if (System.currentTimeMillis() - lastUnderAttackAtMs < 5_000)
-        {
-            debug("Waiting for player to recover from combat");
             return;
         }
 
@@ -752,17 +734,7 @@ public class MiningScript extends Script
                 Rs2Player.isAnimating(),
                 Rs2Player.isInteracting());
 
-        if (interactionStarted)
-        {
-            boolean activityStarted = sleepUntil(() -> Rs2Player.isAnimating() || Rs2Player.isInteracting(), 1_200);
-            debug("Rock post-click wait | activityStarted={} moving={} animating={} interacting={} player={}",
-                    activityStarted,
-                    Rs2Player.isMoving(),
-                    Rs2Player.isAnimating(),
-                    Rs2Player.isInteracting(),
-                    Rs2Player.getWorldLocation());
-        }
-        else
+        if (!interactionStarted)
         {
             debug("Rock interaction was not accepted by tile object API | objectName={} id={} loc={}",
                     targetRock.getName(),
