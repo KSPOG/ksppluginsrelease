@@ -67,6 +67,8 @@ public class TutorialIslandScript extends Script
     private static final int QUEUED_LOGIN_EMAIL_PASSWORD_DELAY_MIN_MS = 1400;
     private static final int QUEUED_LOGIN_EMAIL_PASSWORD_DELAY_MAX_MS = 2600;
     private static final long SURVIVAL_ACTION_COOLDOWN_MS = 600L;
+    private static final long SURVIVAL_FIRE_APPEAR_TIMEOUT_MS = 5_000L;
+    private static final long BREAD_COOK_RETRY_MS = 3_000L;
 
     private static final int NAME_CREATION_GROUP = 558;
     private static final int NAME_CREATION_CONTAINER_CHILD = 2;
@@ -143,6 +145,8 @@ public class TutorialIslandScript extends Script
     private WorldPoint ownFireLocation;
     private long lastSurvivalFiremakingActionAtMs;
     private long lastSurvivalCookingActionAtMs;
+    private boolean waitingForSurvivalFire;
+    private long lastBreadCookActionAtMs;
 
     public boolean run()
     {
@@ -219,7 +223,11 @@ public class TutorialIslandScript extends Script
                     return;
                 }
 
-                if (Rs2Player.isMoving() || Rs2Player.isAnimating())
+                int tutorialProgress = Microbot.getVarbitPlayerValue(281);
+                boolean fastTutorialTransition = status == Status.SURVIVAL_GUIDE
+                        || (status == Status.COOKING_GUIDE && tutorialProgress < 200);
+
+                if (!fastTutorialTransition && (Rs2Player.isMoving() || Rs2Player.isAnimating()))
                 {
                     return;
                 }
@@ -734,36 +742,83 @@ public class TutorialIslandScript extends Script
             return;
         }
 
-        if (progress <= 90)
+        // As soon as the cooked shrimp exists, leave Survival immediately.
+        // Do not wait for the cooking animation or the varbit/status update.
+        if (Rs2Inventory.hasItem(ItemID.SHRIMPS) || progress >= 120)
         {
-            if (!Rs2Inventory.hasItem("Bronze Axe") || !Rs2Inventory.hasItem("Tinderbox"))
-            {
-                talkToSurvivalExpert();
-                return;
-            }
-            if (!Rs2Inventory.hasItem(ItemID.RAW_SHRIMPS_2514))
-            {
-                ownFireLocation = null;
-                fishShrimp();
-                return;
-            }
-            boolean firePresent = ownFireLocation != null && hasNearbyFire();
-            if (!firePresent && !Rs2Inventory.hasItem("Logs"))
-            {
-                ownFireLocation = null;
-                cutTree();
-                return;
-            }
-            if (!firePresent)
-            {
-                lightFire();
-                return;
-            }
-            cookShrimpOnOwnFire();
+            waitingForSurvivalFire = false;
+            walkTutorialLocal(COOKING_AREA_WALK_TILE, 3);
             return;
         }
 
-        debug("Waiting for Survival Guide progress update | progress=%d", progress);
+        if (!Rs2Inventory.hasItem("Bronze Axe") || !Rs2Inventory.hasItem("Tinderbox"))
+        {
+            talkToSurvivalExpert();
+            return;
+        }
+
+        Rs2TileObjectModel fire = findTutorialFire();
+
+        // Once Tinderbox + Logs was dispatched, never chop another tree while
+        // waiting for the fire object to materialize. Poll every 250ms instead.
+        if (waitingForSurvivalFire)
+        {
+            if (fire != null)
+            {
+                waitingForSurvivalFire = false;
+                if (Rs2Inventory.hasItem(ItemID.RAW_SHRIMPS_2514))
+                {
+                    cookShrimpOnFire(fire);
+                }
+                return;
+            }
+
+            if (System.currentTimeMillis() - lastSurvivalFiremakingActionAtMs
+                    < SURVIVAL_FIRE_APPEAR_TIMEOUT_MS)
+            {
+                return;
+            }
+
+            waitingForSurvivalFire = false;
+        }
+
+        // Fire visible -> use raw shrimp immediately, even if the tutorial
+        // progress varbit has not advanced to 90 yet.
+        if (fire != null)
+        {
+            if (Rs2Inventory.hasItem(ItemID.RAW_SHRIMPS_2514))
+            {
+                cookShrimpOnFire(fire);
+                return;
+            }
+
+            // A burned shrimp removes the raw shrimp while progress remains in
+            // the Survival section. Catch another one while the fire is alive.
+            if (!Rs2Inventory.hasItem(ItemID.SHRIMPS))
+            {
+                fishShrimp();
+            }
+            return;
+        }
+
+        // The first scheduler cycle that sees Logs lights them immediately,
+        // regardless of whether the varbit has advanced from 70 to 80 yet.
+        if (Rs2Inventory.hasItem("Logs"))
+        {
+            lightFire();
+            return;
+        }
+
+        // No logs/fire/cooked shrimp: obtain a log. If a raw shrimp was burned,
+        // fishing is handled above while a fire exists; otherwise keep the
+        // tutorial's normal woodcutting progression.
+        if (progress >= 90 && !Rs2Inventory.hasItem(ItemID.RAW_SHRIMPS_2514))
+        {
+            fishShrimp();
+            return;
+        }
+
+        cutTree();
     }
 
     private boolean configureCameraAfterGielinorGuide()
@@ -909,11 +964,7 @@ public class TutorialIslandScript extends Script
         {
             if (!Rs2Inventory.contains("Bread dough") && !Rs2Inventory.contains("Bread"))
             {
-                if (Rs2Inventory.combine("Bucket of water", "Pot of flour"))
-                {
-                    sleepUntil(() -> Rs2Inventory.contains("Bread dough")
-                            || Microbot.getVarbitPlayerValue(281) >= 160, 1_500);
-                }
+                Rs2Inventory.combine("Bucket of water", "Pot of flour");
                 return;
             }
 
@@ -942,22 +993,23 @@ public class TutorialIslandScript extends Script
                     return;
                 }
 
-                if (!Rs2Inventory.interact("Bread dough"))
+                long now = System.currentTimeMillis();
+                if (lastBreadCookActionAtMs != 0L
+                        && now - lastBreadCookActionAtMs < BREAD_COOK_RETRY_MS)
                 {
                     return;
                 }
 
-                if (range.click("Use"))
+                if (Rs2Inventory.useItemOnObject(ItemID.BREAD_DOUGH, range.getId()))
                 {
-                    sleepUntil(() -> Rs2Player.isAnimating()
-                            || Rs2Inventory.contains("Bread")
-                            || Microbot.getVarbitPlayerValue(281) >= 170, 1_500);
+                    lastBreadCookActionAtMs = now;
                 }
                 return;
             }
 
             if (Rs2Inventory.contains("Bread"))
             {
+                lastBreadCookActionAtMs = 0L;
                 openTutorialPassageAndWalk(
                         9710,
                         QUEST_GUIDE_WALK_TILE,
@@ -1661,6 +1713,8 @@ public class TutorialIslandScript extends Script
         lastExperienceSelection = "None";
         lastSurvivalFiremakingActionAtMs = 0L;
         lastSurvivalCookingActionAtMs = 0L;
+        waitingForSurvivalFire = false;
+        lastBreadCookActionAtMs = 0L;
     }
 
     // -------------------------------------------------------------------------
@@ -1800,7 +1854,8 @@ public class TutorialIslandScript extends Script
     private void lightFire()
     {
         long now = System.currentTimeMillis();
-        if (now - lastSurvivalFiremakingActionAtMs < SURVIVAL_ACTION_COOLDOWN_MS)
+        if (waitingForSurvivalFire
+                || now - lastSurvivalFiremakingActionAtMs < SURVIVAL_ACTION_COOLDOWN_MS)
         {
             return;
         }
@@ -1821,7 +1876,7 @@ public class TutorialIslandScript extends Script
             return;
         }
 
-        if (!Rs2Inventory.combine("Logs", "Tinderbox"))
+        if (!Rs2Inventory.combine("Tinderbox", "Logs"))
         {
             debug("Failed to start Tutorial Island firemaking interaction.");
             return;
@@ -1829,6 +1884,7 @@ public class TutorialIslandScript extends Script
 
         lastSurvivalFiremakingActionAtMs = now;
         ownFireLocation = fireLocation;
+        waitingForSurvivalFire = true;
     }
 
     private void cutTree()
@@ -1921,7 +1977,16 @@ public class TutorialIslandScript extends Script
 
     private void cookShrimpOnOwnFire()
     {
-        if (!Rs2Inventory.hasItem(ItemID.RAW_SHRIMPS_2514))
+        Rs2TileObjectModel fire = findTutorialFire();
+        if (fire != null)
+        {
+            cookShrimpOnFire(fire);
+        }
+    }
+
+    private void cookShrimpOnFire(Rs2TileObjectModel fire)
+    {
+        if (fire == null || !Rs2Inventory.hasItem(ItemID.RAW_SHRIMPS_2514))
         {
             return;
         }
@@ -1929,18 +1994,6 @@ public class TutorialIslandScript extends Script
         long now = System.currentTimeMillis();
         if (now - lastSurvivalCookingActionAtMs < SURVIVAL_ACTION_COOLDOWN_MS)
         {
-            return;
-        }
-
-        Rs2TileObjectModel fire = Microbot.getRs2TileObjectCache()
-                .query()
-                .fromWorldView()
-                .withId(ObjectID.FIRE_26185)
-                .nearestOnClientThread();
-
-        if (fire == null)
-        {
-            ownFireLocation = null;
             return;
         }
 
@@ -1956,6 +2009,22 @@ public class TutorialIslandScript extends Script
         }
 
         lastSurvivalCookingActionAtMs = now;
+    }
+
+    private Rs2TileObjectModel findTutorialFire()
+    {
+        WorldPoint origin = ownFireLocation != null ? ownFireLocation : Rs2Player.getWorldLocation();
+        if (origin == null)
+        {
+            return null;
+        }
+
+        return Microbot.getRs2TileObjectCache()
+                .query()
+                .fromWorldView()
+                .withId(ObjectID.FIRE_26185)
+                .within(origin, 3)
+                .nearestOnClientThread();
     }
 
     private boolean hasNearbyFire() { return Microbot.getRs2TileObjectCache().query().fromWorldView().withId(ObjectID.FIRE_26185).nearest() != null; }
