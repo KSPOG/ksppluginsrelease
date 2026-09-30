@@ -19,8 +19,8 @@ import net.runelite.client.plugins.microbot.util.walker.StrongholdAnswer;
 @Singleton
 public class SoCScript extends Script
 {
-    private static final int LOOP_DELAY_MS = 250;
-    private static final int WALK_REFIRE_MS = 3_000;
+    private static final int LOOP_DELAY_MS = 100;
+    private static final int WALK_REFIRE_MS = 1_000;
     private static final int HEAL_PERCENT = 55;
     private static final int GIFT_OF_PEACE_OBJECT_ID = 20_656;
     private static final int GRAIN_OF_PLENTY_OBJECT_ID = 1_900;
