@@ -388,16 +388,6 @@ public class MiningScript extends Script
             return true;
         }
 
-        if (Rs2Player.isMoving())
-        {
-            KspTaskDebug.throttled(log, debugLogging, "Mining", "walk-moving", 3_000L,
-                    "waiting for walker | player={} targetArea={} walkerTarget={}",
-                    playerLocation,
-                    targetArea.getDisplayName(),
-                    Rs2Walker.getCurrentTarget());
-            return false;
-        }
-
         Microbot.status = "Walking to " + targetArea.getDisplayName();
 
         if (KspWalkerGuard.walkToDestination(
