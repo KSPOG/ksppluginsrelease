@@ -36,9 +36,9 @@ public class FireMakingScript extends Script
 
     private static final int LOOP_DELAY_MS = 100;
     private static final int WEB_WALK_COOLDOWN_MS = 1_000;
-    private static final int FIRE_INTERACT_COOLDOWN_MS = 300;
-    private static final int FIRE_START_GRACE_MS = 900;
-    private static final int BURN_PROMPT_ACTION_COOLDOWN_MS = 300;
+    private static final int FIRE_INTERACT_COOLDOWN_MS = 100;
+    private static final int FIRE_START_GRACE_MS = 600;
+    private static final int BURN_PROMPT_ACTION_COOLDOWN_MS = 100;
     private static final int CAMPFIRE_DISTANCE = 6;
     private static final int NEARBY_CAMPFIRE_SCAN_RADIUS = 12;
 
@@ -108,8 +108,7 @@ public class FireMakingScript extends Script
             else if (expectingFiremakingXpDrop
                     && fireLocation == null
                     && !isBurnInterfaceOpen(targetLogName, getTargetLogId(targetLogName))
-                    && !Rs2Player.isAnimating()
-                    && !Rs2Player.isInteracting())
+                    && !Rs2Player.isAnimating())
             {
                 resetFireInteractionState("active fire disappeared");
             }
@@ -120,7 +119,7 @@ public class FireMakingScript extends Script
             // full timeout while a usable fire was already on the ground.
             if (expectingFiremakingXpDrop
                     && fireLocation == null
-                    && (Rs2Player.isAnimating() || Rs2Player.isInteracting()))
+                    && Rs2Player.isAnimating())
             {
                 debug("Firemaking action still active with {}", targetLogName);
                 return;
@@ -405,7 +404,7 @@ public class FireMakingScript extends Script
             return;
         }
 
-        if (Rs2Player.isAnimating() || Rs2Player.isInteracting()) return;
+        if (Rs2Player.isAnimating()) return;
 
         long now = System.currentTimeMillis();
         if (now - lastFireInteractAtMs < FIRE_INTERACT_COOLDOWN_MS) return;
@@ -670,7 +669,7 @@ public class FireMakingScript extends Script
             return false;
         }
 
-        if (Rs2Player.isAnimating() || Rs2Player.isInteracting())
+        if (Rs2Player.isAnimating())
         {
             return true;
         }
@@ -711,8 +710,7 @@ public class FireMakingScript extends Script
         WorldPoint player = Rs2Player.getWorldLocation();
         return player != null
                 && targetArea.toWorldArea().contains(player)
-                && !Rs2Player.isAnimating()
-                && !Rs2Player.isInteracting();
+                && !Rs2Player.isAnimating();
     }
 
     private boolean isIdleNearCampfire(WorldPoint fireLocation)
@@ -722,8 +720,7 @@ public class FireMakingScript extends Script
                 && fireLocation != null
                 && isInTargetArea(fireLocation)
                 && Rs2Player.distanceTo(fireLocation) <= CAMPFIRE_DISTANCE
-                && !Rs2Player.isAnimating()
-                && !Rs2Player.isInteracting();
+                && !Rs2Player.isAnimating();
     }
 
     private WorldPoint findUsableFireLocation()
