@@ -13,8 +13,8 @@ public final class KspWalkerGuard
 {
     private static final int SAME_TARGET_DISTANCE = 8;
     private static final int CANVAS_RECOVERY_STEP_TILES = 4;
-    private static final long CLEAR_COOLDOWN_MS = 1_500L;
-    private static final long WALK_IDLE_RECOVERY_MS = 5_000L;
+    private static final long CLEAR_COOLDOWN_MS = 500L;
+    private static final long WALK_IDLE_RECOVERY_MS = 1_500L;
     private static final Map<String, WalkRequest> WALK_REQUESTS = new ConcurrentHashMap<>();
     private static volatile long lastGlobalClearAtMs;
     private static WorldPoint lastObservedPosition;
