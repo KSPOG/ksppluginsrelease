@@ -43,9 +43,7 @@ public class BuyScript extends Script {
 
     private static final int LOOP_DELAY_MS = 100;
     private static final int WEB_WALK_COOLDOWN_MS = 1_000;
-    private static final int ACTION_COOLDOWN_MS = 400;
-    private static final int BANK_WAIT_TIMEOUT_MS = 3000;
-    private static final int GE_OFFER_INPUT_DELAY_MS = 900;
+    private static final int ACTION_COOLDOWN_MS = 300;
 
     private static final int TARGET_SMITHING_LEVEL = Buy.TARGET_SMITHING_LEVEL;
     private static final int TARGET_SMITHING_XP = Buy.TARGET_SMITHING_XP;
