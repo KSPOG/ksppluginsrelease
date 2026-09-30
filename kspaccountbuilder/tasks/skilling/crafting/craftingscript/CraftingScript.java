@@ -35,7 +35,6 @@ public class CraftingScript extends Script
     private static final int WALK_COOLDOWN_MS = 1_000;
     private static final int FURNACE_SEARCH_RADIUS = 12;
     private static final int ACTION_COOLDOWN_MS = 300;
-    private static final int PRODUCTION_START_TIMEOUT_MS = 2_500;
 
     private volatile CraftingState state = CraftingState.WAITING;
     private volatile CraftingLevels targetLevel = CraftingLevels.LEATHER_GLOVES;
