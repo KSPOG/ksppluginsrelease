@@ -289,10 +289,6 @@ extends Script {
 
         this.markExistingTargetAreaWalkIfActive();
 
-        if (Rs2Player.isMoving()) {
-            return false;
-        }
-
         if (KspWalkerGuard.walkToDestination(
                 TARGET_AREA_WALK_KEY,
                 this::getTargetAreaWalkPoint,
