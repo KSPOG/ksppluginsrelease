@@ -38,7 +38,7 @@ public class WoodCuttingScript extends Script {
 
     private static final int LOOP_DELAY_MS = 100;
     private static final int WEB_WALK_COOLDOWN_MS = 1_000;
-    private static final int OBJECT_INTERACTION_COOLDOWN_MS = 300;
+    private static final int OBJECT_INTERACTION_COOLDOWN_MS = 100;
     private static final long BANK_ACTION_COOLDOWN_MS = 500L;
     private static final int TREE_SEARCH_PADDING_TILES = 8;
     private static final int OUT_OF_AREA_TREE_FALLBACK_RADIUS = 4;
@@ -407,7 +407,7 @@ public class WoodCuttingScript extends Script {
     }
 
     private void interactWithBestWillowAfterBank() {
-        if (Rs2Bank.isOpen() || Rs2Player.isAnimating() || Rs2Player.isInteracting()) return;
+        if (Rs2Bank.isOpen() || Rs2Player.isAnimating()) return;
 
         WorldPoint player = Rs2Player.getWorldLocation();
         if (player == null) return;
@@ -479,8 +479,7 @@ public class WoodCuttingScript extends Script {
         WorldPoint player = Rs2Player.getWorldLocation();
         return player != null
                 && targetArea.contains(player)
-                && !Rs2Player.isAnimating()
-                && !Rs2Player.isInteracting();
+                && !Rs2Player.isAnimating();
     }
 
     private boolean bankActionReady() {
