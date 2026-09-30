@@ -44,9 +44,9 @@ public class MiningScript extends Script
 {
     private static final Logger log = LoggerFactory.getLogger(MiningScript.class);
 
-    private static final int LOOP_DELAY_MS = 250;
-    private static final int WEB_WALK_COOLDOWN_MS = 3_000;
-    private static final int OBJECT_INTERACTION_COOLDOWN_MS = 350;
+    private static final int LOOP_DELAY_MS = 100;
+    private static final int WEB_WALK_COOLDOWN_MS = 1_000;
+    private static final int OBJECT_INTERACTION_COOLDOWN_MS = 300;
     private static final long BANK_ACTION_COOLDOWN_MS = 500L;
     private static final int ROCK_SEARCH_PADDING_TILES = 8;
     private static final int OUT_OF_AREA_ROCK_FALLBACK_RADIUS = 4;
@@ -386,16 +386,6 @@ public class MiningScript extends Script
         {
             clearTargetAreaWalkIfNeeded(area);
             return true;
-        }
-
-        if (Rs2Player.isMoving())
-        {
-            KspTaskDebug.throttled(log, debugLogging, "Mining", "walk-moving", 3_000L,
-                    "waiting for walker | player={} targetArea={} walkerTarget={}",
-                    playerLocation,
-                    targetArea.getDisplayName(),
-                    Rs2Walker.getCurrentTarget());
-            return false;
         }
 
         Microbot.status = "Walking to " + targetArea.getDisplayName();

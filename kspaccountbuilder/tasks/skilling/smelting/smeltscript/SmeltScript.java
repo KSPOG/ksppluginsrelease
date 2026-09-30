@@ -46,14 +46,10 @@ import org.slf4j.LoggerFactory;
 public class SmeltScript
 extends Script {
     private static final Logger log = LoggerFactory.getLogger(SmeltScript.class);
-    private static final int INVENTORY_SLOTS = 28;
-    private static final int LOOP_DELAY_MS = 250;
-    private static final int WEB_WALK_COOLDOWN_MS = 3000;
-    private static final int FURNACE_INTERACT_COOLDOWN_MS = 350;
-    private static final int SMELT_START_GRACE_MS = 1500;
-    private static final int SMELT_ANIMATION_COOLDOWN_MS = 1800;
-    private static final int PRODUCTION_WIDGET_GROUP_ID = 270;
-    private static final int PRODUCTION_WIDGET_CONTAINER_CHILD_ID = 13;
+    private static final int LOOP_DELAY_MS = 100;
+    private static final int WEB_WALK_COOLDOWN_MS = 1_000;
+    private static final int FURNACE_INTERACT_COOLDOWN_MS = 300;
+    private static final int SMELT_START_GRACE_MS = 900;
     private long lastWebWalkAtMs;
     private long lastFurnaceInteractAtMs;
     private long awaitingSmeltStartAtMs;
@@ -284,9 +280,6 @@ extends Script {
         if (this.targetArea.toWorldArea().contains(Rs2Player.getWorldLocation())) {
             this.clearTargetAreaWalkIfNeeded();
             return true;
-        }
-        if (Rs2Player.isMoving()) {
-            return false;
         }
         if (KspWalkerGuard.walkToDestination(
                 "Smelting:target-area",

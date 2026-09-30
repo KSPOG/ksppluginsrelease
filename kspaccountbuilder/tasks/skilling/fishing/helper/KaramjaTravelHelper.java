@@ -47,7 +47,7 @@ public final class KaramjaTravelHelper
     private static final int NPC_REACH_DISTANCE = 3;
     private static final int FISHING_AREA_DISTANCE = 5;
     private static final int DEPOSIT_AREA_DISTANCE = 6;
-    private static final long WALK_REFIRE_COOLDOWN_MS = 3_000L;
+    private static final long WALK_REFIRE_COOLDOWN_MS = 1_000L;
     private static final long TRAVEL_TRANSITION_TIMEOUT_MS = 15_000L;
 
     private static final String WALK_KEY_TO_PORT_SARIM_TRAVEL = "ksp_fishing_karamja_port_sarim_travel";

@@ -37,10 +37,9 @@ import java.util.concurrent.TimeUnit;
 @Singleton
 public class CooksScript extends Script {
     private static final Logger log = LoggerFactory.getLogger(CooksScript.class);
-    private static final int LOOP_DELAY_MS = 250;
-    private static final int WALK_REFIRE_COOLDOWN_MS = 3_500;
-    private static final int GE_OFFER_INPUT_DELAY_MS = 900;
-    private static final int ACTION_COOLDOWN_MS = 650;
+    private static final int LOOP_DELAY_MS = 100;
+    private static final int WALK_REFIRE_COOLDOWN_MS = 1_000;
+    private static final int ACTION_COOLDOWN_MS = 300;
     private static final int MIN_QUEST_BUY_PRICE = 1_000;
     private static final int MAX_QUEST_BUY_PRICE = 2_000;
     private static final int NPC_REACH_DISTANCE = 5;
@@ -126,7 +125,7 @@ public class CooksScript extends Script {
             return;
         }
 
-        if (Rs2Player.isMoving() || Rs2Player.isAnimating()) {
+        if (Rs2Player.isAnimating()) {
             return;
         }
 

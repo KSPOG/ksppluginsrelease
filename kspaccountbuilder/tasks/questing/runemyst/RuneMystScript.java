@@ -20,10 +20,10 @@ import org.slf4j.LoggerFactory;
 public class RuneMystScript extends Script
 {
     private static final Logger log = LoggerFactory.getLogger(RuneMystScript.class);
-    private static final int LOOP_DELAY_MS = 250;
+    private static final int LOOP_DELAY_MS = 100;
     private static final int NPC_REACH_DISTANCE = 4;
-    private static final long WALK_REFIRE_COOLDOWN_MS = 3_500L;
-    private static final long ACTION_COOLDOWN_MS = 650L;
+    private static final long WALK_REFIRE_COOLDOWN_MS = 1_000L;
+    private static final long ACTION_COOLDOWN_MS = 300L;
 
     private static final int AIR_TALISMAN_ID = 1438;
     private static final int RESEARCH_PACKAGE_ID = 290;
@@ -103,7 +103,7 @@ public class RuneMystScript extends Script
             return;
         }
 
-        if (Rs2Player.isMoving() || Rs2Player.isAnimating())
+        if (Rs2Player.isAnimating())
         {
             return;
         }

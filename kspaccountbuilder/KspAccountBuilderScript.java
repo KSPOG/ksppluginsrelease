@@ -105,7 +105,7 @@ public class KspAccountBuilderScript extends Script
         private int getSelectionWeight() { return selectionWeight; }
     }
 
-    private static final int LOOP_DELAY_MS = 250;
+    private static final int LOOP_DELAY_MS = 100;
     private static final String EXTERNAL_AUTO_LOGIN_PLUGIN_CLASS = "net.runelite.client.plugins.microbot.accountselector.AutoLoginPlugin";
     // Camera values recovered from the supplied Account Builder 1.5.200 bytecode.
     private static final int POST_TUTORIAL_BANK_CAMERA_PITCH = 2821;
@@ -125,8 +125,6 @@ public class KspAccountBuilderScript extends Script
     private static final long PLAY_TIME_READ_RETRY_MS = TimeUnit.SECONDS.toMillis(1);
     private static final long BREAK_LOGOUT_COMBAT_GRACE_MS = TimeUnit.SECONDS.toMillis(11);
     private static final long TASK_SWITCH_ACTION_COOLDOWN_MS = 500L;
-    private static final String BRONZE_SWORD = "Bronze sword";
-    private static final String WOODEN_SHIELD = "Wooden shield";
     private static final int DRAYNOR_CORRIDOR_MIN_X = 3050;
     private static final int DRAYNOR_CORRIDOR_MAX_X = 3135;
     private static final int DRAYNOR_CORRIDOR_MIN_Y = 3230;

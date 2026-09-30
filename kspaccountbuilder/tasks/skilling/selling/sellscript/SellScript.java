@@ -72,12 +72,9 @@ import org.slf4j.LoggerFactory;
 public class SellScript
 extends Script {
     private static final Logger log = LoggerFactory.getLogger(SellScript.class);
-    private static final int LOOP_DELAY_MS = 250;
-    private static final int WEB_WALK_COOLDOWN_MS = 3000;
-    private static final int ACTION_COOLDOWN_MS = 400;
-    private static final int GE_OFFER_INPUT_DELAY_MS = 900;
-    private static final int INVENTORY_WAIT_TIMEOUT_MS = 3000;
-    private static final int OFFER_SCREEN_WAIT_TIMEOUT_MS = 3000;
+    private static final int LOOP_DELAY_MS = 100;
+    private static final int WEB_WALK_COOLDOWN_MS = 1_000;
+    private static final int ACTION_COOLDOWN_MS = 300;
     private static final int TRADE_RESTRICTION_CACHE_MS = 10000;
     private static final int TRADE_RESTRICTION_MIN_TOTAL_LEVEL = 100;
     private static final int TRADE_RESTRICTION_MIN_QUEST_POINTS = 10;
@@ -637,11 +634,7 @@ extends Script {
         return offered;
     }
 
-    private void waitForGrandExchangeOfferInput() {
-        // processOffer is stateful; the scheduler observes the next GE state on the next tick.
-    }
-
-    private void returnToGrandExchangeOverview() {
+        private void returnToGrandExchangeOverview() {
         if (System.currentTimeMillis() - lastActionAtMs < ACTION_COOLDOWN_MS) return;
         Rs2GrandExchange.backToOverview();
         lastActionAtMs = System.currentTimeMillis();

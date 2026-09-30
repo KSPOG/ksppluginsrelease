@@ -41,11 +41,9 @@ import org.slf4j.LoggerFactory;
 public class BuyScript extends Script {
     private static final Logger log = LoggerFactory.getLogger(BuyScript.class);
 
-    private static final int LOOP_DELAY_MS = 250;
-    private static final int WEB_WALK_COOLDOWN_MS = 3000;
-    private static final int ACTION_COOLDOWN_MS = 400;
-    private static final int BANK_WAIT_TIMEOUT_MS = 3000;
-    private static final int GE_OFFER_INPUT_DELAY_MS = 900;
+    private static final int LOOP_DELAY_MS = 100;
+    private static final int WEB_WALK_COOLDOWN_MS = 1_000;
+    private static final int ACTION_COOLDOWN_MS = 300;
 
     private static final int TARGET_SMITHING_LEVEL = Buy.TARGET_SMITHING_LEVEL;
     private static final int TARGET_SMITHING_XP = Buy.TARGET_SMITHING_XP;
@@ -1191,8 +1189,6 @@ public class BuyScript extends Script {
             return false;
         }
 
-        this.waitForActionCooldown();
-
         Microbot.status = "Buying " + quantity + "x " + itemName;
 
         int buyPrice = this.getAdjustedBuyPrice(itemName);
@@ -1209,8 +1205,6 @@ public class BuyScript extends Script {
                 .price(buyPrice)
                 .closeAfterCompletion(false)
                 .build();
-
-        this.waitForGrandExchangeOfferInput();
 
         boolean offered = Rs2GrandExchange.processOffer(request);
 
@@ -1238,8 +1232,6 @@ public class BuyScript extends Script {
             return false;
         }
 
-        this.waitForActionCooldown();
-
         Microbot.status = "Buying " + quantity + "x " + itemName;
 
         int buyPrice = this.getAdjustedBuyPrice(itemName);
@@ -1256,8 +1248,6 @@ public class BuyScript extends Script {
                 .price(buyPrice)
                 .closeAfterCompletion(false)
                 .build();
-
-        this.waitForGrandExchangeOfferInput();
 
         boolean offered = Rs2GrandExchange.processOffer(request);
 
@@ -1649,8 +1639,6 @@ public class BuyScript extends Script {
             return false;
         }
 
-        this.waitForActionCooldown();
-
         Microbot.status = "Selling " + item.getName();
 
         GrandExchangeRequest request = GrandExchangeRequest.builder()
@@ -1660,8 +1648,6 @@ public class BuyScript extends Script {
                 .percent(-10)
                 .closeAfterCompletion(false)
                 .build();
-
-        this.waitForGrandExchangeOfferInput();
 
         boolean offered = Rs2GrandExchange.processOffer(request);
 
@@ -1686,8 +1672,6 @@ public class BuyScript extends Script {
             return false;
         }
 
-        this.waitForActionCooldown();
-
         Microbot.status = "Buying " + itemName;
         int buyPrice = this.getAdjustedBuyPrice(itemName);
         if (!this.canAffordQuantity(1, buyPrice)) {
@@ -1706,8 +1690,6 @@ public class BuyScript extends Script {
                 .price(buyPrice)
                 .closeAfterCompletion(false)
                 .build();
-
-        this.waitForGrandExchangeOfferInput();
 
         boolean offered = Rs2GrandExchange.processOffer(request);
 
@@ -1797,15 +1779,7 @@ public class BuyScript extends Script {
         return false;
     }
 
-    private void waitForActionCooldown() {
-        // Non-blocking: offer methods gate on lastActionAtMs before dispatch.
-    }
-
-    private void waitForGrandExchangeOfferInput() {
-        // processOffer handles the offer UI; the next 250 ms tick observes the result.
-    }
-
-    private void syncPendingMissingToolBuysFromActiveOffers(String desiredPickaxe, String desiredAxe) {
+            private void syncPendingMissingToolBuysFromActiveOffers(String desiredPickaxe, String desiredAxe) {
         for (GrandExchangeSlots slot : Rs2GrandExchange.getActiveOfferSlots()) {
             GrandExchangeOfferDetails details = Rs2GrandExchange.getOfferDetails(slot);
 
