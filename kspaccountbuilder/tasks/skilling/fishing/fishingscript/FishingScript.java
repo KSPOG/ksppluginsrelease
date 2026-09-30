@@ -359,16 +359,6 @@ public class FishingScript extends Script
             return KaramjaTravelHelper.travelToKaramjaFishingSpot();
         }
 
-        if (Rs2Player.isMoving())
-        {
-            KspTaskDebug.throttled(log, debugLogging, "Fishing", "walk-moving", 3_000L,
-                    "waiting for walker | player={} targetArea={} walkerTarget={}",
-                    playerLocation,
-                    targetArea.getDisplayName(),
-                    Rs2Walker.getCurrentTarget());
-            return false;
-        }
-
         Microbot.status = "Walking to " + targetArea.getDisplayName();
         if (KspWalkerGuard.walkToDestination(
                 WALK_KEY_TO_FISHING_AREA,
