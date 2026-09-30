@@ -32,7 +32,7 @@ public class EssenceMining extends Script
     private static final int NPC_REACH_DISTANCE = 5;
     private static final int PORTAL_APPROACH_DISTANCE = 6;
     private static final long WALK_REFIRE_COOLDOWN_MS = 1_000L;
-    private static final long ACTION_COOLDOWN_MS = 300L;
+    private static final long ACTION_COOLDOWN_MS = 100L;
     private static final WorldPoint AUBURY_POSITION = new WorldPoint(3253, 3399, 0);
     private static final WorldPoint[] ESSENCE_MINE_PORTAL_LOCATIONS = {
             new WorldPoint(2932, 4854, 0),
@@ -200,7 +200,7 @@ public class EssenceMining extends Script
     {
         state = EssenceState.MINING;
         status = "Mining rune essence";
-        if (Rs2Player.isAnimating() || Rs2Player.isInteracting() || !canAct())
+        if (Rs2Player.isAnimating() || !canAct())
         {
             return;
         }
