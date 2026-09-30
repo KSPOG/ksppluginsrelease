@@ -105,7 +105,7 @@ public class KspAccountBuilderScript extends Script
         private int getSelectionWeight() { return selectionWeight; }
     }
 
-    private static final int LOOP_DELAY_MS = 250;
+    private static final int LOOP_DELAY_MS = 100;
     private static final String EXTERNAL_AUTO_LOGIN_PLUGIN_CLASS = "net.runelite.client.plugins.microbot.accountselector.AutoLoginPlugin";
     // Camera values recovered from the supplied Account Builder 1.5.200 bytecode.
     private static final int POST_TUTORIAL_BANK_CAMERA_PITCH = 2821;
