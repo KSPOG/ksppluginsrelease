@@ -304,11 +304,6 @@ public class FireMakingScript extends Script
             return true;
         }
 
-        if (Rs2Player.isMoving())
-        {
-            return false;
-        }
-
         Microbot.status = "Walking to firemaking area";
 
         if (KspWalkerGuard.walkToDestination(
