@@ -41,8 +41,8 @@ import org.slf4j.LoggerFactory;
 public class BuyScript extends Script {
     private static final Logger log = LoggerFactory.getLogger(BuyScript.class);
 
-    private static final int LOOP_DELAY_MS = 250;
-    private static final int WEB_WALK_COOLDOWN_MS = 3000;
+    private static final int LOOP_DELAY_MS = 100;
+    private static final int WEB_WALK_COOLDOWN_MS = 1_000;
     private static final int ACTION_COOLDOWN_MS = 400;
     private static final int BANK_WAIT_TIMEOUT_MS = 3000;
     private static final int GE_OFFER_INPUT_DELAY_MS = 900;
