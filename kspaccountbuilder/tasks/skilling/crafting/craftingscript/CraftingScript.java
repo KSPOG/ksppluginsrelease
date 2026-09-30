@@ -281,11 +281,6 @@ public class CraftingScript extends Script
             return true;
         }
 
-        if (Rs2Player.isMoving())
-        {
-            return false;
-        }
-
         Microbot.status = "Walking to " + area.getDisplayName();
         KspWalkerGuard.walkToDestination(
                 walkKey,
