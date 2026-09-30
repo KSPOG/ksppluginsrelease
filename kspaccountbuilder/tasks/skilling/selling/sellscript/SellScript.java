@@ -634,11 +634,7 @@ extends Script {
         return offered;
     }
 
-    private void waitForGrandExchangeOfferInput() {
-        // processOffer is stateful; the scheduler observes the next GE state on the next tick.
-    }
-
-    private void returnToGrandExchangeOverview() {
+        private void returnToGrandExchangeOverview() {
         if (System.currentTimeMillis() - lastActionAtMs < ACTION_COOLDOWN_MS) return;
         Rs2GrandExchange.backToOverview();
         lastActionAtMs = System.currentTimeMillis();
