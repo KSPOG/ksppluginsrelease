@@ -125,8 +125,6 @@ public class KspAccountBuilderScript extends Script
     private static final long PLAY_TIME_READ_RETRY_MS = TimeUnit.SECONDS.toMillis(1);
     private static final long BREAK_LOGOUT_COMBAT_GRACE_MS = TimeUnit.SECONDS.toMillis(11);
     private static final long TASK_SWITCH_ACTION_COOLDOWN_MS = 500L;
-    private static final String BRONZE_SWORD = "Bronze sword";
-    private static final String WOODEN_SHIELD = "Wooden shield";
     private static final int DRAYNOR_CORRIDOR_MIN_X = 3050;
     private static final int DRAYNOR_CORRIDOR_MAX_X = 3135;
     private static final int DRAYNOR_CORRIDOR_MIN_Y = 3230;
