@@ -200,7 +200,7 @@ public class EssenceMining extends Script
     {
         state = EssenceState.MINING;
         status = "Mining rune essence";
-        if (Rs2Player.isAnimating() || Rs2Player.isMoving() || !canAct())
+        if (Rs2Player.isAnimating() || Rs2Player.isInteracting() || !canAct())
         {
             return;
         }
