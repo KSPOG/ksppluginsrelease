@@ -256,16 +256,13 @@ public class CookingScript extends Script
             return true;
         }
 
-        if (!Rs2Player.isMoving())
-        {
-            Microbot.status = "Walking to " + targetArea.getDisplayName();
-            KspWalkerGuard.walkToDestination(
-                    WALK_KEY,
-                    this::getCookingTile,
-                    targetArea.getArea()::contains,
-                    1,
-                    WALK_COOLDOWN_MS);
-        }
+        Microbot.status = "Walking to " + targetArea.getDisplayName();
+        KspWalkerGuard.walkToDestination(
+                WALK_KEY,
+                this::getCookingTile,
+                targetArea.getArea()::contains,
+                1,
+                WALK_COOLDOWN_MS);
         return false;
     }
 
