@@ -46,7 +46,7 @@ public class MiningScript extends Script
 
     private static final int LOOP_DELAY_MS = 100;
     private static final int WEB_WALK_COOLDOWN_MS = 1_000;
-    private static final int OBJECT_INTERACTION_COOLDOWN_MS = 300;
+    private static final int OBJECT_INTERACTION_COOLDOWN_MS = 100;
     private static final long BANK_ACTION_COOLDOWN_MS = 500L;
     private static final int ROCK_SEARCH_PADDING_TILES = 8;
     private static final int OUT_OF_AREA_ROCK_FALLBACK_RADIUS = 4;
@@ -626,8 +626,7 @@ public class MiningScript extends Script
         WorldPoint playerLocation = Rs2Player.getWorldLocation();
         return playerLocation != null
                 && targetArea.toWorldArea().contains(playerLocation)
-                && !Rs2Player.isAnimating()
-                && !Rs2Player.isInteracting();
+                && !Rs2Player.isAnimating();
     }
 
     private boolean isPlayerUnderAttack()
