@@ -74,10 +74,7 @@ extends Script {
     private static final Logger log = LoggerFactory.getLogger(SellScript.class);
     private static final int LOOP_DELAY_MS = 100;
     private static final int WEB_WALK_COOLDOWN_MS = 1_000;
-    private static final int ACTION_COOLDOWN_MS = 400;
-    private static final int GE_OFFER_INPUT_DELAY_MS = 900;
-    private static final int INVENTORY_WAIT_TIMEOUT_MS = 3000;
-    private static final int OFFER_SCREEN_WAIT_TIMEOUT_MS = 3000;
+    private static final int ACTION_COOLDOWN_MS = 300;
     private static final int TRADE_RESTRICTION_CACHE_MS = 10000;
     private static final int TRADE_RESTRICTION_MIN_TOTAL_LEVEL = 100;
     private static final int TRADE_RESTRICTION_MIN_QUEST_POINTS = 10;
