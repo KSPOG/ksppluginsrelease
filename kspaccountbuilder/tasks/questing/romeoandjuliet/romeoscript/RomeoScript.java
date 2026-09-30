@@ -182,7 +182,7 @@ public class RomeoScript extends Script
             return;
         }
 
-        if (Rs2Player.isMoving() || Rs2Player.isAnimating())
+        if (Rs2Player.isAnimating())
         {
             return;
         }
