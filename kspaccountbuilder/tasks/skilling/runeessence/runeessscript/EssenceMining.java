@@ -26,13 +26,13 @@ import org.slf4j.LoggerFactory;
 public class EssenceMining extends Script
 {
     private static final Logger log = LoggerFactory.getLogger(EssenceMining.class);
-    private static final int LOOP_DELAY_MS = 600;
+    private static final int LOOP_DELAY_MS = 100;
     private static final int ESSENCE_MINE_REGION = 11595;
     private static final int ESSENCE_MINE_PORTAL_ID = 3086;
     private static final int NPC_REACH_DISTANCE = 5;
     private static final int PORTAL_APPROACH_DISTANCE = 6;
-    private static final long WALK_REFIRE_COOLDOWN_MS = 3_500L;
-    private static final long ACTION_COOLDOWN_MS = 1_200L;
+    private static final long WALK_REFIRE_COOLDOWN_MS = 1_000L;
+    private static final long ACTION_COOLDOWN_MS = 300L;
     private static final WorldPoint AUBURY_POSITION = new WorldPoint(3253, 3399, 0);
     private static final WorldPoint[] ESSENCE_MINE_PORTAL_LOCATIONS = {
             new WorldPoint(2932, 4854, 0),
