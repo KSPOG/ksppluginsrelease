@@ -49,7 +49,7 @@ import static net.runelite.client.plugins.microbot.util.dialogues.Rs2Dialogue.is
 @Singleton
 public class TutorialIslandScript extends Script
 {
-    private static final int LOOP_DELAY_MS = 250;
+    private static final int LOOP_DELAY_MS = 100;
     private static final int DEFAULT_CAMERA_ZOOM = 377;
     private static final int RAT_PEN_GATE_ID = 9719;
     private static final int RAT_PEN_INNER_BOUNDARY_X = 3110;
