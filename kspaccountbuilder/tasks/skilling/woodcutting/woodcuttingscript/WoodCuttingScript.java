@@ -315,19 +315,6 @@ public class WoodCuttingScript extends Script {
             return true;
         }
 
-        /*
-         * Only keep waiting for movement if we are actually outside the task area.
-         * This prevents the script from walking again while already near valid task objects.
-         */
-        if (Rs2Player.isMoving()) {
-            KspTaskDebug.throttled(log, this.debugLogging, "Woodcutting", "walk-moving", 3_000L,
-                    "waiting for walker | player={} targetArea={} walkerTarget={}",
-                    playerLocation,
-                    this.targetArea.getDisplayName(),
-                    Rs2Walker.getCurrentTarget());
-            return false;
-        }
-
         Microbot.status = "Walking to woodcutting area";
 
         if (KspWalkerGuard.walkToDestination(
