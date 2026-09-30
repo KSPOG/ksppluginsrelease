@@ -34,12 +34,12 @@ public class FireMakingScript extends Script
 {
     private static final Logger log = LoggerFactory.getLogger(FireMakingScript.class);
 
-    private static final int LOOP_DELAY_MS = 250;
-    private static final int WEB_WALK_COOLDOWN_MS = 3_000;
-    private static final int FIRE_INTERACT_COOLDOWN_MS = 450;
+    private static final int LOOP_DELAY_MS = 100;
+    private static final int WEB_WALK_COOLDOWN_MS = 1_000;
+    private static final int FIRE_INTERACT_COOLDOWN_MS = 300;
     private static final int FIRE_START_GRACE_MS = 900;
     private static final int FRESH_FIRE_APPEAR_TIMEOUT_MS = 1_500;
-    private static final int BURN_PROMPT_ACTION_COOLDOWN_MS = 500;
+    private static final int BURN_PROMPT_ACTION_COOLDOWN_MS = 300;
     private static final int CAMPFIRE_DISTANCE = 6;
     private static final int NEARBY_CAMPFIRE_SCAN_RADIUS = 12;
 
