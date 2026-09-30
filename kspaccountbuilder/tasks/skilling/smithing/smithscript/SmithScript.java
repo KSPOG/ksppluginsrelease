@@ -48,10 +48,10 @@ public class SmithScript
 extends Script {
     private static final Logger log = LoggerFactory.getLogger(SmithScript.class);
     private static final int INVENTORY_SLOTS = 28;
-    private static final int LOOP_DELAY_MS = 250;
-    private static final int WEB_WALK_COOLDOWN_MS = 3000;
-    private static final int ANVIL_INTERACT_COOLDOWN_MS = 350;
-    private static final int SMITH_START_GRACE_MS = 1500;
+    private static final int LOOP_DELAY_MS = 100;
+    private static final int WEB_WALK_COOLDOWN_MS = 1_000;
+    private static final int ANVIL_INTERACT_COOLDOWN_MS = 300;
+    private static final int SMITH_START_GRACE_MS = 900;
     private static final int SMITH_ANIMATION_COOLDOWN_MS = 1800;
     private static final int ANVIL_SEARCH_RADIUS = 12;
     private static final int ANVIL_APPROACH_DISTANCE = 6;
@@ -507,7 +507,7 @@ extends Script {
             return false;
         }
         long elapsed = System.currentTimeMillis() - this.awaitingSmithStartAtMs;
-        if (elapsed < 2500L) {
+        if (elapsed < SMITH_START_GRACE_MS) {
             return true;
         }
         this.awaitingSmithStartAtMs = 0L;
