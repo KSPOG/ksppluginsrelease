@@ -49,7 +49,7 @@ extends Script {
     private static final Logger log = LoggerFactory.getLogger(SmithScript.class);
     private static final int LOOP_DELAY_MS = 100;
     private static final int WEB_WALK_COOLDOWN_MS = 1_000;
-    private static final int ANVIL_INTERACT_COOLDOWN_MS = 300;
+    private static final int ANVIL_INTERACT_COOLDOWN_MS = 100;
     private static final int SMITH_START_GRACE_MS = 900;
     private static final int ANVIL_APPROACH_DISTANCE = 6;
     private static final int SMITHING_WIDGET_GROUP_ID = 312;
@@ -367,7 +367,7 @@ extends Script {
             return;
         }
 
-        if (Rs2Player.isAnimating() || Rs2Player.isInteracting()) {
+        if (Rs2Player.isAnimating()) {
             lastSmithAnimationAtMs = System.currentTimeMillis();
             return;
         }

@@ -48,7 +48,7 @@ extends Script {
     private static final Logger log = LoggerFactory.getLogger(SmeltScript.class);
     private static final int LOOP_DELAY_MS = 100;
     private static final int WEB_WALK_COOLDOWN_MS = 1_000;
-    private static final int FURNACE_INTERACT_COOLDOWN_MS = 300;
+    private static final int FURNACE_INTERACT_COOLDOWN_MS = 100;
     private static final int SMELT_START_GRACE_MS = 900;
     private long lastWebWalkAtMs;
     private long lastFurnaceInteractAtMs;
@@ -314,7 +314,7 @@ extends Script {
     }
 
     private void smeltAtFurnace(BarLevels bar) {
-        if (Rs2Player.isAnimating() || Rs2Player.isInteracting()) {
+        if (Rs2Player.isAnimating()) {
             lastSmeltAnimationAtMs = System.currentTimeMillis();
             return;
         }
@@ -387,7 +387,7 @@ extends Script {
         if (this.awaitingSmeltStartAtMs == 0L) {
             return false;
         }
-        if (Rs2Player.isAnimating() || Rs2Player.isInteracting()) {
+        if (Rs2Player.isAnimating()) {
             return true;
         }
         long elapsed = System.currentTimeMillis() - this.awaitingSmeltStartAtMs;

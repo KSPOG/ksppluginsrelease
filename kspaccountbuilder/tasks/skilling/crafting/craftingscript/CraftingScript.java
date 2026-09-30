@@ -34,7 +34,7 @@ public class CraftingScript extends Script
     private static final int LOOP_DELAY_MS = 100;
     private static final int WALK_COOLDOWN_MS = 1_000;
     private static final int FURNACE_SEARCH_RADIUS = 12;
-    private static final int ACTION_COOLDOWN_MS = 300;
+    private static final int ACTION_COOLDOWN_MS = 100;
 
     private volatile CraftingState state = CraftingState.WAITING;
     private volatile CraftingLevels targetLevel = CraftingLevels.LEATHER_GLOVES;
@@ -335,7 +335,7 @@ public class CraftingScript extends Script
 
     private void selectProductAndMakeAll(CraftInventory recipe)
     {
-        if (Rs2Player.isAnimating() || Rs2Player.isInteracting()) return;
+        if (Rs2Player.isAnimating()) return;
 
         boolean selected = Rs2Widget.clickWidget(recipe.getProductName(), true)
                 || Rs2Widget.clickWidget(recipe.getProductName(), false);
@@ -358,7 +358,7 @@ public class CraftingScript extends Script
             Rs2Bank.closeBank();
             return false;
         }
-        if (Rs2Player.isMoving() || Rs2Player.isAnimating() || Rs2Player.isInteracting())
+        if (Rs2Player.isMoving() || Rs2Player.isAnimating())
         {
             return false;
         }

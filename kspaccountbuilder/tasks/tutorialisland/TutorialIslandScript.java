@@ -726,7 +726,7 @@ public class TutorialIslandScript extends Script
         Rs2TileObjectModel fire = findTutorialFire();
         if (survivalCookingDispatched)
         {
-            if (Rs2Player.isAnimating() || Rs2Player.isInteracting()) return;
+            if (Rs2Player.isAnimating()) return;
             survivalCookingDispatched = false;
         }
 
@@ -736,7 +736,7 @@ public class TutorialIslandScript extends Script
             {
                 waitingForSurvivalFire = false;
             }
-            else if (Rs2Inventory.hasItem("Logs") && readyForAction() && !Rs2Player.isMoving())
+            else if (Rs2Inventory.hasItem("Logs") && !Rs2Player.isAnimating() && !Rs2Player.isMoving())
             {
                 waitingForSurvivalFire = false;
             }
@@ -894,7 +894,7 @@ public class TutorialIslandScript extends Script
         if (Rs2Inventory.contains("Bread dough"))
         {
             doughMixDispatched = false;
-            if (breadCookingDispatched && (Rs2Player.isAnimating() || Rs2Player.isInteracting())) return;
+            if (breadCookingDispatched && Rs2Player.isAnimating()) return;
             breadCookingDispatched = false;
 
             Rs2TileObjectModel range = tutorialObject(9736);
@@ -1035,7 +1035,7 @@ public class TutorialIslandScript extends Script
 
     private void smeltTutorialBronze()
     {
-        if (Rs2Inventory.contains("Bronze bar") || !readyForAction()) return;
+        if (Rs2Inventory.contains("Bronze bar") || Rs2Player.isAnimating()) return;
         Rs2TileObjectModel furnace = tutorialObject(ObjectID.FURNACE_10082);
         if (!prepareTutorialObjectInteraction(furnace, 4)) return;
         int ore = Rs2Inventory.hasItem(ItemID.TIN_ORE) ? ItemID.TIN_ORE : ItemID.COPPER_ORE;
@@ -1044,7 +1044,7 @@ public class TutorialIslandScript extends Script
 
     private void openTutorialAnvil()
     {
-        if (Rs2Widget.isSmithingWidgetOpen() || !readyForAction()) return;
+        if (Rs2Widget.isSmithingWidgetOpen() || Rs2Player.isAnimating()) return;
         Rs2TileObjectModel anvil = tutorialObject("Anvil");
         if (!prepareTutorialObjectInteraction(anvil, 4)) return;
         if (Rs2Inventory.hasItem(ItemID.BRONZE_BAR)) Rs2Inventory.useItemOnObject(ItemID.BRONZE_BAR, anvil.getId());
@@ -1774,7 +1774,7 @@ public class TutorialIslandScript extends Script
 
         if (treeActionDispatched)
         {
-            if (Rs2Player.isAnimating() || Rs2Player.isInteracting())
+            if (Rs2Player.isAnimating())
             {
                 return;
             }
@@ -1809,7 +1809,7 @@ public class TutorialIslandScript extends Script
 
         if (fishingActionDispatched)
         {
-            if (Rs2Player.isAnimating() || Rs2Player.isInteracting())
+            if (Rs2Player.isAnimating())
             {
                 return;
             }
