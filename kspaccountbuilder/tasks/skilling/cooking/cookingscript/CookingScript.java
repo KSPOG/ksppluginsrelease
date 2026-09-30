@@ -30,8 +30,8 @@ public class CookingScript extends Script
     private static final Logger log = LoggerFactory.getLogger(CookingScript.class);
     private static final String WALK_KEY = "Cooking:target-area";
     private static final String EXIT_WALK_KEY = "Cooking:exit-area";
-    private static final int LOOP_DELAY_MS = 250;
-    private static final int WALK_COOLDOWN_MS = 3_000;
+    private static final int LOOP_DELAY_MS = 100;
+    private static final int WALK_COOLDOWN_MS = 1_000;
     private static final int EDGEVILLE_STOVE_ID = 12269;
     private static final int LUMBRIDGE_RANGE_ID = 114;
     private static final int COOKING_EXIT_DOOR_ID = 1535;
@@ -42,7 +42,7 @@ public class CookingScript extends Script
     private static final WorldPoint LUMBRIDGE_RANGE_LOCATION = new WorldPoint(3212, 3215, 0);
     private static final WorldPoint COOKING_EXIT_DOOR_POINT = new WorldPoint(3079, 3497, 0);
     private static final WorldPoint COOKING_EXIT_OUTSIDE_POINT = new WorldPoint(3080, 3498, 0);
-    private static final long DOOR_INTERACTION_COOLDOWN_MS = 750L;
+    private static final long DOOR_INTERACTION_COOLDOWN_MS = 300L;
 
     private volatile Areas targetArea = Areas.EDGEVILLE_RANGE;
     private volatile CookingState state = CookingState.WAITING;
