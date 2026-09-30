@@ -31,10 +31,10 @@ public class CraftingScript extends Script
     private static final Logger log = LoggerFactory.getLogger(CraftingScript.class);
     private static final String BANK_WALK_KEY = "Crafting:edge-bank";
     private static final String FURNACE_WALK_KEY = "Crafting:edge-furnace";
-    private static final int LOOP_DELAY_MS = 250;
-    private static final int WALK_COOLDOWN_MS = 3_000;
+    private static final int LOOP_DELAY_MS = 100;
+    private static final int WALK_COOLDOWN_MS = 1_000;
     private static final int FURNACE_SEARCH_RADIUS = 12;
-    private static final int ACTION_COOLDOWN_MS = 350;
+    private static final int ACTION_COOLDOWN_MS = 300;
     private static final int PRODUCTION_START_TIMEOUT_MS = 2_500;
 
     private volatile CraftingState state = CraftingState.WAITING;
