@@ -37,7 +37,7 @@ import java.util.concurrent.TimeUnit;
 @Singleton
 public class CooksScript extends Script {
     private static final Logger log = LoggerFactory.getLogger(CooksScript.class);
-    private static final int LOOP_DELAY_MS = 250;
+    private static final int LOOP_DELAY_MS = 100;
     private static final int WALK_REFIRE_COOLDOWN_MS = 3_500;
     private static final int GE_OFFER_INPUT_DELAY_MS = 900;
     private static final int ACTION_COOLDOWN_MS = 650;
