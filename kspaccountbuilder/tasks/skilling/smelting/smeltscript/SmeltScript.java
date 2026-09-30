@@ -285,9 +285,6 @@ extends Script {
             this.clearTargetAreaWalkIfNeeded();
             return true;
         }
-        if (Rs2Player.isMoving()) {
-            return false;
-        }
         if (KspWalkerGuard.walkToDestination(
                 "Smelting:target-area",
                 this::getAreaCenter,
