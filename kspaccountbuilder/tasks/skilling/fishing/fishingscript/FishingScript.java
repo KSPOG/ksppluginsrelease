@@ -646,6 +646,15 @@ public class FishingScript extends Script
         }).orElse("");
     }
 
+    private boolean isIdleInTargetArea()
+    {
+        WorldPoint player = Rs2Player.getWorldLocation();
+        return player != null
+                && targetArea.contains(player)
+                && !Rs2Player.isMoving()
+                && !Rs2Player.isAnimating();
+    }
+
     private boolean canStartFishingInTargetArea()
     {
         WorldPoint player = Rs2Player.getWorldLocation();
