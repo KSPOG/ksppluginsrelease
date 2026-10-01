@@ -21,6 +21,7 @@ public class SoCScript extends Script
 {
     private static final int LOOP_DELAY_MS = 100;
     private static final int WALK_REFIRE_MS = 1_000;
+    private static final long INTERACTION_DISPATCH_TIMEOUT_MS = 1_500L;
     private static final int HEAL_PERCENT = 55;
     private static final int GIFT_OF_PEACE_OBJECT_ID = 20_656;
     private static final int GRAIN_OF_PLENTY_OBJECT_ID = 1_900;
@@ -44,6 +45,8 @@ public class SoCScript extends Script
     private boolean gateOfWarAdvancePending;
     private Areas pendingLadderArea;
     private boolean complete;
+    private long pendingInteractionAtMs;
+    private String pendingInteractionKey;
 
     public boolean run()
     {
@@ -204,6 +207,8 @@ public class SoCScript extends Script
         if (!rewardDialogueSeen)
         {
             rewardInteractionStarted = false;
+        pendingInteractionAtMs = 0L;
+        pendingInteractionKey = null;
             return;
         }
 
@@ -226,12 +231,20 @@ public class SoCScript extends Script
 
         for (String action : REWARD_ACTIONS)
         {
+            String key = "reward:" + objectId + ":" + action;
+            if (isInteractionPending(key)) return false;
             if (Rs2GameObject.interact(object, action))
             {
+                markInteraction(key);
                 return true;
             }
         }
-        return Rs2GameObject.interact(object);
+
+        String key = "reward:" + objectId;
+        if (isInteractionPending(key)) return false;
+        boolean interacted = Rs2GameObject.interact(object);
+        if (interacted) markInteraction(key);
+        return interacted;
     }
 
     private boolean handleDialogue()
@@ -240,7 +253,8 @@ public class SoCScript extends Script
 
         if (Rs2Dialogue.hasContinue())
         {
-            Rs2Dialogue.clickContinue();
+            if (isInteractionPending("dialogue-continue")) return true;
+            if (Rs2Dialogue.clickContinue()) markInteraction("dialogue-continue");
             return true;
         }
 
@@ -278,11 +292,16 @@ public class SoCScript extends Script
             return;
         }
 
+        if (isInteractionPending("ladder-down")) return;
         boolean interacted = Microbot.getRs2TileObjectCache().query()
                 .fromWorldView()
                 .withName("Ladder")
                 .interact("Climb-down");
-        if (interacted) Microbot.status = "Descending Stronghold ladder";
+        if (interacted)
+        {
+            markInteraction("ladder-down");
+            Microbot.status = "Descending Stronghold ladder";
+        }
     }
 
     private void returnToBank()
@@ -296,6 +315,23 @@ public class SoCScript extends Script
 
         Microbot.status = "Returning to bank";
         Rs2Bank.walkToBankAndUseBank();
+    }
+
+    private boolean isInteractionPending(String key)
+    {
+        if (pendingInteractionAtMs == 0L || pendingInteractionKey == null) return false;
+        if (!pendingInteractionKey.equals(key)) return false;
+        if (Rs2Player.isMoving() || Rs2Player.isAnimating() || Rs2Player.isInteracting()) return true;
+        if (System.currentTimeMillis() - pendingInteractionAtMs < INTERACTION_DISPATCH_TIMEOUT_MS) return true;
+        pendingInteractionAtMs = 0L;
+        pendingInteractionKey = null;
+        return false;
+    }
+
+    private void markInteraction(String key)
+    {
+        pendingInteractionKey = key;
+        pendingInteractionAtMs = System.currentTimeMillis();
     }
 
     private void updateProgressFromCurrentArea()
