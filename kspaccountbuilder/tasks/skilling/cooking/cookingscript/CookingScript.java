@@ -45,6 +45,7 @@ public class CookingScript extends Script
     private static final long DOOR_INTERACTION_COOLDOWN_MS = 300L;
     private static final long STOVE_INTERACTION_COOLDOWN_MS = 100L;
     private static final long PRODUCTION_ACTION_TIMEOUT_MS = 1_500L;
+    private static final long ACTION_DISPATCH_TIMEOUT_MS = 1_500L;
 
     private volatile Areas targetArea = Areas.EDGEVILLE_RANGE;
     private volatile CookingState state = CookingState.WAITING;
@@ -53,6 +54,10 @@ public class CookingScript extends Script
     private long lastStoveInteractionAtMs;
     private long pendingProductionActionAtMs;
     private String pendingProductionItem;
+    private long pendingWorldActionAtMs;
+    private String pendingWorldAction;
+    private long pendingBankActionAtMs;
+    private int pendingBankEmptySlots = -1;
 
     public void setDebugLogging(boolean debugLogging) { this.debugLogging = debugLogging; }
 
@@ -144,11 +149,14 @@ public class CookingScript extends Script
             }
 
             long now = System.currentTimeMillis();
-            if (now - lastStoveInteractionAtMs < STOVE_INTERACTION_COOLDOWN_MS) return;
+            if (isWorldActionPending("stove") || now - lastStoveInteractionAtMs < STOVE_INTERACTION_COOLDOWN_MS) return;
 
             state = CookingState.OPENING_COOKING_INTERFACE;
             Microbot.status = "Cooking " + fish.getCookedItemName();
-            if (stove.click("Cook")) lastStoveInteractionAtMs = now;
+            if (stove.click("Cook")) {
+                lastStoveInteractionAtMs = now;
+                markWorldAction("stove");
+            }
         }, 0L, LOOP_DELAY_MS, TimeUnit.MILLISECONDS);
 
         return true;
@@ -182,21 +190,27 @@ public class CookingScript extends Script
 
         if (!Rs2Bank.isOpen())
         {
-            if (!Rs2Bank.openBank()) Rs2Bank.walkToBankAndUseBank();
+            if (isWorldActionPending("open-bank")) return;
+            if (Rs2Bank.openBank()) markWorldAction("open-bank");
+            else Rs2Bank.walkToBankAndUseBank();
             return;
         }
 
         if (KspBankWidgetHelper.closeBankTutorialOverlayIfOpen()) return;
 
+        if (isBankInventoryActionPending()) return;
+
         if (!Rs2Inventory.isEmpty())
         {
-            Rs2Bank.depositAll();
+            int before = Rs2Inventory.emptySlotCount();
+            if (Rs2Bank.depositAll()) markBankInventoryAction(before);
             return;
         }
 
         if (!Rs2Inventory.hasItem(fish.getRawItemName()))
         {
-            Rs2Bank.withdrawAll(fish.getRawItemName());
+            int before = Rs2Inventory.emptySlotCount();
+            if (Rs2Bank.withdrawAll(fish.getRawItemName())) markBankInventoryAction(before);
             return;
         }
 
@@ -339,6 +353,43 @@ public class CookingScript extends Script
                 : EDGEVILLE_COOKING_TILE;
     }
 
+    private boolean isWorldActionPending(String action)
+    {
+        if (pendingWorldActionAtMs == 0L || pendingWorldAction == null) return false;
+        if (!pendingWorldAction.equals(action)) return false;
+        if (Rs2Player.isMoving() || Rs2Player.isAnimating() || Rs2Player.isInteracting()) return true;
+        if (System.currentTimeMillis() - pendingWorldActionAtMs < ACTION_DISPATCH_TIMEOUT_MS) return true;
+        pendingWorldActionAtMs = 0L;
+        pendingWorldAction = null;
+        return false;
+    }
+
+    private void markWorldAction(String action)
+    {
+        pendingWorldAction = action;
+        pendingWorldActionAtMs = System.currentTimeMillis();
+    }
+
+    private boolean isBankInventoryActionPending()
+    {
+        if (pendingBankActionAtMs == 0L) return false;
+        if (Rs2Inventory.emptySlotCount() != pendingBankEmptySlots) {
+            pendingBankActionAtMs = 0L;
+            pendingBankEmptySlots = -1;
+            return false;
+        }
+        if (System.currentTimeMillis() - pendingBankActionAtMs < ACTION_DISPATCH_TIMEOUT_MS) return true;
+        pendingBankActionAtMs = 0L;
+        pendingBankEmptySlots = -1;
+        return false;
+    }
+
+    private void markBankInventoryAction(int beforeEmptySlots)
+    {
+        pendingBankEmptySlots = beforeEmptySlots;
+        pendingBankActionAtMs = System.currentTimeMillis();
+    }
+
     private boolean isCookingProductionWidgetOpen()
     {
         return Rs2Widget.isProductionWidgetOpen()
@@ -415,6 +466,10 @@ public class CookingScript extends Script
         lastDoorInteractionAtMs = 0L;
         lastStoveInteractionAtMs = 0L;
         clearProductionAction();
+        pendingWorldActionAtMs = 0L;
+        pendingWorldAction = null;
+        pendingBankActionAtMs = 0L;
+        pendingBankEmptySlots = -1;
         KspWalkerGuard.clear(EXIT_WALK_KEY);
         KspWalkerGuard.clear(WALK_KEY);
         super.shutdown();

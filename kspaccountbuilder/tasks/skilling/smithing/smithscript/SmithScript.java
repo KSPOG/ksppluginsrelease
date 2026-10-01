@@ -52,6 +52,7 @@ extends Script {
     private static final int ANVIL_INTERACT_COOLDOWN_MS = 100;
     private static final int SMITH_START_GRACE_MS = 900;
     private static final long SMITH_WIDGET_ACTION_TIMEOUT_MS = 1_500L;
+    private static final long ACTION_DISPATCH_TIMEOUT_MS = 1_500L;
     private static final int ANVIL_APPROACH_DISTANCE = 6;
     private static final int SMITHING_WIDGET_GROUP_ID = 312;
     private static final int SMITHING_ALL_BUTTON_CHILD_ID = 7;
@@ -70,6 +71,11 @@ extends Script {
     private boolean bankInventoryReset;
     private long pendingSmithWidgetActionAtMs;
     private String pendingSmithWidgetAction;
+    private long pendingWorldActionAtMs;
+    private String pendingWorldAction;
+    private long pendingInventoryActionAtMs;
+    private String pendingInventoryItem;
+    private int pendingInventoryBeforeCount = -1;
     private SmithArea targetArea = SmithArea.SMITH_AREA_VARROCK_WEST_ANVIL;
     private SmithRecipe targetRecipe = SmithRecipe.BRONZE_DAGGER;
     private SmithLevels forcedSmithLevel;
@@ -187,8 +193,9 @@ extends Script {
         awaitingSmithStartAtMs = 0L;
 
         if (!Rs2Bank.isOpen()) {
-            if (Rs2Player.isInteracting()) return false;
-            if (!Rs2Bank.openBank()) Rs2Bank.walkToBankAndUseBank();
+            if (Rs2Player.isInteracting() || isWorldActionPending("open-bank")) return false;
+            if (Rs2Bank.openBank()) markWorldAction("open-bank");
+            else Rs2Bank.walkToBankAndUseBank();
             return false;
         }
 
@@ -222,7 +229,10 @@ extends Script {
 
         if (!hasHammerInInventory()) {
             if (!hasHammerInBank()) return false;
-            Rs2Bank.withdrawOne(hammer);
+            if (!isInventoryActionPending()
+                    && Rs2Bank.withdrawOne(hammer)) {
+                markInventoryAction(hammer, Rs2Inventory.count(hammer));
+            }
             return false;
         }
 
@@ -232,7 +242,10 @@ extends Script {
         int bars = products * recipe.getBarRequirement();
         int current = Rs2Inventory.count(bar);
         if (current < bars) {
-            Rs2Bank.withdrawX(bar, bars - current);
+            if (!isInventoryActionPending()
+                    && Rs2Bank.withdrawX(bar, bars - current)) {
+                markInventoryAction(bar, current);
+            }
             return false;
         }
 
@@ -395,11 +408,12 @@ extends Script {
         }
 
         long now = System.currentTimeMillis();
-        if (now - lastAnvilInteractAtMs < ANVIL_INTERACT_COOLDOWN_MS) return;
+        if (isWorldActionPending("anvil") || now - lastAnvilInteractAtMs < ANVIL_INTERACT_COOLDOWN_MS) return;
 
         if (anvil.click("Smith")) {
             lastAnvilInteractAtMs = now;
             awaitingSmithStartAtMs = now;
+            markWorldAction("anvil");
         }
     }
 
@@ -460,6 +474,49 @@ extends Script {
         }
 
         return selectedRecipe;
+    }
+
+    private boolean isWorldActionPending(String action)
+    {
+        if (pendingWorldActionAtMs == 0L || pendingWorldAction == null) return false;
+        if (!pendingWorldAction.equals(action)) return false;
+        if (Rs2Player.isMoving() || Rs2Player.isAnimating() || Rs2Player.isInteracting()) return true;
+        if (System.currentTimeMillis() - pendingWorldActionAtMs < ACTION_DISPATCH_TIMEOUT_MS) return true;
+        pendingWorldActionAtMs = 0L;
+        pendingWorldAction = null;
+        return false;
+    }
+
+    private void markWorldAction(String action)
+    {
+        pendingWorldAction = action;
+        pendingWorldActionAtMs = System.currentTimeMillis();
+    }
+
+    private boolean isInventoryActionPending()
+    {
+        if (pendingInventoryActionAtMs == 0L || pendingInventoryItem == null) return false;
+        if (Rs2Inventory.count(pendingInventoryItem) != pendingInventoryBeforeCount) {
+            clearInventoryAction();
+            return false;
+        }
+        if (System.currentTimeMillis() - pendingInventoryActionAtMs < ACTION_DISPATCH_TIMEOUT_MS) return true;
+        clearInventoryAction();
+        return false;
+    }
+
+    private void markInventoryAction(String item, int beforeCount)
+    {
+        pendingInventoryItem = item;
+        pendingInventoryBeforeCount = beforeCount;
+        pendingInventoryActionAtMs = System.currentTimeMillis();
+    }
+
+    private void clearInventoryAction()
+    {
+        pendingInventoryActionAtMs = 0L;
+        pendingInventoryItem = null;
+        pendingInventoryBeforeCount = -1;
     }
 
     private boolean isSmithWidgetActionPending(String action)
@@ -586,6 +643,9 @@ extends Script {
         this.lastWalkTarget = null;
         this.expectingSmithXpDrop = false;
         this.clearSmithWidgetAction();
+        this.pendingWorldActionAtMs = 0L;
+        this.pendingWorldAction = null;
+        this.clearInventoryAction();
         this.walkingToTargetArea = false;
         KspWalkerGuard.clear(TARGET_AREA_WALK_KEY);
         KspWalkerGuard.clear(ANVIL_WALK_KEY);

@@ -50,6 +50,7 @@ import static net.runelite.client.plugins.microbot.util.dialogues.Rs2Dialogue.is
 public class TutorialIslandScript extends Script
 {
     private static final int LOOP_DELAY_MS = 100;
+    private static final long INTERACTION_DISPATCH_TIMEOUT_MS = 1_500L;
     private static final int DEFAULT_CAMERA_ZOOM = 377;
     private static final int RAT_PEN_GATE_ID = 9719;
     private static final int RAT_PEN_INNER_BOUNDARY_X = 3110;
@@ -143,6 +144,8 @@ public class TutorialIslandScript extends Script
     private boolean treeActionDispatched;
     private boolean fishingActionDispatched;
     private boolean homeTeleportDispatched;
+    private long pendingInteractionAtMs;
+    private String pendingInteractionKey;
     private boolean windStrikeSelected;
 
     public boolean run()
@@ -1606,6 +1609,8 @@ public class TutorialIslandScript extends Script
         fishingActionDispatched = false;
         homeTeleportDispatched = false;
         windStrikeSelected = false;
+        pendingInteractionAtMs = 0L;
+        pendingInteractionKey = null;
     }
 
     // -------------------------------------------------------------------------
@@ -1642,10 +1647,20 @@ public class TutorialIslandScript extends Script
 
         KspWalkerGuard.clearActiveWalker("ksp_account_builder_tutorial_npc_interaction");
 
+        String interactionKey = "npc:" + npc.getIndex() + ":" + action;
+        if (isTutorialInteractionPending(interactionKey)
+                || Rs2Player.isMoving()
+                || Rs2Player.isAnimating()
+                || Rs2Player.isInteracting())
+        {
+            return false;
+        }
+
         if (!npc.click(action))
         {
             return false;
         }
+        markTutorialInteraction(interactionKey);
 
         if (afterClick != null)
         {
@@ -1683,7 +1698,11 @@ public class TutorialIslandScript extends Script
             return true;
         }
 
-        Microbot.getRs2TileObjectCache().query().fromWorldView().withId(RAT_PEN_GATE_ID).interact("Open");
+        if (!isTutorialInteractionPending("rat-gate")
+                && Microbot.getRs2TileObjectCache().query().fromWorldView().withId(RAT_PEN_GATE_ID).interact("Open"))
+        {
+            markTutorialInteraction("rat-gate");
+        }
         return false;
     }
 
@@ -1706,7 +1725,14 @@ public class TutorialIslandScript extends Script
             return false;
         }
 
-        return rat.click("Attack");
+        String key = "rat:" + rat.getIndex();
+        if (isTutorialInteractionPending(key)
+                || Rs2Player.isMoving()
+                || Rs2Player.isAnimating()
+                || Rs2Player.isInteracting()) return false;
+        if (!rat.click("Attack")) return false;
+        markTutorialInteraction(key);
+        return true;
     }
 
     private boolean selectLongrangeCombatStyle()
@@ -2166,7 +2192,33 @@ public class TutorialIslandScript extends Script
 
     private boolean readyForAction()
     {
-        return !Rs2Player.isAnimating() && !Rs2Player.isInteracting();
+        if (Rs2Player.isMoving() || Rs2Player.isAnimating() || Rs2Player.isInteracting())
+        {
+            return false;
+        }
+        return !isTutorialInteractionPending();
+    }
+
+    private boolean isTutorialInteractionPending()
+    {
+        if (pendingInteractionAtMs == 0L) return false;
+        if (System.currentTimeMillis() - pendingInteractionAtMs < INTERACTION_DISPATCH_TIMEOUT_MS) return true;
+        pendingInteractionAtMs = 0L;
+        pendingInteractionKey = null;
+        return false;
+    }
+
+    private boolean isTutorialInteractionPending(String key)
+    {
+        return pendingInteractionKey != null
+                && pendingInteractionKey.equals(key)
+                && isTutorialInteractionPending();
+    }
+
+    private void markTutorialInteraction(String key)
+    {
+        pendingInteractionKey = key;
+        pendingInteractionAtMs = System.currentTimeMillis();
     }
 
     private Rs2TileObjectModel tutorialObject(int id)
@@ -2182,13 +2234,19 @@ public class TutorialIslandScript extends Script
     private boolean clickTutorialObject(int id, String action, int reach)
     {
         Rs2TileObjectModel object = tutorialObject(id);
-        return prepareTutorialObjectInteraction(object, reach) && readyForAction() && object.click(action);
+        if (!prepareTutorialObjectInteraction(object, reach) || !readyForAction()) return false;
+        if (!object.click(action)) return false;
+        markTutorialInteraction("object:" + id + ":" + action);
+        return true;
     }
 
     private boolean clickTutorialObject(String name, String action, int reach)
     {
         Rs2TileObjectModel object = tutorialObject(name);
-        return prepareTutorialObjectInteraction(object, reach) && readyForAction() && object.click(action);
+        if (!prepareTutorialObjectInteraction(object, reach) || !readyForAction()) return false;
+        if (!object.click(action)) return false;
+        markTutorialInteraction("object:" + name + ":" + action);
+        return true;
     }
 
     private boolean prepareTutorialObjectInteraction(Rs2TileObjectModel object, int reach)
@@ -2222,15 +2280,20 @@ public class TutorialIslandScript extends Script
                 .withId(objectId)
                 .nearest();
 
+        if (isTutorialInteractionPending("object:" + objectId + ":" + action)) return false;
+
         if (object != null && object.click(action))
         {
+            markTutorialInteraction("object:" + objectId + ":" + action);
             return true;
         }
 
-        return Microbot.getRs2TileObjectCache()
+        boolean interacted = Microbot.getRs2TileObjectCache()
                 .query()
                 .fromWorldView()
                 .interact(objectId, action);
+        if (interacted) markTutorialInteraction("object:" + objectId + ":" + action);
+        return interacted;
     }
 
     private boolean openTutorialPassageAndWalk(int objectId, WorldPoint target, int reach, BooleanSupplier completed)
@@ -2240,7 +2303,8 @@ public class TutorialIslandScript extends Script
             return true;
         }
 
-        if (Rs2Player.isMoving() || Rs2Player.isInteracting())
+        if (Rs2Player.isMoving() || Rs2Player.isInteracting()
+                || isTutorialInteractionPending("open:" + objectId))
         {
             return false;
         }
@@ -2250,6 +2314,7 @@ public class TutorialIslandScript extends Script
                 .fromWorldView()
                 .interact(objectId, "Open"))
         {
+            markTutorialInteraction("open:" + objectId);
             return false;
         }
 

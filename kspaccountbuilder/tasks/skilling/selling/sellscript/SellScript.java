@@ -75,6 +75,7 @@ extends Script {
     private static final int LOOP_DELAY_MS = 100;
     private static final int WEB_WALK_COOLDOWN_MS = 1_000;
     private static final int ACTION_COOLDOWN_MS = 300;
+    private static final long BANK_DISPATCH_TIMEOUT_MS = 1_500L;
     private static final int TRADE_RESTRICTION_CACHE_MS = 10000;
     private static final int TRADE_RESTRICTION_MIN_TOTAL_LEVEL = 100;
     private static final int TRADE_RESTRICTION_MIN_QUEST_POINTS = 10;
@@ -111,6 +112,10 @@ extends Script {
     private boolean debugLogging;
     private long lastWebWalkAtMs;
     private long lastActionAtMs;
+    private long pendingBankActionAtMs;
+    private String pendingBankItem;
+    private int pendingBankItemBeforeCount = -1;
+    private int pendingBankEmptySlots = -1;
     private final Set<String> blockedSellItems = new HashSet<String>();
     private final Map<String, Integer> withdrawFailureCounts = new HashMap<String, Integer>();
     private Boolean tradeRestrictionUnlockedCache;
@@ -242,10 +247,12 @@ extends Script {
 
         Microbot.status = "Withdrawing Sell Items";
         if (KspBankWidgetHelper.closeBankTutorialOverlayIfOpen()) return;
+        if (isBankInventoryActionPending()) return;
 
         if (!sellInventoryReset) {
             if (!Rs2Inventory.isEmpty()) {
-                Rs2Bank.depositAll();
+                int before = Rs2Inventory.emptySlotCount();
+                if (Rs2Bank.depositAll()) markBankInventoryAction(null, -1, before);
                 return;
             }
             sellInventoryReset = true;
@@ -262,11 +269,14 @@ extends Script {
             int qty = getSellableBankQuantity(entry.getDisplayName());
             if (qty <= 0) continue;
 
-            boolean dispatched = qty >= Rs2Bank.count(entry.getDisplayName(), true)
-                    ? Rs2Bank.withdrawAll(entry.getDisplayName(), true)
-                    : Rs2Bank.withdrawX(entry.getDisplayName(), qty, true);
+            String itemName = entry.getDisplayName();
+            int before = Rs2Inventory.count(itemName);
+            boolean dispatched = qty >= Rs2Bank.count(itemName, true)
+                    ? Rs2Bank.withdrawAll(itemName, true)
+                    : Rs2Bank.withdrawX(itemName, qty, true);
 
-            recordWithdrawResult(entry.getDisplayName(), dispatched);
+            if (dispatched) markBankInventoryAction(itemName, before, -1);
+            recordWithdrawResult(itemName, dispatched);
             return;
         }
 
@@ -479,15 +489,49 @@ extends Script {
 
         for (String name : PICKAXE_NAMES) {
             if (!name.equalsIgnoreCase(desiredPickaxe) && Rs2Bank.count(name) > 0) {
-                return Rs2Bank.withdrawAll(name, true);
+                int before = Rs2Inventory.count(name);
+                boolean dispatched = Rs2Bank.withdrawAll(name, true);
+                if (dispatched) markBankInventoryAction(name, before, -1);
+                return dispatched;
             }
         }
         for (String name : AXE_NAMES) {
             if (!name.equalsIgnoreCase(desiredAxe) && Rs2Bank.count(name) > 0) {
-                return Rs2Bank.withdrawAll(name, true);
+                int before = Rs2Inventory.count(name);
+                boolean dispatched = Rs2Bank.withdrawAll(name, true);
+                if (dispatched) markBankInventoryAction(name, before, -1);
+                return dispatched;
             }
         }
         return false;
+    }
+
+    private boolean isBankInventoryActionPending() {
+        if (pendingBankActionAtMs == 0L) return false;
+
+        boolean changed = pendingBankItem != null
+                ? Rs2Inventory.count(pendingBankItem) != pendingBankItemBeforeCount
+                : Rs2Inventory.emptySlotCount() != pendingBankEmptySlots;
+
+        if (changed || System.currentTimeMillis() - pendingBankActionAtMs >= BANK_DISPATCH_TIMEOUT_MS) {
+            clearBankInventoryAction();
+            return false;
+        }
+        return true;
+    }
+
+    private void markBankInventoryAction(String item, int beforeItemCount, int beforeEmptySlots) {
+        pendingBankItem = item;
+        pendingBankItemBeforeCount = beforeItemCount;
+        pendingBankEmptySlots = beforeEmptySlots;
+        pendingBankActionAtMs = System.currentTimeMillis();
+    }
+
+    private void clearBankInventoryAction() {
+        pendingBankActionAtMs = 0L;
+        pendingBankItem = null;
+        pendingBankItemBeforeCount = -1;
+        pendingBankEmptySlots = -1;
     }
 
     private boolean hasOutdatedToolInBank() {
@@ -658,6 +702,7 @@ extends Script {
         this.state = SellState.GOING_TO_GE;
         this.lastWebWalkAtMs = 0L;
         this.lastActionAtMs = 0L;
+        clearBankInventoryAction();
         this.blockedSellItems.clear();
         this.withdrawFailureCounts.clear();
         this.tradeRestrictionUnlockedCache = null;

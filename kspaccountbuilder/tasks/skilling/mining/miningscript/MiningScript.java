@@ -49,6 +49,7 @@ public class MiningScript extends Script
     private static final int OBJECT_INTERACTION_COOLDOWN_MS = 100;
     private static final int OBJECT_INTERACTION_START_TIMEOUT_MS = 1_500;
     private static final long BANK_ACTION_COOLDOWN_MS = 500L;
+    private static final long BANK_INVENTORY_ACTION_TIMEOUT_MS = 1_500L;
     private static final int ROCK_SEARCH_PADDING_TILES = 8;
     private static final int OUT_OF_AREA_ROCK_FALLBACK_RADIUS = 4;
     private static final int MID_TIER_RANDOM_MAX_LEVEL = 60;
@@ -111,6 +112,8 @@ public class MiningScript extends Script
     private long pendingObjectInteractionAtMs;
     private long lastUnderAttackAtMs;
     private long lastBankActionAtMs;
+    private long pendingBankInventoryActionAtMs;
+    private int pendingBankInventoryEmptySlots = -1;
 
     public void setDebugLogging(boolean debugLogging) { this.debugLogging = debugLogging; }
 
@@ -265,7 +268,9 @@ public class MiningScript extends Script
             if (KspBankWidgetHelper.closeBankTutorialOverlayIfOpen()) return false;
             if (!KspBankMode.ensureWithdrawAsItem() || !bankActionReady()) return false;
 
-            Rs2Bank.withdrawOne(active);
+            if (bankInventoryActionPending()) return false;
+            int before = Rs2Inventory.emptySlotCount();
+            if (Rs2Bank.withdrawOne(active)) markBankInventoryAction(before);
             markBankAction();
             return false;
         }
@@ -289,7 +294,11 @@ public class MiningScript extends Script
             if (KspBankWidgetHelper.closeBankTutorialOverlayIfOpen()) return false;
             if (!bankActionReady()) return false;
 
-            depositOutdatedPickaxes(active);
+            if (bankInventoryActionPending()) return false;
+            if (depositOneOutdatedPickaxe(active)) {
+                markBankAction();
+                return false;
+            }
             if (!hasOutdatedPickaxeInInventory(active)) Rs2Bank.closeBank();
             markBankAction();
             return false;
@@ -298,20 +307,18 @@ public class MiningScript extends Script
         return Rs2Equipment.isWearing(active) || Rs2Inventory.hasItem(active);
     }
 
-    private void depositOutdatedPickaxes(String desiredPickaxeName)
+    private boolean depositOneOutdatedPickaxe(String desiredPickaxeName)
     {
         for (String pickaxeName : PICKAXE_NAMES)
         {
-            if (pickaxeName.equalsIgnoreCase(desiredPickaxeName))
-            {
-                continue;
-            }
-
-            if (Rs2Inventory.hasItem(pickaxeName))
-            {
-                Rs2Bank.depositAll(pickaxeName);
+            if (pickaxeName.equalsIgnoreCase(desiredPickaxeName) || !Rs2Inventory.hasItem(pickaxeName)) continue;
+            int before = Rs2Inventory.emptySlotCount();
+            if (Rs2Bank.depositAll(pickaxeName)) {
+                markBankInventoryAction(before);
+                return true;
             }
         }
+        return false;
     }
 
     private boolean hasOutdatedPickaxeInInventory(String desiredPickaxeName)
@@ -475,11 +482,12 @@ public class MiningScript extends Script
         }
 
         if (KspBankWidgetHelper.closeBankTutorialOverlayIfOpen()) return;
-        if (!bankActionReady()) return;
+        if (!bankActionReady() || bankInventoryActionPending()) return;
 
         String keep = resolveInventoryPickaxeToKeep(miningLevel);
-        if (keep != null) Rs2Bank.depositAllExcept(keep);
-        else Rs2Bank.depositAll();
+        int before = Rs2Inventory.emptySlotCount();
+        boolean deposited = keep != null ? Rs2Bank.depositAllExcept(keep) : Rs2Bank.depositAll();
+        if (deposited) markBankInventoryAction(before);
         markBankAction();
     }
 
@@ -526,9 +534,14 @@ public class MiningScript extends Script
             return;
         }
 
+        if (bankInventoryActionPending()) return;
         String keep = resolveInventoryPickaxeToKeep(miningLevel);
         List<String> itemsToKeep = keep == null ? Collections.emptyList() : Collections.singletonList(keep);
-        Rs2DepositBox.depositAllExcept(itemsToKeep, false);
+        int before = Rs2Inventory.emptySlotCount();
+        if (Rs2DepositBox.depositAllExcept(itemsToKeep, false)) {
+            markBankInventoryAction(before);
+            return;
+        }
         if (!Rs2Inventory.isFull()) Rs2DepositBox.closeDepositBox();
     }
 
@@ -617,6 +630,26 @@ public class MiningScript extends Script
             debug("Rock interaction rejected | rock={} id={} loc={}",
                     rock.getName(), rock.getId(), rock.getWorldLocation());
         }
+    }
+
+    private boolean bankInventoryActionPending()
+    {
+        if (pendingBankInventoryActionAtMs == 0L) return false;
+        if (Rs2Inventory.emptySlotCount() != pendingBankInventoryEmptySlots) {
+            pendingBankInventoryActionAtMs = 0L;
+            pendingBankInventoryEmptySlots = -1;
+            return false;
+        }
+        if (System.currentTimeMillis() - pendingBankInventoryActionAtMs < BANK_INVENTORY_ACTION_TIMEOUT_MS) return true;
+        pendingBankInventoryActionAtMs = 0L;
+        pendingBankInventoryEmptySlots = -1;
+        return false;
+    }
+
+    private void markBankInventoryAction(int beforeEmptySlots)
+    {
+        pendingBankInventoryEmptySlots = beforeEmptySlots;
+        pendingBankInventoryActionAtMs = System.currentTimeMillis();
     }
 
     private boolean bankActionReady()
@@ -1062,6 +1095,8 @@ public class MiningScript extends Script
     public void shutdown()
     {
         lastBankActionAtMs = 0L;
+        pendingBankInventoryActionAtMs = 0L;
+        pendingBankInventoryEmptySlots = -1;
         startingTargetRockInitialized = false;
         initializedSelectionBand = -1;
         randomMidTierRock = null;

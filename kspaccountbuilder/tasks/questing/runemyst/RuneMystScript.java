@@ -24,6 +24,7 @@ public class RuneMystScript extends Script
     private static final int NPC_REACH_DISTANCE = 4;
     private static final long WALK_REFIRE_COOLDOWN_MS = 1_000L;
     private static final long ACTION_COOLDOWN_MS = 300L;
+    private static final long NPC_INTERACTION_TIMEOUT_MS = 1_500L;
 
     private static final int AIR_TALISMAN_ID = 1438;
     private static final int RESEARCH_PACKAGE_ID = 290;
@@ -41,6 +42,8 @@ public class RuneMystScript extends Script
     private boolean complete;
     private boolean finalSedridorDeliveryStarted;
     private long lastActionAtMs;
+    private long pendingNpcInteractionAtMs;
+    private int pendingNpcIndex = -1;
     private RuneMystState state = RuneMystState.PREPARING;
     private String status = "Idle";
 
@@ -50,6 +53,8 @@ public class RuneMystScript extends Script
         complete = false;
         finalSedridorDeliveryStarted = false;
         lastActionAtMs = 0L;
+        pendingNpcInteractionAtMs = 0L;
+        pendingNpcIndex = -1;
         state = RuneMystState.PREPARING;
         status = "Starting Rune Mysteries";
 
@@ -243,13 +248,38 @@ public class RuneMystScript extends Script
         state = talkingState;
         status = "Talking to " + npcName;
         KspWalkerGuard.clear(walkKey);
-        if (System.currentTimeMillis() - lastActionAtMs < ACTION_COOLDOWN_MS)
+        if (System.currentTimeMillis() - lastActionAtMs < ACTION_COOLDOWN_MS
+                || isNpcInteractionPending(npc)
+                || Rs2Player.isMoving()
+                || Rs2Player.isAnimating()
+                || Rs2Player.isInteracting())
         {
             return;
         }
 
-        lastActionAtMs = System.currentTimeMillis();
-        npc.click("Talk-to");
+        if (npc.click("Talk-to"))
+        {
+            lastActionAtMs = System.currentTimeMillis();
+            pendingNpcInteractionAtMs = lastActionAtMs;
+            pendingNpcIndex = npc.getIndex();
+        }
+    }
+
+    private boolean isNpcInteractionPending(Rs2NpcModel npc)
+    {
+        if (pendingNpcInteractionAtMs == 0L) return false;
+        if (Rs2Dialogue.isInDialogue())
+        {
+            pendingNpcInteractionAtMs = 0L;
+            pendingNpcIndex = -1;
+            return true;
+        }
+        if (npc != null && pendingNpcIndex != -1 && npc.getIndex() != pendingNpcIndex) return false;
+        if (Rs2Player.isMoving() || Rs2Player.isAnimating() || Rs2Player.isInteracting()) return true;
+        if (System.currentTimeMillis() - pendingNpcInteractionAtMs < NPC_INTERACTION_TIMEOUT_MS) return true;
+        pendingNpcInteractionAtMs = 0L;
+        pendingNpcIndex = -1;
+        return false;
     }
 
     private boolean isQuestComplete() { return Rs2Player.getQuestState(Quest.RUNE_MYSTERIES) == QuestState.FINISHED; }
