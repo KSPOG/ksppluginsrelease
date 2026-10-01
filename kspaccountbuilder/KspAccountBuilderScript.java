@@ -319,8 +319,6 @@ public class KspAccountBuilderScript extends Script
                 return;
             }
 
-            KspWalkerGuard.recoverActiveWalkIfIdle();
-
             if (currentTask == null)
             {
                 currentTask = resolveStartingTask();
