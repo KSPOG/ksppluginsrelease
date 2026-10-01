@@ -36,13 +36,13 @@ public final class KspWalkerGuard
             return false;
         }
 
-        if (Rs2Walker.getCurrentTarget() != null)
+        WorldPoint target = targetSupplier.get();
+        if (target == null)
         {
             return false;
         }
 
-        WorldPoint target = targetSupplier.get();
-        if (target == null)
+        if (!prepareCoreWalkerTarget(target, arriveDistance))
         {
             return false;
         }
@@ -65,7 +65,7 @@ public final class KspWalkerGuard
             return false;
         }
 
-        if (Rs2Walker.getCurrentTarget() != null)
+        if (!prepareCoreWalkerTarget(target, arriveDistance))
         {
             return false;
         }
@@ -88,7 +88,7 @@ public final class KspWalkerGuard
             return false;
         }
 
-        if (Rs2Player.isMoving() || Rs2Walker.getCurrentTarget() != null)
+        if (Rs2Player.isMoving() || !prepareCoreWalkerTarget(target, arriveDistance))
         {
             return false;
         }
@@ -98,7 +98,7 @@ public final class KspWalkerGuard
 
     public static void clear(String key)
     {
-        // No local route/request state remains.
+        clearActiveWalker("ksp_account_builder_clear_walker");
     }
 
     public static void clearActiveWalker(String reason)
@@ -112,6 +112,24 @@ public final class KspWalkerGuard
     public static void clearReachedDestination(String key, String reason)
     {
         clearActiveWalker(reason != null ? reason : "ksp_account_builder_reached_destination");
+    }
+
+    private static boolean prepareCoreWalkerTarget(WorldPoint target, int arriveDistance)
+    {
+        WorldPoint currentTarget = Rs2Walker.getCurrentTarget();
+        if (currentTarget == null)
+        {
+            return true;
+        }
+
+        int sameDestinationDistance = Math.max(2, arriveDistance + 2);
+        if (isSameDestination(currentTarget, target, sameDestinationDistance))
+        {
+            return false;
+        }
+
+        Rs2Walker.clearWalkingRoute("ksp_account_builder_retarget");
+        return true;
     }
 
     private static boolean blockWalkingForOpenWorldMap()
