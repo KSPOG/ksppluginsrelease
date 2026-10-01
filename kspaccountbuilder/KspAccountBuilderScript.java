@@ -288,7 +288,7 @@ public class KspAccountBuilderScript extends Script
                 return;
             }
 
-            boolean playTimeConfirmed = sampleAccountPlayTime();
+            refreshAccountIdentity();
             if (handleExperienceLampInterruption())
             {
                 updateWindowTitle();
@@ -296,20 +296,13 @@ public class KspAccountBuilderScript extends Script
                 return;
             }
 
-            processTimers(playTimeConfirmed);
+            processTimers();
             updateWindowTitle();
 
             if (isAnyBreakActive()
                     || !Microbot.isLoggedIn()
                     || !isReadyAfterLoginHandoff())
             {
-                maybeLogStatus();
-                return;
-            }
-
-            if (!playTimeConfirmed)
-            {
-                Microbot.status = "Confirming account play time";
                 maybeLogStatus();
                 return;
             }
@@ -328,10 +321,11 @@ public class KspAccountBuilderScript extends Script
             {
                 currentTask = resolveStartingTask();
                 awaitingActivitySwitchTimerStart = canUseActivitySwitchTimer();
-                debug("Selected initial task after play-time confirmation | currentTask={}", currentTask);
+                debug("Selected initial task | currentTask={}", currentTask);
             }
 
             runAccountBuilderCycle();
+            sampleAccountPlayTime();
             maybeLogStatus();
         }
         catch (Exception ex)
@@ -454,7 +448,7 @@ public class KspAccountBuilderScript extends Script
         return true;
     }
 
-    private void processTimers(boolean playTimeConfirmed)
+    private void processTimers()
     {
         if (shuttingDown) return;
 
@@ -473,7 +467,7 @@ public class KspAccountBuilderScript extends Script
 
         if (!Microbot.isLoggedIn()) return;
 
-        if (!playTimeConfirmed || currentTask == null || isSingleSkillTaskForced())
+        if (currentTask == null || isSingleSkillTaskForced())
         {
             clearPendingActivitySwitch();
             return;
@@ -2878,6 +2872,38 @@ public class KspAccountBuilderScript extends Script
         Rs2Antiban.resetAntibanSettings(true);
     }
 
+    private void refreshAccountIdentity()
+    {
+        boolean loggedIn = Microbot.isLoggedIn();
+        long accountHash = loggedIn ? getCurrentAccountHash() : 0L;
+
+        if (loggedIn
+                && accountHash != 0L
+                && currentAccountHashSnapshot != 0L
+                && accountHash != currentAccountHashSnapshot)
+        {
+            if (currentTask != null)
+            {
+                stopCurrentTaskScript();
+            }
+            taskStarted = false;
+            currentTask = null;
+            pendingTask = null;
+            preselectedHandoffTask = null;
+            pendingRandomTaskSelection = false;
+            awaitingNextActivityStart = false;
+            awaitingActivitySwitchTimerStart = false;
+            nextActivitySwitchAtMillis = -1L;
+            synchronizedPlayTimeAccountHash = 0L;
+            nextPlayTimeReadAtMillis = 0L;
+            taskSwitchBankLocation = null;
+            debug("Account changed; reset task state before selecting for new account");
+        }
+
+        currentAccountHashSnapshot = accountHash;
+        accountPlayTimeCache.sample(loggedIn, accountHash);
+    }
+
     private boolean sampleAccountPlayTime()
     {
         boolean loggedIn = Microbot.isLoggedIn();
@@ -2891,31 +2917,9 @@ public class KspAccountBuilderScript extends Script
             return true;
         }
 
-        long accountHash = getCurrentAccountHash();
-        currentAccountHashSnapshot = accountHash;
-        accountPlayTimeCache.sample(loggedIn, accountHash);
-
-        if (loggedIn
-                && accountHash != 0L
-                && synchronizedPlayTimeAccountHash != 0L
-                && accountHash != synchronizedPlayTimeAccountHash)
-        {
-            if (currentTask != null)
-            {
-                stopCurrentTaskScript();
-            }
-            taskStarted = false;
-            currentTask = null;
-            pendingTask = null;
-            pendingRandomTaskSelection = false;
-            awaitingNextActivityStart = false;
-            awaitingActivitySwitchTimerStart = false;
-            nextActivitySwitchAtMillis = -1L;
-            synchronizedPlayTimeAccountHash = 0L;
-            nextPlayTimeReadAtMillis = 0L;
-            taskSwitchBankLocation = null;
-            debug("Account changed; stopped task selection until play time is confirmed");
-        }
+        long accountHash = currentAccountHashSnapshot != 0L
+                ? currentAccountHashSnapshot
+                : getCurrentAccountHash();
 
         if (!loggedIn)
         {
