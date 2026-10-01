@@ -370,6 +370,8 @@ extends Script {
             return;
         }
 
+        if (isWaitingForSmithStart()) return;
+
         if (Rs2Player.isAnimating()) {
             lastSmithAnimationAtMs = System.currentTimeMillis();
             return;
