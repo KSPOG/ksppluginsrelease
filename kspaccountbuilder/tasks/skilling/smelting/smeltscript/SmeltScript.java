@@ -50,10 +50,17 @@ extends Script {
     private static final int WEB_WALK_COOLDOWN_MS = 1_000;
     private static final int FURNACE_INTERACT_COOLDOWN_MS = 100;
     private static final int SMELT_START_GRACE_MS = 900;
+    private static final int BANK_WITHDRAW_START_TIMEOUT_MS = 1_500;
+    private static final int PRODUCTION_ACTION_START_TIMEOUT_MS = 1_500;
     private long lastWebWalkAtMs;
     private long lastFurnaceInteractAtMs;
     private long awaitingSmeltStartAtMs;
     private long lastSmeltAnimationAtMs;
+    private long pendingWithdrawAtMs;
+    private String pendingWithdrawItem;
+    private int pendingWithdrawBeforeCount = -1;
+    private long pendingProductionActionAtMs;
+    private String pendingProductionActionKey;
     private SmeltArea targetArea = SmeltArea.SMELT_AREA_EDGEVILLE_FURNACE;
     private BarLevels targetBar = BarLevels.BRONZE;
     private boolean debugLogging;
@@ -194,16 +201,18 @@ extends Script {
         int primaryTarget = bars * req.getPrimaryOreAmount();
         int secondaryTarget = req.hasSecondaryOre() ? bars * req.getSecondaryOreAmount() : 0;
 
+        if (isWithdrawPending()) return false;
+
         int primaryCurrent = Rs2Inventory.count(req.getPrimaryOreName());
         if (primaryCurrent < primaryTarget) {
-            Rs2Bank.withdrawX(req.getPrimaryOreName(), primaryTarget - primaryCurrent);
+            dispatchWithdraw(req.getPrimaryOreName(), primaryTarget - primaryCurrent, primaryCurrent);
             return false;
         }
 
         if (req.hasSecondaryOre()) {
             int secondaryCurrent = Rs2Inventory.count(req.getSecondaryOreName());
             if (secondaryCurrent < secondaryTarget) {
-                Rs2Bank.withdrawX(req.getSecondaryOreName(), secondaryTarget - secondaryCurrent);
+                dispatchWithdraw(req.getSecondaryOreName(), secondaryTarget - secondaryCurrent, secondaryCurrent);
                 return false;
             }
         }
@@ -358,20 +367,107 @@ extends Script {
     }
 
     private boolean handleSmeltSelection(BarLevels bar) {
-        if (Rs2Widget.findWidget("What would you like to smelt?", null, false) == null) return false;
+        if (Rs2Widget.findWidget("What would you like to smelt?", null, false) == null) {
+            clearProductionActionIfWidgetClosed();
+            return false;
+        }
 
-        Rs2Widget.clickWidget(bar.getDisplayName());
+        if (isProductionActionPending("smelt-selection:" + bar.name())) return true;
+
+        if (Rs2Widget.clickWidget(bar.getDisplayName())) {
+            markProductionAction("smelt-selection:" + bar.name());
+        }
         return true;
     }
 
     private boolean handleProductionWidget(BarLevels bar) {
-        if (!Rs2Widget.isProductionWidgetOpen()) return false;
+        if (!Rs2Widget.isProductionWidgetOpen()) {
+            clearProductionActionIfWidgetClosed();
+            return false;
+        }
+
+        String key = "production:" + bar.name();
+        if (isProductionActionPending(key)) return true;
 
         if (!selectProductionBar(bar)) return true;
 
+        markProductionAction(key);
         Rs2Keyboard.keyPress(32);
         awaitingSmeltStartAtMs = System.currentTimeMillis();
         return true;
+    }
+
+    private void dispatchWithdraw(String itemName, int amount, int beforeCount) {
+        if (amount <= 0 || itemName == null) return;
+
+        if (Rs2Bank.withdrawX(itemName, amount)) {
+            pendingWithdrawAtMs = System.currentTimeMillis();
+            pendingWithdrawItem = itemName;
+            pendingWithdrawBeforeCount = beforeCount;
+            debug("Withdraw dispatched | item={} amount={} before={}", itemName, amount, beforeCount);
+        }
+    }
+
+    private boolean isWithdrawPending() {
+        if (pendingWithdrawAtMs == 0L || pendingWithdrawItem == null) return false;
+
+        int current = Rs2Inventory.count(pendingWithdrawItem);
+        if (current != pendingWithdrawBeforeCount) {
+            clearPendingWithdraw();
+            return false;
+        }
+
+        if (System.currentTimeMillis() - pendingWithdrawAtMs >= BANK_WITHDRAW_START_TIMEOUT_MS) {
+            debug("Withdraw dispatch timed out | item={} before={} current={}",
+                    pendingWithdrawItem, pendingWithdrawBeforeCount, current);
+            clearPendingWithdraw();
+            return false;
+        }
+
+        return true;
+    }
+
+    private void clearPendingWithdraw() {
+        pendingWithdrawAtMs = 0L;
+        pendingWithdrawItem = null;
+        pendingWithdrawBeforeCount = -1;
+    }
+
+    private boolean isProductionActionPending(String key) {
+        if (pendingProductionActionAtMs == 0L || pendingProductionActionKey == null) return false;
+
+        long elapsed = System.currentTimeMillis() - pendingProductionActionAtMs;
+        if (!pendingProductionActionKey.equals(key)) {
+            if (elapsed >= PRODUCTION_ACTION_START_TIMEOUT_MS) clearPendingProductionAction();
+            return false;
+        }
+
+        if (Rs2Player.isAnimating()) {
+            clearPendingProductionAction();
+            return true;
+        }
+
+        if (elapsed < PRODUCTION_ACTION_START_TIMEOUT_MS) return true;
+
+        clearPendingProductionAction();
+        return false;
+    }
+
+    private void markProductionAction(String key) {
+        pendingProductionActionKey = key;
+        pendingProductionActionAtMs = System.currentTimeMillis();
+    }
+
+    private void clearProductionActionIfWidgetClosed() {
+        if (!Rs2Widget.isProductionWidgetOpen()
+                && Rs2Widget.findWidget("What would you like to smelt?", null, false) == null) {
+            clearPendingProductionAction();
+        }
+    }
+
+    private void clearPendingProductionAction() {
+        pendingProductionActionAtMs = 0L;
+        pendingProductionActionKey = null;
     }
 
     private boolean selectProductionBar(BarLevels bar) {
@@ -409,6 +505,8 @@ extends Script {
         this.lastFurnaceInteractAtMs = 0L;
         this.awaitingSmeltStartAtMs = 0L;
         this.lastSmeltAnimationAtMs = 0L;
+        this.clearPendingWithdraw();
+        this.clearPendingProductionAction();
         this.walkingToTargetArea = false;
         this.bankInventoryReset = false;
         KspWalkerGuard.clear("Smelting:target-area");
