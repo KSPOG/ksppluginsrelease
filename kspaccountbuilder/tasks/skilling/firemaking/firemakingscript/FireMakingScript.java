@@ -264,10 +264,14 @@ public class FireMakingScript extends Script
 
         if (isBankActionPending()) return false;
 
-        int beforeDeposit = Rs2Inventory.emptySlotCount();
-        if (Rs2Bank.depositAllExcept(TINDERBOX_NAME)
-                && Rs2Inventory.emptySlotCount() == beforeDeposit) {
-            markBankAction(beforeDeposit);
+        boolean hasItemsToDeposit = Rs2Inventory.all().stream()
+                .anyMatch(item -> item != null
+                        && item.getName() != null
+                        && !TINDERBOX_NAME.equalsIgnoreCase(item.getName()));
+        if (hasItemsToDeposit)
+        {
+            int beforeDeposit = Rs2Inventory.emptySlotCount();
+            if (Rs2Bank.depositAllExcept(TINDERBOX_NAME)) markBankAction(beforeDeposit);
             return false;
         }
 
