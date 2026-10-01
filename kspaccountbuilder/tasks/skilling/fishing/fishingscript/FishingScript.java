@@ -43,6 +43,7 @@ public class FishingScript extends Script
     private static final int LOOP_DELAY_MS = 100;
     private static final int WEB_WALK_COOLDOWN_MS = 1_000;
     private static final int NPC_INTERACTION_COOLDOWN_MS = 100;
+    private static final int NPC_INTERACTION_START_TIMEOUT_MS = 1_500;
     private static final int FISHING_SPOT_SEARCH_PADDING_TILES = 8;
     private static final int OUT_OF_AREA_SPOT_FALLBACK_RADIUS = 4;
     private static final int FISHING_SPOT_INTERACTION_DISTANCE = 8;
@@ -66,6 +67,7 @@ public class FishingScript extends Script
     private int cookingBatchItemId = NO_COOKING_BATCH;
     private boolean expectingCookingXpDrop;
     private long lastNpcInteractionAtMs;
+    private long pendingNpcInteractionAtMs;
     private long lastWebWalkAtMs;
 
     public void setDebugLogging(boolean debugLogging) { this.debugLogging = debugLogging; }
@@ -313,9 +315,8 @@ public class FishingScript extends Script
 
     private void fishCurrentTarget()
     {
-        if (!canStartFishingInTargetArea()) return;
-
         long now = System.currentTimeMillis();
+        if (!canStartFishingInTargetArea(now)) return;
         if (now - lastNpcInteractionAtMs < NPC_INTERACTION_COOLDOWN_MS) return;
 
         FishingTarget target = FishingTarget.fromLevelReq(targetFish);
@@ -330,7 +331,12 @@ public class FishingScript extends Script
 
         lastNpcInteractionAtMs = now;
         Microbot.status = "Fishing " + targetFish.getDisplayName();
-        if (!spot.click(action)) {
+        if (spot.click(action)) {
+            pendingNpcInteractionAtMs = now;
+            debug("Fishing interaction dispatched | fish={} action={} spot={} loc={}",
+                    targetFish.getDisplayName(), action, spot.getId(), spot.getWorldLocation());
+        } else {
+            pendingNpcInteractionAtMs = 0L;
             debug("Fishing click rejected | fish={} action={} spot={} loc={}",
                     targetFish.getDisplayName(), action, spot.getId(), spot.getWorldLocation());
         }
@@ -652,15 +658,28 @@ public class FishingScript extends Script
         return player != null
                 && targetArea.contains(player)
                 && !Rs2Player.isMoving()
-                && !Rs2Player.isAnimating();
+                && !Rs2Player.isAnimating()
+                && !Rs2Player.isInteracting();
     }
 
-    private boolean canStartFishingInTargetArea()
+    private boolean canStartFishingInTargetArea(long now)
     {
         WorldPoint player = Rs2Player.getWorldLocation();
-        return player != null
-                && targetArea.contains(player)
-                && !Rs2Player.isAnimating();
+        if (player == null || !targetArea.contains(player)) return false;
+
+        if (Rs2Player.isMoving() || Rs2Player.isAnimating() || Rs2Player.isInteracting())
+        {
+            pendingNpcInteractionAtMs = 0L;
+            return false;
+        }
+
+        if (pendingNpcInteractionAtMs > 0L)
+        {
+            if (now - pendingNpcInteractionAtMs < NPC_INTERACTION_START_TIMEOUT_MS) return false;
+            pendingNpcInteractionAtMs = 0L;
+        }
+
+        return true;
     }
 
     private Areas resolveTargetArea(LevelReqs fish)
@@ -777,6 +796,7 @@ public class FishingScript extends Script
         walkingToTargetArea = false;
         targetAreaArrivalHandled = false;
         lastNpcInteractionAtMs = 0L;
+        pendingNpcInteractionAtMs = 0L;
         lastWebWalkAtMs = 0L;
         state = FishingState.WAITING;
         KspWalkerGuard.clear(WALK_KEY_TO_FISHING_AREA);
