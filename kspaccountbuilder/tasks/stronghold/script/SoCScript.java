@@ -254,7 +254,8 @@ public class SoCScript extends Script
         if (Rs2Dialogue.hasContinue())
         {
             if (isInteractionPending("dialogue-continue")) return true;
-            if (Rs2Dialogue.clickContinue()) markInteraction("dialogue-continue");
+            Rs2Dialogue.clickContinue();
+            markInteraction("dialogue-continue");
             return true;
         }
 
