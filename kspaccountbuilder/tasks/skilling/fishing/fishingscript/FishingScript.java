@@ -267,6 +267,12 @@ public class FishingScript extends Script
 
         if (isCookingWidgetOpen())
         {
+            if (Rs2Player.isAnimating())
+            {
+                pendingCookingWidgetActionAtMs = 0L;
+                return true;
+            }
+
             if (!isCookingWidgetActionPending())
             {
                 Rs2Keyboard.keyPress(KeyEvent.VK_SPACE);
