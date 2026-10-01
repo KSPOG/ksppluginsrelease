@@ -44,6 +44,7 @@ public class BuyScript extends Script {
     private static final int LOOP_DELAY_MS = 100;
     private static final int WEB_WALK_COOLDOWN_MS = 1_000;
     private static final int ACTION_COOLDOWN_MS = 300;
+    private static final long BANK_DISPATCH_TIMEOUT_MS = 1_500L;
 
     private static final int TARGET_SMITHING_LEVEL = Buy.TARGET_SMITHING_LEVEL;
     private static final int TARGET_SMITHING_XP = Buy.TARGET_SMITHING_XP;
@@ -91,6 +92,10 @@ public class BuyScript extends Script {
 
     private long lastWebWalkAtMs;
     private long lastActionAtMs;
+    private long pendingBankActionAtMs;
+    private String pendingBankItem;
+    private int pendingBankItemBeforeCount = -1;
+    private int pendingBankEmptySlots = -1;
 
     private boolean bankToolsAudited;
     private boolean bankHasDesiredPickaxe;
@@ -562,13 +567,15 @@ public class BuyScript extends Script {
         }
 
         Microbot.status = "Preparing GE Items";
+        if (isBankInventoryActionPending()) return;
         refreshBankAuditSnapshot(desiredPickaxe, desiredAxe);
 
         if (KspBankWidgetHelper.closeBankTutorialOverlayIfOpen()) return;
 
         if (!exchangeInventoryReset) {
             if (!Rs2Inventory.isEmpty()) {
-                Rs2Bank.depositAll();
+                int before = Rs2Inventory.emptySlotCount();
+                if (Rs2Bank.depositAll()) markBankInventoryAction(null, -1, before);
                 return;
             }
             exchangeInventoryReset = true;
@@ -587,7 +594,8 @@ public class BuyScript extends Script {
         if (withdrawOutdatedToolsAsNotes(desiredPickaxe, desiredAxe)) return;
 
         if (needCoinsForBuying && Rs2Inventory.itemQuantity(995) <= 0 && Rs2Bank.count(COINS_NAME) > 0) {
-            Rs2Bank.withdrawAll(COINS_NAME);
+            int before = Rs2Inventory.count(COINS_NAME);
+            if (Rs2Bank.withdrawAll(COINS_NAME)) markBankInventoryAction(COINS_NAME, before, -1);
             return;
         }
 
@@ -1602,7 +1610,10 @@ public class BuyScript extends Script {
             if (!pickaxe.equalsIgnoreCase(desiredPickaxe)
                     && Rs2Bank.count(pickaxe) > 0
                     && !Rs2Inventory.isFull()) {
-                return Rs2Bank.withdrawAll(pickaxe, true);
+                int before = Rs2Inventory.count(pickaxe);
+                boolean dispatched = Rs2Bank.withdrawAll(pickaxe, true);
+                if (dispatched) markBankInventoryAction(pickaxe, before, -1);
+                return dispatched;
             }
         }
 
@@ -1610,10 +1621,41 @@ public class BuyScript extends Script {
             if (!axe.equalsIgnoreCase(desiredAxe)
                     && Rs2Bank.count(axe) > 0
                     && !Rs2Inventory.isFull()) {
-                return Rs2Bank.withdrawAll(axe, true);
+                int before = Rs2Inventory.count(axe);
+                boolean dispatched = Rs2Bank.withdrawAll(axe, true);
+                if (dispatched) markBankInventoryAction(axe, before, -1);
+                return dispatched;
             }
         }
         return false;
+    }
+
+    private boolean isBankInventoryActionPending() {
+        if (pendingBankActionAtMs == 0L) return false;
+
+        boolean changed = pendingBankItem != null
+                ? Rs2Inventory.count(pendingBankItem) != pendingBankItemBeforeCount
+                : Rs2Inventory.emptySlotCount() != pendingBankEmptySlots;
+
+        if (changed || System.currentTimeMillis() - pendingBankActionAtMs >= BANK_DISPATCH_TIMEOUT_MS) {
+            clearBankInventoryAction();
+            return false;
+        }
+        return true;
+    }
+
+    private void markBankInventoryAction(String item, int beforeItemCount, int beforeEmptySlots) {
+        pendingBankItem = item;
+        pendingBankItemBeforeCount = beforeItemCount;
+        pendingBankEmptySlots = beforeEmptySlots;
+        pendingBankActionAtMs = System.currentTimeMillis();
+    }
+
+    private void clearBankInventoryAction() {
+        pendingBankActionAtMs = 0L;
+        pendingBankItem = null;
+        pendingBankItemBeforeCount = -1;
+        pendingBankEmptySlots = -1;
     }
 
     private boolean ensureGrandExchangeOpen() {
@@ -2367,6 +2409,7 @@ public class BuyScript extends Script {
     public void shutdown() {
         this.lastWebWalkAtMs = 0L;
         this.lastActionAtMs = 0L;
+        clearBankInventoryAction();
 
         this.bankToolsAudited = false;
         this.bankHasDesiredPickaxe = false;
