@@ -51,6 +51,7 @@ extends Script {
     private static final int WEB_WALK_COOLDOWN_MS = 1_000;
     private static final int ANVIL_INTERACT_COOLDOWN_MS = 100;
     private static final int SMITH_START_GRACE_MS = 900;
+    private static final long SMITH_WIDGET_ACTION_TIMEOUT_MS = 1_500L;
     private static final int ANVIL_APPROACH_DISTANCE = 6;
     private static final int SMITHING_WIDGET_GROUP_ID = 312;
     private static final int SMITHING_ALL_BUTTON_CHILD_ID = 7;
@@ -67,6 +68,8 @@ extends Script {
     private boolean debugLogging;
     private boolean walkingToTargetArea;
     private boolean bankInventoryReset;
+    private long pendingSmithWidgetActionAtMs;
+    private String pendingSmithWidgetAction;
     private SmithArea targetArea = SmithArea.SMITH_AREA_VARROCK_WEST_ANVIL;
     private SmithRecipe targetRecipe = SmithRecipe.BRONZE_DAGGER;
     private SmithLevels forcedSmithLevel;
@@ -416,10 +419,15 @@ extends Script {
         if (products <= 0) return true;
 
         if (Microbot.getVarbitPlayerValue(ANVIL_MAKE_VARBIT_PLAYER) < products) {
-            Rs2Widget.clickWidget(SMITHING_WIDGET_GROUP_ID, SMITHING_ALL_BUTTON_CHILD_ID);
+            if (!isSmithWidgetActionPending("all")
+                    && Rs2Widget.isWidgetVisible(SMITHING_WIDGET_GROUP_ID, SMITHING_ALL_BUTTON_CHILD_ID)
+                    && Rs2Widget.clickWidget(SMITHING_WIDGET_GROUP_ID, SMITHING_ALL_BUTTON_CHILD_ID)) {
+                markSmithWidgetAction("all");
+            }
             return true;
         }
 
+        if (isSmithWidgetActionPending("recipe:" + recipe.name())) return true;
         if (!selectSmithingRecipe(recipe)) return true;
 
         awaitingSmithStartAtMs = System.currentTimeMillis();
@@ -441,10 +449,49 @@ extends Script {
         }
 
         if (selectedRecipe && this.isSmithingWidgetOpen()) {
+            markSmithWidgetAction("recipe:" + recipe.name());
             Rs2Keyboard.keyPress((int)32);
         }
 
         return selectedRecipe;
+    }
+
+    private boolean isSmithWidgetActionPending(String action)
+    {
+        if (pendingSmithWidgetActionAtMs == 0L || pendingSmithWidgetAction == null) return false;
+
+        if (Rs2Player.isAnimating())
+        {
+            clearSmithWidgetAction();
+            return false;
+        }
+
+        long elapsed = System.currentTimeMillis() - pendingSmithWidgetActionAtMs;
+        if (!pendingSmithWidgetAction.equals(action))
+        {
+            clearSmithWidgetAction();
+            return false;
+        }
+
+        if (elapsed >= SMITH_WIDGET_ACTION_TIMEOUT_MS)
+        {
+            clearSmithWidgetAction();
+            return false;
+        }
+
+        return true;
+    }
+
+    private void markSmithWidgetAction(String action)
+    {
+        pendingSmithWidgetAction = action;
+        pendingSmithWidgetActionAtMs = System.currentTimeMillis();
+    }
+
+    private void clearSmithWidgetAction()
+    {
+        pendingSmithWidgetAction = null;
+        pendingSmithWidgetActionAtMs = 0L;
     }
 
     private String getSmithingWidgetProductName(SmithRecipe recipe) {
@@ -532,6 +579,7 @@ extends Script {
         this.lastWebWalkAtMs = 0L;
         this.lastWalkTarget = null;
         this.expectingSmithXpDrop = false;
+        this.clearSmithWidgetAction();
         this.walkingToTargetArea = false;
         KspWalkerGuard.clear(TARGET_AREA_WALK_KEY);
         KspWalkerGuard.clear(ANVIL_WALK_KEY);
