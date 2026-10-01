@@ -44,12 +44,15 @@ public class CookingScript extends Script
     private static final WorldPoint COOKING_EXIT_OUTSIDE_POINT = new WorldPoint(3080, 3498, 0);
     private static final long DOOR_INTERACTION_COOLDOWN_MS = 300L;
     private static final long STOVE_INTERACTION_COOLDOWN_MS = 100L;
+    private static final long PRODUCTION_ACTION_TIMEOUT_MS = 1_500L;
 
     private volatile Areas targetArea = Areas.EDGEVILLE_RANGE;
     private volatile CookingState state = CookingState.WAITING;
     private boolean debugLogging;
     private long lastDoorInteractionAtMs;
     private long lastStoveInteractionAtMs;
+    private long pendingProductionActionAtMs;
+    private String pendingProductionItem;
 
     public void setDebugLogging(boolean debugLogging) { this.debugLogging = debugLogging; }
 
@@ -103,20 +106,25 @@ public class CookingScript extends Script
                 return;
             }
 
-            if (Rs2Widget.findWidget("How many would you like to cook?", null, false) != null)
+            if (isCookingProductionWidgetOpen())
             {
                 state = CookingState.OPENING_COOKING_INTERFACE;
                 Microbot.status = "Selecting " + fish.getCookedItemName();
-                if (selectProductionOption(fish.getCookedItemName()))
+                if (!isProductionActionPending(fish.getCookedItemName())
+                        && selectProductionOption(fish.getCookedItemName()))
                 {
+                    markProductionAction(fish.getCookedItemName());
                     Rs2Keyboard.keyPress(KeyEvent.VK_SPACE);
                     state = CookingState.COOKING;
                 }
                 return;
             }
 
+            if (isProductionActionPending(fish.getCookedItemName())) return;
+
             if (Rs2Player.isAnimating())
             {
+                clearProductionAction();
                 return;
             }
 
@@ -324,6 +332,44 @@ public class CookingScript extends Script
                 : EDGEVILLE_COOKING_TILE;
     }
 
+    private boolean isCookingProductionWidgetOpen()
+    {
+        return Rs2Widget.isProductionWidgetOpen()
+                || Rs2Widget.findWidget("How many would you like to cook?", null, false) != null;
+    }
+
+    private boolean isProductionActionPending(String itemName)
+    {
+        if (pendingProductionActionAtMs == 0L || pendingProductionItem == null) return false;
+
+        if (Rs2Player.isAnimating())
+        {
+            clearProductionAction();
+            return false;
+        }
+
+        long elapsed = System.currentTimeMillis() - pendingProductionActionAtMs;
+        if (!pendingProductionItem.equals(itemName) || elapsed >= PRODUCTION_ACTION_TIMEOUT_MS)
+        {
+            clearProductionAction();
+            return false;
+        }
+
+        return true;
+    }
+
+    private void markProductionAction(String itemName)
+    {
+        pendingProductionItem = itemName;
+        pendingProductionActionAtMs = System.currentTimeMillis();
+    }
+
+    private void clearProductionAction()
+    {
+        pendingProductionActionAtMs = 0L;
+        pendingProductionItem = null;
+    }
+
     private boolean selectProductionOption(String itemName)
     {
         boolean selected = Rs2Widget.clickWidget(
@@ -360,6 +406,8 @@ public class CookingScript extends Script
     {
         state = CookingState.WAITING;
         lastDoorInteractionAtMs = 0L;
+        lastStoveInteractionAtMs = 0L;
+        clearProductionAction();
         KspWalkerGuard.clear(EXIT_WALK_KEY);
         KspWalkerGuard.clear(WALK_KEY);
         super.shutdown();
