@@ -5,7 +5,6 @@ import java.util.Deque;
 import java.util.Locale;
 import java.util.concurrent.TimeUnit;
 import lombok.extern.slf4j.Slf4j;
-import net.runelite.api.EquipmentInventorySlot;
 import net.runelite.api.GrandExchangeOffer;
 import net.runelite.api.GrandExchangeOfferState;
 import net.runelite.api.Skill;
@@ -19,7 +18,6 @@ import net.runelite.client.plugins.microbot.util.grandexchange.GrandExchangeRequ
 import net.runelite.client.plugins.microbot.util.grandexchange.GrandExchangeSlots;
 import net.runelite.client.plugins.microbot.util.grandexchange.Rs2GrandExchange;
 import net.runelite.client.plugins.microbot.util.inventory.Rs2Inventory;
-import net.runelite.client.plugins.microbot.util.inventory.Rs2ItemModel;
 import net.runelite.client.plugins.microbot.util.magic.Rs2Magic;
 import net.runelite.client.plugins.microbot.util.magic.Rs2Spells;
 import net.runelite.client.plugins.microbot.util.magic.Rs2Staff;
@@ -910,11 +908,19 @@ public class KspBonesToBananasScript extends Script
     {
         try
         {
-            Rs2ItemModel weapon = Rs2Equipment.get(EquipmentInventorySlot.WEAPON);
-            Rs2Staff staff = weapon == null ? Rs2Staff.NONE : Rs2Staff.byItemId(weapon.getId());
-            freeWater = staff != Rs2Staff.NONE && staff.provides(Runes.WATER);
-            freeEarth = staff != Rs2Staff.NONE && staff.provides(Runes.EARTH);
-            staffName = staff == Rs2Staff.NONE ? "None / no rune savings" : prettyStaff(staff);
+            Rs2Staff equippedStaff = Rs2Staff.NONE;
+            for (Rs2Staff staff : Rs2Staff.values())
+            {
+                if (staff != Rs2Staff.NONE && Rs2Equipment.isWearing(staff.getItemID()))
+                {
+                    equippedStaff = staff;
+                    break;
+                }
+            }
+
+            freeWater = equippedStaff != Rs2Staff.NONE && equippedStaff.getRunes().contains(Runes.WATER);
+            freeEarth = equippedStaff != Rs2Staff.NONE && equippedStaff.getRunes().contains(Runes.EARTH);
+            staffName = equippedStaff == Rs2Staff.NONE ? "None / no rune savings" : prettyStaff(equippedStaff);
         }
         catch (RuntimeException ex)
         {
