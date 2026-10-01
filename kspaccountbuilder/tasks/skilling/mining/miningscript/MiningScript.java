@@ -47,6 +47,7 @@ public class MiningScript extends Script
     private static final int LOOP_DELAY_MS = 100;
     private static final int WEB_WALK_COOLDOWN_MS = 1_000;
     private static final int OBJECT_INTERACTION_COOLDOWN_MS = 100;
+    private static final int OBJECT_INTERACTION_START_TIMEOUT_MS = 1_500;
     private static final long BANK_ACTION_COOLDOWN_MS = 500L;
     private static final int ROCK_SEARCH_PADDING_TILES = 8;
     private static final int OUT_OF_AREA_ROCK_FALLBACK_RADIUS = 4;
@@ -107,6 +108,7 @@ public class MiningScript extends Script
 
     private long lastWebWalkAtMs;
     private long lastObjectInteractionAtMs;
+    private long pendingObjectInteractionAtMs;
     private long lastUnderAttackAtMs;
     private long lastBankActionAtMs;
 
@@ -593,19 +595,25 @@ public class MiningScript extends Script
             return;
         }
 
-        if (System.currentTimeMillis() - lastUnderAttackAtMs < 1_000L) return;
-        if (!canStartMiningInTargetArea()) return;
-
         long now = System.currentTimeMillis();
+        if (now - lastUnderAttackAtMs < 1_000L) return;
+        if (!canStartMiningInTargetArea(now)) return;
         if (now - lastObjectInteractionAtMs < OBJECT_INTERACTION_COOLDOWN_MS) return;
 
         Rs2TileObjectModel rock = findNearestRockInTargetArea(miningLevel);
-        if (rock == null || !canStartMiningInTargetArea()) return;
+        if (rock == null || !canStartMiningInTargetArea(now)) return;
 
         lastObjectInteractionAtMs = now;
         Microbot.status = "Mining " + rock.getName();
-        if (!rock.click("Mine"))
+        if (rock.click("Mine"))
         {
+            pendingObjectInteractionAtMs = now;
+            debug("Rock interaction dispatched | rock={} id={} loc={} player={}",
+                    rock.getName(), rock.getId(), rock.getWorldLocation(), Rs2Player.getWorldLocation());
+        }
+        else
+        {
+            pendingObjectInteractionAtMs = 0L;
             debug("Rock interaction rejected | rock={} id={} loc={}",
                     rock.getName(), rock.getId(), rock.getWorldLocation());
         }
@@ -621,12 +629,30 @@ public class MiningScript extends Script
         lastBankActionAtMs = System.currentTimeMillis();
     }
 
-    private boolean canStartMiningInTargetArea()
+    private boolean canStartMiningInTargetArea(long now)
     {
         WorldPoint playerLocation = Rs2Player.getWorldLocation();
-        return playerLocation != null
-                && targetArea.toWorldArea().contains(playerLocation)
-                && !Rs2Player.isAnimating();
+        if (playerLocation == null || !targetArea.toWorldArea().contains(playerLocation))
+        {
+            return false;
+        }
+
+        if (Rs2Player.isMoving() || Rs2Player.isAnimating() || Rs2Player.isInteracting())
+        {
+            pendingObjectInteractionAtMs = 0L;
+            return false;
+        }
+
+        if (pendingObjectInteractionAtMs > 0L)
+        {
+            if (now - pendingObjectInteractionAtMs < OBJECT_INTERACTION_START_TIMEOUT_MS)
+            {
+                return false;
+            }
+            pendingObjectInteractionAtMs = 0L;
+        }
+
+        return true;
     }
 
     private boolean isPlayerUnderAttack()
@@ -1045,6 +1071,7 @@ public class MiningScript extends Script
         KspWalkerGuard.clear(DEPOSIT_BOX_WALK_KEY);
         lastWebWalkAtMs = 0L;
         lastObjectInteractionAtMs = 0L;
+        pendingObjectInteractionAtMs = 0L;
         lastUnderAttackAtMs = 0L;
 
         super.shutdown();
