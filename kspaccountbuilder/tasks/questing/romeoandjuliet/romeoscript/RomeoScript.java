@@ -30,6 +30,7 @@ public class RomeoScript extends Script
     private static final int NPC_REACH_DISTANCE = 4;
     private static final long WALK_REFIRE_COOLDOWN_MS = 1_000L;
     private static final long ACTION_COOLDOWN_MS = 300L;
+    private static final long INTERACTION_DISPATCH_TIMEOUT_MS = 1_500L;
     private static final long DIALOGUE_INTERACTION_TIMEOUT_MS = 10_000L;
     private static final long QUEST_STAGE_TRANSITION_TIMEOUT_MS = 45_000L;
     private static final int JULIET_STAIRCASE_ID = 11797;
@@ -79,6 +80,8 @@ public class RomeoScript extends Script
     private boolean awaitingPotionCutscene;
     private RomeoState dialogueState;
     private long lastActionAtMs;
+    private long pendingInteractionAtMs;
+    private String pendingInteractionKey;
     private long potionDialogueCompletedAtMs;
     private long finalRomeoDialogueCompletedAtMs;
     private RomeoState state = RomeoState.PREPARING;
@@ -96,6 +99,8 @@ public class RomeoScript extends Script
         awaitingPotionCutscene = false;
         dialogueState = null;
         lastActionAtMs = 0L;
+        pendingInteractionAtMs = 0L;
+        pendingInteractionKey = null;
         potionDialogueCompletedAtMs = 0L;
         finalRomeoDialogueCompletedAtMs = 0L;
         state = RomeoState.PREPARING;
@@ -511,7 +516,7 @@ public class RomeoScript extends Script
         }
 
         KspWalkerGuard.clearReachedDestination(WALK_KEY_CADAVA_BUSH, "ksp_romeo_reached_cadava_bush");
-        if (!actionCooldownElapsed()) return;
+        if (!worldInteractionReady()) return;
 
         state = RomeoState.PICKING_CADAVA_BERRIES;
         status = "Picking Cadava berries";
@@ -523,8 +528,11 @@ public class RomeoScript extends Script
             return;
         }
 
-        lastActionAtMs = System.currentTimeMillis();
-        Rs2GameObject.interact(bush, "Pick-from");
+        if (Rs2GameObject.interact(bush, "Pick-from"))
+        {
+            lastActionAtMs = System.currentTimeMillis();
+            markWorldInteraction("cadava-bush");
+        }
     }
 
     private void startQuestWithRomeo()
@@ -539,12 +547,16 @@ public class RomeoScript extends Script
             return;
         }
 
-        if (!walkToNpc(WALK_KEY_ROMEO, romeo, "Romeo") || !actionCooldownElapsed()) return;
+        if (!walkToNpc(WALK_KEY_ROMEO, romeo, "Romeo") || !worldInteractionReady()) return;
 
         state = RomeoState.TALKING_TO_ROMEO;
         status = "Talking to Romeo";
-        lastActionAtMs = System.currentTimeMillis();
-        if (romeo.click("Talk-to")) KspWalkerGuard.clear(WALK_KEY_ROMEO);
+        if (romeo.click("Talk-to"))
+        {
+            lastActionAtMs = System.currentTimeMillis();
+            markWorldInteraction("npc:" + romeo.getIndex());
+            KspWalkerGuard.clear(WALK_KEY_ROMEO);
+        }
     }
 
     private void returnMessageToRomeo()
@@ -559,13 +571,17 @@ public class RomeoScript extends Script
             return;
         }
 
-        if (!walkToNpc(WALK_KEY_ROMEO, romeo, "Romeo") || !actionCooldownElapsed()) return;
+        if (!walkToNpc(WALK_KEY_ROMEO, romeo, "Romeo") || !worldInteractionReady()) return;
 
         deliveringMessageToRomeo = true;
         state = RomeoState.TALKING_TO_ROMEO;
         status = "Giving Juliet's message to Romeo";
-        lastActionAtMs = System.currentTimeMillis();
-        if (romeo.click("Talk-to")) KspWalkerGuard.clear(WALK_KEY_ROMEO);
+        if (romeo.click("Talk-to"))
+        {
+            lastActionAtMs = System.currentTimeMillis();
+            markWorldInteraction("npc:" + romeo.getIndex());
+            KspWalkerGuard.clear(WALK_KEY_ROMEO);
+        }
     }
 
     private void talkToQuestNpc(
@@ -587,12 +603,16 @@ public class RomeoScript extends Script
             return;
         }
 
-        if (!walkToNpc(walkKey, npc, npcName) || !actionCooldownElapsed()) return;
+        if (!walkToNpc(walkKey, npc, npcName) || !worldInteractionReady()) return;
 
         state = talkingState;
         status = talkingStatus;
-        lastActionAtMs = System.currentTimeMillis();
-        if (npc.click("Talk-to")) KspWalkerGuard.clear(walkKey);
+        if (npc.click("Talk-to"))
+        {
+            lastActionAtMs = System.currentTimeMillis();
+            markWorldInteraction("npc:" + npc.getIndex());
+            KspWalkerGuard.clear(walkKey);
+        }
     }
 
     private void talkToJuliet()
@@ -609,12 +629,16 @@ public class RomeoScript extends Script
                 return;
             }
 
-            if (!walkDirectlyToJuliet(player, juliet) || !actionCooldownElapsed()) return;
+            if (!walkDirectlyToJuliet(player, juliet) || !worldInteractionReady()) return;
 
             state = RomeoState.TALKING_TO_JULIET;
             status = "Talking to Juliet";
-            lastActionAtMs = System.currentTimeMillis();
-            if (juliet.click("Talk-to")) KspWalkerGuard.clear(WALK_KEY_JULIET);
+            if (juliet.click("Talk-to"))
+            {
+                lastActionAtMs = System.currentTimeMillis();
+                markWorldInteraction("npc:" + juliet.getIndex());
+                KspWalkerGuard.clear(WALK_KEY_JULIET);
+            }
             return;
         }
 
@@ -715,10 +739,13 @@ public class RomeoScript extends Script
         if (door != null)
         {
             status = "Opening door to Juliet";
-            if (!actionCooldownElapsed()) return true;
+            if (!worldInteractionReady()) return true;
 
-            lastActionAtMs = System.currentTimeMillis();
-            Rs2GameObject.interact(door, "Open");
+            if (Rs2GameObject.interact(door, "Open"))
+            {
+                lastActionAtMs = System.currentTimeMillis();
+                markWorldInteraction("door-open");
+            }
             return true;
         }
 
@@ -762,8 +789,12 @@ public class RomeoScript extends Script
         TileObject staircase = Rs2GameObject.findObjectByLocation(JULIET_UPSTAIRS_STAIRCASE_POSITION);
         if (isJulietUpstairsStaircase(staircase))
         {
-            lastActionAtMs = System.currentTimeMillis();
-            Rs2GameObject.interact(staircase, "Climb-down");
+            if (!worldInteractionReady()) return;
+            if (Rs2GameObject.interact(staircase, "Climb-down"))
+            {
+                lastActionAtMs = System.currentTimeMillis();
+                markWorldInteraction("stairs-down");
+            }
             return;
         }
 
@@ -773,8 +804,12 @@ public class RomeoScript extends Script
                 JULIET_STAIRCASE_INTERACTION_DISTANCE);
         if (isJulietUpstairsStaircase(staircase))
         {
-            lastActionAtMs = System.currentTimeMillis();
-            Rs2GameObject.interact(staircase, "Climb-down");
+            if (!worldInteractionReady()) return;
+            if (Rs2GameObject.interact(staircase, "Climb-down"))
+            {
+                lastActionAtMs = System.currentTimeMillis();
+                markWorldInteraction("stairs-down");
+            }
             return;
         }
 
@@ -811,33 +846,36 @@ public class RomeoScript extends Script
 
     private boolean interactWithJulietStaircase()
     {
+        if (!worldInteractionReady()) return false;
+
         TileObject staircase = Rs2GameObject.findObjectByLocation(JULIET_STAIRCASE_POSITION);
-        if (isJulietStaircase(staircase))
+        if (!isJulietStaircase(staircase))
         {
-            return Rs2GameObject.interact(staircase, "Climb-up");
+            staircase = Rs2GameObject.findObjectByLocation(JULIET_STAIRCASE_LEGACY_POSITION);
+        }
+        if (!isJulietStaircase(staircase))
+        {
+            staircase = Rs2GameObject.getTileObject(
+                    JULIET_STAIRCASE_ID,
+                    JULIET_STAIRCASE_POSITION,
+                    JULIET_STAIRCASE_INTERACTION_DISTANCE);
         }
 
-        staircase = Rs2GameObject.findObjectByLocation(JULIET_STAIRCASE_LEGACY_POSITION);
-        if (isJulietStaircase(staircase))
-        {
-            return Rs2GameObject.interact(staircase, "Climb-up");
-        }
+        boolean interacted = isJulietStaircase(staircase)
+                ? Rs2GameObject.interact(staircase, "Climb-up")
+                : Microbot.getRs2TileObjectCache()
+                        .query()
+                        .fromWorldView()
+                        .withId(JULIET_STAIRCASE_ID)
+                        .within(JULIET_STAIRCASE_INTERACTION_DISTANCE)
+                        .interact("Climb-up");
 
-        staircase = Rs2GameObject.getTileObject(
-                JULIET_STAIRCASE_ID,
-                JULIET_STAIRCASE_POSITION,
-                JULIET_STAIRCASE_INTERACTION_DISTANCE);
-        if (isJulietStaircase(staircase))
+        if (interacted)
         {
-            return Rs2GameObject.interact(staircase, "Climb-up");
+            lastActionAtMs = System.currentTimeMillis();
+            markWorldInteraction("stairs-up");
         }
-
-        return Microbot.getRs2TileObjectCache()
-                .query()
-                .fromWorldView()
-                .withId(JULIET_STAIRCASE_ID)
-                .within(JULIET_STAIRCASE_INTERACTION_DISTANCE)
-                .interact("Climb-up");
+        return interacted;
     }
 
     private boolean isJulietStaircase(TileObject staircase)
@@ -879,6 +917,25 @@ public class RomeoScript extends Script
                 .fromWorldView()
                 .withName(name)
                 .nearestOnClientThread();
+    }
+
+    private boolean worldInteractionReady()
+    {
+        if (Rs2Player.isMoving() || Rs2Player.isAnimating() || Rs2Player.isInteracting()) return false;
+        if (pendingInteractionAtMs > 0L)
+        {
+            if (Rs2Dialogue.isInDialogue()) return false;
+            if (System.currentTimeMillis() - pendingInteractionAtMs < INTERACTION_DISPATCH_TIMEOUT_MS) return false;
+            pendingInteractionAtMs = 0L;
+            pendingInteractionKey = null;
+        }
+        return actionCooldownElapsed();
+    }
+
+    private void markWorldInteraction(String key)
+    {
+        pendingInteractionKey = key;
+        pendingInteractionAtMs = System.currentTimeMillis();
     }
 
     private boolean actionCooldownElapsed() { return System.currentTimeMillis() - lastActionAtMs >= ACTION_COOLDOWN_MS; }
@@ -927,6 +984,8 @@ public class RomeoScript extends Script
         awaitingPotionCutscene = false;
         dialogueState = null;
         lastActionAtMs = 0L;
+        pendingInteractionAtMs = 0L;
+        pendingInteractionKey = null;
         potionDialogueCompletedAtMs = 0L;
         finalRomeoDialogueCompletedAtMs = 0L;
         state = RomeoState.PREPARING;
