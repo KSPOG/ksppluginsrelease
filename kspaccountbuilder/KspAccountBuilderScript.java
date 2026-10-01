@@ -217,6 +217,7 @@ public class KspAccountBuilderScript extends Script
     private boolean debugEnabled;
     private boolean debugLoggingApplied;
     private volatile BuilderTask pendingTask;
+    private BuilderTask preselectedHandoffTask;
     private BuilderTask singleSkillRecoveryTask;
     private BuilderTask auditedSingleSkillTask;
     private BuilderTask pendingSingleSkillAuditTask;
@@ -350,6 +351,7 @@ public class KspAccountBuilderScript extends Script
         taskStarted = false;
         breakActive = false;
         pendingTask = null;
+        preselectedHandoffTask = null;
         singleSkillRecoveryTask = null;
         auditedSingleSkillTask = null;
         pendingSingleSkillAuditTask = null;
@@ -494,7 +496,7 @@ public class KspAccountBuilderScript extends Script
                 && nextActivitySwitchAtMillis > 0L
                 && now >= nextActivitySwitchAtMillis)
         {
-            if (!isSafeToStartActivitySwitch() || !ensureInventoryTabOpenForTaskSelection()) return;
+            if (!isSafeToStartActivitySwitch()) return;
 
             pendingRandomTaskSelection = true;
             taskStarted = false;
@@ -572,6 +574,7 @@ public class KspAccountBuilderScript extends Script
     private void clearPendingActivitySwitch()
     {
         pendingTask = null;
+        preselectedHandoffTask = null;
         pendingRandomTaskSelection = false;
         awaitingNextActivityStart = false;
         awaitingActivitySwitchTimerStart = false;
@@ -1744,30 +1747,32 @@ public class KspAccountBuilderScript extends Script
 
     private boolean switchToTaskWithResources()
     {
-        if (!stopCurrentTaskForHandoff(null))
+        if (preselectedHandoffTask == null)
+        {
+            preselectedHandoffTask = getRandomTaskWithResourcesExcluding(currentTask);
+            if (preselectedHandoffTask == null)
+            {
+                debug("Current task {} has no resources and no alternative task is available", currentTask);
+                return false;
+            }
+            debug("Preselected replacement task {} before bank handoff | currentTask={}",
+                    preselectedHandoffTask, currentTask);
+        }
+
+        if (!stopCurrentTaskForHandoff(preselectedHandoffTask))
         {
             return false;
         }
 
         if (!prepareForTaskSwitchAtBank())
         {
-            debug("Waiting to switch task; still preparing bank handoff before selecting replacement for {}", currentTask);
+            debug("Waiting to switch task; bank handoff in progress | currentTask={} nextTask={}",
+                    currentTask, preselectedHandoffTask);
             return false;
         }
 
-        BuilderTask nextTask = getRandomTaskWithResourcesExcluding(currentTask);
-        if (nextTask == null)
-        {
-            debug("Current task {} has no resources and no alternative task is available after bank cleanup", currentTask);
-            return false;
-        }
-
-        if (!ensureInventoryTabOpenForTaskSelection())
-        {
-            debug("Waiting to switch task; inventory tab is not open before switching from {} to {}", currentTask, nextTask);
-            return false;
-        }
-
+        BuilderTask nextTask = preselectedHandoffTask;
+        preselectedHandoffTask = null;
         pendingTask = null;
         singleSkillRecoveryTask = null;
         clearSingleSkillResourceAudit();
@@ -1783,35 +1788,38 @@ public class KspAccountBuilderScript extends Script
 
     private boolean switchToRandomTaskAfterBank(BuilderTask excludedTask)
     {
-        if (!stopCurrentTaskForHandoff(null))
+        if (preselectedHandoffTask == null)
+        {
+            preselectedHandoffTask = getRandomTaskWithResourcesExcluding(excludedTask);
+            if (preselectedHandoffTask == null)
+            {
+                preselectedHandoffTask = getRandomTaskExcluding(excludedTask);
+            }
+
+            if (preselectedHandoffTask == null)
+            {
+                debug("No next task could be selected | excluded={}", excludedTask);
+                return false;
+            }
+
+            debug("Preselected next task {} before bank handoff | excluded={}",
+                    preselectedHandoffTask, excludedTask);
+        }
+
+        if (!stopCurrentTaskForHandoff(preselectedHandoffTask))
         {
             return false;
         }
 
         if (!prepareForTaskSwitchAtBank())
         {
-            debug("Waiting to select next task; still preparing bank handoff from {}", currentTask);
+            debug("Waiting to select next task; bank handoff in progress | currentTask={} nextTask={}",
+                    currentTask, preselectedHandoffTask);
             return false;
         }
 
-        BuilderTask nextTask = getRandomTaskWithResourcesExcluding(excludedTask);
-        if (nextTask == null)
-        {
-            nextTask = getRandomTaskExcluding(excludedTask);
-        }
-
-        if (nextTask == null)
-        {
-            debug("No next task could be selected after bank cleanup | excluded={}", excludedTask);
-            return false;
-        }
-
-        if (!ensureInventoryTabOpenForTaskSelection())
-        {
-            debug("Waiting to select next task; inventory tab is not open before switching from {} to {}", currentTask, nextTask);
-            return false;
-        }
-
+        BuilderTask nextTask = preselectedHandoffTask;
+        preselectedHandoffTask = null;
         pendingTask = null;
         pendingRandomTaskSelection = false;
         awaitingNextActivityStart = false;
@@ -1829,8 +1837,56 @@ public class KspAccountBuilderScript extends Script
             return excluded == BuilderTask.TUTORIAL_ISLAND ? null : BuilderTask.TUTORIAL_ISLAND;
         }
 
-        BuilderTask task = selectTask(excluded, true, false, false);
-        return task != null ? task : selectTask(excluded, true, true, false);
+        return selectTaskWithSupportFallback(excluded, true, false);
+    }
+
+    private BuilderTask selectTaskWithSupportFallback(
+            BuilderTask excluded,
+            boolean requireResources,
+            boolean includeUnavailable)
+    {
+        long regularMask = 0L;
+        long supportMask = 0L;
+        int regularWeight = 0;
+        int supportWeight = 0;
+        int[] weights = new int[BuilderTask.values().length];
+
+        for (BuilderTask task : BuilderTask.values())
+        {
+            if (task == excluded || task == BuilderTask.TUTORIAL_ISLAND) continue;
+            if (!includeUnavailable && (isTaskTemporarilyDisabled(task) || isOneTimeTaskCompleted(task))) continue;
+            if (requireResources && !hasResourcesForTask(task)) continue;
+
+            int weight = getTaskSelectionWeight(task);
+            weights[task.ordinal()] = weight;
+            if (isSupportTask(task))
+            {
+                supportMask |= 1L << task.ordinal();
+                supportWeight += weight;
+            }
+            else
+            {
+                regularMask |= 1L << task.ordinal();
+                regularWeight += weight;
+            }
+        }
+
+        if (regularWeight > 0) return pickWeightedTask(regularMask, regularWeight, weights);
+        return supportWeight > 0 ? pickWeightedTask(supportMask, supportWeight, weights) : null;
+    }
+
+    private BuilderTask pickWeightedTask(long mask, int totalWeight, int[] weights)
+    {
+        if (totalWeight <= 0) return null;
+
+        int roll = ThreadLocalRandom.current().nextInt(totalWeight);
+        for (BuilderTask task : BuilderTask.values())
+        {
+            if ((mask & (1L << task.ordinal())) == 0L) continue;
+            roll -= weights[task.ordinal()];
+            if (roll < 0) return task;
+        }
+        return null;
     }
 
     private boolean isSupportTask(BuilderTask task) { return task == BuilderTask.GE_BUY; }
@@ -1940,24 +1996,19 @@ public class KspAccountBuilderScript extends Script
     {
         long mask = 0L;
         int totalWeight = 0;
+        int[] weights = new int[BuilderTask.values().length];
 
         for (BuilderTask task : BuilderTask.values())
         {
             if (!isTaskCandidate(task, excluded, requireResources, includeSupport, includeUnavailable)) continue;
+
+            int weight = getTaskSelectionWeight(task);
+            weights[task.ordinal()] = weight;
             mask |= 1L << task.ordinal();
-            totalWeight += getTaskSelectionWeight(task);
+            totalWeight += weight;
         }
 
-        if (totalWeight <= 0) return null;
-
-        int roll = ThreadLocalRandom.current().nextInt(totalWeight);
-        for (BuilderTask task : BuilderTask.values())
-        {
-            if ((mask & (1L << task.ordinal())) == 0L) continue;
-            roll -= getTaskSelectionWeight(task);
-            if (roll < 0) return task;
-        }
-        return null;
+        return pickWeightedTask(mask, totalWeight, weights);
     }
 
     private boolean isTaskCandidate(
