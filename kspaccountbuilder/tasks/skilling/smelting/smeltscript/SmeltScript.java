@@ -49,7 +49,7 @@ extends Script {
     private static final int LOOP_DELAY_MS = 100;
     private static final int WEB_WALK_COOLDOWN_MS = 1_000;
     private static final int FURNACE_INTERACT_COOLDOWN_MS = 100;
-    private static final int SMELT_START_GRACE_MS = 900;
+    private static final int SMELT_START_GRACE_MS = 1_500;
     private static final int BANK_WITHDRAW_START_TIMEOUT_MS = 1_500;
     private static final int PRODUCTION_ACTION_START_TIMEOUT_MS = 1_500;
     private long lastWebWalkAtMs;
@@ -328,6 +328,10 @@ extends Script {
             return;
         }
 
+        if (Rs2Player.isMoving() || Rs2Player.isInteracting()) {
+            return;
+        }
+
         if (Rs2Bank.isOpen()) {
             Rs2Bank.closeBank();
             return;
@@ -483,13 +487,20 @@ extends Script {
         if (this.awaitingSmeltStartAtMs == 0L) {
             return false;
         }
-        if (Rs2Player.isAnimating()) {
+
+        if (Rs2Player.isMoving()
+                || Rs2Player.isInteracting()
+                || Rs2Player.isAnimating()
+                || Rs2Widget.isProductionWidgetOpen()
+                || Rs2Widget.findWidget("What would you like to smelt?", null, false) != null) {
             return true;
         }
+
         long elapsed = System.currentTimeMillis() - this.awaitingSmeltStartAtMs;
         if (elapsed < SMELT_START_GRACE_MS) {
             return true;
         }
+
         this.awaitingSmeltStartAtMs = 0L;
         return false;
     }
