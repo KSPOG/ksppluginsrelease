@@ -36,6 +36,11 @@ public final class KspWalkerGuard
             return false;
         }
 
+        if (Rs2Walker.getCurrentTarget() != null)
+        {
+            return false;
+        }
+
         WorldPoint target = targetSupplier.get();
         if (target == null)
         {
@@ -60,6 +65,11 @@ public final class KspWalkerGuard
             return false;
         }
 
+        if (Rs2Walker.getCurrentTarget() != null)
+        {
+            return false;
+        }
+
         Rs2Walker.walkTo(target, arriveDistance);
         return true;
     }
@@ -75,6 +85,11 @@ public final class KspWalkerGuard
         if (isSameDestination(player, target, Math.max(0, arriveDistance)))
         {
             clearActiveWalker("ksp_account_builder_reached_destination");
+            return false;
+        }
+
+        if (Rs2Player.isMoving() || Rs2Walker.getCurrentTarget() != null)
+        {
             return false;
         }
 
