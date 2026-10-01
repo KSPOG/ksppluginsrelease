@@ -49,6 +49,7 @@ public final class KaramjaTravelHelper
     private static final int DEPOSIT_AREA_DISTANCE = 6;
     private static final long WALK_REFIRE_COOLDOWN_MS = 1_000L;
     private static final long TRAVEL_TRANSITION_TIMEOUT_MS = 15_000L;
+    private static final long INTERACTION_DISPATCH_TIMEOUT_MS = 1_500L;
 
     private static final String WALK_KEY_TO_PORT_SARIM_TRAVEL = "ksp_fishing_karamja_port_sarim_travel";
     private static final String WALK_KEY_TO_PORT_SARIM_DEPOSIT = "ksp_fishing_karamja_port_sarim_deposit";
@@ -59,6 +60,8 @@ public final class KaramjaTravelHelper
 
     private static volatile TravelDirection pendingTravelDirection;
     private static volatile long pendingTravelUntilMs;
+    private static volatile long pendingInteractionAtMs;
+    private static volatile String pendingInteractionKey;
 
     private KaramjaTravelHelper() {}
 
@@ -229,6 +232,7 @@ public final class KaramjaTravelHelper
     public static void clearWalkerState()
     {
         clearPendingTravel();
+        clearPendingInteraction();
         KspWalkerGuard.clear(WALK_KEY_TO_PORT_SARIM_TRAVEL);
         KspWalkerGuard.clear(WALK_KEY_TO_PORT_SARIM_DEPOSIT);
         KspWalkerGuard.clear(WALK_KEY_TO_KARAMJA_CUSTOMS);
@@ -241,7 +245,9 @@ public final class KaramjaTravelHelper
     {
         if (Rs2Dialogue.hasContinue())
         {
+            if (isInteractionPending("dialogue-continue")) return true;
             Rs2Dialogue.clickContinue();
+            markInteraction("dialogue-continue");
             return true;
         }
 
@@ -307,9 +313,19 @@ public final class KaramjaTravelHelper
             return false;
         }
 
+        String interactionKey = "npc:" + npc.getIndex() + ":" + action;
+        if (isInteractionPending(interactionKey)
+                || Rs2Player.isMoving()
+                || Rs2Player.isAnimating()
+                || Rs2Player.isInteracting())
+        {
+            return false;
+        }
+
         boolean clicked = npc.click(action);
         if (clicked)
         {
+            markInteraction(interactionKey);
             KspWalkerGuard.clear(walkKey);
             if (!"Talk-to".equalsIgnoreCase(action))
             {
@@ -317,6 +333,27 @@ public final class KaramjaTravelHelper
             }
         }
         return clicked;
+    }
+
+    private static boolean isInteractionPending(String key)
+    {
+        if (pendingInteractionAtMs == 0L || pendingInteractionKey == null) return false;
+        if (!pendingInteractionKey.equals(key)) return false;
+        if (System.currentTimeMillis() - pendingInteractionAtMs < INTERACTION_DISPATCH_TIMEOUT_MS) return true;
+        clearPendingInteraction();
+        return false;
+    }
+
+    private static void markInteraction(String key)
+    {
+        pendingInteractionKey = key;
+        pendingInteractionAtMs = System.currentTimeMillis();
+    }
+
+    private static void clearPendingInteraction()
+    {
+        pendingInteractionAtMs = 0L;
+        pendingInteractionKey = null;
     }
 
     private static boolean isTravelTransitionPending(TravelDirection direction, WorldPoint playerLocation)
