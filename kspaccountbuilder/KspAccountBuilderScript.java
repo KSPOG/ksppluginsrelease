@@ -496,7 +496,7 @@ public class KspAccountBuilderScript extends Script
                 && nextActivitySwitchAtMillis > 0L
                 && now >= nextActivitySwitchAtMillis)
         {
-            if (!isSafeToStartActivitySwitch() || !ensureInventoryTabOpenForTaskSelection()) return;
+            if (!isSafeToStartActivitySwitch()) return;
 
             pendingRandomTaskSelection = true;
             taskStarted = false;
@@ -1996,24 +1996,19 @@ public class KspAccountBuilderScript extends Script
     {
         long mask = 0L;
         int totalWeight = 0;
+        int[] weights = new int[BuilderTask.values().length];
 
         for (BuilderTask task : BuilderTask.values())
         {
             if (!isTaskCandidate(task, excluded, requireResources, includeSupport, includeUnavailable)) continue;
+
+            int weight = getTaskSelectionWeight(task);
+            weights[task.ordinal()] = weight;
             mask |= 1L << task.ordinal();
-            totalWeight += getTaskSelectionWeight(task);
+            totalWeight += weight;
         }
 
-        if (totalWeight <= 0) return null;
-
-        int roll = ThreadLocalRandom.current().nextInt(totalWeight);
-        for (BuilderTask task : BuilderTask.values())
-        {
-            if ((mask & (1L << task.ordinal())) == 0L) continue;
-            roll -= getTaskSelectionWeight(task);
-            if (roll < 0) return task;
-        }
-        return null;
+        return pickWeightedTask(mask, totalWeight, weights);
     }
 
     private boolean isTaskCandidate(
