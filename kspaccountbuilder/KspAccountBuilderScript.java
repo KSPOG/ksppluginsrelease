@@ -994,8 +994,11 @@ public class KspAccountBuilderScript extends Script
             return singleSkillTask;
         }
 
-        BuilderTask taskWithResources = getRandomTaskWithResourcesExcluding(null);
-        return taskWithResources != null ? taskWithResources : getRandomTaskExcluding(null);
+        // Startup must be instantaneous: do not scan bank-backed resource state
+        // across every task before assigning currentTask. Pick an eligible weighted
+        // task first; the normal cycle validates only that task's resources and
+        // performs recovery/switching if needed.
+        return getRandomTaskExcluding(null);
     }
 
     private void applySingleSkillOverride()
