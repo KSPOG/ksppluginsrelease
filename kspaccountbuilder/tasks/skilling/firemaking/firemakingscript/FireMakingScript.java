@@ -39,6 +39,7 @@ public class FireMakingScript extends Script
     private static final int FIRE_INTERACT_COOLDOWN_MS = 100;
     private static final int FIRE_START_GRACE_MS = 600;
     private static final int BURN_PROMPT_ACTION_COOLDOWN_MS = 100;
+    private static final int BANK_ACTION_TIMEOUT_MS = 1_500;
     private static final int CAMPFIRE_DISTANCE = 6;
     private static final int NEARBY_CAMPFIRE_SCAN_RADIUS = 12;
 
@@ -57,6 +58,8 @@ public class FireMakingScript extends Script
     private long lastFireInteractAtMs;
     private long awaitingFireStartAtMs;
     private long lastBurnPromptActionAtMs;
+    private long pendingBankActionAtMs;
+    private int pendingBankEmptySlots = -1;
 
     private boolean expectingFiremakingXpDrop;
     private boolean tendingForestersCampfire;
@@ -259,13 +262,21 @@ public class FireMakingScript extends Script
         if (!Rs2Bank.isOpen()) return false;
         if (KspBankWidgetHelper.closeBankTutorialOverlayIfOpen()) return false;
 
-        Rs2Bank.depositAllExcept(TINDERBOX_NAME);
+        if (isBankActionPending()) return false;
+
+        int beforeDeposit = Rs2Inventory.emptySlotCount();
+        if (Rs2Bank.depositAllExcept(TINDERBOX_NAME)
+                && Rs2Inventory.emptySlotCount() == beforeDeposit) {
+            markBankAction(beforeDeposit);
+            return false;
+        }
 
         if (!Rs2Inventory.hasItem(TINDERBOX_NAME))
         {
             if (Rs2Bank.count(TINDERBOX_NAME) <= 0) return false;
             if (!KspBankMode.ensureWithdrawAsItem()) return false;
-            Rs2Bank.withdrawOne(TINDERBOX_NAME);
+            int before = Rs2Inventory.emptySlotCount();
+            if (Rs2Bank.withdrawOne(TINDERBOX_NAME)) markBankAction(before);
             return false;
         }
 
@@ -273,12 +284,33 @@ public class FireMakingScript extends Script
         {
             if (Rs2Bank.count(targetLogName) <= 0) return false;
             if (!KspBankMode.ensureWithdrawAsItem()) return false;
-            Rs2Bank.withdrawAll(targetLogName);
+            int before = Rs2Inventory.emptySlotCount();
+            if (Rs2Bank.withdrawAll(targetLogName)) markBankAction(before);
             return false;
         }
 
         Rs2Bank.closeBank();
         return false;
+    }
+
+    private boolean isBankActionPending()
+    {
+        if (pendingBankActionAtMs == 0L) return false;
+        if (Rs2Inventory.emptySlotCount() != pendingBankEmptySlots) {
+            pendingBankActionAtMs = 0L;
+            pendingBankEmptySlots = -1;
+            return false;
+        }
+        if (System.currentTimeMillis() - pendingBankActionAtMs < BANK_ACTION_TIMEOUT_MS) return true;
+        pendingBankActionAtMs = 0L;
+        pendingBankEmptySlots = -1;
+        return false;
+    }
+
+    private void markBankAction(int beforeEmptySlots)
+    {
+        pendingBankEmptySlots = beforeEmptySlots;
+        pendingBankActionAtMs = System.currentTimeMillis();
     }
 
     private boolean hasLogsForCurrentTarget(String targetLogName) { return Rs2Inventory.hasItem(targetLogName); }
@@ -855,6 +887,8 @@ public class FireMakingScript extends Script
     {
         lastWebWalkAtMs = 0L;
         lastFireInteractAtMs = 0L;
+        pendingBankActionAtMs = 0L;
+        pendingBankEmptySlots = -1;
         awaitingFireStartAtMs = 0L;
         lastBurnPromptActionAtMs = 0L;
         expectingFiremakingXpDrop = false;
