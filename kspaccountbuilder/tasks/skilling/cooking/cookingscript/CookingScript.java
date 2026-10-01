@@ -108,6 +108,13 @@ public class CookingScript extends Script
 
             if (isCookingProductionWidgetOpen())
             {
+                if (Rs2Player.isAnimating())
+                {
+                    clearProductionAction();
+                    state = CookingState.COOKING;
+                    return;
+                }
+
                 state = CookingState.OPENING_COOKING_INTERFACE;
                 Microbot.status = "Selecting " + fish.getCookedItemName();
                 if (!isProductionActionPending(fish.getCookedItemName())
