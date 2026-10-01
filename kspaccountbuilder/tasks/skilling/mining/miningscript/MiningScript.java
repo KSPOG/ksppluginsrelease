@@ -296,7 +296,6 @@ public class MiningScript extends Script
 
             if (bankInventoryActionPending()) return false;
             if (depositOneOutdatedPickaxe(active)) {
-                markBankInventoryAction(Rs2Inventory.emptySlotCount());
                 markBankAction();
                 return false;
             }
@@ -315,7 +314,7 @@ public class MiningScript extends Script
             if (pickaxeName.equalsIgnoreCase(desiredPickaxeName) || !Rs2Inventory.hasItem(pickaxeName)) continue;
             int before = Rs2Inventory.emptySlotCount();
             if (Rs2Bank.depositAll(pickaxeName)) {
-                pendingBankInventoryEmptySlots = before;
+                markBankInventoryAction(before);
                 return true;
             }
         }
