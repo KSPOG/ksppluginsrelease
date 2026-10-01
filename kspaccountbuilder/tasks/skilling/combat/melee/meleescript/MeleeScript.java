@@ -394,7 +394,8 @@ public class MeleeScript
     }
 
     private boolean ensureInTargetArea(CombatAreas targetArea) {
-        if (targetArea.contains(Rs2Player.getWorldLocation())) {
+        WorldPoint playerLocation = Rs2Player.getWorldLocation();
+        if (isPlayerInsideCombatArea(playerLocation, targetArea)) {
             KspWalkerGuard.clear("Melee:target-area");
             KspWalkerGuard.clear("Melee:hill-giants-entry");
             return true;
@@ -412,7 +413,7 @@ public class MeleeScript
         if (KspWalkerGuard.walkToDestination(
                 "Melee:target-area",
                 () -> this.resolveWalkTarget(targetArea),
-                targetArea::contains,
+                point -> this.isPlayerInsideCombatArea(point, targetArea),
                 2,
                 WEB_WALK_COOLDOWN_MS)) {
             this.lastWebWalkAtMs = System.currentTimeMillis();
@@ -459,6 +460,15 @@ public class MeleeScript
         return true;
     }
 
+    private boolean isPlayerInsideCombatArea(WorldPoint location, CombatAreas area) {
+        if (location == null || area == null || !area.contains(location)) {
+            return false;
+        }
+
+        return area != CombatAreas.CHICKENS
+                || location.distanceTo(CHICKEN_WALK_TARGET) <= CHICKEN_COMBAT_RADIUS;
+    }
+
     private WorldPoint resolveWalkTarget(CombatAreas targetArea) {
         if (targetArea == CombatAreas.CHICKENS) {
             return CHICKEN_WALK_TARGET;
@@ -497,6 +507,13 @@ public class MeleeScript
         Actor currentInteracting = Rs2Player.getInteracting();
         WorldPoint playerLocation = Rs2Player.getWorldLocation();
         if (stage == null || localPlayer == null || playerLocation == null) {
+            return;
+        }
+
+        if (!isPlayerInsideCombatArea(playerLocation, stage.area)) {
+            this.setStatus("Walking to " + stage.area.getDisplayName());
+            this.debug("Blocked attack outside combat area | area={} player={} walkTarget={}",
+                    stage.area.getDisplayName(), playerLocation, resolveWalkTarget(stage.area));
             return;
         }
 
