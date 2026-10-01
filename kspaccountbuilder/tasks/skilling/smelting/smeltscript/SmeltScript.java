@@ -21,7 +21,11 @@ package net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.sm
 import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 import javax.inject.Singleton;
+import net.runelite.api.GameObject;
+import net.runelite.api.MenuAction;
+import net.runelite.api.ObjectComposition;
 import net.runelite.api.Skill;
+import net.runelite.api.TileObject;
 import net.runelite.api.coords.WorldPoint;
 import net.runelite.client.plugins.microbot.Microbot;
 import net.runelite.client.plugins.microbot.Script;
@@ -35,7 +39,10 @@ import net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.sme
 import net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.smelting.smeltarea.SmeltArea;
 import net.runelite.client.plugins.microbot.util.bank.Rs2Bank;
 import net.runelite.client.plugins.microbot.util.inventory.Rs2Inventory;
+import net.runelite.client.plugins.microbot.util.gameobject.Rs2GameObject;
 import net.runelite.client.plugins.microbot.util.keyboard.Rs2Keyboard;
+import net.runelite.client.plugins.microbot.util.menu.NewMenuEntry;
+import net.runelite.client.plugins.microbot.util.misc.Rs2UiHelper;
 import net.runelite.client.plugins.microbot.util.player.Rs2Player;
 import net.runelite.client.plugins.microbot.util.walker.Rs2Walker;
 import net.runelite.client.plugins.microbot.util.widget.Rs2Widget;
@@ -48,13 +55,12 @@ extends Script {
     private static final Logger log = LoggerFactory.getLogger(SmeltScript.class);
     private static final int LOOP_DELAY_MS = 100;
     private static final int WEB_WALK_COOLDOWN_MS = 1_000;
-    private static final int FURNACE_INTERACT_COOLDOWN_MS = 100;
-    private static final int SMELT_START_GRACE_MS = 1_500;
+    private static final int EDGEVILLE_FURNACE_ID = 16469;
+    private static final long FURNACE_INTERACTION_TIMEOUT_MS = 8_000L;
     private static final int BANK_WITHDRAW_START_TIMEOUT_MS = 1_500;
     private static final int PRODUCTION_ACTION_START_TIMEOUT_MS = 1_500;
     private long lastWebWalkAtMs;
-    private long lastFurnaceInteractAtMs;
-    private long awaitingSmeltStartAtMs;
+    private long furnaceInteractionSentAt;
     private long lastSmeltAnimationAtMs;
     private long pendingWithdrawAtMs;
     private String pendingWithdrawItem;
@@ -96,7 +102,7 @@ extends Script {
                     Rs2Player.isInteracting(),
                     Rs2Bank.isOpen(),
                     Rs2Widget.isProductionWidgetOpen(),
-                    this.awaitingSmeltStartAtMs != 0L);
+                    this.furnaceInteractionSentAt != 0L);
             if (!this.ensureOreInventoryForTargetBar(this.targetBar)) {
                 this.debug("Unable to prepare ore inventory for {} yet", this.targetBar.getDisplayName());
                 return;
@@ -328,17 +334,15 @@ extends Script {
             return;
         }
 
-        if (Rs2Player.isMoving() || Rs2Player.isInteracting()) {
-            return;
-        }
-
         if (Rs2Bank.isOpen()) {
             Rs2Bank.closeBank();
             return;
         }
 
-        if (handleSmeltSelection(bar) || handleProductionWidget(bar)) return;
-        if (isWaitingForSmeltStart()) return;
+        if (handleSmeltSelection(bar) || handleProductionWidget(bar)) {
+            furnaceInteractionSentAt = 0L;
+            return;
+        }
 
         WorldPoint player = Rs2Player.getWorldLocation();
         if (player == null || !targetArea.toWorldArea().contains(player)) return;
@@ -346,14 +350,33 @@ extends Script {
         clearTargetAreaWalkIfNeeded();
 
         long now = System.currentTimeMillis();
-        if (now - lastFurnaceInteractAtMs < FURNACE_INTERACT_COOLDOWN_MS) return;
+        if (furnaceInteractionSentAt > 0L
+                && now - furnaceInteractionSentAt < FURNACE_INTERACTION_TIMEOUT_MS) {
+            Microbot.status = Rs2Player.isMoving()
+                    ? "Approaching furnace"
+                    : "Waiting for smelting interface";
+            return;
+        }
 
-        Rs2TileObjectModel furnace = findNearbyFurnaceInTargetArea();
-        if (furnace == null) return;
+        if (Rs2Player.isMoving() || Rs2Player.isInteracting()) return;
 
-        if (furnace.click("Smelt")) {
-            lastFurnaceInteractAtMs = now;
-            awaitingSmeltStartAtMs = now;
+        furnaceInteractionSentAt = 0L;
+
+        TileObject furnace = Rs2GameObject.findObjectById(EDGEVILLE_FURNACE_ID);
+        if (furnace == null) {
+            Rs2TileObjectModel fallback = findNearbyFurnaceInTargetArea();
+            if (fallback == null) return;
+
+            Microbot.status = "Opening furnace interface";
+            if (fallback.click("Smelt")) {
+                furnaceInteractionSentAt = now;
+            }
+            return;
+        }
+
+        Microbot.status = "Opening Edgeville furnace interface";
+        if (interactGameObjectWithoutCamera(furnace, "Smelt")) {
+            furnaceInteractionSentAt = now;
         }
     }
 
@@ -397,7 +420,7 @@ extends Script {
 
         markProductionAction(key);
         Rs2Keyboard.keyPress(32);
-        awaitingSmeltStartAtMs = System.currentTimeMillis();
+        furnaceInteractionSentAt = 0L;
         return true;
     }
 
@@ -483,26 +506,76 @@ extends Script {
         return selected;
     }
 
-    private boolean isWaitingForSmeltStart() {
-        if (this.awaitingSmeltStartAtMs == 0L) {
+    private boolean interactGameObjectWithoutCamera(TileObject tileObject, String action) {
+        if (!(tileObject instanceof GameObject) || action == null || action.isBlank()) {
             return false;
         }
 
-        if (Rs2Player.isMoving()
-                || Rs2Player.isInteracting()
-                || Rs2Player.isAnimating()
-                || Rs2Widget.isProductionWidgetOpen()
-                || Rs2Widget.findWidget("What would you like to smelt?", null, false) != null) {
-            return true;
+        GameObject object = (GameObject) tileObject;
+        ObjectComposition composition = Microbot.getClientThread().runOnClientThreadOptional(() -> {
+            ObjectComposition resolved = Microbot.getClient().getObjectDefinition(object.getId());
+            if (resolved != null && resolved.getImpostorIds() != null && resolved.getImpostor() != null) {
+                resolved = resolved.getImpostor();
+            }
+            return resolved;
+        }).orElse(null);
+        if (composition == null) {
+            return false;
         }
 
-        long elapsed = System.currentTimeMillis() - this.awaitingSmeltStartAtMs;
-        if (elapsed < SMELT_START_GRACE_MS) {
-            return true;
+        String[] actions = composition.getActions();
+        if (actions == null) {
+            return false;
         }
 
-        this.awaitingSmeltStartAtMs = 0L;
-        return false;
+        int actionIndex = -1;
+        for (int i = 0; i < actions.length; i++) {
+            if (actions[i] != null && action.equalsIgnoreCase(actions[i])) {
+                actionIndex = i;
+                break;
+            }
+        }
+        if (actionIndex < 0) {
+            return false;
+        }
+
+        MenuAction menuAction = gameObjectMenuAction(actionIndex);
+        if (menuAction == null) {
+            return false;
+        }
+
+        int sceneX = object.getLocalLocation().getSceneX();
+        int sceneY = object.getLocalLocation().getSceneY();
+        if (object.sizeX() > 1) {
+            sceneX -= object.sizeX() / 2;
+        }
+        if (object.sizeY() > 1) {
+            sceneY -= object.sizeY() / 2;
+        }
+
+        NewMenuEntry entry = new NewMenuEntry()
+                .param0(sceneX)
+                .param1(sceneY)
+                .opcode(menuAction.getId())
+                .identifier(object.getId())
+                .itemId(-1)
+                .option(actions[actionIndex])
+                .target(composition.getName())
+                .gameObject(object);
+
+        Microbot.doInvoke(entry, Rs2UiHelper.getObjectClickbox(object));
+        return true;
+    }
+
+    private MenuAction gameObjectMenuAction(int actionIndex) {
+        switch (actionIndex) {
+            case 0: return MenuAction.GAME_OBJECT_FIRST_OPTION;
+            case 1: return MenuAction.GAME_OBJECT_SECOND_OPTION;
+            case 2: return MenuAction.GAME_OBJECT_THIRD_OPTION;
+            case 3: return MenuAction.GAME_OBJECT_FOURTH_OPTION;
+            case 4: return MenuAction.GAME_OBJECT_FIFTH_OPTION;
+            default: return null;
+        }
     }
 
     private void debug(String message, Object ... args) {
@@ -513,8 +586,7 @@ extends Script {
 
     public void shutdown() {
         this.lastWebWalkAtMs = 0L;
-        this.lastFurnaceInteractAtMs = 0L;
-        this.awaitingSmeltStartAtMs = 0L;
+        this.furnaceInteractionSentAt = 0L;
         this.lastSmeltAnimationAtMs = 0L;
         this.clearPendingWithdraw();
         this.clearPendingProductionAction();
