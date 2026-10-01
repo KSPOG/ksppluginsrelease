@@ -366,6 +366,8 @@ public class SoCScript extends Script
     {
         rewardDialogueSeen = false;
         rewardInteractionStarted = false;
+        pendingInteractionAtMs = 0L;
+        pendingInteractionKey = null;
     }
 
     @Override
