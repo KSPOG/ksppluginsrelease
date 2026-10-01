@@ -54,6 +54,7 @@ public class FishingScript extends Script
     private static final String WALK_KEY_TO_FISHING_AREA = "Fishing:target-area";
     private static final String WALK_KEY_TO_TROUT_SALMON_FIRE = "Fishing:trout-salmon-fire";
     private static final long COOKING_WIDGET_ACTION_TIMEOUT_MS = 1_500L;
+    private static final long ACTION_DISPATCH_TIMEOUT_MS = 1_500L;
     private static final WorldPoint TROUT_SALMON_WALK_POSITION = new WorldPoint(3104, 3431, 0);
     private static final WorldPoint TROUT_SALMON_FIRE_POSITION = new WorldPoint(3106, 3432, 0);
 
@@ -71,6 +72,9 @@ public class FishingScript extends Script
     private long pendingNpcInteractionAtMs;
     private long lastWebWalkAtMs;
     private long pendingCookingWidgetActionAtMs;
+    private long pendingCookingFireActionAtMs;
+    private long pendingBankActionAtMs;
+    private int pendingBankEmptySlots = -1;
 
     public void setDebugLogging(boolean debugLogging) { this.debugLogging = debugLogging; }
 
@@ -89,6 +93,7 @@ public class FishingScript extends Script
         cookingBatchItemId = NO_COOKING_BATCH;
         expectingCookingXpDrop = false;
         pendingCookingWidgetActionAtMs = 0L;
+        pendingCookingFireActionAtMs = 0L;
 
         mainScheduledFuture = scheduledExecutorService.scheduleWithFixedDelay(() ->
         {
@@ -267,6 +272,7 @@ public class FishingScript extends Script
 
         if (isCookingWidgetOpen())
         {
+            pendingCookingFireActionAtMs = 0L;
             if (Rs2Player.isAnimating())
             {
                 pendingCookingWidgetActionAtMs = 0L;
@@ -305,7 +311,13 @@ public class FishingScript extends Script
             return false;
         }
 
+        if (pendingCookingFireActionAtMs > 0L
+                && System.currentTimeMillis() - pendingCookingFireActionAtMs < ACTION_DISPATCH_TIMEOUT_MS) {
+            return true;
+        }
+
         expectingCookingXpDrop = Rs2Inventory.useItemOnObject(cookingBatchItemId, fire.getId());
+        if (expectingCookingXpDrop) pendingCookingFireActionAtMs = System.currentTimeMillis();
         return true;
     }
 
@@ -479,11 +491,17 @@ public class FishingScript extends Script
             return false;
         }
 
+        if (isBankInventoryActionPending()) return false;
+
         if (KspBankWidgetHelper.closeBankTutorialOverlayIfOpen()) return false;
         if (!KspBankMode.ensureWithdrawAsItem()) return false;
 
         List<String> required = getRequiredItems(fish);
-        Rs2Bank.depositAllExcept(required.toArray(new String[0]));
+        int beforeDeposit = Rs2Inventory.emptySlotCount();
+        if (Rs2Bank.depositAllExcept(required.toArray(new String[0]))) {
+            markBankInventoryAction(beforeDeposit);
+            return false;
+        }
 
         for (String item : required)
         {
@@ -497,14 +515,16 @@ public class FishingScript extends Script
             if (isConsumable(item))
             {
                 if (Rs2Inventory.count(item) <= 0 && Rs2Bank.count(item) > 0) {
-                    Rs2Bank.withdrawAll(item);
+                    int before = Rs2Inventory.emptySlotCount();
+                    if (Rs2Bank.withdrawAll(item)) markBankInventoryAction(before);
                     return false;
                 }
                 continue;
             }
 
             if (!Rs2Inventory.hasItem(item) && Rs2Bank.count(item) > 0) {
-                Rs2Bank.withdrawOne(item);
+                int before = Rs2Inventory.emptySlotCount();
+                if (Rs2Bank.withdrawOne(item)) markBankInventoryAction(before);
                 return false;
             }
         }
@@ -532,8 +552,13 @@ public class FishingScript extends Script
 
         if (KspBankWidgetHelper.closeBankTutorialOverlayIfOpen()) return;
 
+        if (isBankInventoryActionPending()) return;
         List<String> required = getRequiredItems(targetFish);
-        Rs2Bank.depositAllExcept(required.toArray(new String[0]));
+        int before = Rs2Inventory.emptySlotCount();
+        if (Rs2Bank.depositAllExcept(required.toArray(new String[0]))) {
+            markBankInventoryAction(before);
+            return;
+        }
         if (!Rs2Inventory.isFull()) Rs2Bank.closeBank();
     }
 
@@ -546,9 +571,34 @@ public class FishingScript extends Script
             return;
         }
 
+        if (isBankInventoryActionPending()) return;
         List<String> required = getRequiredItems(targetFish);
-        Rs2DepositBox.depositAllExcept(required, false);
+        int before = Rs2Inventory.emptySlotCount();
+        if (Rs2DepositBox.depositAllExcept(required, false)) {
+            markBankInventoryAction(before);
+            return;
+        }
         if (!Rs2Inventory.isFull()) Rs2DepositBox.closeDepositBox();
+    }
+
+    private boolean isBankInventoryActionPending()
+    {
+        if (pendingBankActionAtMs == 0L) return false;
+        if (Rs2Inventory.emptySlotCount() != pendingBankEmptySlots) {
+            pendingBankActionAtMs = 0L;
+            pendingBankEmptySlots = -1;
+            return false;
+        }
+        if (System.currentTimeMillis() - pendingBankActionAtMs < ACTION_DISPATCH_TIMEOUT_MS) return true;
+        pendingBankActionAtMs = 0L;
+        pendingBankEmptySlots = -1;
+        return false;
+    }
+
+    private void markBankInventoryAction(int beforeEmptySlots)
+    {
+        pendingBankEmptySlots = beforeEmptySlots;
+        pendingBankActionAtMs = System.currentTimeMillis();
     }
 
     private boolean hasRequiredSupplies(LevelReqs fish)
@@ -773,7 +823,10 @@ public class FishingScript extends Script
 
         int bank = Math.max(0, Rs2Bank.count(ItemID.COINS_995));
         int amount = Math.min(KARAMJA_COIN_RESERVE - current, bank);
-        if (amount > 0) Rs2Bank.withdrawX(true, ItemID.COINS_995, amount);
+        if (amount > 0 && !isBankInventoryActionPending()) {
+            int before = Rs2Inventory.emptySlotCount();
+            if (Rs2Bank.withdrawX(true, ItemID.COINS_995, amount)) markBankInventoryAction(before);
+        }
     }
 
     private WorldPoint getAreaCenter()
@@ -840,6 +893,9 @@ public class FishingScript extends Script
         targetAreaArrivalHandled = false;
         lastNpcInteractionAtMs = 0L;
         pendingNpcInteractionAtMs = 0L;
+        pendingCookingFireActionAtMs = 0L;
+        pendingBankActionAtMs = 0L;
+        pendingBankEmptySlots = -1;
         lastWebWalkAtMs = 0L;
         state = FishingState.WAITING;
         KspWalkerGuard.clear(WALK_KEY_TO_FISHING_AREA);
