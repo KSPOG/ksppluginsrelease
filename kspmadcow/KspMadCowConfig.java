@@ -8,7 +8,6 @@ import net.runelite.client.config.ConfigItem;
 import net.runelite.client.config.ConfigSection;
 import net.runelite.client.config.Range;
 import net.runelite.client.plugins.microbot.kspmule.KspMuleConfig;
-import net.runelite.client.plugins.microbot.util.misc.Rs2Food;
 
 @ConfigGroup(KspMadCowConfig.GROUP)
 public interface KspMadCowConfig extends Config, KspMuleConfig, KspSupportConfig {
@@ -26,7 +25,7 @@ public interface KspMadCowConfig extends Config, KspMuleConfig, KspSupportConfig
     String muleSection = KspMuleConfig.SECTION;
 
     @ConfigItem(keyName = "food", name = "Food", description = "Food that must be present in the inventory", position = 0, section = suppliesSection)
-    default Rs2Food food() { return Rs2Food.LOBSTER; }
+    default KspMadCowFood food() { return KspMadCowFood.LOBSTER; }
     @ConfigItem(keyName = "foodAmount", name = "Food amount", description = "Target number of configured food items to withdraw", position = 1, section = suppliesSection)
     @Range(min = 1, max = 25) default int foodAmount() { return 20; }
     @ConfigItem(keyName = "eatAtPercent", name = "Eat at HP %", description = "Eat the configured food at or below this hitpoints percentage, including during combat", position = 2, section = suppliesSection)
