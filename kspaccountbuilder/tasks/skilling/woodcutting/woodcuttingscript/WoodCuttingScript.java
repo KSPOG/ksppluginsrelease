@@ -39,6 +39,7 @@ public class WoodCuttingScript extends Script {
     private static final int LOOP_DELAY_MS = 100;
     private static final int WEB_WALK_COOLDOWN_MS = 1_000;
     private static final int OBJECT_INTERACTION_COOLDOWN_MS = 100;
+    private static final int OBJECT_INTERACTION_START_TIMEOUT_MS = 1_500;
     private static final long BANK_ACTION_COOLDOWN_MS = 500L;
     private static final int TREE_SEARCH_PADDING_TILES = 8;
     private static final int OUT_OF_AREA_TREE_FALLBACK_RADIUS = 4;
@@ -67,6 +68,7 @@ public class WoodCuttingScript extends Script {
     private boolean progressiveWoodcutting = true;
     private long lastWebWalkAtMs;
     private long lastObjectInteractionAtMs;
+    private long pendingObjectInteractionAtMs;
     private boolean walkingToTargetArea;
     private long lastBankActionAtMs;
 
@@ -407,7 +409,8 @@ public class WoodCuttingScript extends Script {
     }
 
     private void interactWithBestWillowAfterBank() {
-        if (Rs2Bank.isOpen() || Rs2Player.isAnimating()) return;
+        long now = System.currentTimeMillis();
+        if (Rs2Bank.isOpen() || !canDispatchObjectInteraction(now)) return;
 
         WorldPoint player = Rs2Player.getWorldLocation();
         if (player == null) return;
@@ -420,9 +423,11 @@ public class WoodCuttingScript extends Script {
 
         if (willow == null) return;
 
-        lastObjectInteractionAtMs = System.currentTimeMillis();
+        lastObjectInteractionAtMs = now;
         Microbot.status = "Chopping " + willow.getName();
-        willow.click("Chop down");
+        if (willow.click("Chop down")) {
+            pendingObjectInteractionAtMs = now;
+        }
     }
 
     private String resolveInventoryAxeToKeep(int woodcuttingLevel) {
@@ -453,9 +458,8 @@ public class WoodCuttingScript extends Script {
     }
 
     private void chopForCurrentLevel(int woodcuttingLevel) {
-        if (!canStartChopInTargetArea()) return;
-
         long now = System.currentTimeMillis();
+        if (!canStartChopInTargetArea(now)) return;
         if (now - lastObjectInteractionAtMs < OBJECT_INTERACTION_COOLDOWN_MS) return;
 
         Rs2TileObjectModel tree = findNearestTreeInTargetArea(woodcuttingLevel);
@@ -466,6 +470,7 @@ public class WoodCuttingScript extends Script {
 
         lastObjectInteractionAtMs = now;
         if (tree.click("Chop down")) {
+            pendingObjectInteractionAtMs = now;
             Microbot.status = "Chopping " + tree.getName();
             debug("Tree interaction accepted | tree={} id={} loc={} player={}",
                     tree.getName(), tree.getId(), tree.getWorldLocation(), Rs2Player.getWorldLocation());
@@ -475,11 +480,25 @@ public class WoodCuttingScript extends Script {
         }
     }
 
-    private boolean canStartChopInTargetArea() {
+    private boolean canStartChopInTargetArea(long now) {
         WorldPoint player = Rs2Player.getWorldLocation();
         return player != null
                 && targetArea.contains(player)
-                && !Rs2Player.isAnimating();
+                && canDispatchObjectInteraction(now);
+    }
+
+    private boolean canDispatchObjectInteraction(long now) {
+        if (Rs2Player.isMoving() || Rs2Player.isAnimating() || Rs2Player.isInteracting()) {
+            pendingObjectInteractionAtMs = 0L;
+            return false;
+        }
+
+        if (pendingObjectInteractionAtMs > 0L) {
+            if (now - pendingObjectInteractionAtMs < OBJECT_INTERACTION_START_TIMEOUT_MS) return false;
+            pendingObjectInteractionAtMs = 0L;
+        }
+
+        return true;
     }
 
     private boolean bankActionReady() {
@@ -764,6 +783,7 @@ public class WoodCuttingScript extends Script {
         this.randomOakArea = null;
         this.lastWebWalkAtMs = 0L;
         this.lastObjectInteractionAtMs = 0L;
+        this.pendingObjectInteractionAtMs = 0L;
         this.walkingToTargetArea = false;
         KspWalkerGuard.clear("Woodcutting:target-area");
 
