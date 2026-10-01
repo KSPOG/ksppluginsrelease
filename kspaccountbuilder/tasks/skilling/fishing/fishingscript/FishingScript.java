@@ -53,6 +53,7 @@ public class FishingScript extends Script
     private static final int NO_COOKING_BATCH = -1;
     private static final String WALK_KEY_TO_FISHING_AREA = "Fishing:target-area";
     private static final String WALK_KEY_TO_TROUT_SALMON_FIRE = "Fishing:trout-salmon-fire";
+    private static final long COOKING_WIDGET_ACTION_TIMEOUT_MS = 1_500L;
     private static final WorldPoint TROUT_SALMON_WALK_POSITION = new WorldPoint(3104, 3431, 0);
     private static final WorldPoint TROUT_SALMON_FIRE_POSITION = new WorldPoint(3106, 3432, 0);
 
@@ -69,6 +70,7 @@ public class FishingScript extends Script
     private long lastNpcInteractionAtMs;
     private long pendingNpcInteractionAtMs;
     private long lastWebWalkAtMs;
+    private long pendingCookingWidgetActionAtMs;
 
     public void setDebugLogging(boolean debugLogging) { this.debugLogging = debugLogging; }
 
@@ -86,6 +88,7 @@ public class FishingScript extends Script
         targetAreaArrivalHandled = false;
         cookingBatchItemId = NO_COOKING_BATCH;
         expectingCookingXpDrop = false;
+        pendingCookingWidgetActionAtMs = 0L;
 
         mainScheduledFuture = scheduledExecutorService.scheduleWithFixedDelay(() ->
         {
@@ -262,15 +265,30 @@ public class FishingScript extends Script
 
         Microbot.status = "Cooking " + getCookingBatchName() + " before banking";
 
-        if (Rs2Widget.isProductionWidgetOpen()
-                || Rs2Widget.findWidget("How many would you like to cook?", null, false) != null)
+        if (isCookingWidgetOpen())
         {
-            Rs2Keyboard.keyPress(KeyEvent.VK_SPACE);
-            expectingCookingXpDrop = true;
+            if (Rs2Player.isAnimating())
+            {
+                pendingCookingWidgetActionAtMs = 0L;
+                return true;
+            }
+
+            if (!isCookingWidgetActionPending())
+            {
+                Rs2Keyboard.keyPress(KeyEvent.VK_SPACE);
+                pendingCookingWidgetActionAtMs = System.currentTimeMillis();
+                expectingCookingXpDrop = true;
+            }
             return true;
         }
 
-        if (Rs2Player.isAnimating()) return true;
+        if (isCookingWidgetActionPending()) return true;
+
+        if (Rs2Player.isAnimating())
+        {
+            pendingCookingWidgetActionAtMs = 0L;
+            return true;
+        }
 
         WorldPoint player = Rs2Player.getWorldLocation();
         if (player == null) return true;
@@ -288,6 +306,31 @@ public class FishingScript extends Script
         }
 
         expectingCookingXpDrop = Rs2Inventory.useItemOnObject(cookingBatchItemId, fire.getId());
+        return true;
+    }
+
+    private boolean isCookingWidgetOpen()
+    {
+        return Rs2Widget.isProductionWidgetOpen()
+                || Rs2Widget.findWidget("How many would you like to cook?", null, false) != null;
+    }
+
+    private boolean isCookingWidgetActionPending()
+    {
+        if (pendingCookingWidgetActionAtMs == 0L) return false;
+
+        if (Rs2Player.isAnimating())
+        {
+            pendingCookingWidgetActionAtMs = 0L;
+            return false;
+        }
+
+        if (System.currentTimeMillis() - pendingCookingWidgetActionAtMs >= COOKING_WIDGET_ACTION_TIMEOUT_MS)
+        {
+            pendingCookingWidgetActionAtMs = 0L;
+            return false;
+        }
+
         return true;
     }
 

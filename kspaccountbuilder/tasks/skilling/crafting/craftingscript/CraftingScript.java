@@ -35,6 +35,7 @@ public class CraftingScript extends Script
     private static final int WALK_COOLDOWN_MS = 1_000;
     private static final int FURNACE_SEARCH_RADIUS = 12;
     private static final int ACTION_COOLDOWN_MS = 100;
+    private static final long PRODUCTION_ACTION_TIMEOUT_MS = 1_500L;
 
     private volatile CraftingState state = CraftingState.WAITING;
     private volatile CraftingLevels targetLevel = CraftingLevels.LEATHER_GLOVES;
@@ -44,6 +45,8 @@ public class CraftingScript extends Script
     private long lastActionAtMs;
     private boolean expectingXpDrop;
     private boolean bankInventoryReset;
+    private long pendingProductionActionAtMs;
+    private String pendingProductionRecipe;
 
     public boolean run() { return run(CraftingLevels.LEATHER_GLOVES, true); }
 
@@ -292,13 +295,13 @@ public class CraftingScript extends Script
 
     private void craftFromInventory(CraftInventory recipe)
     {
-        if (Rs2Widget.isProductionWidgetOpen()
-                || Rs2Widget.findWidget(targetLevel.getDisplayName(), null, false) != null)
+        if (isCraftingProductionWidgetOpen(recipe))
         {
             selectProductAndMakeAll(recipe);
             return;
         }
 
+        if (isProductionActionPending(recipe)) return;
         if (!canStartAction()) return;
 
         Ingredient tool = recipe.getTool();
@@ -314,12 +317,13 @@ public class CraftingScript extends Script
 
     private void craftAtFurnace(CraftInventory recipe)
     {
-        if (Rs2Widget.isGoldCraftingWidgetOpen() || Rs2Widget.isSilverCraftingWidgetOpen())
+        if (isCraftingProductionWidgetOpen(recipe))
         {
             selectProductAndMakeAll(recipe);
             return;
         }
 
+        if (isProductionActionPending(recipe)) return;
         if (!canStartAction()) return;
 
         Rs2TileObjectModel furnace = findFurnace();
@@ -335,7 +339,11 @@ public class CraftingScript extends Script
 
     private void selectProductAndMakeAll(CraftInventory recipe)
     {
-        if (Rs2Player.isAnimating()) return;
+        if (!isCraftingProductionWidgetOpen(recipe) || isProductionActionPending(recipe)) return;
+        if (Rs2Player.isAnimating()) {
+            clearProductionAction();
+            return;
+        }
 
         boolean selected = Rs2Widget.clickWidget(recipe.getProductName(), true)
                 || Rs2Widget.clickWidget(recipe.getProductName(), false);
@@ -346,9 +354,57 @@ public class CraftingScript extends Script
             return;
         }
 
+        markProductionAction(recipe);
         Rs2Keyboard.keyPress(KeyEvent.VK_SPACE);
         expectingXpDrop = true;
         lastActionAtMs = System.currentTimeMillis();
+    }
+
+    private boolean isCraftingProductionWidgetOpen(CraftInventory recipe)
+    {
+        if (recipe == null) return false;
+        if (recipe.requiresFurnace())
+        {
+            return Rs2Widget.isGoldCraftingWidgetOpen()
+                    || Rs2Widget.isSilverCraftingWidgetOpen()
+                    || Rs2Widget.findWidget(recipe.getProductName(), null, false) != null;
+        }
+
+        return Rs2Widget.isProductionWidgetOpen()
+                || Rs2Widget.findWidget(recipe.getProductName(), null, false) != null
+                || Rs2Widget.findWidget(targetLevel.getDisplayName(), null, false) != null;
+    }
+
+    private boolean isProductionActionPending(CraftInventory recipe)
+    {
+        if (pendingProductionActionAtMs == 0L || pendingProductionRecipe == null || recipe == null) return false;
+
+        if (Rs2Player.isAnimating())
+        {
+            clearProductionAction();
+            return false;
+        }
+
+        long elapsed = System.currentTimeMillis() - pendingProductionActionAtMs;
+        if (!pendingProductionRecipe.equals(recipe.name()) || elapsed >= PRODUCTION_ACTION_TIMEOUT_MS)
+        {
+            clearProductionAction();
+            return false;
+        }
+
+        return true;
+    }
+
+    private void markProductionAction(CraftInventory recipe)
+    {
+        pendingProductionRecipe = recipe.name();
+        pendingProductionActionAtMs = System.currentTimeMillis();
+    }
+
+    private void clearProductionAction()
+    {
+        pendingProductionActionAtMs = 0L;
+        pendingProductionRecipe = null;
     }
 
     private boolean canStartAction()
@@ -412,6 +468,7 @@ public class CraftingScript extends Script
     public void shutdown()
     {
         state = CraftingState.WAITING;
+        clearProductionAction();
         lastActionAtMs = 0L;
         expectingXpDrop = false;
         bankInventoryReset = false;
