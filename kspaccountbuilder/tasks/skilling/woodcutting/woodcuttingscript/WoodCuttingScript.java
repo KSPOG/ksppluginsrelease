@@ -71,6 +71,7 @@ public class WoodCuttingScript extends Script {
     private long pendingObjectInteractionAtMs;
     private boolean walkingToTargetArea;
     private long lastBankActionAtMs;
+    private final AccountBuilderForestryHandler forestryHandler = new AccountBuilderForestryHandler();
 
     public void setDebugLogging(boolean debugLogging) {
         this.debugLogging = debugLogging;
@@ -124,6 +125,14 @@ public class WoodCuttingScript extends Script {
                     Rs2Inventory.isFull(),
                     Rs2Bank.isOpen(),
                     Rs2Walker.getCurrentTarget());
+
+            if (targetTree != null && this.forestryHandler.runIfNeeded(targetTree)) {
+                this.pendingObjectInteractionAtMs = 0L;
+                this.walkingToTargetArea = false;
+                KspWalkerGuard.clearActiveWalker("ksp_account_builder_woodcutting_forestry");
+                KspWalkerGuard.clear("Woodcutting:target-area");
+                return;
+            }
 
             if (Rs2Inventory.isFull()) {
                 this.debug("Inventory full; banking logs | player={} area={} equippedAxeInInv={}",
@@ -785,6 +794,7 @@ public class WoodCuttingScript extends Script {
         this.lastObjectInteractionAtMs = 0L;
         this.pendingObjectInteractionAtMs = 0L;
         this.walkingToTargetArea = false;
+        this.forestryHandler.reset();
         KspWalkerGuard.clear("Woodcutting:target-area");
 
         super.shutdown();
