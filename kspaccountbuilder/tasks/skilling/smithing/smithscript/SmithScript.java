@@ -414,6 +414,10 @@ extends Script {
 
     private boolean handleSmithingSelection(SmithRecipe recipe) {
         if (!isSmithingWidgetOpen()) return false;
+        if (Rs2Player.isAnimating()) {
+            clearSmithWidgetAction();
+            return true;
+        }
 
         awaitingSmithStartAtMs = 0L;
         int bars = Rs2Inventory.count(getBarName(recipe));
