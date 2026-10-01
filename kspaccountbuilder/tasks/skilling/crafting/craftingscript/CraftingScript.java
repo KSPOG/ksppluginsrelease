@@ -36,6 +36,7 @@ public class CraftingScript extends Script
     private static final int FURNACE_SEARCH_RADIUS = 12;
     private static final int ACTION_COOLDOWN_MS = 100;
     private static final long PRODUCTION_ACTION_TIMEOUT_MS = 1_500L;
+    private static final long ACTION_DISPATCH_TIMEOUT_MS = 1_500L;
 
     private volatile CraftingState state = CraftingState.WAITING;
     private volatile CraftingLevels targetLevel = CraftingLevels.LEATHER_GLOVES;
@@ -47,6 +48,11 @@ public class CraftingScript extends Script
     private boolean bankInventoryReset;
     private long pendingProductionActionAtMs;
     private String pendingProductionRecipe;
+    private long pendingWorldActionAtMs;
+    private String pendingWorldAction;
+    private long pendingInventoryActionAtMs;
+    private String pendingInventoryItem;
+    private int pendingInventoryBeforeCount = -1;
 
     public boolean run() { return run(CraftingLevels.LEATHER_GLOVES, true); }
 
@@ -197,7 +203,7 @@ public class CraftingScript extends Script
 
         if (!Rs2Bank.isOpen())
         {
-            Rs2Bank.openBank();
+            if (!isWorldActionPending("open-bank") && Rs2Bank.openBank()) markWorldAction("open-bank");
             return;
         }
 
@@ -227,7 +233,10 @@ public class CraftingScript extends Script
                 return;
             }
 
-            withdraw(ingredient.getItemName(), amount);
+            if (!isInventoryActionPending()
+                    && withdraw(ingredient.getItemName(), amount)) {
+                markInventoryAction(ingredient.getItemName(), current);
+            }
             return;
         }
 
@@ -302,7 +311,7 @@ public class CraftingScript extends Script
         }
 
         if (isProductionActionPending(recipe)) return;
-        if (!canStartAction()) return;
+        if (isWorldActionPending("combine") || !canStartAction()) return;
 
         Ingredient tool = recipe.getTool();
         Ingredient material = getFirstConsumable(recipe);
@@ -312,6 +321,7 @@ public class CraftingScript extends Script
         if (Rs2Inventory.combine(tool.getItemName(), material.getItemName()))
         {
             lastActionAtMs = System.currentTimeMillis();
+            markWorldAction("combine");
         }
     }
 
@@ -324,7 +334,7 @@ public class CraftingScript extends Script
         }
 
         if (isProductionActionPending(recipe)) return;
-        if (!canStartAction()) return;
+        if (isWorldActionPending("furnace") || !canStartAction()) return;
 
         Rs2TileObjectModel furnace = findFurnace();
         if (furnace == null)
@@ -334,7 +344,10 @@ public class CraftingScript extends Script
         }
 
         Microbot.status = "Crafting " + targetLevel.getDisplayName();
-        if (furnace.click("Smelt")) lastActionAtMs = System.currentTimeMillis();
+        if (furnace.click("Smelt")) {
+            lastActionAtMs = System.currentTimeMillis();
+            markWorldAction("furnace");
+        }
     }
 
     private void selectProductAndMakeAll(CraftInventory recipe)
@@ -407,6 +420,49 @@ public class CraftingScript extends Script
         pendingProductionRecipe = null;
     }
 
+    private boolean isWorldActionPending(String action)
+    {
+        if (pendingWorldActionAtMs == 0L || pendingWorldAction == null) return false;
+        if (!pendingWorldAction.equals(action)) return false;
+        if (Rs2Player.isMoving() || Rs2Player.isAnimating() || Rs2Player.isInteracting()) return true;
+        if (System.currentTimeMillis() - pendingWorldActionAtMs < ACTION_DISPATCH_TIMEOUT_MS) return true;
+        pendingWorldActionAtMs = 0L;
+        pendingWorldAction = null;
+        return false;
+    }
+
+    private void markWorldAction(String action)
+    {
+        pendingWorldAction = action;
+        pendingWorldActionAtMs = System.currentTimeMillis();
+    }
+
+    private boolean isInventoryActionPending()
+    {
+        if (pendingInventoryActionAtMs == 0L || pendingInventoryItem == null) return false;
+        if (Rs2Inventory.count(pendingInventoryItem) != pendingInventoryBeforeCount) {
+            clearInventoryAction();
+            return false;
+        }
+        if (System.currentTimeMillis() - pendingInventoryActionAtMs < ACTION_DISPATCH_TIMEOUT_MS) return true;
+        clearInventoryAction();
+        return false;
+    }
+
+    private void markInventoryAction(String item, int beforeCount)
+    {
+        pendingInventoryItem = item;
+        pendingInventoryBeforeCount = beforeCount;
+        pendingInventoryActionAtMs = System.currentTimeMillis();
+    }
+
+    private void clearInventoryAction()
+    {
+        pendingInventoryActionAtMs = 0L;
+        pendingInventoryItem = null;
+        pendingInventoryBeforeCount = -1;
+    }
+
     private boolean canStartAction()
     {
         if (Rs2Bank.isOpen())
@@ -414,7 +470,7 @@ public class CraftingScript extends Script
             Rs2Bank.closeBank();
             return false;
         }
-        if (Rs2Player.isMoving() || Rs2Player.isAnimating())
+        if (Rs2Player.isMoving() || Rs2Player.isAnimating() || Rs2Player.isInteracting())
         {
             return false;
         }
@@ -469,6 +525,9 @@ public class CraftingScript extends Script
     {
         state = CraftingState.WAITING;
         clearProductionAction();
+        pendingWorldActionAtMs = 0L;
+        pendingWorldAction = null;
+        clearInventoryAction();
         lastActionAtMs = 0L;
         expectingXpDrop = false;
         bankInventoryReset = false;
