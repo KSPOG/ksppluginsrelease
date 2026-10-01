@@ -819,7 +819,7 @@ public class KspBryophytaScript extends Script {
         if (!lairEntryPending || state == BryophytaState.STOPPED) return;
         if (groupId == InterfaceID.DIALOG_OPTION || groupId == InterfaceID.DIALOG_NPC
                 || groupId == InterfaceID.DIALOG_PLAYER || groupId == InterfaceID.DIALOG_SPRITE
-                || groupId == InterfaceID.DIALOG_DOUBLE_SPRITE || groupId == 229) {
+                || groupId == 229) {
             lastGateDialogueFingerprint = "";
             gateContinueHandled = false;
             serviceLairGateWidgetNow();
