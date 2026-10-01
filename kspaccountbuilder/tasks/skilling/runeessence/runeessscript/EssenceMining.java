@@ -33,6 +33,7 @@ public class EssenceMining extends Script
     private static final int PORTAL_APPROACH_DISTANCE = 6;
     private static final long WALK_REFIRE_COOLDOWN_MS = 1_000L;
     private static final long ACTION_COOLDOWN_MS = 100L;
+    private static final long ACTION_DISPATCH_TIMEOUT_MS = 1_500L;
     private static final WorldPoint AUBURY_POSITION = new WorldPoint(3253, 3399, 0);
     private static final WorldPoint[] ESSENCE_MINE_PORTAL_LOCATIONS = {
             new WorldPoint(2932, 4854, 0),
@@ -46,6 +47,10 @@ public class EssenceMining extends Script
 
     private boolean debugLogging;
     private long lastActionAtMs;
+    private long pendingWorldActionAtMs;
+    private String pendingWorldAction;
+    private long pendingBankActionAtMs;
+    private int pendingBankEmptySlots = -1;
     private EssenceState state = EssenceState.PREPARING;
     private String status = "Idle";
 
@@ -53,6 +58,10 @@ public class EssenceMining extends Script
     {
         shutdown();
         lastActionAtMs = 0L;
+        pendingWorldActionAtMs = 0L;
+        pendingWorldAction = null;
+        pendingBankActionAtMs = 0L;
+        pendingBankEmptySlots = -1;
         state = EssenceState.PREPARING;
         status = "Starting rune essence mining";
 
@@ -134,8 +143,10 @@ public class EssenceMining extends Script
         }
 
         KspWalkerGuard.clear(WALK_KEY_BANK);
-        if (!Rs2Bank.isOpen() && !Rs2Bank.openBank())
+        if (!Rs2Bank.isOpen())
         {
+            if (isWorldActionPending("open-bank")) return;
+            if (Rs2Bank.openBank()) markWorldAction("open-bank");
             return;
         }
 
@@ -153,18 +164,26 @@ public class EssenceMining extends Script
 
         if (!Rs2Inventory.hasItem(pickaxeToKeep) && !Rs2Equipment.isWearing(pickaxeToKeep))
         {
-            Rs2Bank.withdrawOne(pickaxeToKeep);
+            if (!isBankActionPending()) {
+                int before = Rs2Inventory.emptySlotCount();
+                if (Rs2Bank.withdrawOne(pickaxeToKeep)) markBankAction(before);
+            }
             return;
         }
 
+        if (isBankActionPending()) return;
+
+        int before = Rs2Inventory.emptySlotCount();
+        boolean deposited;
         if (Rs2Inventory.hasItem(pickaxeToKeep))
         {
-            Rs2Bank.depositAllExcept(pickaxeToKeep);
+            deposited = Rs2Bank.depositAllExcept(pickaxeToKeep);
         }
         else
         {
-            Rs2Bank.depositAll();
+            deposited = Rs2Bank.depositAll();
         }
+        if (deposited) markBankAction(before);
 
         if (!Rs2Inventory.isFull())
         {
@@ -191,16 +210,19 @@ public class EssenceMining extends Script
         state = EssenceState.TELEPORTING;
         status = "Teleporting to rune essence mine";
         KspWalkerGuard.clear(WALK_KEY_AUBURY);
-        if (!canAct()) return;
+        if (isWorldActionPending("aubury") || !canAct()) return;
 
-        if (aubury.click("Teleport")) lastActionAtMs = System.currentTimeMillis();
+        if (aubury.click("Teleport")) {
+            lastActionAtMs = System.currentTimeMillis();
+            markWorldAction("aubury");
+        }
     }
 
     private void mineEssence()
     {
         state = EssenceState.MINING;
         status = "Mining rune essence";
-        if (Rs2Player.isAnimating() || !canAct())
+        if (Rs2Player.isAnimating() || Rs2Player.isInteracting() || isWorldActionPending("essence-rock") || !canAct())
         {
             return;
         }
@@ -212,6 +234,7 @@ public class EssenceMining extends Script
         if (essenceRock != null && essenceRock.click("Mine"))
         {
             lastActionAtMs = System.currentTimeMillis();
+            markWorldAction("essence-rock");
         }
     }
 
@@ -219,7 +242,7 @@ public class EssenceMining extends Script
     {
         state = EssenceState.EXITING_MINE;
         status = "Leaving rune essence mine";
-        if (Rs2Player.isAnimating() || !canAct()) return;
+        if (Rs2Player.isAnimating() || Rs2Player.isInteracting() || isWorldActionPending("portal") || !canAct()) return;
 
         var portal = Microbot.getRs2TileObjectCache().query()
                 .withId(ESSENCE_MINE_PORTAL_ID)
@@ -242,7 +265,10 @@ public class EssenceMining extends Script
         }
 
         KspWalkerGuard.clear(WALK_KEY_PORTAL);
-        if (portal.click()) lastActionAtMs = System.currentTimeMillis();
+        if (portal.click()) {
+            lastActionAtMs = System.currentTimeMillis();
+            markWorldAction("portal");
+        }
     }
 
     public boolean recoverFromEssenceMine()
@@ -331,6 +357,43 @@ public class EssenceMining extends Script
             }
         }
         return false;
+    }
+
+    private boolean isWorldActionPending(String action)
+    {
+        if (pendingWorldActionAtMs == 0L || pendingWorldAction == null) return false;
+        if (!pendingWorldAction.equals(action)) return false;
+        if (Rs2Player.isMoving() || Rs2Player.isAnimating() || Rs2Player.isInteracting()) return true;
+        if (System.currentTimeMillis() - pendingWorldActionAtMs < ACTION_DISPATCH_TIMEOUT_MS) return true;
+        pendingWorldActionAtMs = 0L;
+        pendingWorldAction = null;
+        return false;
+    }
+
+    private void markWorldAction(String action)
+    {
+        pendingWorldAction = action;
+        pendingWorldActionAtMs = System.currentTimeMillis();
+    }
+
+    private boolean isBankActionPending()
+    {
+        if (pendingBankActionAtMs == 0L) return false;
+        if (Rs2Inventory.emptySlotCount() != pendingBankEmptySlots) {
+            pendingBankActionAtMs = 0L;
+            pendingBankEmptySlots = -1;
+            return false;
+        }
+        if (System.currentTimeMillis() - pendingBankActionAtMs < ACTION_DISPATCH_TIMEOUT_MS) return true;
+        pendingBankActionAtMs = 0L;
+        pendingBankEmptySlots = -1;
+        return false;
+    }
+
+    private void markBankAction(int beforeEmptySlots)
+    {
+        pendingBankEmptySlots = beforeEmptySlots;
+        pendingBankActionAtMs = System.currentTimeMillis();
     }
 
     private boolean canAct() { return System.currentTimeMillis() - lastActionAtMs >= ACTION_COOLDOWN_MS; }
