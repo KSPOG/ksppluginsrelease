@@ -41,6 +41,7 @@ public class WoodCuttingScript extends Script {
     private static final int OBJECT_INTERACTION_COOLDOWN_MS = 100;
     private static final int OBJECT_INTERACTION_START_TIMEOUT_MS = 1_500;
     private static final long BANK_ACTION_COOLDOWN_MS = 500L;
+    private static final long BANK_INVENTORY_ACTION_TIMEOUT_MS = 1_500L;
     private static final int TREE_SEARCH_PADDING_TILES = 8;
     private static final int OUT_OF_AREA_TREE_FALLBACK_RADIUS = 4;
     private static final int MID_TIER_RANDOM_MAX_LEVEL = 60;
@@ -71,6 +72,8 @@ public class WoodCuttingScript extends Script {
     private long pendingObjectInteractionAtMs;
     private boolean walkingToTargetArea;
     private long lastBankActionAtMs;
+    private long pendingBankInventoryActionAtMs;
+    private int pendingBankInventoryEmptySlots = -1;
     private final AccountBuilderForestryHandler forestryHandler = new AccountBuilderForestryHandler();
 
     public void setDebugLogging(boolean debugLogging) {
@@ -197,7 +200,9 @@ public class WoodCuttingScript extends Script {
             if (!KspBankMode.ensureWithdrawAsItem()) return false;
             if (!bankActionReady()) return false;
 
-            Rs2Bank.withdrawOne(activeAxe);
+            if (bankInventoryActionPending()) return false;
+            int before = Rs2Inventory.emptySlotCount();
+            if (Rs2Bank.withdrawOne(activeAxe)) markBankInventoryAction(before);
             markBankAction();
             return false;
         }
@@ -218,7 +223,11 @@ public class WoodCuttingScript extends Script {
             if (KspBankWidgetHelper.closeBankTutorialOverlayIfOpenAndWait()) return false;
             if (!bankActionReady()) return false;
 
-            depositOutdatedAxes(activeAxe);
+            if (bankInventoryActionPending()) return false;
+            if (depositOneOutdatedAxe(activeAxe)) {
+                markBankAction();
+                return false;
+            }
             if (!hasOutdatedAxeInInventory(activeAxe)) {
                 Rs2Bank.closeBank();
             }
@@ -229,18 +238,16 @@ public class WoodCuttingScript extends Script {
         return Rs2Equipment.isWearing(activeAxe) || Rs2Inventory.hasItem(activeAxe);
     }
 
-    private void depositOutdatedAxes(String desiredAxeName) {
+    private boolean depositOneOutdatedAxe(String desiredAxeName) {
         for (String axeName : AXE_NAMES) {
-            if (axeName.equalsIgnoreCase(desiredAxeName)) {
-                continue;
+            if (axeName.equalsIgnoreCase(desiredAxeName) || !Rs2Inventory.hasItem(axeName)) continue;
+            int before = Rs2Inventory.emptySlotCount();
+            if (Rs2Bank.depositAll(axeName)) {
+                markBankInventoryAction(before);
+                return true;
             }
-
-            if (!Rs2Inventory.hasItem(axeName)) {
-                continue;
-            }
-
-            Rs2Bank.depositAll(axeName);
         }
+        return false;
     }
 
     private boolean hasOutdatedAxeInInventory(String desiredAxeName) {
@@ -409,11 +416,12 @@ public class WoodCuttingScript extends Script {
         }
 
         if (KspBankWidgetHelper.closeBankTutorialOverlayIfOpenAndWait()) return;
-        if (!bankActionReady()) return;
+        if (!bankActionReady() || bankInventoryActionPending()) return;
 
         String keep = resolveInventoryAxeToKeep(woodcuttingLevel);
-        if (keep != null) Rs2Bank.depositAllExcept(keep);
-        else Rs2Bank.depositAll();
+        int before = Rs2Inventory.emptySlotCount();
+        boolean deposited = keep != null ? Rs2Bank.depositAllExcept(keep) : Rs2Bank.depositAll();
+        if (deposited) markBankInventoryAction(before);
         markBankAction();
     }
 
@@ -508,6 +516,24 @@ public class WoodCuttingScript extends Script {
         }
 
         return true;
+    }
+
+    private boolean bankInventoryActionPending() {
+        if (pendingBankInventoryActionAtMs == 0L) return false;
+        if (Rs2Inventory.emptySlotCount() != pendingBankInventoryEmptySlots) {
+            pendingBankInventoryActionAtMs = 0L;
+            pendingBankInventoryEmptySlots = -1;
+            return false;
+        }
+        if (System.currentTimeMillis() - pendingBankInventoryActionAtMs < BANK_INVENTORY_ACTION_TIMEOUT_MS) return true;
+        pendingBankInventoryActionAtMs = 0L;
+        pendingBankInventoryEmptySlots = -1;
+        return false;
+    }
+
+    private void markBankInventoryAction(int beforeEmptySlots) {
+        pendingBankInventoryEmptySlots = beforeEmptySlots;
+        pendingBankInventoryActionAtMs = System.currentTimeMillis();
     }
 
     private boolean bankActionReady() {
@@ -787,6 +813,8 @@ public class WoodCuttingScript extends Script {
 
     public void shutdown() {
         lastBankActionAtMs = 0L;
+        pendingBankInventoryActionAtMs = 0L;
+        pendingBankInventoryEmptySlots = -1;
         this.startingTargetTreeInitialized = false;
         this.randomMidTierTree = null;
         this.randomOakArea = null;
