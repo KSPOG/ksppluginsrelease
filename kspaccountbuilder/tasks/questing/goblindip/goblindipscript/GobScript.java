@@ -40,6 +40,7 @@ public class GobScript extends Script {
     private static final int LOOP_DELAY_MS = 100;
     private static final int WALK_REFIRE_COOLDOWN_MS = 1_000;
     private static final int ACTION_COOLDOWN_MS = 300;
+    private static final long NPC_INTERACTION_TIMEOUT_MS = 1_500L;
     private static final int MIN_QUEST_BUY_PRICE = 1_000;
     private static final int MAX_QUEST_BUY_PRICE = 2_000;
     private static final int NPC_REACH_DISTANCE = 4;
@@ -76,6 +77,8 @@ public class GobScript extends Script {
     private boolean mailHandInInProgress;
     private boolean requirementBankAudited;
     private long lastActionAtMs;
+    private long pendingNpcInteractionAtMs;
+    private int pendingNpcIndex = -1;
     private int lastPlainMailCount;
     private int lastBlueMailCount;
     private int lastOrangeMailCount;
@@ -90,6 +93,8 @@ public class GobScript extends Script {
         requirementBankAudited = false;
         resetHandInTracking();
         lastActionAtMs = 0L;
+        pendingNpcInteractionAtMs = 0L;
+        pendingNpcIndex = -1;
         pendingRequirementBuys.clear();
         activeRequirementBuys.clear();
         state = GobState.PREPARING;
@@ -749,13 +754,33 @@ public class GobScript extends Script {
         }
 
         status = "Talking to " + general.getName();
+        if (isNpcInteractionPending(general)) return false;
+        if (Rs2Player.isMoving() || Rs2Player.isAnimating() || Rs2Player.isInteracting()) return false;
+
         snapshotMailCounts();
         boolean clicked = general.click("Talk-to");
         if (clicked) {
+            pendingNpcInteractionAtMs = System.currentTimeMillis();
+            pendingNpcIndex = general.getIndex();
             mailHandInInProgress = true;
             KspWalkerGuard.clear(WALK_KEY_GENERAL);
         }
         return clicked;
+    }
+
+    private boolean isNpcInteractionPending(Rs2NpcModel npc) {
+        if (pendingNpcInteractionAtMs == 0L) return false;
+        if (Rs2Dialogue.isInDialogue()) {
+            pendingNpcInteractionAtMs = 0L;
+            pendingNpcIndex = -1;
+            return true;
+        }
+        if (npc != null && pendingNpcIndex != -1 && npc.getIndex() != pendingNpcIndex) return false;
+        if (Rs2Player.isMoving() || Rs2Player.isAnimating() || Rs2Player.isInteracting()) return true;
+        if (System.currentTimeMillis() - pendingNpcInteractionAtMs < NPC_INTERACTION_TIMEOUT_MS) return true;
+        pendingNpcInteractionAtMs = 0L;
+        pendingNpcIndex = -1;
+        return false;
     }
 
     private Rs2NpcModel findNearestGeneral() {
@@ -931,6 +956,8 @@ public class GobScript extends Script {
         requirementBankAudited = false;
         resetHandInTracking();
         lastActionAtMs = 0L;
+        pendingNpcInteractionAtMs = 0L;
+        pendingNpcIndex = -1;
         state = GobState.PREPARING;
         status = "Idle";
         super.shutdown();
