@@ -55,6 +55,7 @@ public class MeleeScript
     private static final int CHICKEN_TARGET_COMBAT_STAT_LEVEL = 15;
     private static final int LOOT_RADIUS = 12;
     private static final long NO_FOOD_CONFIRMATION_MS = 2_500L;
+    private static final long ACTION_DISPATCH_TIMEOUT_MS = 1_500L;
     private static final WorldPoint CHICKEN_WALK_TARGET = new WorldPoint(3177, 3298, 0);
     private static final WorldPoint CHICKEN_GATE_EAST = new WorldPoint(3262, 3321, 0);
     private static final WorldPoint CHICKEN_GATE_WEST = new WorldPoint(3261, 3321, 0);
@@ -77,6 +78,12 @@ public class MeleeScript
     private WorldPoint lastWalkTarget;
     private CombatAreas forcedCombatArea;
     private long lastConfirmedFoodAtMs;
+    private long pendingAttackAtMs;
+    private int pendingAttackNpcIndex = -1;
+    private long pendingWorldActionAtMs;
+    private String pendingWorldAction;
+    private long pendingBankActionAtMs;
+    private int pendingBankInventoryCount = -1;
     private volatile boolean pendingSellHandoff;
 
     public void setDebugLogging(boolean debugLogging) {
@@ -282,7 +289,9 @@ public class MeleeScript
         setStatus("Banking for " + stage.primaryNpc.getDisplayName());
 
         if (!Rs2Bank.isOpen()) {
-            if (!Rs2Bank.openBank()) Rs2Bank.walkToBankAndUseBank();
+            if (isWorldActionPending("open-bank")) return;
+            if (Rs2Bank.openBank()) markWorldAction("open-bank");
+            else Rs2Bank.walkToBankAndUseBank();
             return;
         }
 
@@ -295,7 +304,10 @@ public class MeleeScript
 
         if (!Rs2Inventory.isEmpty() && !hasMeleeSetupItemsInInventory(gearPlan)) {
             boolean hadSellableLoot = hasSellListItemInInventory();
-            Rs2Bank.depositAll();
+            if (!isBankInventoryActionPending()) {
+                int before = Rs2Inventory.emptySlotCount();
+                if (Rs2Bank.depositAll()) markBankInventoryAction(before);
+            }
             if (hadSellableLoot) pendingSellHandoff = true;
             return;
         }
@@ -306,7 +318,10 @@ public class MeleeScript
                     || Rs2Inventory.hasItem(desiredItem)) continue;
 
             if (Rs2Bank.count(desiredItem) > 0) {
-                Rs2Bank.withdrawOne(desiredItem);
+                if (!isBankInventoryActionPending()) {
+                    int before = Rs2Inventory.emptySlotCount();
+                    if (Rs2Bank.withdrawOne(desiredItem)) markBankInventoryAction(before);
+                }
                 return;
             }
         }
@@ -315,7 +330,10 @@ public class MeleeScript
         int missingFood = Math.max(0, TARGET_FOOD_COUNT - getFoodCountInInventory());
 
         if (bankFood != null && missingFood > 0) {
-            Rs2Bank.withdrawX(bankFood.getItemId(), missingFood);
+            if (!isBankInventoryActionPending()) {
+                int before = Rs2Inventory.emptySlotCount();
+                if (Rs2Bank.withdrawX(bankFood.getItemId(), missingFood)) markBankInventoryAction(before);
+            }
             return;
         }
 
@@ -447,7 +465,8 @@ public class MeleeScript
                 EDGEVILLE_TRAPDOOR_OPEN_ID, EDGEVILLE_TRAPDOOR, EDGEVILLE_TRAPDOOR_INTERACTION_DISTANCE);
         if (trapdoor != null && Rs2GameObject.hasAction(trapdoor, "Climb-down")) {
             setStatus("Entering Edgeville dungeon");
-            Rs2GameObject.interact(trapdoor, "Climb-down");
+            if (isWorldActionPending("trapdoor-climb")) return true;
+            if (Rs2GameObject.interact(trapdoor, "Climb-down")) markWorldAction("trapdoor-climb");
             return true;
         }
 
@@ -455,7 +474,10 @@ public class MeleeScript
                 EDGEVILLE_TRAPDOOR_CLOSED_ID, EDGEVILLE_TRAPDOOR, EDGEVILLE_TRAPDOOR_INTERACTION_DISTANCE);
         if (trapdoor != null && Rs2GameObject.hasAction(trapdoor, "Open")) {
             setStatus("Opening Edgeville trapdoor");
-            Rs2GameObject.interact(trapdoor, "Open");
+            if (!isWorldActionPending("trapdoor-open")
+                    && Rs2GameObject.interact(trapdoor, "Open")) {
+                markWorldAction("trapdoor-open");
+            }
         }
         return true;
     }
@@ -499,7 +521,9 @@ public class MeleeScript
 
         KspWalkerGuard.clear("Melee:target-area");
         setStatus("Opening gate to chickens");
-        return Rs2GameObject.interact(gate, "Open");
+        if (isWorldActionPending("chicken-gate")) return true;
+        if (Rs2GameObject.interact(gate, "Open")) markWorldAction("chicken-gate");
+        return true;
     }
 
     private void attackTarget(TrainingStage stage) {
@@ -516,6 +540,8 @@ public class MeleeScript
                     stage.area.getDisplayName(), playerLocation, resolveWalkTarget(stage.area));
             return;
         }
+
+        if (isAttackDispatchPending()) return;
 
         Rs2NpcModel currentAttacker = findNpcAttackingPlayer(localPlayer, playerLocation, stage);
         if (currentAttacker != null) {
@@ -613,8 +639,60 @@ public class MeleeScript
                 playerLocation,
                 playerLocation.distanceTo(target.getWorldLocation()),
                 target.getInteracting());
-        target.click("Attack");
+        if (target.click("Attack")) {
+            pendingAttackAtMs = System.currentTimeMillis();
+            pendingAttackNpcIndex = target.getIndex();
+        }
 
+    }
+
+    private boolean isAttackDispatchPending() {
+        if (pendingAttackAtMs == 0L) return false;
+
+        if (Rs2Player.isMoving() || Rs2Player.isAnimating() || Rs2Player.isInteracting() || Rs2Combat.inCombat()) {
+            pendingAttackAtMs = 0L;
+            pendingAttackNpcIndex = -1;
+            return true;
+        }
+
+        if (System.currentTimeMillis() - pendingAttackAtMs < ACTION_DISPATCH_TIMEOUT_MS) return true;
+
+        pendingAttackAtMs = 0L;
+        pendingAttackNpcIndex = -1;
+        return false;
+    }
+
+    private boolean isWorldActionPending(String action) {
+        if (pendingWorldActionAtMs == 0L || pendingWorldAction == null) return false;
+        if (!pendingWorldAction.equals(action)) return false;
+        if (Rs2Player.isMoving() || Rs2Player.isAnimating() || Rs2Player.isInteracting()) return true;
+        if (System.currentTimeMillis() - pendingWorldActionAtMs < ACTION_DISPATCH_TIMEOUT_MS) return true;
+        pendingWorldActionAtMs = 0L;
+        pendingWorldAction = null;
+        return false;
+    }
+
+    private void markWorldAction(String action) {
+        pendingWorldAction = action;
+        pendingWorldActionAtMs = System.currentTimeMillis();
+    }
+
+    private boolean isBankInventoryActionPending() {
+        if (pendingBankActionAtMs == 0L) return false;
+        if (Rs2Inventory.emptySlotCount() != pendingBankInventoryCount) {
+            pendingBankActionAtMs = 0L;
+            pendingBankInventoryCount = -1;
+            return false;
+        }
+        if (System.currentTimeMillis() - pendingBankActionAtMs < ACTION_DISPATCH_TIMEOUT_MS) return true;
+        pendingBankActionAtMs = 0L;
+        pendingBankInventoryCount = -1;
+        return false;
+    }
+
+    private void markBankInventoryAction(int beforeEmptySlots) {
+        pendingBankInventoryCount = beforeEmptySlots;
+        pendingBankActionAtMs = System.currentTimeMillis();
     }
 
     private boolean isNpcInTargetArea(Rs2NpcModel npc, TrainingStage stage) {
@@ -891,6 +969,12 @@ public class MeleeScript
     public void shutdown() {
         this.lastWebWalkAtMs = 0L;
         this.lastWalkTarget = null;
+        this.pendingAttackAtMs = 0L;
+        this.pendingAttackNpcIndex = -1;
+        this.pendingWorldActionAtMs = 0L;
+        this.pendingWorldAction = null;
+        this.pendingBankActionAtMs = 0L;
+        this.pendingBankInventoryCount = -1;
         KspWalkerGuard.clear("Melee:target-area");
         KspWalkerGuard.clear("Melee:hill-giants-entry");
         this.state = CombatState.PREPARING;
