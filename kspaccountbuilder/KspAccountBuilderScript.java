@@ -125,6 +125,7 @@ public class KspAccountBuilderScript extends Script
     private static final long PLAY_TIME_READ_RETRY_MS = TimeUnit.SECONDS.toMillis(1);
     private static final long BREAK_LOGOUT_COMBAT_GRACE_MS = TimeUnit.SECONDS.toMillis(11);
     private static final long TASK_SWITCH_ACTION_COOLDOWN_MS = 500L;
+    private static final long TASK_SWITCH_DISPATCH_TIMEOUT_MS = 1_500L;
     private static final int DRAYNOR_CORRIDOR_MIN_X = 3050;
     private static final int DRAYNOR_CORRIDOR_MAX_X = 3135;
     private static final int DRAYNOR_CORRIDOR_MIN_Y = 3230;
@@ -240,6 +241,9 @@ public class KspAccountBuilderScript extends Script
     private long nextPlayTimeReadAtMillis;
     private BankLocation taskSwitchBankLocation;
     private long lastTaskSwitchActionAtMs;
+    private long pendingTaskSwitchInventoryAtMs;
+    private int pendingTaskSwitchInventoryEmptySlots = -1;
+    private long pendingTaskSwitchEquipmentAtMs;
     private boolean taskSwitchBankResetPending;
 
     public BuilderTask getCurrentTask() { return currentTask; }
@@ -366,6 +370,9 @@ public class KspAccountBuilderScript extends Script
         nextPlayTimeReadAtMillis = 0L;
         taskSwitchBankLocation = null;
         lastTaskSwitchActionAtMs = 0L;
+        pendingTaskSwitchInventoryAtMs = 0L;
+        pendingTaskSwitchInventoryEmptySlots = -1;
+        pendingTaskSwitchEquipmentAtMs = 0L;
         taskSwitchBankResetPending = false;
         pausedActivitySwitchRemainingMillis = -1L;
         activitySwitchTimerPaused = false;
@@ -2318,21 +2325,37 @@ public class KspAccountBuilderScript extends Script
     private boolean depositInventoryForTaskSwitch()
     {
         if (!Rs2Bank.isOpen() || closeTaskSwitchBankTutorialOverlayIfOpen()) return false;
-        if (Rs2Inventory.isEmpty()) return true;
-        if (!taskSwitchActionReady()) return false;
+        if (Rs2Inventory.isEmpty()) {
+            pendingTaskSwitchInventoryAtMs = 0L;
+            pendingTaskSwitchInventoryEmptySlots = -1;
+            return true;
+        }
+        if (!taskSwitchActionReady() || taskSwitchInventoryActionPending()) return false;
 
         Microbot.status = "Depositing inventory before next task";
-        Rs2Bank.depositAll();
+        int before = Rs2Inventory.emptySlotCount();
+        if (Rs2Bank.depositAll()) {
+            pendingTaskSwitchInventoryEmptySlots = before;
+            pendingTaskSwitchInventoryAtMs = System.currentTimeMillis();
+        }
         markTaskSwitchAction();
         return false;
     }
 
     private boolean unequipGatheringTools()
     {
-        if (!isGatheringToolEquipped()) return true;
-        if (!Rs2Bank.isOpen() || closeTaskSwitchBankTutorialOverlayIfOpen() || !taskSwitchActionReady()) return false;
+        if (!isGatheringToolEquipped()) {
+            pendingTaskSwitchEquipmentAtMs = 0L;
+            return true;
+        }
+        if (!Rs2Bank.isOpen()
+                || closeTaskSwitchBankTutorialOverlayIfOpen()
+                || !taskSwitchActionReady()
+                || taskSwitchEquipmentActionPending()) return false;
 
-        Rs2Bank.depositEquipment();
+        if (Rs2Bank.depositEquipment()) {
+            pendingTaskSwitchEquipmentAtMs = System.currentTimeMillis();
+        }
         markTaskSwitchAction();
         return false;
     }
@@ -2343,7 +2366,30 @@ public class KspAccountBuilderScript extends Script
                 || Rs2Equipment.isWearing("axe", false) || Rs2Equipment.isWearing("axe");
     }
 
-        private boolean taskSwitchActionReady()
+    private boolean taskSwitchInventoryActionPending()
+    {
+        if (pendingTaskSwitchInventoryAtMs == 0L) return false;
+        if (Rs2Inventory.emptySlotCount() != pendingTaskSwitchInventoryEmptySlots
+                || System.currentTimeMillis() - pendingTaskSwitchInventoryAtMs >= TASK_SWITCH_DISPATCH_TIMEOUT_MS) {
+            pendingTaskSwitchInventoryAtMs = 0L;
+            pendingTaskSwitchInventoryEmptySlots = -1;
+            return false;
+        }
+        return true;
+    }
+
+    private boolean taskSwitchEquipmentActionPending()
+    {
+        if (pendingTaskSwitchEquipmentAtMs == 0L) return false;
+        if (!isGatheringToolEquipped()
+                || System.currentTimeMillis() - pendingTaskSwitchEquipmentAtMs >= TASK_SWITCH_DISPATCH_TIMEOUT_MS) {
+            pendingTaskSwitchEquipmentAtMs = 0L;
+            return false;
+        }
+        return true;
+    }
+
+    private boolean taskSwitchActionReady()
     {
         return System.currentTimeMillis() - lastTaskSwitchActionAtMs >= TASK_SWITCH_ACTION_COOLDOWN_MS;
     }
