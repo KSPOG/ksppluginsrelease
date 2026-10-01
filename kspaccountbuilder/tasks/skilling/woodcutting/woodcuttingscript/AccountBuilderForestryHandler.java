@@ -1,6 +1,6 @@
 package net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.woodcutting.woodcuttingscript;
 
-import java.awt.Point;
+import net.runelite.api.Point;
 import java.awt.Polygon;
 import java.awt.event.KeyEvent;
 import java.util.Comparator;
@@ -10,6 +10,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.stream.Collectors;
 import net.runelite.api.gameval.ItemID;
 import net.runelite.api.gameval.NpcID;
 import net.runelite.api.gameval.ObjectID;
@@ -132,7 +133,7 @@ final class AccountBuilderForestryHandler {
     private boolean handleEntlings(TreeLevel tree) {
         List<Rs2NpcModel> entlings = Microbot.getRs2NpcCache().query()
                 .withId(NpcID.GATHERING_EVENT_ENTLINGS_NPC_01)
-                .toList().stream().filter(x -> x != null && near(x.getWorldLocation())).toList();
+                .toList().stream().filter(x -> x != null && near(x.getWorldLocation())).collect(Collectors.toList());
         if (entlings.isEmpty()) return false;
 
         Microbot.status = "Forestry: Friendly Entlings";
