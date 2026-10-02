@@ -20,6 +20,7 @@ import net.runelite.client.plugins.microbot.util.grandexchange.GrandExchangeActi
 import net.runelite.client.plugins.microbot.util.grandexchange.GrandExchangeRequest;
 import net.runelite.client.plugins.microbot.util.grandexchange.GrandExchangeSlots;
 import net.runelite.client.plugins.microbot.util.grandexchange.Rs2GrandExchange;
+import net.runelite.client.plugins.microbot.ksputil.KspGrandExchangeSafe;
 import net.runelite.client.plugins.microbot.util.grandexchange.models.GrandExchangeOfferDetails;
 import net.runelite.client.plugins.microbot.util.inventory.Rs2Inventory;
 import net.runelite.client.plugins.microbot.util.player.Rs2Player;
@@ -360,7 +361,7 @@ public class CooksScript extends Script {
                 .build();
 
         int slotsBefore = Rs2GrandExchange.getAvailableSlotsCount();
-        boolean offered = Rs2GrandExchange.processOffer(request);
+        boolean offered = KspGrandExchangeSafe.processOffer(request);
         if (!offered) return false;
 
         if (!sleepUntil(() ->
