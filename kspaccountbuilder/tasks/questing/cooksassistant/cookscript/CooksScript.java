@@ -655,7 +655,7 @@ public class CooksScript extends Script {
 
     private boolean isNpcInteractionPending(Rs2NpcModel npc) {
         if (pendingNpcInteractionAtMs == 0L) return false;
-        if (Rs2Dialogue.isInDialogue()) {
+        if (isQuestDialogueActive()) {
             pendingNpcInteractionAtMs = 0L;
             pendingNpcIndex = -1;
             return true;
