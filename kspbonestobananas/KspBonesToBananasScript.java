@@ -559,7 +559,6 @@ public class KspBonesToBananasScript extends Script
 
     private void placeOrder(GeOrder order)
     {
-        GrandExchangeRequest request;
         if (order.action == GrandExchangeAction.BUY)
         {
             order.slot = firstFreeGeSlot();
@@ -568,41 +567,20 @@ public class KspBonesToBananasScript extends Script
                 status = "Waiting for a free GE slot";
                 return;
             }
-            request = GrandExchangeRequest.builder()
-                    .slot(order.slot)
-                    .action(order.action)
-                    .itemName(order.itemName)
-                    .exact(true)
-                    .quantity(order.quantity)
-                    .price(order.price)
-                    .closeAfterCompletion(false)
-                    .build();
-        }
-        else
-        {
-            // SELL ignores request.slot in Microbot, but remembering the first free slot
-            // gives us a strong expected-slot hint before falling back to exact matching.
-            order.slot = firstFreeGeSlot();
-            if (order.slot == null)
-            {
-                status = "Waiting for a free GE slot";
-                return;
-            }
-            request = GrandExchangeRequest.builder()
-                    .action(order.action)
-                    .itemName(order.itemName)
-                    .exact(true)
-                    .quantity(order.quantity)
-                    .price(order.price)
-                    .closeAfterCompletion(false)
-                    .build();
         }
 
         status = (order.action == GrandExchangeAction.BUY ? "Placing buy: " : "Placing sell: ") + order.itemName;
         boolean placed;
         try
         {
-            placed = KspGrandExchangeSafe.processOffer(request);
+            placed = KspGrandExchangeSafe.processOffer(
+                    order.slot,
+                    order.action,
+                    order.itemName,
+                    true,
+                    order.quantity,
+                    (long) order.price,
+                    false);
         }
         catch (RuntimeException ex)
         {
