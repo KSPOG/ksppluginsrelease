@@ -420,14 +420,11 @@ public class KspSmartSuperheatScript extends Script
     private void placeOrder(GeOrder o)
     {
         if (++o.attempts > MAX_GE_ATTEMPTS) { o.attempts = 1; status = "GE retrying cleanly: " + o.itemName; sleep(1500); }
-        GrandExchangeRequest request;
         if (o.action == GrandExchangeAction.BUY)
         {
             o.slot = freeSlot();
             if (o.slot == null) { status = "Waiting for free GE slot"; return; }
-            request = GrandExchangeRequest.builder().slot(o.slot).action(o.action).itemName(o.itemName).exact(true).quantity(o.quantity).price(o.price).closeAfterCompletion(false).build();
         }
-        else request = GrandExchangeRequest.builder().action(o.action).itemName(o.itemName).exact(true).quantity(o.quantity).price(o.price).closeAfterCompletion(false).build();
 
         status = (o.action == GrandExchangeAction.BUY ? "Placing buy: " : "Placing sell: ") + o.itemName;
         o.placedAt = System.currentTimeMillis();
@@ -435,7 +432,14 @@ public class KspSmartSuperheatScript extends Script
         boolean placed = false;
         try
         {
-            placed = KspGrandExchangeSafe.processOffer(request);
+            placed = KspGrandExchangeSafe.processOffer(
+                    o.slot,
+                    o.action,
+                    o.itemName,
+                    true,
+                    o.quantity,
+                    (long) o.price,
+                    false);
         }
         catch (NullPointerException e)
         {
