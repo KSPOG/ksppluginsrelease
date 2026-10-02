@@ -371,14 +371,26 @@ public class TutorialIslandScript extends Script
             completionState = "Active";
         }
 
+        TutState previous = status;
         if (isDisplayNameWidgetOpen()) status = TutState.NAME;
         else if (isCharacterCreationWidgetOpen()) status = TutState.CHARACTER;
         else status = stageFor(progress);
+
+        if (previous != status)
+        {
+            // A tutorial-stage transition invalidates any route or interaction
+            // dispatched for the previous instructor/room.
+            KspWalkerGuard.clearActiveWalker("ksp_tutorial_stage_changed");
+            pendingInteractionAtMs = 0L;
+            pendingInteractionKey = null;
+        }
     }
 
     private TutState stageFor(int progress)
     {
-        if (progress < 10) return TutState.GETTING_STARTED;
+        // Tutorial state 10 is still the Gielinor Guide section: open the
+        // starting-room door. Survival begins at state 20.
+        if (progress <= 10) return TutState.GETTING_STARTED;
         if (progress < 120) return TutState.SURVIVAL_GUIDE;
         if (progress < 200) return TutState.COOKING_GUIDE;
         if (progress <= 250) return TutState.QUEST_GUIDE;
@@ -694,6 +706,18 @@ public class TutorialIslandScript extends Script
 
         if (!toggledSettings && configureCameraAfterGielinorGuide())
         {
+            return;
+        }
+
+        if (progress >= 10)
+        {
+            // State 10 = leave the Gielinor Guide room, not Survival Expert.
+            openTutorialPassageAndWalk(
+                    9708,
+                    new WorldPoint(3098, 3095, 0),
+                    4,
+                    () -> Microbot.getVarbitPlayerValue(281) >= 20
+                            || isInArea(SURVIVAL_AREA));
             return;
         }
 
@@ -2194,8 +2218,11 @@ public class TutorialIslandScript extends Script
             return;
         }
 
-        KspWalkerGuard.clear("Tutorial Island:local-walk");
-        Rs2Walker.walkTo(target, reach);
+        KspWalkerGuard.walkToPoint(
+                "Tutorial Island:local-walk",
+                target,
+                reach,
+                500L);
     }
 
     private boolean openTutorialPassage(int objectId, BooleanSupplier completed) { return openTutorialPassageAndWalk(objectId, null, 0, completed); }
@@ -2392,6 +2419,10 @@ public class TutorialIslandScript extends Script
     public void shutdown()
     {
         debugEnabled = false;
+        pendingInteractionAtMs = 0L;
+        pendingInteractionKey = null;
+        KspWalkerGuard.clear("Tutorial Island:local-walk");
+        KspWalkerGuard.clearActiveWalker("ksp_tutorial_shutdown");
         super.shutdown();
     }
 
