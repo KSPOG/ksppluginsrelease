@@ -51,7 +51,6 @@ public class KspJewelryCrafterScript extends Script
     private static final int GE_SEARCH_GROUP = 162;
     private static final int GE_SEARCH_PROMPT_CHILD = 52;
     private static final int GE_SELECTED_PRICE_CHILD = 41;
-    private static final int GE_OFFER_PRICE_VARBIT = 4398;
     private static final int GE_VALUE_ENTRY_ATTEMPTS = 3;
     private static final int GE_PRICE_CLICK_DELAY_MIN_MS = 650;
     private static final int GE_PRICE_CLICK_DELAY_MAX_MS = 950;
@@ -1209,6 +1208,12 @@ if (!Rs2Widget.clickWidget(productionWidget))
             Rs2Keyboard.enter();
             if (!Rs2GrandExchange.isOpen()) return false;
 
+            if (child == GE_PRICE_X_CHILD)
+            {
+                return sleepUntil(() -> !gePriceInputOpen() || !Rs2GrandExchange.isOpen(), 1_500)
+                    && Rs2GrandExchange.isOpen();
+            }
+
             if (sleepUntil(() -> geOfferValueMatches(child, value), 1_500))
             {
                 sleepUntil(() -> !gePriceInputOpen(), 1_000);
@@ -1232,8 +1237,11 @@ if (!Rs2Widget.clickWidget(productionWidget))
 
     private boolean geOfferValueMatches(int child, int value)
     {
+        // The September 2026 GE update removed the legacy price varbit 4398.
+        // Price entry is confirmed by the chatbox closing and the eventual offer
+        // registration instead of reading the removed varbit.
         if (child == GE_PRICE_X_CHILD)
-            return Microbot.getVarbitValue(GE_OFFER_PRICE_VARBIT) == value;
+            return false;
         if (child == GE_QUANTITY_X_CHILD)
             return Microbot.getVarbitValue(VarbitID.GE_NEWOFFER_QUANTITY) == value;
         return false;
