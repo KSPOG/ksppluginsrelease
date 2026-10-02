@@ -938,7 +938,7 @@ public class RomeoScript extends Script
         if (Rs2Player.isMoving() || Rs2Player.isAnimating() || Rs2Player.isInteracting()) return false;
         if (pendingInteractionAtMs > 0L)
         {
-            if (Rs2Dialogue.isInDialogue()) return false;
+            if (isQuestDialogueActive()) return false;
             if (System.currentTimeMillis() - pendingInteractionAtMs < INTERACTION_DISPATCH_TIMEOUT_MS) return false;
             pendingInteractionAtMs = 0L;
             pendingInteractionKey = null;
