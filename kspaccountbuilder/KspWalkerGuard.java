@@ -1,5 +1,7 @@
 package net.runelite.client.plugins.microbot.kspaccountbuilder;
 
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
 import net.runelite.api.coords.WorldPoint;
@@ -15,6 +17,10 @@ import net.runelite.client.plugins.microbot.util.walker.Rs2Walker;
  */
 public final class KspWalkerGuard
 {
+    private static final Map<String, WorldPoint> KEY_TARGETS = new ConcurrentHashMap<>();
+    private static final Map<String, Long> KEY_LAST_DISPATCH = new ConcurrentHashMap<>();
+    private static volatile String activeWalkerKey;
+
     private KspWalkerGuard() {}
 
     public static boolean walkToDestination(
@@ -32,21 +38,26 @@ public final class KspWalkerGuard
         WorldPoint player = Rs2Player.getWorldLocation();
         if (player != null && destinationMatcher.test(player))
         {
-            clearActiveWalker("ksp_account_builder_reached_destination");
+            clearKey(key, "ksp_account_builder_reached_destination");
             return false;
         }
 
-        WorldPoint target = targetSupplier.get();
+        String walkKey = normalizeKey(key);
+        WorldPoint target = KEY_TARGETS.get(walkKey);
         if (target == null)
         {
-            return false;
+            target = targetSupplier.get();
+            if (target == null) return false;
+            KEY_TARGETS.put(walkKey, target);
         }
 
-        if (!prepareCoreWalkerTarget(target, arriveDistance))
+        if (!mayDispatch(walkKey, target, arriveDistance, refireCooldownMs))
         {
             return false;
         }
 
+        activeWalkerKey = walkKey;
+        KEY_LAST_DISPATCH.put(walkKey, System.currentTimeMillis());
         Rs2Walker.walkTo(target, arriveDistance);
         return true;
     }
@@ -61,15 +72,25 @@ public final class KspWalkerGuard
         WorldPoint player = Rs2Player.getWorldLocation();
         if (isSameDestination(player, target, Math.max(0, arriveDistance)))
         {
-            clearActiveWalker("ksp_account_builder_reached_destination");
+            clearKey(key, "ksp_account_builder_reached_destination");
             return false;
         }
 
-        if (!prepareCoreWalkerTarget(target, arriveDistance))
+        String walkKey = normalizeKey(key);
+        WorldPoint cached = KEY_TARGETS.get(walkKey);
+        if (cached == null || !isSameDestination(cached, target, Math.max(2, arriveDistance + 2)))
+        {
+            if (cached != null) clearKey(walkKey, "ksp_account_builder_retarget");
+            KEY_TARGETS.put(walkKey, target);
+        }
+
+        if (!mayDispatch(walkKey, target, arriveDistance, refireCooldownMs))
         {
             return false;
         }
 
+        activeWalkerKey = walkKey;
+        KEY_LAST_DISPATCH.put(walkKey, System.currentTimeMillis());
         Rs2Walker.walkTo(target, arriveDistance);
         return true;
     }
@@ -98,7 +119,7 @@ public final class KspWalkerGuard
 
     public static void clear(String key)
     {
-        clearActiveWalker("ksp_account_builder_clear_walker");
+        clearKey(key, "ksp_account_builder_clear_walker");
     }
 
     public static void clearActiveWalker(String reason)
@@ -107,11 +128,54 @@ public final class KspWalkerGuard
         {
             Rs2Walker.clearWalkingRoute(reason != null ? reason : "ksp_account_builder_clear_walker");
         }
+        activeWalkerKey = null;
     }
 
     public static void clearReachedDestination(String key, String reason)
     {
-        clearActiveWalker(reason != null ? reason : "ksp_account_builder_reached_destination");
+        clearKey(key, reason != null ? reason : "ksp_account_builder_reached_destination");
+    }
+
+    private static boolean mayDispatch(String key, WorldPoint target, int arriveDistance, long refireCooldownMs)
+    {
+        WorldPoint currentTarget = Rs2Walker.getCurrentTarget();
+        if (currentTarget != null)
+        {
+            if (isSameDestination(currentTarget, target, Math.max(2, arriveDistance + 2)))
+            {
+                return false;
+            }
+            if (activeWalkerKey != null && !activeWalkerKey.equals(key))
+            {
+                Rs2Walker.clearWalkingRoute("ksp_account_builder_owner_changed");
+            }
+            else
+            {
+                Rs2Walker.clearWalkingRoute("ksp_account_builder_retarget");
+            }
+        }
+
+        long last = KEY_LAST_DISPATCH.getOrDefault(key, 0L);
+        long cooldown = Math.max(0L, refireCooldownMs);
+        return System.currentTimeMillis() - last >= cooldown;
+    }
+
+    private static void clearKey(String key, String reason)
+    {
+        String walkKey = normalizeKey(key);
+        KEY_TARGETS.remove(walkKey);
+        KEY_LAST_DISPATCH.remove(walkKey);
+
+        if (walkKey.equals(activeWalkerKey))
+        {
+            clearActiveWalker(reason);
+            activeWalkerKey = null;
+        }
+    }
+
+    private static String normalizeKey(String key)
+    {
+        return key == null || key.isBlank() ? "ksp_account_builder_default_walk" : key;
     }
 
     private static boolean prepareCoreWalkerTarget(WorldPoint target, int arriveDistance)
