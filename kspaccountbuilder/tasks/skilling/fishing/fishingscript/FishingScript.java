@@ -92,7 +92,6 @@ public class FishingScript extends Script
         targetAreaArrivalHandled = false;
         cookingBatchItemId = NO_COOKING_BATCH;
         expectingCookingXpDrop = false;
-        pendingCookingFireActionAtMs = 0L;
         pendingCookingWidgetActionAtMs = 0L;
         pendingCookingFireActionAtMs = 0L;
 
@@ -369,6 +368,7 @@ public class FishingScript extends Script
     {
         cookingBatchItemId = NO_COOKING_BATCH;
         expectingCookingXpDrop = false;
+        pendingCookingFireActionAtMs = 0L;
     }
 
     private void fishCurrentTarget()
