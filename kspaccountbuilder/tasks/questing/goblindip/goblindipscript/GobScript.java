@@ -388,17 +388,13 @@ public class GobScript extends Script {
         int offerPrice = getQuestBuyOfferPrice(buyRequest);
         if (offerPrice <= 0) return false;
 
-        GrandExchangeRequest request = GrandExchangeRequest.builder()
-                .action(GrandExchangeAction.BUY)
-                .itemName(buyRequest.itemName)
-                .exact(true)
-                .quantity(buyRequest.quantity)
-                .price(offerPrice)
-                .closeAfterCompletion(false)
-                .build();
-
         int slotsBefore = Rs2GrandExchange.getAvailableSlotsCount();
-        boolean offered = KspGrandExchangeSafe.processOffer(request);
+        boolean offered = KspGrandExchangeSafe.buy(
+                buyRequest.itemName,
+                buyRequest.quantity,
+                (long) offerPrice,
+                true,
+                false);
         if (!offered) return false;
 
         if (!sleepUntil(() ->
