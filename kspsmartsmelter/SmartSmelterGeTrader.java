@@ -10,6 +10,7 @@ import net.runelite.client.plugins.microbot.util.grandexchange.GrandExchangeActi
 import net.runelite.client.plugins.microbot.util.grandexchange.GrandExchangeRequest;
 import net.runelite.client.plugins.microbot.util.grandexchange.GrandExchangeSlots;
 import net.runelite.client.plugins.microbot.util.grandexchange.Rs2GrandExchange;
+import net.runelite.client.plugins.microbot.ksputil.KspGrandExchangeSafe;
 import net.runelite.client.plugins.microbot.util.grandexchange.models.WikiPrice;
 import net.runelite.client.plugins.microbot.util.world.Rs2WorldUtil;
 
@@ -87,7 +88,7 @@ final class SmartSmelterGeTrader
         Microbot.status = "Buying " + quantity + " x " + itemName
                 + " in GE slot " + (slot.ordinal() + 1);
 
-        if (!Rs2GrandExchange.processOffer(request))
+        if (!KspGrandExchangeSafe.processOffer(request))
         {
             Microbot.status = Rs2GrandExchange.isOpen()
                     ? "GE buy placement failed: " + itemName
@@ -159,7 +160,7 @@ final class SmartSmelterGeTrader
                 .build();
 
         Microbot.status = "Selling " + quantity + " x " + itemName;
-        if (!Rs2GrandExchange.processOffer(request))
+        if (!KspGrandExchangeSafe.processOffer(request))
         {
             Microbot.status = Rs2GrandExchange.isOpen()
                     ? "GE sell placement failed: " + itemName
