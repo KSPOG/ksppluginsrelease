@@ -37,9 +37,9 @@ import java.util.concurrent.TimeUnit;
 @Singleton
 public class GobScript extends Script {
     private static final Logger log = LoggerFactory.getLogger(GobScript.class);
-    private static final int LOOP_DELAY_MS = 100;
+    private static final int LOOP_DELAY_MS = 50;
     private static final int WALK_REFIRE_COOLDOWN_MS = 1_000;
-    private static final int ACTION_COOLDOWN_MS = 300;
+    private static final int ACTION_COOLDOWN_MS = 100;
     private static final long NPC_INTERACTION_TIMEOUT_MS = 1_500L;
     private static final int MIN_QUEST_BUY_PRICE = 1_000;
     private static final int MAX_QUEST_BUY_PRICE = 2_000;
@@ -382,7 +382,6 @@ public class GobScript extends Script {
 
     private boolean placeRequirementBuyOffer(QuestBuyRequest buyRequest) {
         if (buyRequest == null || buyRequest.quantity <= 0) return false;
-        if (System.currentTimeMillis() - lastActionAtMs < ACTION_COOLDOWN_MS) return false;
 
         status = "Buying " + buyRequest.quantity + "x " + buyRequest.itemName;
         int offerPrice = getQuestBuyOfferPrice(buyRequest);
@@ -397,8 +396,26 @@ public class GobScript extends Script {
                 .closeAfterCompletion(false)
                 .build();
 
+        int slotsBefore = Rs2GrandExchange.getAvailableSlotsCount();
         boolean offered = Rs2GrandExchange.processOffer(request);
         if (!offered) return false;
+
+        if (!sleepUntil(() ->
+                !Rs2GrandExchange.isOpen()
+                        || Rs2GrandExchange.isOfferScreenOpen()
+                        || Rs2GrandExchange.getAvailableSlotsCount() < slotsBefore, 2_000)) {
+            return false;
+        }
+
+        if (!Rs2GrandExchange.isOpen()) return false;
+        if (Rs2GrandExchange.isOfferScreenOpen()) {
+            Rs2GrandExchange.backToOverview();
+            if (!sleepUntil(() ->
+                    Rs2GrandExchange.isOpen()
+                            && !Rs2GrandExchange.isOfferScreenOpen(), 2_000)) {
+                return false;
+            }
+        }
 
         lastActionAtMs = System.currentTimeMillis();
         pendingRequirementBuys.remove(0);
