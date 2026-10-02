@@ -12,6 +12,7 @@ import net.runelite.client.plugins.microbot.util.grandexchange.GrandExchangeActi
 import net.runelite.client.plugins.microbot.util.grandexchange.GrandExchangeRequest;
 import net.runelite.client.plugins.microbot.util.grandexchange.GrandExchangeSlots;
 import net.runelite.client.plugins.microbot.util.grandexchange.Rs2GrandExchange;
+import net.runelite.client.plugins.microbot.ksputil.KspGrandExchangeSafe;
 import net.runelite.client.plugins.microbot.util.keyboard.Rs2Keyboard;
 import net.runelite.client.plugins.microbot.util.widget.Rs2Widget;
 
@@ -144,7 +145,7 @@ final class FactoryGrandExchangeInvoker
             {
                 return fail("initial BUY widget state changed before native placement");
             }
-            success = Rs2GrandExchange.processOffer(request);
+            success = KspGrandExchangeSafe.processOffer(request);
         }
         catch (Exception ex)
         {
@@ -221,7 +222,7 @@ final class FactoryGrandExchangeInvoker
             {
                 return fail("initial SELL widget state changed before native placement");
             }
-            success = Rs2GrandExchange.processOffer(request);
+            success = KspGrandExchangeSafe.processOffer(request);
         }
         catch (Exception ex)
         {
