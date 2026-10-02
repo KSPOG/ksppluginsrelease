@@ -1205,17 +1205,9 @@ public class BuyScript extends Script {
             return false;
         }
 
-        GrandExchangeRequest request = GrandExchangeRequest.builder()
-                .action(GrandExchangeAction.BUY)
-                .itemName(itemName)
-                .exact(true)
-                .quantity(quantity)
-                .price(buyPrice)
-                .closeAfterCompletion(false)
-                .build();
-
         int slotsBefore = Rs2GrandExchange.getAvailableSlotsCount();
-        boolean offered = KspGrandExchangeSafe.processOffer(request);
+        boolean offered = KspGrandExchangeSafe.buy(
+                itemName, quantity, (long) buyPrice, true, false);
         if (offered && !waitForOfferCommit(slotsBefore)) offered = false;
 
         this.debug(
@@ -1249,17 +1241,9 @@ public class BuyScript extends Script {
             return false;
         }
 
-        GrandExchangeRequest request = GrandExchangeRequest.builder()
-                .action(GrandExchangeAction.BUY)
-                .itemName(itemName)
-                .exact(true)
-                .quantity(quantity)
-                .price(buyPrice)
-                .closeAfterCompletion(false)
-                .build();
-
         int slotsBefore = Rs2GrandExchange.getAvailableSlotsCount();
-        boolean offered = KspGrandExchangeSafe.processOffer(request);
+        boolean offered = KspGrandExchangeSafe.buy(
+                itemName, quantity, (long) buyPrice, true, false);
         if (offered && !waitForOfferCommit(slotsBefore)) offered = false;
 
         this.debug(
@@ -1685,16 +1669,13 @@ public class BuyScript extends Script {
 
         Microbot.status = "Selling " + item.getName();
 
-        GrandExchangeRequest request = GrandExchangeRequest.builder()
-                .action(GrandExchangeAction.SELL)
-                .itemName(item.getName())
-                .quantity(item.getQuantity())
-                .price(this.getAdjustedSellPrice(item))
-                .closeAfterCompletion(false)
-                .build();
-
         int slotsBefore = Rs2GrandExchange.getAvailableSlotsCount();
-        boolean offered = KspGrandExchangeSafe.processOffer(request);
+        boolean offered = KspGrandExchangeSafe.sell(
+                item.getName(),
+                item.getQuantity(),
+                (long) this.getAdjustedSellPrice(item),
+                true,
+                false);
         if (offered && !waitForOfferCommit(slotsBefore)) offered = false;
 
         if (offered) {
@@ -1727,17 +1708,9 @@ public class BuyScript extends Script {
             return false;
         }
 
-        GrandExchangeRequest request = GrandExchangeRequest.builder()
-                .action(GrandExchangeAction.BUY)
-                .itemName(itemName)
-                .exact(true)
-                .quantity(1)
-                .price(buyPrice)
-                .closeAfterCompletion(false)
-                .build();
-
         int slotsBefore = Rs2GrandExchange.getAvailableSlotsCount();
-        boolean offered = KspGrandExchangeSafe.processOffer(request);
+        boolean offered = KspGrandExchangeSafe.buy(
+                itemName, 1, (long) buyPrice, true, false);
         if (offered && !waitForOfferCommit(slotsBefore)) offered = false;
 
         this.debug(
