@@ -900,16 +900,12 @@ public class GobScript extends Script {
     }
 
     private void clearInactiveHandInTracking() {
-        if (!mailHandInProgressOrDialogueActive()) {
+        if (!mailHandInInProgress || isQuestDialogueActive()) {
             return;
         }
 
         updateAcceptedMailFromInventoryLoss();
         mailHandInInProgress = false;
-    }
-
-    private boolean mailHandInProgressOrDialogueActive() {
-        return !mailHandInInProgress || isQuestDialogueActive();
     }
 
     private void removeRequirementBuy(String itemName) {
