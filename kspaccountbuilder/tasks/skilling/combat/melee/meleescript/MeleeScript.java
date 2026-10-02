@@ -96,6 +96,7 @@ public class MeleeScript
     private int pendingLootWorldViewId = -1;
     private long pendingLootUntilMs;
     private volatile boolean pendingSellHandoff;
+    private volatile long runGeneration;
 
     public void setDebugLogging(boolean debugLogging) {
         this.debugLogging = debugLogging;
@@ -107,14 +108,16 @@ public class MeleeScript
 
     public boolean run(CombatAreas forcedCombatArea) {
         this.shutdown();
+        long generation = ++this.runGeneration;
         this.pendingSellHandoff = false;
         this.forcedCombatArea = forcedCombatArea;
         this.lastConfirmedFoodAtMs = System.currentTimeMillis();
         this.setStatus("Starting melee training");
         this.state = CombatState.PREPARING;
         this.mainScheduledFuture = this.scheduledExecutorService.scheduleWithFixedDelay(() -> {
+            if (generation != this.runGeneration) return;
             try {
-                if (!super.run() || !Microbot.isLoggedIn()) {
+                if (generation != this.runGeneration || !super.run() || !Microbot.isLoggedIn()) {
                     return;
                 }
                 TrainingStage stage = this.resolveTrainingStage();
@@ -191,7 +194,10 @@ public class MeleeScript
                 this.attackTarget(stage);
             }
             catch (Exception ex) {
-                Microbot.logStackTrace((String)((Object)((Object)this)).getClass().getSimpleName(), (Exception)ex);
+                if (generation != this.runGeneration || isExpectedCancellation(ex)) {
+                    return;
+                }
+                Microbot.logStackTrace(this.getClass().getSimpleName(), ex);
             }
         }, 0L, LOOP_DELAY_MS, TimeUnit.MILLISECONDS);
         return true;
@@ -1096,6 +1102,7 @@ public class MeleeScript
     }
 
     public void shutdown() {
+        ++this.runGeneration;
         this.lastWebWalkAtMs = 0L;
         this.lastWalkTarget = null;
         this.pendingAttackAtMs = 0L;
@@ -1112,6 +1119,15 @@ public class MeleeScript
         this.state = CombatState.PREPARING;
         this.status = "Idle";
         super.shutdown();
+    }
+
+    private boolean isExpectedCancellation(Throwable throwable) {
+        Throwable current = throwable;
+        while (current != null) {
+            if (current instanceof InterruptedException) return true;
+            current = current.getCause();
+        }
+        return Thread.currentThread().isInterrupted();
     }
 
     private void debug(String message, Object ... args) {
