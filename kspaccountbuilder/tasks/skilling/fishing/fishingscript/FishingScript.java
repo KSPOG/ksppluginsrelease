@@ -299,16 +299,18 @@ public class FishingScript extends Script
         WorldPoint player = Rs2Player.getWorldLocation();
         if (player == null) return true;
 
-        if (player.distanceTo(TROUT_SALMON_FIRE_POSITION) > 2) {
-            KspWalkerGuard.walkToPoint(WALK_KEY_TO_TROUT_SALMON_FIRE, TROUT_SALMON_FIRE_POSITION, 2, WEB_WALK_COOLDOWN_MS);
-            return true;
-        }
-
         Rs2TileObjectModel fire = Microbot.getRs2TileObjectCache().query()
                 .fromWorldView().withId(TROUT_SALMON_FIRE_ID).nearest();
         if (fire == null) {
+            pendingCookingFireActionAtMs = 0L;
+            KspWalkerGuard.clear(WALK_KEY_TO_TROUT_SALMON_FIRE);
             resetCookingBatch();
             return false;
+        }
+
+        if (player.distanceTo(fire.getWorldLocation()) > 2) {
+            KspWalkerGuard.walkToPoint(WALK_KEY_TO_TROUT_SALMON_FIRE, fire.getWorldLocation(), 2, WEB_WALK_COOLDOWN_MS);
+            return true;
         }
 
         if (pendingCookingFireActionAtMs > 0L
@@ -366,6 +368,7 @@ public class FishingScript extends Script
     {
         cookingBatchItemId = NO_COOKING_BATCH;
         expectingCookingXpDrop = false;
+        pendingCookingFireActionAtMs = 0L;
     }
 
     private void fishCurrentTarget()

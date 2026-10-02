@@ -60,6 +60,8 @@ public class FireMakingScript extends Script
     private long lastBurnPromptActionAtMs;
     private long pendingBankActionAtMs;
     private int pendingBankEmptySlots = -1;
+    private WorldPoint activeFireInteractionLocation;
+    private int activeFireInteractionId = -1;
 
     private boolean expectingFiremakingXpDrop;
     private boolean tendingForestersCampfire;
@@ -87,6 +89,17 @@ public class FireMakingScript extends Script
             {
                 debug("No firemaking log target available for current level");
                 return;
+            }
+
+            int targetLogId = getTargetLogId(targetLogName);
+            if (activeFireInteractionLocation != null
+                    && !isBurnInterfaceOpen(targetLogName, targetLogId))
+            {
+                Rs2TileObjectModel activeFire = findFireObjectAtLocation(activeFireInteractionLocation);
+                if (activeFire == null || activeFire.getId() != activeFireInteractionId)
+                {
+                    resetFireInteractionState("interacted fire disappeared");
+                }
             }
 
             WorldPoint fireLocation = findUsableFireLocation();
@@ -128,7 +141,6 @@ public class FireMakingScript extends Script
                 return;
             }
 
-            int targetLogId = getTargetLogId(targetLogName);
             KspTaskDebug.throttled(log, debugLogging, "Firemaking", "loop", 5_000L,
                     "loop | targetLog={} targetId={} area={} player={} moving={} animating={} interacting={} invLogs={} bankOpen={} burnPromptOpen={} awaitingStart={}",
                     targetLogName,
@@ -381,17 +393,17 @@ public class FireMakingScript extends Script
             return;
         }
 
-        if (Rs2Player.distanceTo(fireLocation) > CAMPFIRE_DISTANCE)
-        {
-            Microbot.status = "Walking to campfire";
-            KspWalkerGuard.walkToPoint("Firemaking:campfire", fireLocation, CAMPFIRE_DISTANCE, WEB_WALK_COOLDOWN_MS);
-            return;
-        }
-
         Rs2TileObjectModel fire = findFireObjectAtLocation(fireLocation);
         if (fire == null || !isValidFireId(fire.getId()))
         {
             resetFireInteractionState("selected fire disappeared");
+            return;
+        }
+
+        if (Rs2Player.distanceTo(fireLocation) > CAMPFIRE_DISTANCE)
+        {
+            Microbot.status = "Walking to campfire";
+            KspWalkerGuard.walkToPoint("Firemaking:campfire", fireLocation, CAMPFIRE_DISTANCE, WEB_WALK_COOLDOWN_MS);
             return;
         }
 
@@ -419,6 +431,9 @@ public class FireMakingScript extends Script
 
         lastFireInteractAtMs = now;
         awaitingFireStartAtMs = now;
+        activeFireInteractionLocation = fire.getWorldLocation();
+        activeFireInteractionId = fire.getId();
+        expectingFiremakingXpDrop = true;
     }
 
     private void buildFire(String targetLogName)
@@ -728,6 +743,8 @@ public class FireMakingScript extends Script
         expectingFiremakingXpDrop = false;
         tendingForestersCampfire = false;
         lastBurnPromptActionAtMs = 0L;
+        activeFireInteractionLocation = null;
+        activeFireInteractionId = -1;
         KspWalkerGuard.clear("Firemaking:campfire");
     }
 
@@ -897,6 +914,8 @@ public class FireMakingScript extends Script
         lastBurnPromptActionAtMs = 0L;
         expectingFiremakingXpDrop = false;
         tendingForestersCampfire = false;
+        activeFireInteractionLocation = null;
+        activeFireInteractionId = -1;
         walkingToTargetArea = false;
         KspWalkerGuard.clear("Firemaking:target-area");
         KspWalkerGuard.clear("Firemaking:campfire");

@@ -729,8 +729,18 @@ public class TutorialIslandScript extends Script
         Rs2TileObjectModel fire = findTutorialFire();
         if (survivalCookingDispatched)
         {
-            if (Rs2Player.isAnimating()) return;
-            survivalCookingDispatched = false;
+            if (fire == null)
+            {
+                survivalCookingDispatched = false;
+            }
+            else if (Rs2Player.isAnimating())
+            {
+                return;
+            }
+            else
+            {
+                survivalCookingDispatched = false;
+            }
         }
 
         if (waitingForSurvivalFire)
