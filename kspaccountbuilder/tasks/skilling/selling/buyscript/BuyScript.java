@@ -29,6 +29,7 @@ import net.runelite.client.plugins.microbot.util.grandexchange.GrandExchangeActi
 import net.runelite.client.plugins.microbot.util.grandexchange.GrandExchangeRequest;
 import net.runelite.client.plugins.microbot.util.grandexchange.GrandExchangeSlots;
 import net.runelite.client.plugins.microbot.util.grandexchange.Rs2GrandExchange;
+import net.runelite.client.plugins.microbot.ksputil.KspGrandExchangeSafe;
 import net.runelite.client.plugins.microbot.util.grandexchange.models.GrandExchangeOfferDetails;
 import net.runelite.client.plugins.microbot.util.inventory.Rs2Inventory;
 import net.runelite.client.plugins.microbot.util.inventory.Rs2ItemModel;
@@ -1214,7 +1215,7 @@ public class BuyScript extends Script {
                 .build();
 
         int slotsBefore = Rs2GrandExchange.getAvailableSlotsCount();
-        boolean offered = Rs2GrandExchange.processOffer(request);
+        boolean offered = KspGrandExchangeSafe.processOffer(request);
         if (offered && !waitForOfferCommit(slotsBefore)) offered = false;
 
         this.debug(
@@ -1258,7 +1259,7 @@ public class BuyScript extends Script {
                 .build();
 
         int slotsBefore = Rs2GrandExchange.getAvailableSlotsCount();
-        boolean offered = Rs2GrandExchange.processOffer(request);
+        boolean offered = KspGrandExchangeSafe.processOffer(request);
         if (offered && !waitForOfferCommit(slotsBefore)) offered = false;
 
         this.debug(
@@ -1688,12 +1689,12 @@ public class BuyScript extends Script {
                 .action(GrandExchangeAction.SELL)
                 .itemName(item.getName())
                 .quantity(item.getQuantity())
-                .percent(-10)
+                .price(this.getAdjustedSellPrice(item))
                 .closeAfterCompletion(false)
                 .build();
 
         int slotsBefore = Rs2GrandExchange.getAvailableSlotsCount();
-        boolean offered = Rs2GrandExchange.processOffer(request);
+        boolean offered = KspGrandExchangeSafe.processOffer(request);
         if (offered && !waitForOfferCommit(slotsBefore)) offered = false;
 
         if (offered) {
@@ -1736,7 +1737,7 @@ public class BuyScript extends Script {
                 .build();
 
         int slotsBefore = Rs2GrandExchange.getAvailableSlotsCount();
-        boolean offered = Rs2GrandExchange.processOffer(request);
+        boolean offered = KspGrandExchangeSafe.processOffer(request);
         if (offered && !waitForOfferCommit(slotsBefore)) offered = false;
 
         this.debug(
