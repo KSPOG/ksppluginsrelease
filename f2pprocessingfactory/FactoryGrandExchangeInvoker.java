@@ -449,7 +449,7 @@ final class FactoryGrandExchangeInvoker
                 continue;
             }
 
-            Rs2GrandExchange.setChatboxValue(price);
+            KspGrandExchangeSafe.setChatboxValue(price);
             sleep(250, 450);
             if (!pressEnterForPricePrompt(price))
             {
