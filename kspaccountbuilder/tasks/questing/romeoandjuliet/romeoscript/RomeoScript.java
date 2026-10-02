@@ -205,7 +205,7 @@ public class RomeoScript extends Script
         state = RomeoState.WAITING_FOR_CUTSCENE;
         status = "Waiting for Romeo and Juliet cutscene";
         KspWalkerGuard.clearActiveWalker("ksp_romeo_cutscene");
-        if (Rs2Dialogue.isInDialogue() && Rs2Dialogue.hasContinue())
+        if (isQuestDialogueActive() && Rs2Dialogue.hasContinue())
         {
             Rs2Dialogue.clickContinue();
         }
@@ -334,7 +334,7 @@ public class RomeoScript extends Script
 
     private boolean handleDialogue(QuestState questState)
     {
-        if (!Rs2Dialogue.isInDialogue())
+        if (!isQuestDialogueActive())
         {
             if (romeoDialogueSeen)
             {
@@ -435,6 +435,10 @@ public class RomeoScript extends Script
             return false;
         }
 
+        KspWalkerGuard.clearActiveWalker("ksp_romeo_dialogue");
+        pendingInteractionAtMs = 0L;
+        pendingInteractionKey = null;
+
         if (state == RomeoState.TALKING_TO_ROMEO)
         {
             romeoDialogueSeen = true;
@@ -480,8 +484,18 @@ public class RomeoScript extends Script
             return true;
         }
 
-        return Rs2Dialogue.hasSelectAnOption()
-                && Rs2Dialogue.keyPressForDialogueOption(1);
+        if (Rs2Dialogue.hasSelectAnOption())
+        {
+            Rs2Dialogue.keyPressForDialogueOption(1);
+        }
+        return true;
+    }
+
+    private boolean isQuestDialogueActive()
+    {
+        return Rs2Dialogue.isInDialogue()
+                || Rs2Dialogue.hasContinue()
+                || Rs2Dialogue.hasSelectAnOption();
     }
 
     private boolean handleApothecaryDialogue()
@@ -924,7 +938,7 @@ public class RomeoScript extends Script
         if (Rs2Player.isMoving() || Rs2Player.isAnimating() || Rs2Player.isInteracting()) return false;
         if (pendingInteractionAtMs > 0L)
         {
-            if (Rs2Dialogue.isInDialogue()) return false;
+            if (isQuestDialogueActive()) return false;
             if (System.currentTimeMillis() - pendingInteractionAtMs < INTERACTION_DISPATCH_TIMEOUT_MS) return false;
             pendingInteractionAtMs = 0L;
             pendingInteractionKey = null;

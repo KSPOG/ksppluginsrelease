@@ -87,7 +87,7 @@ public class RuneMystScript extends Script
 
         if (finalSedridorDeliveryStarted
                 && !Rs2Inventory.hasItem(RESEARCH_NOTES_ID)
-                && !Rs2Dialogue.isInDialogue())
+                && !isQuestDialogueActive())
         {
             markComplete();
             return;
@@ -173,12 +173,14 @@ public class RuneMystScript extends Script
             return true;
         }
 
-        if (!Rs2Dialogue.isInDialogue())
+        if (!isQuestDialogueActive())
         {
             return false;
         }
 
         KspWalkerGuard.clearActiveWalker("ksp_rune_mysteries_dialogue");
+        pendingNpcInteractionAtMs = 0L;
+        pendingNpcIndex = -1;
         status = "Handling Rune Mysteries dialogue";
 
         if (Rs2Dialogue.hasContinue())
@@ -219,7 +221,15 @@ public class RuneMystScript extends Script
             return true;
         }
 
-        return Rs2Dialogue.keyPressForDialogueOption(1);
+        Rs2Dialogue.keyPressForDialogueOption(1);
+        return true;
+    }
+
+    private boolean isQuestDialogueActive()
+    {
+        return Rs2Dialogue.isInDialogue()
+                || Rs2Dialogue.hasContinue()
+                || Rs2Dialogue.hasSelectAnOption();
     }
 
     private void talkToQuestNpc(
@@ -268,7 +278,7 @@ public class RuneMystScript extends Script
     private boolean isNpcInteractionPending(Rs2NpcModel npc)
     {
         if (pendingNpcInteractionAtMs == 0L) return false;
-        if (Rs2Dialogue.isInDialogue())
+        if (isQuestDialogueActive())
         {
             pendingNpcInteractionAtMs = 0L;
             pendingNpcIndex = -1;
