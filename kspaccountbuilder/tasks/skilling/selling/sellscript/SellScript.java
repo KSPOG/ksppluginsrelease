@@ -72,10 +72,10 @@ import org.slf4j.LoggerFactory;
 public class SellScript
 extends Script {
     private static final Logger log = LoggerFactory.getLogger(SellScript.class);
-    private static final int LOOP_DELAY_MS = 100;
+    private static final int LOOP_DELAY_MS = 50;
     private static final int WEB_WALK_COOLDOWN_MS = 1_000;
-    private static final int ACTION_COOLDOWN_MS = 300;
-    private static final long BANK_DISPATCH_TIMEOUT_MS = 1_500L;
+    private static final int ACTION_COOLDOWN_MS = 100;
+    private static final long BANK_DISPATCH_TIMEOUT_MS = 750L;
     private static final int TRADE_RESTRICTION_CACHE_MS = 10000;
     private static final int TRADE_RESTRICTION_MIN_TOTAL_LEVEL = 100;
     private static final int TRADE_RESTRICTION_MIN_QUEST_POINTS = 10;
@@ -263,12 +263,11 @@ extends Script {
             return;
         }
 
-        int emptySlotsBeforeBatch = Rs2Inventory.emptySlotCount();
-        int remainingSlots = emptySlotsBeforeBatch;
-        boolean dispatchedAny = false;
+        int remainingSlots = Rs2Inventory.emptySlotCount();
+        boolean withdrewAny = false;
 
-        // Withdraw every eligible stack in one bank session. Because sell items are
-        // withdrawn as notes, each distinct item only consumes one inventory slot.
+        // Match Smart Smelter / Jewelry Crafter: dispatch one bank action, then
+        // continue immediately once the inventory confirms that exact action.
         for (SellList entry : SELL_ENTRIES) {
             if (remainingSlots <= 0) break;
             if (!shouldSellEntry(entry) || isBlockedSellItem(entry.getDisplayName())) continue;
@@ -276,30 +275,21 @@ extends Script {
             int qty = getSellableBankQuantity(entry.getDisplayName());
             if (qty <= 0) continue;
 
-            String itemName = entry.getDisplayName();
-            boolean dispatched = qty >= Rs2Bank.count(itemName, true)
-                    ? Rs2Bank.withdrawAll(itemName, true)
-                    : Rs2Bank.withdrawX(itemName, qty, true);
-
-            recordWithdrawResult(itemName, dispatched);
-            if (!dispatched) continue;
-
-            dispatchedAny = true;
+            if (!withdrawSellStack(entry.getDisplayName(), qty)) continue;
+            withdrewAny = true;
             remainingSlots--;
         }
 
         if (remainingSlots > 0) {
             int withdrawnTools = withdrawOutdatedToolsAsNotes(remainingSlots);
-            if (withdrawnTools > 0) {
-                dispatchedAny = true;
-                remainingSlots -= withdrawnTools;
-            }
+            withdrewAny |= withdrawnTools > 0;
         }
 
-        // One batch-level pending marker prevents the next 100 ms tick from
-        // re-dispatching the same withdrawals before the inventory updates.
-        if (dispatchedAny) {
-            markBankInventoryAction(null, -1, emptySlotsBeforeBatch);
+        if (withdrewAny) {
+            Rs2Bank.closeBank();
+            sleepUntil(() -> !Rs2Bank.isOpen(), 2_000);
+            state = SellState.SELLING_ITEMS;
+            Microbot.status = "Opening GE";
             return;
         }
 
@@ -496,6 +486,26 @@ extends Script {
         return false;
     }
 
+    private boolean withdrawSellStack(String itemName, int quantity) {
+        if (itemName == null || quantity <= 0) return false;
+
+        int before = Rs2Inventory.count(itemName);
+        int bankCount = Rs2Bank.count(itemName, true);
+        boolean dispatched = quantity >= bankCount
+                ? Rs2Bank.withdrawAll(itemName, true)
+                : Rs2Bank.withdrawX(itemName, quantity, true);
+
+        recordWithdrawResult(itemName, dispatched);
+        if (!dispatched) return false;
+
+        if (sleepUntil(() -> Rs2Inventory.count(itemName) > before, 2_000)) {
+            return true;
+        }
+
+        recordWithdrawResult(itemName, false);
+        return false;
+    }
+
     private int withdrawOutdatedToolsAsNotes(int maxSlots) {
         if (maxSlots <= 0 || !canAffordGeBuyRequirements()) return 0;
 
@@ -507,7 +517,7 @@ extends Script {
             if (withdrawn >= maxSlots) break;
             if (!name.equalsIgnoreCase(desiredPickaxe)
                     && Rs2Bank.count(name) > 0
-                    && Rs2Bank.withdrawAll(name, true)) {
+                    && withdrawSellStack(name, Rs2Bank.count(name, true))) {
                 withdrawn++;
             }
         }
@@ -516,7 +526,7 @@ extends Script {
             if (withdrawn >= maxSlots) break;
             if (!name.equalsIgnoreCase(desiredAxe)
                     && Rs2Bank.count(name) > 0
-                    && Rs2Bank.withdrawAll(name, true)) {
+                    && withdrawSellStack(name, Rs2Bank.count(name, true))) {
                 withdrawn++;
             }
         }
@@ -683,24 +693,27 @@ extends Script {
             }
 
             int beforeSlots = availableSlots;
-            int beforeQuantity = Rs2Inventory.count(item.getName());
+            if (!placeFallbackSellOffer(item)) return;
 
-            if (!placeFallbackSellOffer(item)) {
+            if (!sleepUntil(() ->
+                    !Rs2GrandExchange.isOpen()
+                            || Rs2GrandExchange.isOfferScreenOpen()
+                            || Rs2GrandExchange.getAvailableSlotsCount() < beforeSlots, 2_000)) {
                 return;
             }
 
+            if (!Rs2GrandExchange.isOpen()) return;
+
             if (Rs2GrandExchange.isOfferScreenOpen()) {
-                returnToGrandExchangeOverview();
-                return;
+                Rs2GrandExchange.backToOverview();
+                if (!sleepUntil(() ->
+                        Rs2GrandExchange.isOpen()
+                                && !Rs2GrandExchange.isOfferScreenOpen(), 2_000)) {
+                    return;
+                }
             }
 
             availableSlots = Rs2GrandExchange.getAvailableSlotsCount();
-
-            // Avoid spinning if the client has not reflected the offer yet.
-            if (availableSlots >= beforeSlots
-                    && Rs2Inventory.count(item.getName()) >= beforeQuantity) {
-                return;
-            }
         }
 
         Microbot.status = "Waiting for GE Slot";
