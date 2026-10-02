@@ -41,10 +41,10 @@ import org.slf4j.LoggerFactory;
 public class BuyScript extends Script {
     private static final Logger log = LoggerFactory.getLogger(BuyScript.class);
 
-    private static final int LOOP_DELAY_MS = 100;
+    private static final int LOOP_DELAY_MS = 50;
     private static final int WEB_WALK_COOLDOWN_MS = 1_000;
-    private static final int ACTION_COOLDOWN_MS = 300;
-    private static final long BANK_DISPATCH_TIMEOUT_MS = 1_500L;
+    private static final int ACTION_COOLDOWN_MS = 100;
+    private static final long BANK_DISPATCH_TIMEOUT_MS = 750L;
 
     private static final int TARGET_SMITHING_LEVEL = Buy.TARGET_SMITHING_LEVEL;
     private static final int TARGET_SMITHING_XP = Buy.TARGET_SMITHING_XP;
@@ -802,7 +802,7 @@ public class BuyScript extends Script {
 
         if (!this.pendingFishingSupplyBuys.isEmpty() && this.getNextFishingSupplyToBuy() == null) {
             Microbot.status = "Waiting for fishing supplies";
-            return true;
+            return Rs2GrandExchange.getAvailableSlotsCount() <= 0;
         }
 
         return false;
@@ -995,7 +995,7 @@ public class BuyScript extends Script {
 
         if (!this.pendingOreBuys.isEmpty() && this.getNextOreToBuy() == null) {
             Microbot.status = "Waiting for ore buys";
-            return true;
+            return Rs2GrandExchange.getAvailableSlotsCount() <= 0;
         }
 
         return false;
@@ -1192,7 +1192,6 @@ public class BuyScript extends Script {
     }
 
     private boolean placeOreBuyOffer(String itemName, int quantity) {
-        if (System.currentTimeMillis() - lastActionAtMs < ACTION_COOLDOWN_MS) return false;
         if (itemName == null || quantity <= 0 || this.isOreBuyPending(itemName)) {
             return false;
         }
@@ -1214,7 +1213,9 @@ public class BuyScript extends Script {
                 .closeAfterCompletion(false)
                 .build();
 
+        int slotsBefore = Rs2GrandExchange.getAvailableSlotsCount();
         boolean offered = Rs2GrandExchange.processOffer(request);
+        if (offered && !waitForOfferCommit(slotsBefore)) offered = false;
 
         this.debug(
                 "GE ore buy offer | item={} qty={} price={} offered={} slots={}",
@@ -1235,7 +1236,6 @@ public class BuyScript extends Script {
     }
 
     private boolean placeFishingSupplyBuyOffer(String itemName, int quantity) {
-        if (System.currentTimeMillis() - lastActionAtMs < ACTION_COOLDOWN_MS) return false;
         if (itemName == null || quantity <= 0 || this.isFishingSupplyBuyPending(itemName)) {
             return false;
         }
@@ -1257,7 +1257,9 @@ public class BuyScript extends Script {
                 .closeAfterCompletion(false)
                 .build();
 
+        int slotsBefore = Rs2GrandExchange.getAvailableSlotsCount();
         boolean offered = Rs2GrandExchange.processOffer(request);
+        if (offered && !waitForOfferCommit(slotsBefore)) offered = false;
 
         this.debug(
                 "GE fishing-supply buy offer | item={} qty={} price={} offered={} slots={}",
@@ -1676,7 +1678,6 @@ public class BuyScript extends Script {
     }
 
     private boolean placeFallbackSellOffer(Rs2ItemModel item) {
-        if (System.currentTimeMillis() - lastActionAtMs < ACTION_COOLDOWN_MS) return false;
         if (item == null) {
             return false;
         }
@@ -1691,7 +1692,9 @@ public class BuyScript extends Script {
                 .closeAfterCompletion(false)
                 .build();
 
+        int slotsBefore = Rs2GrandExchange.getAvailableSlotsCount();
         boolean offered = Rs2GrandExchange.processOffer(request);
+        if (offered && !waitForOfferCommit(slotsBefore)) offered = false;
 
         if (offered) {
             this.lastActionAtMs = System.currentTimeMillis();
@@ -1709,7 +1712,6 @@ public class BuyScript extends Script {
     }
 
     private boolean placeFallbackBuyOffer(String itemName) {
-        if (System.currentTimeMillis() - lastActionAtMs < ACTION_COOLDOWN_MS) return false;
         if (itemName == null || this.isMissingToolBuyPending(itemName)) {
             return false;
         }
@@ -1733,7 +1735,9 @@ public class BuyScript extends Script {
                 .closeAfterCompletion(false)
                 .build();
 
+        int slotsBefore = Rs2GrandExchange.getAvailableSlotsCount();
         boolean offered = Rs2GrandExchange.processOffer(request);
+        if (offered && !waitForOfferCommit(slotsBefore)) offered = false;
 
         this.debug(
                 "GE missing-tool buy offer | item={} qty=1 price={} offered={} slots={}",
@@ -1749,6 +1753,27 @@ public class BuyScript extends Script {
         }
 
         return offered;
+    }
+
+    private boolean waitForOfferCommit(int slotsBefore) {
+        if (slotsBefore <= 0) return true;
+
+        if (sleepUntil(() ->
+                !Rs2GrandExchange.isOpen()
+                        || Rs2GrandExchange.isOfferScreenOpen()
+                        || Rs2GrandExchange.getAvailableSlotsCount() < slotsBefore, 2_000)) {
+            if (!Rs2GrandExchange.isOpen()) return false;
+            if (Rs2GrandExchange.isOfferScreenOpen()) {
+                Rs2GrandExchange.backToOverview();
+                return sleepUntil(() ->
+                        Rs2GrandExchange.isOpen()
+                                && !Rs2GrandExchange.isOfferScreenOpen(), 2_000);
+            }
+            return true;
+        }
+
+        return Rs2GrandExchange.isOpen()
+                && Rs2GrandExchange.getAvailableSlotsCount() < slotsBefore;
     }
 
     private long getCurrentSpendableCoins() {
