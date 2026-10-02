@@ -594,7 +594,7 @@ public class KspSmartSuperheatScript extends Script
         // Same chatbox-value flow as Jewellery Crafter, with the settle delays
         // Microbot's own GE setPrice() uses so the new value is not submitted too early.
         sleep(600, 1000);
-        Rs2GrandExchange.setChatboxValue(newPrice);
+        KspGrandExchangeSafe.setChatboxValue(newPrice);
         sleep(500, 750);
         Rs2Keyboard.enter();
         sleep(800, 1100);
