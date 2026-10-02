@@ -185,7 +185,7 @@ extends Script {
     private boolean ensureOreInventoryForTargetBar(BarLevels bar) {
         ReqOres req = ReqOres.valueOf(bar.name());
 
-        if (hasRequiredOresInInventory(req)) {
+        if (hasBalancedOreInventory(req)) {
             bankInteractionSentAt = 0L;
             if (Rs2Bank.isOpen()) {
                 Rs2Bank.closeBank();
