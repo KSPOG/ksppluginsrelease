@@ -779,7 +779,7 @@ public class GobScript extends Script {
 
     private boolean isNpcInteractionPending(Rs2NpcModel npc) {
         if (pendingNpcInteractionAtMs == 0L) return false;
-        if (Rs2Dialogue.isInDialogue()) {
+        if (isQuestDialogueActive()) {
             pendingNpcInteractionAtMs = 0L;
             pendingNpcIndex = -1;
             return true;
@@ -894,18 +894,22 @@ public class GobScript extends Script {
         lastBlueMailCount = blueMailCount;
         lastOrangeMailCount = orangeMailCount;
 
-        if (!Rs2Dialogue.isInDialogue() && allMailAccepted()) {
+        if (!isQuestDialogueActive() && allMailAccepted()) {
             mailHandInInProgress = false;
         }
     }
 
     private void clearInactiveHandInTracking() {
-        if (!mailHandInInProgress || Rs2Dialogue.isInDialogue()) {
+        if (!mailHandInProgressOrDialogueActive()) {
             return;
         }
 
         updateAcceptedMailFromInventoryLoss();
         mailHandInInProgress = false;
+    }
+
+    private boolean mailHandInProgressOrDialogueActive() {
+        return !mailHandInInProgress || isQuestDialogueActive();
     }
 
     private void removeRequirementBuy(String itemName) {
