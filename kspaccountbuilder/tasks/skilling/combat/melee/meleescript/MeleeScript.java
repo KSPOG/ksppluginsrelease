@@ -415,7 +415,7 @@ public class MeleeScript
         }
 
         setStatus("Looting " + loot.getName());
-        boolean clicked = loot.pickup();
+        boolean clicked = MeleeLootingHelper.take(loot, log, debugLogging);
         if (clicked) {
             markLootPickupPending(loot);
             postKillLootUntilMs = Math.max(postKillLootUntilMs, System.currentTimeMillis() + POST_KILL_LOOT_WINDOW_MS);
@@ -512,13 +512,14 @@ public class MeleeScript
 
         return Microbot.getRs2TileItemCache().query()
                 .fromWorldView()
+                .where(item -> item != null)
+                .where(item -> !item.isDespawned())
+                .where(Rs2TileItemModel::isLootAble)
+                .where(Rs2TileItemModel::isOwned)
+                .where(item -> this.isLocationInTargetArea(item.getWorldLocation(), stage))
+                .where(this::canStoreLoot)
+                .where(item -> this.matchesConfiguredLootName(stage.lootNames, item.getName()))
                 .within(LOOT_RADIUS)
-                .where(item -> item.getName() != null
-                        && item.isLootAble()
-                        && this.isLocationInTargetArea(item.getWorldLocation(), stage)
-                        && this.canStoreLoot(item)
-                        && (this.matchesConfiguredLootName(stage.lootNames, item.getName())
-                            || (stage.area != CombatAreas.CHICKENS && item.isOwned())))
                 .nearestOnClientThread(LOOT_RADIUS);
     }
 
