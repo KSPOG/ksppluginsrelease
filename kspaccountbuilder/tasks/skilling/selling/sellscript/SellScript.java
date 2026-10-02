@@ -263,24 +263,45 @@ extends Script {
             return;
         }
 
+        int emptySlotsBeforeBatch = Rs2Inventory.emptySlotCount();
+        int remainingSlots = emptySlotsBeforeBatch;
+        boolean dispatchedAny = false;
+
+        // Withdraw every eligible stack in one bank session. Because sell items are
+        // withdrawn as notes, each distinct item only consumes one inventory slot.
         for (SellList entry : SELL_ENTRIES) {
+            if (remainingSlots <= 0) break;
             if (!shouldSellEntry(entry) || isBlockedSellItem(entry.getDisplayName())) continue;
 
             int qty = getSellableBankQuantity(entry.getDisplayName());
             if (qty <= 0) continue;
 
             String itemName = entry.getDisplayName();
-            int before = Rs2Inventory.count(itemName);
             boolean dispatched = qty >= Rs2Bank.count(itemName, true)
                     ? Rs2Bank.withdrawAll(itemName, true)
                     : Rs2Bank.withdrawX(itemName, qty, true);
 
-            if (dispatched) markBankInventoryAction(itemName, before, -1);
             recordWithdrawResult(itemName, dispatched);
-            return;
+            if (!dispatched) continue;
+
+            dispatchedAny = true;
+            remainingSlots--;
         }
 
-        if (withdrawOutdatedToolsAsNotes()) return;
+        if (remainingSlots > 0) {
+            int withdrawnTools = withdrawOutdatedToolsAsNotes(remainingSlots);
+            if (withdrawnTools > 0) {
+                dispatchedAny = true;
+                remainingSlots -= withdrawnTools;
+            }
+        }
+
+        // One batch-level pending marker prevents the next 100 ms tick from
+        // re-dispatching the same withdrawals before the inventory updates.
+        if (dispatchedAny) {
+            markBankInventoryAction(null, -1, emptySlotsBeforeBatch);
+            return;
+        }
 
         if (!hasSellableBankItems()) {
             complete = true;
@@ -351,13 +372,7 @@ extends Script {
         if (!ensureGrandExchangeOpen()) return;
         if (Rs2GrandExchange.getAvailableSlotsCount() <= 0) return;
 
-        Rs2ItemModel item = getNextSellableInventoryItem();
-        if (item == null) {
-            state = SellState.RESTOCKING_FROM_BANK;
-            return;
-        }
-
-        placeFallbackSellOffer(item);
+        processAvailableSellSlots();
     }
 
     private boolean shouldSellEntry(SellList sellList) {
@@ -481,29 +496,32 @@ extends Script {
         return false;
     }
 
-    private boolean withdrawOutdatedToolsAsNotes() {
-        if (!canAffordGeBuyRequirements()) return false;
+    private int withdrawOutdatedToolsAsNotes(int maxSlots) {
+        if (maxSlots <= 0 || !canAffordGeBuyRequirements()) return 0;
 
         String desiredPickaxe = resolveDesiredPickaxeName();
         String desiredAxe = resolveDesiredAxeName();
+        int withdrawn = 0;
 
         for (String name : PICKAXE_NAMES) {
-            if (!name.equalsIgnoreCase(desiredPickaxe) && Rs2Bank.count(name) > 0) {
-                int before = Rs2Inventory.count(name);
-                boolean dispatched = Rs2Bank.withdrawAll(name, true);
-                if (dispatched) markBankInventoryAction(name, before, -1);
-                return dispatched;
+            if (withdrawn >= maxSlots) break;
+            if (!name.equalsIgnoreCase(desiredPickaxe)
+                    && Rs2Bank.count(name) > 0
+                    && Rs2Bank.withdrawAll(name, true)) {
+                withdrawn++;
             }
         }
+
         for (String name : AXE_NAMES) {
-            if (!name.equalsIgnoreCase(desiredAxe) && Rs2Bank.count(name) > 0) {
-                int before = Rs2Inventory.count(name);
-                boolean dispatched = Rs2Bank.withdrawAll(name, true);
-                if (dispatched) markBankInventoryAction(name, before, -1);
-                return dispatched;
+            if (withdrawn >= maxSlots) break;
+            if (!name.equalsIgnoreCase(desiredAxe)
+                    && Rs2Bank.count(name) > 0
+                    && Rs2Bank.withdrawAll(name, true)) {
+                withdrawn++;
             }
         }
-        return false;
+
+        return withdrawn;
     }
 
     private boolean isBankInventoryActionPending() {
@@ -654,8 +672,42 @@ extends Script {
         return false;
     }
 
+    private void processAvailableSellSlots() {
+        int availableSlots = Rs2GrandExchange.getAvailableSlotsCount();
+
+        while (availableSlots > 0) {
+            Rs2ItemModel item = getNextSellableInventoryItem();
+            if (item == null) {
+                state = SellState.RESTOCKING_FROM_BANK;
+                return;
+            }
+
+            int beforeSlots = availableSlots;
+            int beforeQuantity = Rs2Inventory.count(item.getName());
+
+            if (!placeFallbackSellOffer(item)) {
+                return;
+            }
+
+            if (Rs2GrandExchange.isOfferScreenOpen()) {
+                returnToGrandExchangeOverview();
+                return;
+            }
+
+            availableSlots = Rs2GrandExchange.getAvailableSlotsCount();
+
+            // Avoid spinning if the client has not reflected the offer yet.
+            if (availableSlots >= beforeSlots
+                    && Rs2Inventory.count(item.getName()) >= beforeQuantity) {
+                return;
+            }
+        }
+
+        Microbot.status = "Waiting for GE Slot";
+    }
+
     private boolean placeFallbackSellOffer(Rs2ItemModel item) {
-        if (item == null || System.currentTimeMillis() - lastActionAtMs < ACTION_COOLDOWN_MS) return false;
+        if (item == null) return false;
 
         int qty = getSellableInventoryQuantity(item.getName(), item.getQuantity());
         if (qty <= 0) return false;
