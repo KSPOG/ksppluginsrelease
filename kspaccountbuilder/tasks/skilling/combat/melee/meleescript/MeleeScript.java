@@ -59,7 +59,7 @@ public class MeleeScript
     private static final long ACTION_DISPATCH_TIMEOUT_MS = 1_500L;
     private static final long POST_KILL_LOOT_WINDOW_MS = 350L;
     private static final long LOOT_CLICK_COOLDOWN_MS = 650L;
-    private static final long BONE_BURY_CONFIRM_TIMEOUT_MS = 1_200L;
+    private static final int BONE_BURY_CONFIRM_TIMEOUT_MS = 1_200;
     private static final WorldPoint CHICKEN_WALK_TARGET = new WorldPoint(3177, 3298, 0);
     private static final WorldPoint CHICKEN_GATE_EAST = new WorldPoint(3262, 3321, 0);
     private static final WorldPoint CHICKEN_GATE_WEST = new WorldPoint(3261, 3321, 0);
