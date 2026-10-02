@@ -62,6 +62,7 @@ import net.runelite.client.plugins.microbot.util.bank.Rs2Bank;
 import net.runelite.client.plugins.microbot.util.grandexchange.GrandExchangeAction;
 import net.runelite.client.plugins.microbot.util.grandexchange.GrandExchangeRequest;
 import net.runelite.client.plugins.microbot.util.grandexchange.Rs2GrandExchange;
+import net.runelite.client.plugins.microbot.ksputil.KspGrandExchangeSafe;
 import net.runelite.client.plugins.microbot.util.inventory.Rs2Inventory;
 import net.runelite.client.plugins.microbot.util.inventory.Rs2ItemModel;
 import net.runelite.client.plugins.microbot.util.player.Rs2Player;
@@ -729,12 +730,13 @@ extends Script {
         GrandExchangeRequest request = GrandExchangeRequest.builder()
                 .action(GrandExchangeAction.SELL)
                 .itemName(item.getName())
+                .exact(true)
                 .quantity(qty)
-                .percent(-10)
+                .price(getAdjustedSellPrice(item))
                 .closeAfterCompletion(false)
                 .build();
 
-        boolean offered = Rs2GrandExchange.processOffer(request);
+        boolean offered = KspGrandExchangeSafe.processOffer(request);
         if (offered) lastActionAtMs = System.currentTimeMillis();
 
         debug("GE sell offer | item={} qty={} offered={} slots={}",
@@ -743,7 +745,18 @@ extends Script {
         return offered;
     }
 
-        private void returnToGrandExchangeOverview() {
+        private int getAdjustedSellPrice(Rs2ItemModel item) {
+        if (item == null) return 1;
+
+        int itemId = item.getUnNotedId() > 0 ? item.getUnNotedId() : item.getId();
+        int guide = Rs2GrandExchange.getPrice(itemId);
+        if (guide <= 0 && item.getPrice() > 0L) {
+            guide = (int) Math.min(Integer.MAX_VALUE, item.getPrice());
+        }
+        return Math.max(1, (int) ((long) Math.max(1, guide) * 90L / 100L));
+    }
+
+    private void returnToGrandExchangeOverview() {
         if (System.currentTimeMillis() - lastActionAtMs < ACTION_COOLDOWN_MS) return;
         Rs2GrandExchange.backToOverview();
         lastActionAtMs = System.currentTimeMillis();
