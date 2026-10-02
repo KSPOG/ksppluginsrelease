@@ -75,20 +75,17 @@ final class SmartSmelterGeTrader
         }
 
         GrandExchangeSlots slot = freeSlots.get(0);
-        GrandExchangeRequest request = GrandExchangeRequest.builder()
-                .slot(slot)
-                .action(GrandExchangeAction.BUY)
-                .itemName(itemName)
-                .exact(true)
-                .quantity(quantity)
-                .price(price)
-                .closeAfterCompletion(false)
-                .build();
-
         Microbot.status = "Buying " + quantity + " x " + itemName
                 + " in GE slot " + (slot.ordinal() + 1);
 
-        if (!KspGrandExchangeSafe.processOffer(request))
+        if (!KspGrandExchangeSafe.processOffer(
+                slot,
+                GrandExchangeAction.BUY,
+                itemName,
+                true,
+                quantity,
+                (long) price,
+                false))
         {
             Microbot.status = Rs2GrandExchange.isOpen()
                     ? "GE buy placement failed: " + itemName
@@ -150,17 +147,13 @@ final class SmartSmelterGeTrader
             return false;
         }
 
-        GrandExchangeRequest request = GrandExchangeRequest.builder()
-                .action(GrandExchangeAction.SELL)
-                .itemName(itemName)
-                .exact(true)
-                .quantity(quantity)
-                .price(price)
-                .closeAfterCompletion(false)
-                .build();
-
         Microbot.status = "Selling " + quantity + " x " + itemName;
-        if (!KspGrandExchangeSafe.processOffer(request))
+        if (!KspGrandExchangeSafe.sell(
+                itemName,
+                quantity,
+                (long) price,
+                true,
+                false))
         {
             Microbot.status = Rs2GrandExchange.isOpen()
                     ? "GE sell placement failed: " + itemName
