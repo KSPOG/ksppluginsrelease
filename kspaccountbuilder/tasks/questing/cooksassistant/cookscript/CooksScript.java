@@ -159,10 +159,13 @@ public class CooksScript extends Script {
     }
 
     private boolean handleDialogue() {
-        if (!Rs2Dialogue.isInDialogue()) {
+        if (!isQuestDialogueActive()) {
             return false;
         }
 
+        KspWalkerGuard.clearActiveWalker("ksp_cooks_assistant_dialogue");
+        pendingNpcInteractionAtMs = 0L;
+        pendingNpcIndex = -1;
         state = CooksState.TALKING_TO_COOK;
         status = "Handling cook dialogue";
 
@@ -172,7 +175,7 @@ public class CooksScript extends Script {
         }
 
         if (!Rs2Dialogue.hasSelectAnOption()) {
-            return false;
+            return true;
         }
 
         for (String option : COOK_DIALOGUE_OPTIONS) {
@@ -189,7 +192,14 @@ public class CooksScript extends Script {
             return true;
         }
 
-        return Rs2Dialogue.keyPressForDialogueOption(1);
+        Rs2Dialogue.keyPressForDialogueOption(1);
+        return true;
+    }
+
+    private boolean isQuestDialogueActive() {
+        return Rs2Dialogue.isInDialogue()
+                || Rs2Dialogue.hasContinue()
+                || Rs2Dialogue.hasSelectAnOption();
     }
 
     private boolean handleRequirementBuying() {
