@@ -127,16 +127,6 @@ final class FactoryGrandExchangeInvoker
             return fail("refusing initial BUY because exact GE overview widget state is not ready");
         }
 
-        GrandExchangeRequest request = GrandExchangeRequest.builder()
-            .action(GrandExchangeAction.BUY)
-            .slot(slot)
-            .itemName(itemName)
-            .exact(true)
-            .quantity(quantity)
-            .price(price)
-            .closeAfterCompletion(false)
-            .build();
-
         boolean success;
         initialPlacementInProgress = true;
         try
@@ -145,7 +135,14 @@ final class FactoryGrandExchangeInvoker
             {
                 return fail("initial BUY widget state changed before native placement");
             }
-            success = KspGrandExchangeSafe.processOffer(request);
+            success = KspGrandExchangeSafe.processOffer(
+                slot,
+                GrandExchangeAction.BUY,
+                itemName,
+                true,
+                quantity,
+                (long) price,
+                false);
         }
         catch (Exception ex)
         {
@@ -205,15 +202,6 @@ final class FactoryGrandExchangeInvoker
         // initial-SELL path was entered.
         Microbot.log("KSP AIO Factory GE INITIAL SELL inventory Offer path: item="
             + itemName + " itemId=" + itemId + " qty=" + quantity + " price=" + price);
-        GrandExchangeRequest request = GrandExchangeRequest.builder()
-            .action(GrandExchangeAction.SELL)
-            .itemName(itemName)
-            .exact(true)
-            .quantity(quantity)
-            .price(price)
-            .closeAfterCompletion(false)
-            .build();
-
         boolean success;
         initialPlacementInProgress = true;
         try
@@ -222,7 +210,12 @@ final class FactoryGrandExchangeInvoker
             {
                 return fail("initial SELL widget state changed before native placement");
             }
-            success = KspGrandExchangeSafe.processOffer(request);
+            success = KspGrandExchangeSafe.sell(
+                itemName,
+                quantity,
+                (long) price,
+                true,
+                false);
         }
         catch (Exception ex)
         {
