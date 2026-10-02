@@ -21,7 +21,7 @@ import net.runelite.client.plugins.microbot.util.bank.Rs2Bank;
 import net.runelite.client.plugins.microbot.util.gameobject.Rs2GameObject;
 import net.runelite.client.plugins.microbot.util.grandexchange.GrandExchangeAction;
 import net.runelite.client.plugins.microbot.util.grandexchange.GrandExchangeSlots;
-import net.runelite.client.plugins.microbot.util.grandexchange.Rs2GrandExchange;
+import net.runelite.client.plugins.microbot.util.grandexchange.Rs2GrandExchange;\nimport net.runelite.client.plugins.microbot.ksputil.KspGrandExchangeSafe;
 import net.runelite.client.plugins.microbot.util.inventory.Rs2Inventory;
 import net.runelite.client.plugins.microbot.util.keyboard.Rs2Keyboard;
 import net.runelite.client.plugins.microbot.util.player.Rs2Player;
@@ -1203,7 +1203,7 @@ if (!Rs2Widget.clickWidget(productionWidget))
             if (!Rs2GrandExchange.isOpen()) return false;
 
             sleep(600, 1_000);
-            Rs2GrandExchange.setChatboxValue(value);
+            KspGrandExchangeSafe.setChatboxValue(value);
             sleep(500, 750);
             Rs2Keyboard.enter();
             if (!Rs2GrandExchange.isOpen()) return false;
