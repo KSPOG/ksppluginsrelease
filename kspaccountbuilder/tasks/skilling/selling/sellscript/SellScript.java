@@ -727,16 +727,12 @@ extends Script {
         if (qty <= 0) return false;
 
         Microbot.status = "Selling " + item.getName();
-        GrandExchangeRequest request = GrandExchangeRequest.builder()
-                .action(GrandExchangeAction.SELL)
-                .itemName(item.getName())
-                .exact(true)
-                .quantity(qty)
-                .price(getAdjustedSellPrice(item))
-                .closeAfterCompletion(false)
-                .build();
-
-        boolean offered = KspGrandExchangeSafe.processOffer(request);
+        boolean offered = KspGrandExchangeSafe.sell(
+                item.getName(),
+                qty,
+                (long) getAdjustedSellPrice(item),
+                true,
+                false);
         if (offered) lastActionAtMs = System.currentTimeMillis();
 
         debug("GE sell offer | item={} qty={} offered={} slots={}",
