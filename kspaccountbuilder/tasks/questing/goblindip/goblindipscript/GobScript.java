@@ -194,8 +194,11 @@ public class GobScript extends Script {
     }
 
     private boolean handleDialogue() {
-        if (!Rs2Dialogue.isInDialogue()) return false;
+        if (!isQuestDialogueActive()) return false;
 
+        KspWalkerGuard.clearActiveWalker("ksp_goblin_diplomacy_dialogue");
+        pendingNpcInteractionAtMs = 0L;
+        pendingNpcIndex = -1;
         updateAcceptedMailFromInventoryLoss();
         state = GobState.TALKING_TO_GENERALS;
         status = "Handling general dialogue";
@@ -206,7 +209,7 @@ public class GobScript extends Script {
             return true;
         }
 
-        if (!Rs2Dialogue.hasSelectAnOption()) return false;
+        if (!Rs2Dialogue.hasSelectAnOption()) return true;
 
         for (String option : QUEST_DIALOGUE_OPTIONS) {
             if (Rs2Dialogue.clickOption(option, false)) {
@@ -223,7 +226,13 @@ public class GobScript extends Script {
 
         boolean handled = Rs2Dialogue.keyPressForDialogueOption(1);
         if (handled) updateAcceptedMailFromInventoryLoss();
-        return handled;
+        return true;
+    }
+
+    private boolean isQuestDialogueActive() {
+        return Rs2Dialogue.isInDialogue()
+                || Rs2Dialogue.hasContinue()
+                || Rs2Dialogue.hasSelectAnOption();
     }
 
     private boolean handleRequirementBuying() {
