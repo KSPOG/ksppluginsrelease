@@ -17,6 +17,7 @@ import net.runelite.client.plugins.microbot.util.grandexchange.GrandExchangeActi
 import net.runelite.client.plugins.microbot.util.grandexchange.GrandExchangeRequest;
 import net.runelite.client.plugins.microbot.util.grandexchange.GrandExchangeSlots;
 import net.runelite.client.plugins.microbot.util.grandexchange.Rs2GrandExchange;
+import net.runelite.client.plugins.microbot.ksputil.KspGrandExchangeSafe;
 import net.runelite.client.plugins.microbot.util.inventory.Rs2Inventory;
 import net.runelite.client.plugins.microbot.util.magic.Rs2Magic;
 import net.runelite.client.plugins.microbot.util.magic.Rs2Spells;
@@ -601,7 +602,7 @@ public class KspBonesToBananasScript extends Script
         boolean placed;
         try
         {
-            placed = Rs2GrandExchange.processOffer(request);
+            placed = KspGrandExchangeSafe.processOffer(request);
         }
         catch (RuntimeException ex)
         {
