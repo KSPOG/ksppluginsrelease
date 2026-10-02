@@ -30,7 +30,6 @@ import net.runelite.api.coords.WorldPoint;
 import net.runelite.client.plugins.microbot.Microbot;
 import net.runelite.client.plugins.microbot.Script;
 import net.runelite.client.plugins.microbot.api.tileobject.models.Rs2TileObjectModel;
-import net.runelite.client.plugins.microbot.kspaccountbuilder.KspBankMode;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.KspTaskDebug;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.KspWalkerGuard;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.ksputil.KspBankWidgetHelper;
@@ -56,15 +55,15 @@ extends Script {
     private static final int LOOP_DELAY_MS = 100;
     private static final int WEB_WALK_COOLDOWN_MS = 1_000;
     private static final int EDGEVILLE_FURNACE_ID = 16469;
-    private static final long FURNACE_INTERACTION_TIMEOUT_MS = 8_000L;
-    private static final int BANK_WITHDRAW_START_TIMEOUT_MS = 1_500;
+    private static final WorldPoint EDGEVILLE_FURNACE_POINT = new WorldPoint(3108, 3499, 0);
+    private static final WorldPoint EDGEVILLE_BANK_POINT = new WorldPoint(3096, 3491, 0);
+    private static final long TARGET_INTERACTION_TIMEOUT_MS = 8_000L;
     private static final int PRODUCTION_ACTION_START_TIMEOUT_MS = 1_500;
+    private static final long SMELTING_BATCH_STALL_TIMEOUT_MS = 5_000L;
     private long lastWebWalkAtMs;
+    private long bankInteractionSentAt;
     private long furnaceInteractionSentAt;
     private long lastSmeltAnimationAtMs;
-    private long pendingWithdrawAtMs;
-    private String pendingWithdrawItem;
-    private int pendingWithdrawBeforeCount = -1;
     private long pendingProductionActionAtMs;
     private String pendingProductionActionKey;
     private SmeltArea targetArea = SmeltArea.SMELT_AREA_EDGEVILLE_FURNACE;
@@ -72,7 +71,9 @@ extends Script {
     private boolean debugLogging;
     private boolean walkingToTargetArea;
     private boolean progressiveSmelting = true;
-    private boolean bankInventoryReset;
+    private boolean smeltingBatchActive;
+    private int smeltingBatchRemainingCycles;
+    private long smeltingBatchLastProgressAtMs;
 
     public void setDebugLogging(boolean debugLogging) {
         this.debugLogging = debugLogging;
@@ -91,6 +92,11 @@ extends Script {
             if (!super.run() || !Microbot.isLoggedIn()) {
                 return;
             }
+            if (this.isSmeltingBatchActive(this.targetBar)) {
+                Microbot.status = "Smelting " + this.targetBar.getDisplayName();
+                return;
+            }
+
             this.selectTargetBar(fallbackBarLevel);
             KspTaskDebug.throttled(log, this.debugLogging, "Smelting", "loop", 5_000L,
                     "loop | targetBar={} area={} player={} moving={} animating={} interacting={} bankOpen={} productionOpen={} awaitingStart={}",
@@ -178,56 +184,144 @@ extends Script {
 
     private boolean ensureOreInventoryForTargetBar(BarLevels bar) {
         ReqOres req = ReqOres.valueOf(bar.name());
-        if (hasBalancedOreInventory(req)) {
-            bankInventoryReset = false;
+
+        if (hasRequiredOresInInventory(req)) {
+            bankInteractionSentAt = 0L;
             if (Rs2Bank.isOpen()) {
                 Rs2Bank.closeBank();
+                sleepUntil(() -> !Rs2Bank.isOpen(), 3_000);
                 return false;
             }
             return true;
         }
 
-        if (!Rs2Bank.isOpen()) {
-            if (!Rs2Bank.openBank()) Rs2Bank.walkToBankAndUseBank();
+        if (!openWorkBank()) {
             return false;
         }
 
         if (KspBankWidgetHelper.closeBankTutorialOverlayIfOpen()) return false;
-        if (!KspBankMode.ensureWithdrawAsItem()) return false;
 
-        if (!bankInventoryReset) {
-            Rs2Bank.depositAll();
-            bankInventoryReset = true;
+        Microbot.status = "Preparing " + bar.getDisplayName();
+        if (!Rs2Bank.setWithdrawAsItem()) {
+            Microbot.status = "Setting bank item withdrawal mode";
             return false;
         }
 
-        int bars = getBarsToWithdrawForInventory(req);
-        if (bars <= 0) return false;
-
-        int primaryTarget = bars * req.getPrimaryOreAmount();
-        int secondaryTarget = req.hasSecondaryOre() ? bars * req.getSecondaryOreAmount() : 0;
-
-        if (isWithdrawPending()) return false;
-
-        int primaryCurrent = Rs2Inventory.count(req.getPrimaryOreName());
-        if (primaryCurrent < primaryTarget) {
-            dispatchWithdraw(req.getPrimaryOreName(), primaryTarget - primaryCurrent, primaryCurrent);
-            return false;
-        }
-
-        if (req.hasSecondaryOre()) {
-            int secondaryCurrent = Rs2Inventory.count(req.getSecondaryOreName());
-            if (secondaryCurrent < secondaryTarget) {
-                dispatchWithdraw(req.getSecondaryOreName(), secondaryTarget - secondaryCurrent, secondaryCurrent);
+        if (!Rs2Inventory.isEmpty()) {
+            if (!Rs2Bank.depositAll()) {
+                Microbot.status = "Depositing previous smelting inventory";
+                return false;
+            }
+            if (!sleepUntil(Rs2Inventory::isEmpty, 3_000)) {
+                Microbot.status = "Waiting for previous smelting inventory to bank";
                 return false;
             }
         }
 
-        if (!hasExactOreInventory(req, primaryTarget, secondaryTarget)) return false;
+        int cycles = getBarsToWithdrawForInventory(req);
+        if (cycles <= 0) {
+            Microbot.status = "Out of ores for " + bar.getDisplayName();
+            return false;
+        }
 
-        bankInventoryReset = false;
+        int primaryTarget = cycles * req.getPrimaryOreAmount();
+        int secondaryTarget = req.hasSecondaryOre() ? cycles * req.getSecondaryOreAmount() : 0;
+
+        if (!withdrawAndWait(req.getPrimaryOreName(), primaryTarget)) {
+            return false;
+        }
+        if (req.hasSecondaryOre() && !withdrawAndWait(req.getSecondaryOreName(), secondaryTarget)) {
+            return false;
+        }
+
         Rs2Bank.closeBank();
+        sleepUntil(() -> !Rs2Bank.isOpen(), 3_000);
+
+        if (!hasExactOreInventory(req, primaryTarget, secondaryTarget)) {
+            Microbot.status = "Smelting inventory setup failed";
+            return false;
+        }
+
+        bankInteractionSentAt = 0L;
+        furnaceInteractionSentAt = 0L;
+        return true;
+    }
+
+    private boolean openWorkBank() {
+        if (Rs2Bank.isOpen()) {
+            bankInteractionSentAt = 0L;
+            return true;
+        }
+
+        WorldPoint player = Rs2Player.getWorldLocation();
+        if (player == null) return false;
+
+        if (player.distanceTo(EDGEVILLE_BANK_POINT) > 20
+                && player.distanceTo(EDGEVILLE_FURNACE_POINT) > 20) {
+            bankInteractionSentAt = 0L;
+            Microbot.status = "Walking to Edgeville bank";
+            if (!Rs2Player.isMoving()) {
+                Rs2Walker.walkTo(EDGEVILLE_BANK_POINT, 4);
+            }
+            return false;
+        }
+
+        long now = System.currentTimeMillis();
+        if (bankInteractionSentAt > 0L
+                && (Rs2Player.isMoving() || now - bankInteractionSentAt < TARGET_INTERACTION_TIMEOUT_MS)) {
+            Microbot.status = Rs2Player.isMoving()
+                    ? "Approaching Edgeville bank"
+                    : "Waiting for Edgeville bank";
+            return false;
+        }
+
+        bankInteractionSentAt = 0L;
+        GameObject bank = Rs2GameObject.get("Bank booth", true);
+        if (bank == null) {
+            Microbot.status = "Finding nearby Edgeville bank booth";
+            return false;
+        }
+
+        Microbot.status = "Opening Edgeville bank";
+        bankInteractionSentAt = now;
+        if (!interactGameObjectWithoutCamera(bank, "Bank")) {
+            bankInteractionSentAt = 0L;
+            Microbot.status = "Edgeville bank target not ready";
+            return false;
+        }
+
+        if (sleepUntil(Rs2Bank::isOpen, 5_000)) {
+            bankInteractionSentAt = 0L;
+            return true;
+        }
+
+        Microbot.status = Rs2Player.isMoving()
+                ? "Approaching Edgeville bank"
+                : "Waiting for Edgeville bank";
         return false;
+    }
+
+    private boolean withdrawAndWait(String oreName, int wanted) {
+        if (oreName == null || wanted <= 0) return true;
+
+        int current = Rs2Inventory.count(oreName);
+        if (current == wanted) return true;
+        if (current > wanted) {
+            Microbot.status = "Resetting incorrect " + oreName + " amount";
+            return false;
+        }
+
+        if (!Rs2Bank.withdrawX(oreName, wanted - current)) {
+            Microbot.status = "Failed withdrawing " + oreName;
+            return false;
+        }
+
+        if (!sleepUntil(() -> Rs2Inventory.count(oreName) >= wanted, 3_000)) {
+            Microbot.status = "Waiting for " + oreName + " withdrawal";
+            return false;
+        }
+
+        return Rs2Inventory.count(oreName) == wanted;
     }
 
     private boolean hasBalancedOreInventory(ReqOres req) {
@@ -240,17 +334,6 @@ extends Script {
         int primaryCount = Rs2Inventory.count((String)req.getPrimaryOreName());
         int secondaryCount = Rs2Inventory.count((String)req.getSecondaryOreName());
         return primaryCount * req.getSecondaryOreAmount() == secondaryCount * req.getPrimaryOreAmount();
-    }
-
-    private boolean prepareExactOreInventory(ReqOres req, int primaryTargetAmount, int secondaryTargetAmount) {
-        return hasExactOreInventory(req, primaryTargetAmount, secondaryTargetAmount);
-    }
-
-    private boolean withdrawExactOreAmount(String oreName, int targetAmount) {
-        if (targetAmount <= 0) return true;
-        int current = Rs2Inventory.count(oreName);
-        if (current >= targetAmount) return true;
-        return Rs2Bank.withdrawX(oreName, targetAmount - current);
     }
 
     private boolean hasExactOreInventory(ReqOres req, int primaryTargetAmount, int secondaryTargetAmount) {
@@ -351,7 +434,7 @@ extends Script {
 
         long now = System.currentTimeMillis();
         if (furnaceInteractionSentAt > 0L
-                && now - furnaceInteractionSentAt < FURNACE_INTERACTION_TIMEOUT_MS) {
+                && now - furnaceInteractionSentAt < TARGET_INTERACTION_TIMEOUT_MS) {
             Microbot.status = Rs2Player.isMoving()
                     ? "Approaching furnace"
                     : "Waiting for smelting interface";
@@ -421,43 +504,68 @@ extends Script {
         markProductionAction(key);
         Rs2Keyboard.keyPress(32);
         furnaceInteractionSentAt = 0L;
+        beginSmeltingBatch(bar);
         return true;
     }
 
-    private void dispatchWithdraw(String itemName, int amount, int beforeCount) {
-        if (amount <= 0 || itemName == null) return;
-
-        if (Rs2Bank.withdrawX(itemName, amount)) {
-            pendingWithdrawAtMs = System.currentTimeMillis();
-            pendingWithdrawItem = itemName;
-            pendingWithdrawBeforeCount = beforeCount;
-            debug("Withdraw dispatched | item={} amount={} before={}", itemName, amount, beforeCount);
-        }
+    private void beginSmeltingBatch(BarLevels bar) {
+        smeltingBatchActive = true;
+        smeltingBatchRemainingCycles = getCraftableBarsFromInventory(bar);
+        smeltingBatchLastProgressAtMs = System.currentTimeMillis();
+        lastSmeltAnimationAtMs = 0L;
+        debug("Smelting batch started | bar={} cycles={}", bar.getDisplayName(), smeltingBatchRemainingCycles);
     }
 
-    private boolean isWithdrawPending() {
-        if (pendingWithdrawAtMs == 0L || pendingWithdrawItem == null) return false;
+    private boolean isSmeltingBatchActive(BarLevels bar) {
+        if (!smeltingBatchActive || bar == null) return false;
 
-        int current = Rs2Inventory.count(pendingWithdrawItem);
-        if (current != pendingWithdrawBeforeCount) {
-            clearPendingWithdraw();
+        int remainingCycles = getCraftableBarsFromInventory(bar);
+        long now = System.currentTimeMillis();
+
+        if (Rs2Player.isAnimating()) {
+            lastSmeltAnimationAtMs = now;
+            smeltingBatchLastProgressAtMs = now;
+        }
+
+        if (remainingCycles < smeltingBatchRemainingCycles) {
+            smeltingBatchRemainingCycles = remainingCycles;
+            smeltingBatchLastProgressAtMs = now;
+            debug("Smelting batch progressed | bar={} remainingCycles={}",
+                    bar.getDisplayName(), remainingCycles);
+        }
+
+        if (remainingCycles <= 0) {
+            clearSmeltingBatch();
             return false;
         }
 
-        if (System.currentTimeMillis() - pendingWithdrawAtMs >= BANK_WITHDRAW_START_TIMEOUT_MS) {
-            debug("Withdraw dispatch timed out | item={} before={} current={}",
-                    pendingWithdrawItem, pendingWithdrawBeforeCount, current);
-            clearPendingWithdraw();
-            return false;
+        if (now - smeltingBatchLastProgressAtMs < SMELTING_BATCH_STALL_TIMEOUT_MS) {
+            return true;
         }
 
-        return true;
+        debug("Smelting batch stalled | bar={} remainingCycles={} lastAnimationAgo={}ms",
+                bar.getDisplayName(),
+                remainingCycles,
+                lastSmeltAnimationAtMs == 0L ? -1L : now - lastSmeltAnimationAtMs);
+        clearSmeltingBatch();
+        return false;
     }
 
-    private void clearPendingWithdraw() {
-        pendingWithdrawAtMs = 0L;
-        pendingWithdrawItem = null;
-        pendingWithdrawBeforeCount = -1;
+    private int getCraftableBarsFromInventory(BarLevels bar) {
+        if (bar == null) return 0;
+        ReqOres req = ReqOres.valueOf(bar.name());
+        int primaryCycles = Rs2Inventory.count(req.getPrimaryOreName()) / req.getPrimaryOreAmount();
+        if (!req.hasSecondaryOre()) return Math.max(0, primaryCycles);
+
+        int secondaryCycles = Rs2Inventory.count(req.getSecondaryOreName()) / req.getSecondaryOreAmount();
+        return Math.max(0, Math.min(primaryCycles, secondaryCycles));
+    }
+
+    private void clearSmeltingBatch() {
+        smeltingBatchActive = false;
+        smeltingBatchRemainingCycles = 0;
+        smeltingBatchLastProgressAtMs = 0L;
+        lastSmeltAnimationAtMs = 0L;
     }
 
     private boolean isProductionActionPending(String key) {
@@ -586,12 +694,12 @@ extends Script {
 
     public void shutdown() {
         this.lastWebWalkAtMs = 0L;
+        this.bankInteractionSentAt = 0L;
         this.furnaceInteractionSentAt = 0L;
         this.lastSmeltAnimationAtMs = 0L;
-        this.clearPendingWithdraw();
+        this.clearSmeltingBatch();
         this.clearPendingProductionAction();
         this.walkingToTargetArea = false;
-        this.bankInventoryReset = false;
         KspWalkerGuard.clear("Smelting:target-area");
         super.shutdown();
     }
