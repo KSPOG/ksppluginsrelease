@@ -222,7 +222,7 @@ public final class KspGrandExchangeSafe
             return false;
         }
 
-        if (!setChatboxLong(value)) return false;
+        if (!setChatboxValue(value)) return false;
         Rs2Keyboard.enter();
 
         return sleepUntil(() ->
@@ -234,7 +234,7 @@ public final class KspGrandExchangeSafe
      * Equivalent to Microbot's setChatboxValue(int), but accepts the 64-bit
      * values used by current RuneLite's GrandExchangeOffer API.
      */
-    private static boolean setChatboxLong(long value)
+    public static boolean setChatboxValue(long value)
     {
         Widget input = Rs2Widget.getWidget(InterfaceID.Chatbox.MES_TEXT2);
         if (input == null) return false;
@@ -252,7 +252,7 @@ public final class KspGrandExchangeSafe
     private static boolean confirmOffer()
     {
         Widget setup = Rs2Widget.getWidget(GE_GROUP, GE_SETUP_CHILD);
-        if (setup == null || setup.isHidden()) return false;
+        if (setup == null || setup.isHidden() || setup.getDynamicChildren() == null) return false;
 
         Widget confirm = Rs2Widget.findWidget(
                 "Confirm",
