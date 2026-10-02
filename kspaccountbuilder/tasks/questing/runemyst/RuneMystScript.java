@@ -87,7 +87,7 @@ public class RuneMystScript extends Script
 
         if (finalSedridorDeliveryStarted
                 && !Rs2Inventory.hasItem(RESEARCH_NOTES_ID)
-                && !Rs2Dialogue.isInDialogue())
+                && !isQuestDialogueActive())
         {
             markComplete();
             return;
