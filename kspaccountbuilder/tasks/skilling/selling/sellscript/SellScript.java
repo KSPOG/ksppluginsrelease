@@ -1,33 +1,3 @@
-/*
- * Decompiled with CFR 0.152.
- *
- * Could not load the following classes:
- *  javax.inject.Singleton
- *  net.runelite.api.MenuAction
- *  net.runelite.api.Skill
- *  net.runelite.api.coords.WorldPoint
- *  net.runelite.api.widgets.Widget
- *  net.runelite.client.plugins.Plugin
- *  net.runelite.client.plugins.microbot.Microbot
- *  net.runelite.client.plugins.microbot.Script
- *  net.runelite.client.plugins.microbot.util.bank.Rs2Bank
- *  net.runelite.client.plugins.microbot.util.grandexchange.GrandExchangeAction
- *  net.runelite.client.plugins.microbot.util.grandexchange.GrandExchangeRequest
- *  net.runelite.client.plugins.microbot.util.grandexchange.Rs2GrandExchange
- *  net.runelite.client.plugins.microbot.util.inventory.Rs2Inventory
- *  net.runelite.client.plugins.microbot.util.inventory.Rs2ItemModel
- *  net.runelite.client.plugins.microbot.util.keyboard.Rs2Keyboard
- *  net.runelite.client.plugins.microbot.util.math.Rs2Random
- *  net.runelite.client.plugins.microbot.util.menu.NewMenuEntry
- *  net.runelite.client.plugins.microbot.util.misc.Rs2UiHelper
- *  net.runelite.client.plugins.microbot.util.npc.Rs2Npc
- *  net.runelite.client.plugins.microbot.util.npc.Rs2NpcModel
- *  net.runelite.client.plugins.microbot.util.player.Rs2Player
- *  net.runelite.client.plugins.microbot.util.walker.Rs2Walker
- *  net.runelite.client.plugins.microbot.util.widget.Rs2Widget
- *  org.slf4j.Logger
- *  org.slf4j.LoggerFactory
- */
 package net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.selling.sellscript;
 
 import java.util.EnumSet;
@@ -40,53 +10,55 @@ import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import javax.inject.Inject;
 import javax.inject.Singleton;
+
 import net.runelite.api.Quest;
 import net.runelite.api.QuestState;
 import net.runelite.api.Skill;
-import net.runelite.api.coords.WorldPoint;
 import net.runelite.client.plugins.microbot.Microbot;
 import net.runelite.client.plugins.microbot.Script;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.KspAccountPlayTimeCache;
-import net.runelite.client.plugins.microbot.kspaccountbuilder.ksputil.KspGrandExchangeHelper;
-import net.runelite.client.plugins.microbot.kspaccountbuilder.ksputil.KspBankWidgetHelper;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.KspTaskDebug;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.KspWalkerGuard;
+import net.runelite.client.plugins.microbot.kspaccountbuilder.ksputil.KspBankWidgetHelper;
+import net.runelite.client.plugins.microbot.kspaccountbuilder.ksputil.KspGrandExchangeHelper;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.questing.cooksassistant.reqs.Items;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.questing.goblindip.reqs.GobReqs;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.selling.buyscript.Buy;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.selling.buyscript.BuyScript;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.selling.gearea.GEArea;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.selling.sell.SellList;
-import net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.selling.sellscript.SellState;
-import net.runelite.client.plugins.microbot.util.bank.Rs2Bank;
-import net.runelite.client.plugins.microbot.util.grandexchange.GrandExchangeAction;
-import net.runelite.client.plugins.microbot.util.grandexchange.GrandExchangeRequest;
-import net.runelite.client.plugins.microbot.util.grandexchange.Rs2GrandExchange;
 import net.runelite.client.plugins.microbot.ksputil.KspGrandExchangeSafe;
+import net.runelite.client.plugins.microbot.util.bank.Rs2Bank;
+import net.runelite.client.plugins.microbot.util.grandexchange.Rs2GrandExchange;
 import net.runelite.client.plugins.microbot.util.inventory.Rs2Inventory;
 import net.runelite.client.plugins.microbot.util.inventory.Rs2ItemModel;
 import net.runelite.client.plugins.microbot.util.player.Rs2Player;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import static net.runelite.client.plugins.microbot.util.Global.sleepUntil;
+
 @Singleton
-public class SellScript
-extends Script {
+public class SellScript extends Script
+{
     private static final Logger log = LoggerFactory.getLogger(SellScript.class);
-    private static final int LOOP_DELAY_MS = 50;
+
+    private static final int LOOP_DELAY_MS = 40;
     private static final int WEB_WALK_COOLDOWN_MS = 1_000;
-    private static final int ACTION_COOLDOWN_MS = 100;
-    private static final long BANK_DISPATCH_TIMEOUT_MS = 750L;
-    private static final int TRADE_RESTRICTION_CACHE_MS = 10000;
+    private static final int MAX_WITHDRAW_FAILURES = 3;
+    private static final int BANK_STATE_TIMEOUT_MS = 900;
+    private static final int GE_STATE_TIMEOUT_MS = 1_200;
+    private static final int TRADE_RESTRICTION_CACHE_MS = 10_000;
     private static final int TRADE_RESTRICTION_MIN_TOTAL_LEVEL = 100;
     private static final int TRADE_RESTRICTION_MIN_QUEST_POINTS = 10;
     private static final int TRADE_RESTRICTION_MIN_HOURS_PLAYED = 20;
-    private static final int MAX_WITHDRAW_FAILURES = 3;
+    private static final long BUY_AFFORDABILITY_CACHE_MS = 3_000L;
+
     private static final String[] PICKAXE_NAMES = Buy.PICKAXE_NAMES;
     private static final String[] AXE_NAMES = Buy.AXE_NAMES;
     private static final SellList[] SELL_ENTRIES = SellList.values();
     private static final Skill[] SKILLS = Skill.values();
-    private static final long BUY_AFFORDABILITY_CACHE_MS = 3_000L;
+
     private static final Set<SellList> PROTECTED_SKILL_RESOURCES = EnumSet.of(
             SellList.LOGS,
             SellList.OAK_LOGS,
@@ -105,613 +77,325 @@ extends Script {
             SellList.LOBSTER,
             SellList.SWORDFISH,
             SellList.SPINACH_ROLL);
+
     @Inject
     private KspAccountPlayTimeCache accountPlayTimeCache;
     @Inject
     private BuyScript buyScript;
+
+    private final Set<String> blockedSellItems = new HashSet<>();
+    private final Map<String, Integer> withdrawFailureCounts = new HashMap<>();
+
     private GEArea targetArea = GEArea.GRAND_EXCHANGE;
+    private SellState state = SellState.GOING_TO_GE;
     private boolean debugLogging;
-    private long lastWebWalkAtMs;
-    private long lastActionAtMs;
-    private long pendingBankActionAtMs;
-    private String pendingBankItem;
-    private int pendingBankItemBeforeCount = -1;
-    private int pendingBankEmptySlots = -1;
-    private final Set<String> blockedSellItems = new HashSet<String>();
-    private final Map<String, Integer> withdrawFailureCounts = new HashMap<String, Integer>();
+    private boolean complete;
+    private boolean sellInventoryReset;
     private Boolean tradeRestrictionUnlockedCache;
     private long lastTradeRestrictionCheckAtMs;
     private long lastBuyAffordabilityCheckAtMs;
     private boolean cachedBuyAffordability;
-    private SellState state = SellState.GOING_TO_GE;
-    private boolean complete;
-    private boolean sellInventoryReset;
 
-    public void setDebugLogging(boolean debugLogging) {
+    public void setDebugLogging(boolean debugLogging)
+    {
         this.debugLogging = debugLogging;
     }
 
-    public boolean run(GEArea area) {
-        this.shutdown();
-        this.targetArea = area;
-        this.complete = false;
-        this.sellInventoryReset = false;
+    public boolean run(GEArea area)
+    {
+        shutdown();
+        targetArea = area;
+        complete = false;
+        sellInventoryReset = false;
+        state = SellState.GOING_TO_GE;
         Microbot.status = "Walking to GE";
-        this.mainScheduledFuture = this.scheduledExecutorService.scheduleWithFixedDelay(() -> {
-            if (!super.run() || !Microbot.isLoggedIn()) {
-                return;
-            }
-            if (this.complete) {
-                Microbot.status = "GE Sell Complete";
-                return;
-            }
-            if (this.completeIfBankHasNothingToSell()) {
-                return;
-            }
-            this.updateState();
-            if (this.debugLogging) {
-                KspTaskDebug.throttled(log, this.debugLogging, "GE Sell", "loop", 5_000L,
-                        "loop | state={} complete={} player={} moving={} interacting={} bankOpen={} geOpen={} offerScreen={} slots={} hasInvSellable={} hasBankSellable={} blockedItems={}",
-                        this.state,
-                        this.complete,
-                        Rs2Player.getWorldLocation(),
-                        Rs2Player.isMoving(),
-                        Rs2Player.isInteracting(),
-                        Rs2Bank.isOpen(),
-                        Rs2GrandExchange.isOpen(),
-                        Rs2GrandExchange.isOfferScreenOpen(),
-                        Rs2GrandExchange.isOpen() ? Rs2GrandExchange.getAvailableSlotsCount() : -1,
-                        this.hasSellableInventoryItems(),
-                        this.hasSellableBankItems(),
-                        this.blockedSellItems);
-            }
-            switch (this.state) {
-                case GOING_TO_GE: {
-                    if (!this.ensureInTargetArea()) {
-                        return;
-                    }
-                    this.state = SellState.RESTOCKING_FROM_BANK;
+
+        mainScheduledFuture = scheduledExecutorService.scheduleWithFixedDelay(() ->
+        {
+            try
+            {
+                if (!super.run() || !Microbot.isLoggedIn()) return;
+                if (complete)
+                {
+                    Microbot.status = "GE Sell Complete";
                     return;
                 }
-                case RESTOCKING_FROM_BANK: {
-                    if (!this.hasSellableInventoryItems()) {
-                        this.prepareSellInventoryFromBank();
-                        return;
-                    }
-                    this.state = SellState.SELLING_ITEMS;
-                    return;
+
+                updateState();
+                switch (state)
+                {
+                    case GOING_TO_GE:
+                        if (ensureInTargetArea()) state = SellState.RESTOCKING_FROM_BANK;
+                        break;
+                    case RESTOCKING_FROM_BANK:
+                        prepareSellInventoryFromBank();
+                        break;
+                    case SELLING_ITEMS:
+                        handleSellingItems();
+                        break;
                 }
-                case SELLING_ITEMS: {
-                    this.handleSellingItems();
-                    return;
-                }
+            }
+            catch (Exception ex)
+            {
+                log.warn("KSP Account Builder SellScript tick failed", ex);
             }
         }, 0L, LOOP_DELAY_MS, TimeUnit.MILLISECONDS);
         return true;
     }
 
-    private boolean completeIfBankHasNothingToSell() {
-        if (!Rs2Bank.isOpen()) {
-            return false;
+    private void updateState()
+    {
+        if (!targetArea.toWorldArea().contains(Rs2Player.getWorldLocation()))
+        {
+            state = SellState.GOING_TO_GE;
+            return;
         }
 
-        if (this.hasSellableInventoryItems() || this.hasSellableBankItems()) {
-            return false;
+        if (hasSellableInventoryItems() || shouldWaitAtGrandExchange())
+        {
+            state = SellState.SELLING_ITEMS;
+            return;
         }
 
-        this.complete = true;
-        this.state = SellState.GOING_TO_GE;
-        Microbot.status = "GE Sell Skipped";
-        this.debug("Skipping GE sell; bank contains no sellable items | blockedItems={}", this.blockedSellItems);
-        return true;
+        state = SellState.RESTOCKING_FROM_BANK;
     }
 
-    private boolean ensureInTargetArea() {
-        if (this.targetArea.toWorldArea().contains(Rs2Player.getWorldLocation())) {
+    private boolean ensureInTargetArea()
+    {
+        if (targetArea.toWorldArea().contains(Rs2Player.getWorldLocation()))
+        {
             KspWalkerGuard.clear("GE Sell:target-area");
             return true;
         }
-        if (Rs2Player.isMoving()) {
-            return false;
-        }
+        if (Rs2Player.isMoving()) return false;
+
         Microbot.status = "Walking to GE";
-        if (KspWalkerGuard.walkToDestination(
+        KspWalkerGuard.walkToDestination(
                 "GE Sell:target-area",
-                this.targetArea::getRandomPoint,
-                this.targetArea.toWorldArea()::contains,
+                targetArea::getRandomPoint,
+                targetArea.toWorldArea()::contains,
                 2,
-                WEB_WALK_COOLDOWN_MS)) {
-            this.lastWebWalkAtMs = System.currentTimeMillis();
-            this.debug("Requested GE sell area walk | player={} area={}",
-                    Rs2Player.getWorldLocation(),
-                    this.targetArea.getDisplayName());
-        }
+                WEB_WALK_COOLDOWN_MS);
         return false;
     }
 
-    private void prepareSellInventoryFromBank() {
-        if (!Rs2Bank.isOpen()) {
-            if (Rs2GrandExchange.isOpen()) {
-                if (shouldWaitAtGrandExchange()) {
-                    state = SellState.SELLING_ITEMS;
-                    Microbot.status = "Waiting for GE Slot";
-                    return;
-                }
-                Rs2GrandExchange.closeExchange();
+    /**
+     * Fast state-driven banking:
+     * bank widget -> note mode -> clean inventory once -> withdraw every sellable
+     * stack, confirming each inventory/bank change -> close bank -> GE.
+     */
+    private void prepareSellInventoryFromBank()
+    {
+        if (Rs2GrandExchange.isOpen())
+        {
+            if (shouldWaitAtGrandExchange())
+            {
+                state = SellState.SELLING_ITEMS;
+                Microbot.status = "Waiting for GE Slot";
                 return;
             }
+            Rs2GrandExchange.closeExchange();
+            return;
+        }
 
+        if (!Rs2Bank.isOpen())
+        {
             Microbot.status = "Opening GE Bank";
             if (!Rs2Bank.openBank()) Rs2Bank.walkToBankAndUseBank();
             return;
         }
 
-        Microbot.status = "Withdrawing Sell Items";
         if (KspBankWidgetHelper.closeBankTutorialOverlayIfOpen()) return;
-        if (isBankInventoryActionPending()) return;
 
-        if (!sellInventoryReset) {
-            if (!Rs2Inventory.isEmpty()) {
+        // As soon as the bank widget exists, select notes. Do not wait for a later tick.
+        if (!Rs2Bank.hasWithdrawAsNote())
+        {
+            Microbot.status = "Setting Withdraw-as-Note";
+            if (!Rs2Bank.setWithdrawAsNote()) return;
+            if (!sleepUntil(Rs2Bank::hasWithdrawAsNote, BANK_STATE_TIMEOUT_MS)) return;
+        }
+
+        // This state is entered with no sellable inventory. Clear protected/junk
+        // inventory once so the sell batch can use every available slot.
+        if (!sellInventoryReset)
+        {
+            if (!Rs2Inventory.isEmpty())
+            {
+                Microbot.status = "Clearing Inventory";
                 int before = Rs2Inventory.emptySlotCount();
-                if (Rs2Bank.depositAll()) markBankInventoryAction(null, -1, before);
-                return;
+                if (!Rs2Bank.depositAll()) return;
+                if (!sleepUntil(() -> Rs2Inventory.isEmpty()
+                        || Rs2Inventory.emptySlotCount() > before, BANK_STATE_TIMEOUT_MS)) return;
+                if (!Rs2Inventory.isEmpty()) return;
             }
             sellInventoryReset = true;
         }
 
-        if (!Rs2Bank.hasWithdrawAsNote()) {
-            Rs2Bank.setWithdrawAsNote();
+        Microbot.status = "Withdrawing Sell Items";
+        boolean withdrewAny = withdrawAllSellableStacks();
+
+        if (!withdrewAny && !hasSellableBankItems())
+        {
+            complete = true;
+            Microbot.status = "GE Sell Complete";
+            Rs2Bank.closeBank();
             return;
         }
 
-        int remainingSlots = Rs2Inventory.emptySlotCount();
+        if (!hasSellableInventoryItems()) return;
+
+        Microbot.status = "Closing Bank";
+        Rs2Bank.closeBank();
+        sleepUntil(() -> !Rs2Bank.isOpen(), BANK_STATE_TIMEOUT_MS);
+        if (Rs2Bank.isOpen()) return;
+
+        sellInventoryReset = false;
+        state = SellState.SELLING_ITEMS;
+        Microbot.status = "Opening GE";
+    }
+
+    private boolean withdrawAllSellableStacks()
+    {
         boolean withdrewAny = false;
 
-        // Match Smart Smelter / Jewelry Crafter: dispatch one bank action, then
-        // continue immediately once the inventory confirms that exact action.
-        for (SellList entry : SELL_ENTRIES) {
-            if (remainingSlots <= 0) break;
+        for (SellList entry : SELL_ENTRIES)
+        {
+            if (Rs2Inventory.emptySlotCount() <= 0) break;
             if (!shouldSellEntry(entry) || isBlockedSellItem(entry.getDisplayName())) continue;
 
             int qty = getSellableBankQuantity(entry.getDisplayName());
             if (qty <= 0) continue;
 
-            if (!withdrawSellStack(entry.getDisplayName(), qty)) continue;
-            withdrewAny = true;
-            remainingSlots--;
+            if (withdrawSellStack(entry.getDisplayName(), qty)) withdrewAny = true;
         }
 
-        if (remainingSlots > 0) {
-            int withdrawnTools = withdrawOutdatedToolsAsNotes(remainingSlots);
-            withdrewAny |= withdrawnTools > 0;
+        if (Rs2Inventory.emptySlotCount() > 0 && canAffordGeBuyRequirements())
+        {
+            withdrewAny |= withdrawOutdatedToolsAsNotes();
         }
 
-        if (withdrewAny) {
-            Rs2Bank.closeBank();
-            sleepUntil(() -> !Rs2Bank.isOpen(), 2_000);
-            state = SellState.SELLING_ITEMS;
-            Microbot.status = "Opening GE";
-            return;
-        }
-
-        if (!hasSellableBankItems()) {
-            complete = true;
-            Microbot.status = "GE Sell Complete";
-        }
+        return withdrewAny;
     }
 
-    private void recordWithdrawResult(String itemName, boolean withdrew) {
-        if (itemName == null) {
-            return;
+    private boolean withdrawSellStack(String itemName, int quantity)
+    {
+        if (itemName == null || quantity <= 0 || Rs2Inventory.emptySlotCount() <= 0) return false;
+
+        int beforeInventory = Rs2Inventory.itemQuantity(itemName, true);
+        int beforeBank = Rs2Bank.count(itemName, true);
+        int withdraw = Math.min(quantity, beforeBank);
+        if (withdraw <= 0) return false;
+
+        boolean dispatched = withdraw >= beforeBank
+                ? Rs2Bank.withdrawAll(itemName, true)
+                : Rs2Bank.withdrawX(itemName, withdraw, true);
+        if (!dispatched)
+        {
+            recordWithdrawResult(itemName, false);
+            return false;
         }
-        String normalizedName = itemName.toLowerCase(Locale.ENGLISH);
-        if (withdrew) {
-            this.withdrawFailureCounts.remove(normalizedName);
-            return;
-        }
-        int failureCount = this.withdrawFailureCounts.getOrDefault(normalizedName, 0) + 1;
-        this.withdrawFailureCounts.put(normalizedName, failureCount);
-        if (failureCount < MAX_WITHDRAW_FAILURES) {
-            return;
-        }
-        this.blockedSellItems.add(normalizedName);
-        this.debug("Blocking sell item after repeated withdrawal failures | item={} failures={}",
-                itemName,
-                failureCount);
+
+        // Noted-aware confirmation. The old Rs2Inventory.count(name) check could
+        // miss the noted variant and burn the full timeout for every item.
+        boolean changed = sleepUntil(() ->
+                Rs2Inventory.itemQuantity(itemName, true) > beforeInventory
+                        || Rs2Bank.count(itemName, true) < beforeBank,
+                BANK_STATE_TIMEOUT_MS);
+
+        recordWithdrawResult(itemName, changed);
+        return changed;
     }
 
-    private void updateState() {
-        if (!this.targetArea.toWorldArea().contains(Rs2Player.getWorldLocation())) {
-            this.state = SellState.GOING_TO_GE;
-            return;
+    private boolean withdrawOutdatedToolsAsNotes()
+    {
+        boolean withdrew = false;
+        String desiredPickaxe = resolveDesiredPickaxeName();
+        String desiredAxe = resolveDesiredAxeName();
+
+        for (String name : PICKAXE_NAMES)
+        {
+            if (Rs2Inventory.emptySlotCount() <= 0) return withdrew;
+            if (name.equalsIgnoreCase(desiredPickaxe)) continue;
+            int qty = Rs2Bank.count(name, true);
+            if (qty > 0 && withdrawSellStack(name, qty)) withdrew = true;
         }
-        if (!this.hasSellableInventoryItems()) {
-            if (!this.shouldWaitAtGrandExchange()) {
-                this.state = SellState.RESTOCKING_FROM_BANK;
-                this.sellInventoryReset = false;
-            } else {
-                this.state = SellState.SELLING_ITEMS;
-            }
-            return;
+
+        for (String name : AXE_NAMES)
+        {
+            if (Rs2Inventory.emptySlotCount() <= 0) return withdrew;
+            if (name.equalsIgnoreCase(desiredAxe)) continue;
+            int qty = Rs2Bank.count(name, true);
+            if (qty > 0 && withdrawSellStack(name, qty)) withdrew = true;
         }
-        this.state = SellState.SELLING_ITEMS;
+        return withdrew;
     }
 
-    private boolean shouldWaitAtGrandExchange() {
-        return Rs2GrandExchange.isOpen()
-                && (Rs2GrandExchange.isOfferScreenOpen()
-                || Rs2GrandExchange.hasSoldOffer()
-                || Rs2GrandExchange.getAvailableSlotsCount() <= 0);
-    }
-
-    private void handleSellingItems() {
+    private void handleSellingItems()
+    {
         if (Rs2Player.isMoving()) return;
 
-        if (Rs2GrandExchange.hasSoldOffer()) {
+        if (Rs2GrandExchange.hasSoldOffer())
+        {
             if (!ensureGrandExchangeOpen()) return;
             Microbot.status = "Collecting Sold Items";
             Rs2GrandExchange.collectAllToBank();
-            lastActionAtMs = System.currentTimeMillis();
             return;
         }
 
-        if (Rs2GrandExchange.isOfferScreenOpen()) {
-            returnToGrandExchangeOverview();
+        if (Rs2GrandExchange.isOfferScreenOpen())
+        {
+            Rs2GrandExchange.backToOverview();
+            sleepUntil(() -> Rs2GrandExchange.isOpen()
+                    && !Rs2GrandExchange.isOfferScreenOpen(), GE_STATE_TIMEOUT_MS);
             return;
         }
 
         if (!ensureGrandExchangeOpen()) return;
-        if (Rs2GrandExchange.getAvailableSlotsCount() <= 0) return;
-
         processAvailableSellSlots();
     }
 
-    private boolean shouldSellEntry(SellList sellList) {
-        if (sellList.isTradeRestricted() && !this.hasUnlockedTradeRestrictedItems()) {
-            return false;
-        }
-        if (PROTECTED_SKILL_RESOURCES.contains(sellList) && !this.canAffordGeBuyRequirements()) {
-            return false;
-        }
-        int firemakingLevel = Microbot.getClient().getRealSkillLevel(Skill.FIREMAKING);
-        if (sellList == SellList.LOGS) {
-            return firemakingLevel >= 15;
-        }
-        if (sellList == SellList.OAK_LOGS) {
-            return firemakingLevel >= 30;
-        }
-        if (sellList == SellList.SILVER_ORE) {
-            return Microbot.getClient().getRealSkillLevel(Skill.SMITHING) < 20;
-        }
-        if (sellList == SellList.SMALL_FISHING_NET
-                || sellList == SellList.FISHING_ROD
-                || sellList == SellList.FISHING_BAIT) {
-            return Microbot.getClient().getRealSkillLevel(Skill.FISHING) >= 20;
-        }
-        return true;
-    }
-
-    private int getSellableBankQuantity(String itemName) {
-        int bankQuantity = Math.max(0, Rs2Bank.count(itemName, true));
-        return Math.max(0, bankQuantity - this.getReservedQuestRequirementQuantity(itemName));
-    }
-
-    private int getSellableInventoryQuantity(String itemName, int inventoryQuantity) {
-        return Math.max(0, inventoryQuantity - this.getReservedQuestRequirementQuantity(itemName));
-    }
-
-    private int getReservedQuestRequirementQuantity(String itemName) {
-        if (itemName == null) {
-            return 0;
-        }
-
-        int reservedQuantity = 0;
-        if (this.isQuestIncomplete(Quest.COOKS_ASSISTANT)) {
-            for (Items item : Items.values()) {
-                if (item.getDisplayName().equalsIgnoreCase(itemName)) {
-                    reservedQuantity += 1;
-                }
-            }
-        }
-        if (this.isQuestIncomplete(Quest.GOBLIN_DIPLOMACY)) {
-            for (GobReqs item : GobReqs.values()) {
-                if (item.getDisplayName().equalsIgnoreCase(itemName)) {
-                    reservedQuantity += item.getQuantity();
-                }
-            }
-        }
-        return reservedQuantity;
-    }
-
-    private boolean isQuestIncomplete(Quest quest) {
-        return Rs2Player.getQuestState(quest) != QuestState.FINISHED;
-    }
-
-    private boolean hasSellableInventoryItems() {
-        return this.getNextSellableInventoryItem() != null;
-    }
-
-    private boolean hasSellableBankItems() {
-        for (SellList sellList : SELL_ENTRIES) {
-            if (!this.shouldSellEntry(sellList)
-                    || this.isBlockedSellItem(sellList.getDisplayName())
-                    || this.getSellableBankQuantity(sellList.getDisplayName()) <= 0) continue;
-            return true;
-        }
-        return this.hasOutdatedToolInBank();
-    }
-
-    public boolean hasSellListItemsAvailable() {
-        return this.hasSellableInventoryItems() || this.hasSellableBankItems();
-    }
-
-    private Rs2ItemModel getNextSellableInventoryItem() {
-        List<Rs2ItemModel> inventoryItems = Rs2Inventory.all();
-        for (Rs2ItemModel item : inventoryItems) {
-            if (item == null
-                    || item.getName() == null
-                    || this.isBlockedSellItem(item.getName())
-                    || this.getSellableInventoryQuantity(item.getName(), item.getQuantity()) <= 0
-                    || !this.isAllowedSellItemName(item.getName())) {
-                continue;
-            }
-            return item;
-        }
-
-        if (!this.canAffordGeBuyRequirements()) {
-            return null;
-        }
-
-        String desiredPickaxe = this.resolveDesiredPickaxeName();
-        String desiredAxe = this.resolveDesiredAxeName();
-        for (Rs2ItemModel item : inventoryItems) {
-            if (item == null
-                    || item.getName() == null
-                    || this.isBlockedSellItem(item.getName())
-                    || !this.isOutdatedToolName(item.getName(), desiredPickaxe, desiredAxe)) {
-                continue;
-            }
-            return item;
-        }
-        return null;
-    }
-
-    private boolean isAllowedSellItemName(String itemName) {
-        for (SellList sellList : SELL_ENTRIES) {
-            if (sellList.getDisplayName().equalsIgnoreCase(itemName)
-                    && this.shouldSellEntry(sellList)
-                    && !this.isBlockedSellItem(sellList.getDisplayName())) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    private boolean withdrawSellStack(String itemName, int quantity) {
-        if (itemName == null || quantity <= 0) return false;
-
-        int before = Rs2Inventory.count(itemName);
-        int bankCount = Rs2Bank.count(itemName, true);
-        boolean dispatched = quantity >= bankCount
-                ? Rs2Bank.withdrawAll(itemName, true)
-                : Rs2Bank.withdrawX(itemName, quantity, true);
-
-        recordWithdrawResult(itemName, dispatched);
-        if (!dispatched) return false;
-
-        if (sleepUntil(() -> Rs2Inventory.count(itemName) > before, 2_000)) {
-            return true;
-        }
-
-        recordWithdrawResult(itemName, false);
-        return false;
-    }
-
-    private int withdrawOutdatedToolsAsNotes(int maxSlots) {
-        if (maxSlots <= 0 || !canAffordGeBuyRequirements()) return 0;
-
-        String desiredPickaxe = resolveDesiredPickaxeName();
-        String desiredAxe = resolveDesiredAxeName();
-        int withdrawn = 0;
-
-        for (String name : PICKAXE_NAMES) {
-            if (withdrawn >= maxSlots) break;
-            if (!name.equalsIgnoreCase(desiredPickaxe)
-                    && Rs2Bank.count(name) > 0
-                    && withdrawSellStack(name, Rs2Bank.count(name, true))) {
-                withdrawn++;
-            }
-        }
-
-        for (String name : AXE_NAMES) {
-            if (withdrawn >= maxSlots) break;
-            if (!name.equalsIgnoreCase(desiredAxe)
-                    && Rs2Bank.count(name) > 0
-                    && withdrawSellStack(name, Rs2Bank.count(name, true))) {
-                withdrawn++;
-            }
-        }
-
-        return withdrawn;
-    }
-
-    private boolean isBankInventoryActionPending() {
-        if (pendingBankActionAtMs == 0L) return false;
-
-        boolean changed = pendingBankItem != null
-                ? Rs2Inventory.count(pendingBankItem) != pendingBankItemBeforeCount
-                : Rs2Inventory.emptySlotCount() != pendingBankEmptySlots;
-
-        if (changed || System.currentTimeMillis() - pendingBankActionAtMs >= BANK_DISPATCH_TIMEOUT_MS) {
-            clearBankInventoryAction();
-            return false;
-        }
-        return true;
-    }
-
-    private void markBankInventoryAction(String item, int beforeItemCount, int beforeEmptySlots) {
-        pendingBankItem = item;
-        pendingBankItemBeforeCount = beforeItemCount;
-        pendingBankEmptySlots = beforeEmptySlots;
-        pendingBankActionAtMs = System.currentTimeMillis();
-    }
-
-    private void clearBankInventoryAction() {
-        pendingBankActionAtMs = 0L;
-        pendingBankItem = null;
-        pendingBankItemBeforeCount = -1;
-        pendingBankEmptySlots = -1;
-    }
-
-    private boolean hasOutdatedToolInBank() {
-        if (!this.canAffordGeBuyRequirements()) {
-            return false;
-        }
-
-        String desiredPickaxe = this.resolveDesiredPickaxeName();
-        String desiredAxe = this.resolveDesiredAxeName();
-        for (String pickaxeName : PICKAXE_NAMES) {
-            if (pickaxeName.equalsIgnoreCase(desiredPickaxe) || Rs2Bank.count((String)pickaxeName) <= 0) continue;
-            return true;
-        }
-        for (String axeName : AXE_NAMES) {
-            if (axeName.equalsIgnoreCase(desiredAxe) || Rs2Bank.count((String)axeName) <= 0) continue;
-            return true;
-        }
-        return false;
-    }
-
-    private boolean canAffordGeBuyRequirements() {
-        long now = System.currentTimeMillis();
-        if (now - this.lastBuyAffordabilityCheckAtMs < BUY_AFFORDABILITY_CACHE_MS) {
-            return this.cachedBuyAffordability;
-        }
-
-        this.cachedBuyAffordability = this.buyScript.canAffordMissingBuys();
-        this.lastBuyAffordabilityCheckAtMs = now;
-        if (!this.cachedBuyAffordability) {
-            this.debug("Protecting required skill resources and pickaxes/axes; ordinary SellList products remain eligible");
-        }
-        return this.cachedBuyAffordability;
-    }
-
-    private boolean isOutdatedToolName(String itemName, String desiredPickaxe, String desiredAxe) {
-        return Buy.isOutdatedToolName(itemName, desiredPickaxe, desiredAxe);
-    }
-
-    private String resolveDesiredPickaxeName() {
-        return Buy.resolveDesiredPickaxeNameForBuy();
-    }
-
-    private String resolveDesiredAxeName() {
-        return Buy.resolveDesiredAxeNameForBuy();
-    }
-
-    private boolean isBlockedSellItem(String itemName) {
-        return itemName != null && this.blockedSellItems.contains(itemName.toLowerCase(Locale.ENGLISH));
-    }
-
-    private boolean hasUnlockedTradeRestrictedItems() {
-        long now = System.currentTimeMillis();
-        if (this.tradeRestrictionUnlockedCache != null
-                && now - this.lastTradeRestrictionCheckAtMs < TRADE_RESTRICTION_CACHE_MS) {
-            return this.tradeRestrictionUnlockedCache;
-        }
-        long accountHash = this.getCurrentAccountHash();
-        // Account Builder owns the single authoritative play-time read. GE selling only
-        // consumes the continuously updated shared cache; it must never trigger another
-        // ACCOUNT_SUMMARY_PLAYTIME varc read.
-        long playTimeMillis = accountHash != 0L
-                && this.accountPlayTimeCache != null
-                && this.accountPlayTimeCache.hasCachedPlayTime(accountHash)
-                ? this.accountPlayTimeCache.getPlayTimeMillis(accountHash)
-                : -1L;
-
-        boolean unlocked = false;
-        if (this.getTotalLevel() >= TRADE_RESTRICTION_MIN_TOTAL_LEVEL
-                && this.getQuestPoints() >= TRADE_RESTRICTION_MIN_QUEST_POINTS) {
-            unlocked = playTimeMillis >= TimeUnit.HOURS.toMillis(TRADE_RESTRICTION_MIN_HOURS_PLAYED);
-        }
-        this.tradeRestrictionUnlockedCache = unlocked;
-        this.lastTradeRestrictionCheckAtMs = now;
-        this.debug("Trade restriction check | accountHash={} playTimeMinutes={} totalLevel={} questPoints={} unlocked={}",
-                accountHash == 0L ? "unavailable" : Long.toUnsignedString(accountHash),
-                playTimeMillis < 0L ? -1L : TimeUnit.MILLISECONDS.toMinutes(playTimeMillis),
-                this.getTotalLevel(),
-                this.getQuestPoints(),
-                unlocked);
-        return unlocked;
-    }
-
-    private long getCurrentAccountHash() {
-        if (!Microbot.isLoggedIn() || Microbot.getClient() == null) {
-            return 0L;
-        }
-        return Microbot.getClientThread()
-                .runOnClientThreadOptional(() -> Microbot.getClient().getAccountHash())
-                .orElse(0L);
-    }
-
-    private int getTotalLevel() {
-        int total = 0;
-        for (Skill skill : SKILLS) {
-            if (skill == Skill.OVERALL) continue;
-            total += Microbot.getClient().getRealSkillLevel(skill);
-        }
-        return total;
-    }
-
-    private int getQuestPoints() {
-        return Microbot.getVarbitPlayerValue((int)101);
-    }
-
-    private boolean ensureGrandExchangeOpen() {
+    private boolean ensureGrandExchangeOpen()
+    {
         if (Rs2GrandExchange.isOpen()) return true;
-
-        if (Rs2Bank.isOpen()) {
+        if (Rs2Bank.isOpen())
+        {
             KspGrandExchangeHelper.closeBankBeforeExchange();
             return false;
         }
 
-        if (System.currentTimeMillis() - lastActionAtMs < ACTION_COOLDOWN_MS) return false;
-
         Microbot.status = "Opening GE";
-        boolean dispatched = KspGrandExchangeHelper.openExchangeDirectly()
-                || KspGrandExchangeHelper.interactClerk();
-
-        if (dispatched) lastActionAtMs = System.currentTimeMillis();
+        KspGrandExchangeHelper.openExchangeDirectly();
+        if (!Rs2GrandExchange.isOpen()) KspGrandExchangeHelper.interactClerk();
         return false;
     }
 
-    private void processAvailableSellSlots() {
+    private void processAvailableSellSlots()
+    {
         int availableSlots = Rs2GrandExchange.getAvailableSlotsCount();
+        if (availableSlots <= 0)
+        {
+            Microbot.status = "Waiting for GE Slot";
+            return;
+        }
 
-        while (availableSlots > 0) {
+        while (availableSlots > 0)
+        {
             Rs2ItemModel item = getNextSellableInventoryItem();
-            if (item == null) {
+            if (item == null)
+            {
                 state = SellState.RESTOCKING_FROM_BANK;
                 return;
             }
 
-            int beforeSlots = availableSlots;
+            // KspGrandExchangeSafe already waits until the slot changes. Do not add
+            // another two-second commit wait here.
             if (!placeFallbackSellOffer(item)) return;
 
-            if (!sleepUntil(() ->
-                    !Rs2GrandExchange.isOpen()
-                            || Rs2GrandExchange.isOfferScreenOpen()
-                            || Rs2GrandExchange.getAvailableSlotsCount() < beforeSlots, 2_000)) {
-                return;
-            }
-
-            if (!Rs2GrandExchange.isOpen()) return;
-
-            if (Rs2GrandExchange.isOfferScreenOpen()) {
+            if (Rs2GrandExchange.isOfferScreenOpen())
+            {
                 Rs2GrandExchange.backToOverview();
-                if (!sleepUntil(() ->
-                        Rs2GrandExchange.isOpen()
-                                && !Rs2GrandExchange.isOfferScreenOpen(), 2_000)) {
-                    return;
-                }
+                if (!sleepUntil(() -> Rs2GrandExchange.isOpen()
+                        && !Rs2GrandExchange.isOfferScreenOpen(), GE_STATE_TIMEOUT_MS)) return;
             }
 
             availableSlots = Rs2GrandExchange.getAvailableSlotsCount();
@@ -720,20 +404,15 @@ extends Script {
         Microbot.status = "Waiting for GE Slot";
     }
 
-    private boolean placeFallbackSellOffer(Rs2ItemModel item) {
-        if (item == null) return false;
-
+    private boolean placeFallbackSellOffer(Rs2ItemModel item)
+    {
+        if (item == null || item.getName() == null) return false;
         int qty = getSellableInventoryQuantity(item.getName(), item.getQuantity());
         if (qty <= 0) return false;
 
         Microbot.status = "Selling " + item.getName();
         boolean offered = KspGrandExchangeSafe.sell(
-                item.getName(),
-                qty,
-                (long) getAdjustedSellPrice(item),
-                true,
-                false);
-        if (offered) lastActionAtMs = System.currentTimeMillis();
+                item.getName(), qty, (long) getAdjustedSellPrice(item), true, false);
 
         debug("GE sell offer | item={} qty={} offered={} slots={}",
                 item.getName(), qty, offered,
@@ -741,58 +420,260 @@ extends Script {
         return offered;
     }
 
-        private int getAdjustedSellPrice(Rs2ItemModel item) {
+    private int getAdjustedSellPrice(Rs2ItemModel item)
+    {
         if (item == null) return 1;
-
         int itemId = item.getUnNotedId() > 0 ? item.getUnNotedId() : item.getId();
         int guide = Rs2GrandExchange.getPrice(itemId);
-        if (guide <= 0 && item.getPrice() > 0L) {
+        if (guide <= 0 && item.getPrice() > 0L)
+        {
             guide = (int) Math.min(Integer.MAX_VALUE, item.getPrice());
         }
         return Math.max(1, (int) ((long) Math.max(1, guide) * 90L / 100L));
     }
 
-    private void returnToGrandExchangeOverview() {
-        if (System.currentTimeMillis() - lastActionAtMs < ACTION_COOLDOWN_MS) return;
-        Rs2GrandExchange.backToOverview();
-        lastActionAtMs = System.currentTimeMillis();
+    private boolean shouldWaitAtGrandExchange()
+    {
+        return Rs2GrandExchange.isOpen()
+                && (Rs2GrandExchange.isOfferScreenOpen()
+                || Rs2GrandExchange.hasSoldOffer()
+                || Rs2GrandExchange.getAvailableSlotsCount() <= 0);
     }
 
-    private WorldPoint getAreaCenter() {
-        int centerX = (this.targetArea.getSouthWest().getX() + this.targetArea.getNorthEast().getX()) / 2;
-        int centerY = (this.targetArea.getSouthWest().getY() + this.targetArea.getNorthEast().getY()) / 2;
-        int plane = this.targetArea.getSouthWest().getPlane();
-        return new WorldPoint(centerX, centerY, plane);
+    private boolean shouldSellEntry(SellList sellList)
+    {
+        if (sellList.isTradeRestricted() && !hasUnlockedTradeRestrictedItems()) return false;
+        if (PROTECTED_SKILL_RESOURCES.contains(sellList) && !canAffordGeBuyRequirements()) return false;
+
+        int firemakingLevel = Microbot.getClient().getRealSkillLevel(Skill.FIREMAKING);
+        if (sellList == SellList.LOGS) return firemakingLevel >= 15;
+        if (sellList == SellList.OAK_LOGS) return firemakingLevel >= 30;
+        if (sellList == SellList.SILVER_ORE)
+            return Microbot.getClient().getRealSkillLevel(Skill.SMITHING) < 20;
+        if (sellList == SellList.SMALL_FISHING_NET
+                || sellList == SellList.FISHING_ROD
+                || sellList == SellList.FISHING_BAIT)
+            return Microbot.getClient().getRealSkillLevel(Skill.FISHING) >= 20;
+        return true;
     }
 
-    private void debug(String message, Object ... args) {
-        if (this.debugLogging) {
-            KspTaskDebug.info(log, true, "GE Sell", message, args);
+    private boolean hasSellableInventoryItems()
+    {
+        return getNextSellableInventoryItem() != null;
+    }
+
+    private boolean hasSellableBankItems()
+    {
+        for (SellList entry : SELL_ENTRIES)
+        {
+            if (shouldSellEntry(entry)
+                    && !isBlockedSellItem(entry.getDisplayName())
+                    && getSellableBankQuantity(entry.getDisplayName()) > 0) return true;
+        }
+        return hasOutdatedToolInBank();
+    }
+
+    public boolean hasSellListItemsAvailable()
+    {
+        return hasSellableInventoryItems() || hasSellableBankItems();
+    }
+
+    private Rs2ItemModel getNextSellableInventoryItem()
+    {
+        List<Rs2ItemModel> items = Rs2Inventory.all();
+        for (Rs2ItemModel item : items)
+        {
+            if (item == null || item.getName() == null || isBlockedSellItem(item.getName())) continue;
+            if (getSellableInventoryQuantity(item.getName(), item.getQuantity()) <= 0) continue;
+            if (isAllowedSellItemName(item.getName())) return item;
+        }
+
+        if (!canAffordGeBuyRequirements()) return null;
+        String desiredPickaxe = resolveDesiredPickaxeName();
+        String desiredAxe = resolveDesiredAxeName();
+        for (Rs2ItemModel item : items)
+        {
+            if (item == null || item.getName() == null || isBlockedSellItem(item.getName())) continue;
+            if (Buy.isOutdatedToolName(item.getName(), desiredPickaxe, desiredAxe)) return item;
+        }
+        return null;
+    }
+
+    private boolean isAllowedSellItemName(String itemName)
+    {
+        for (SellList entry : SELL_ENTRIES)
+        {
+            if (entry.getDisplayName().equalsIgnoreCase(itemName)
+                    && shouldSellEntry(entry)
+                    && !isBlockedSellItem(entry.getDisplayName())) return true;
+        }
+        return false;
+    }
+
+    private int getSellableBankQuantity(String itemName)
+    {
+        return Math.max(0, Rs2Bank.count(itemName, true) - getReservedQuestRequirementQuantity(itemName));
+    }
+
+    private int getSellableInventoryQuantity(String itemName, int inventoryQuantity)
+    {
+        return Math.max(0, inventoryQuantity - getReservedQuestRequirementQuantity(itemName));
+    }
+
+    private int getReservedQuestRequirementQuantity(String itemName)
+    {
+        if (itemName == null) return 0;
+        int reserved = 0;
+
+        if (isQuestIncomplete(Quest.COOKS_ASSISTANT))
+        {
+            for (Items item : Items.values())
+                if (item.getDisplayName().equalsIgnoreCase(itemName)) reserved++;
+        }
+
+        if (isQuestIncomplete(Quest.GOBLIN_DIPLOMACY))
+        {
+            for (GobReqs item : GobReqs.values())
+                if (item.getDisplayName().equalsIgnoreCase(itemName)) reserved += item.getQuantity();
+        }
+        return reserved;
+    }
+
+    private boolean isQuestIncomplete(Quest quest)
+    {
+        return Rs2Player.getQuestState(quest) != QuestState.FINISHED;
+    }
+
+    private boolean hasOutdatedToolInBank()
+    {
+        if (!canAffordGeBuyRequirements()) return false;
+        String desiredPickaxe = resolveDesiredPickaxeName();
+        String desiredAxe = resolveDesiredAxeName();
+
+        for (String name : PICKAXE_NAMES)
+            if (!name.equalsIgnoreCase(desiredPickaxe) && Rs2Bank.count(name) > 0) return true;
+        for (String name : AXE_NAMES)
+            if (!name.equalsIgnoreCase(desiredAxe) && Rs2Bank.count(name) > 0) return true;
+        return false;
+    }
+
+    private String resolveDesiredPickaxeName()
+    {
+        return Buy.resolveDesiredPickaxeNameForBuy();
+    }
+
+    private String resolveDesiredAxeName()
+    {
+        return Buy.resolveDesiredAxeNameForBuy();
+    }
+
+    private boolean canAffordGeBuyRequirements()
+    {
+        long now = System.currentTimeMillis();
+        if (now - lastBuyAffordabilityCheckAtMs < BUY_AFFORDABILITY_CACHE_MS)
+            return cachedBuyAffordability;
+
+        cachedBuyAffordability = buyScript.canAffordMissingBuys();
+        lastBuyAffordabilityCheckAtMs = now;
+        return cachedBuyAffordability;
+    }
+
+    private boolean hasUnlockedTradeRestrictedItems()
+    {
+        long now = System.currentTimeMillis();
+        if (tradeRestrictionUnlockedCache != null
+                && now - lastTradeRestrictionCheckAtMs < TRADE_RESTRICTION_CACHE_MS)
+            return tradeRestrictionUnlockedCache;
+
+        long accountHash = getCurrentAccountHash();
+        long playTimeMillis = accountHash != 0L
+                && accountPlayTimeCache != null
+                && accountPlayTimeCache.hasCachedPlayTime(accountHash)
+                ? accountPlayTimeCache.getPlayTimeMillis(accountHash)
+                : -1L;
+
+        boolean unlocked = getTotalLevel() >= TRADE_RESTRICTION_MIN_TOTAL_LEVEL
+                && getQuestPoints() >= TRADE_RESTRICTION_MIN_QUEST_POINTS
+                && playTimeMillis >= TimeUnit.HOURS.toMillis(TRADE_RESTRICTION_MIN_HOURS_PLAYED);
+
+        tradeRestrictionUnlockedCache = unlocked;
+        lastTradeRestrictionCheckAtMs = now;
+        return unlocked;
+    }
+
+    private long getCurrentAccountHash()
+    {
+        if (!Microbot.isLoggedIn() || Microbot.getClient() == null) return 0L;
+        return Microbot.getClientThread().runOnClientThreadOptional(
+                () -> Microbot.getClient().getAccountHash()).orElse(0L);
+    }
+
+    private int getTotalLevel()
+    {
+        int total = 0;
+        for (Skill skill : SKILLS)
+            if (skill != Skill.OVERALL) total += Microbot.getClient().getRealSkillLevel(skill);
+        return total;
+    }
+
+    private int getQuestPoints()
+    {
+        return Microbot.getVarbitPlayerValue(101);
+    }
+
+    private boolean isBlockedSellItem(String itemName)
+    {
+        return itemName != null && blockedSellItems.contains(itemName.toLowerCase(Locale.ENGLISH));
+    }
+
+    private void recordWithdrawResult(String itemName, boolean success)
+    {
+        if (itemName == null) return;
+        String key = itemName.toLowerCase(Locale.ENGLISH);
+        if (success)
+        {
+            withdrawFailureCounts.remove(key);
+            return;
+        }
+
+        int failures = withdrawFailureCounts.getOrDefault(key, 0) + 1;
+        withdrawFailureCounts.put(key, failures);
+        if (failures >= MAX_WITHDRAW_FAILURES)
+        {
+            blockedSellItems.add(key);
+            debug("Blocking sell item after repeated withdrawal failures | item={} failures={}",
+                    itemName, failures);
         }
     }
 
-    public void shutdown() {
+    private void debug(String message, Object... args)
+    {
+        if (debugLogging) KspTaskDebug.info(log, true, "GE Sell", message, args);
+    }
+
+    @Override
+    public void shutdown()
+    {
+        state = SellState.GOING_TO_GE;
+        complete = false;
         sellInventoryReset = false;
-        this.state = SellState.GOING_TO_GE;
-        this.lastWebWalkAtMs = 0L;
-        this.lastActionAtMs = 0L;
-        clearBankInventoryAction();
-        this.blockedSellItems.clear();
-        this.withdrawFailureCounts.clear();
-        this.tradeRestrictionUnlockedCache = null;
-        this.lastTradeRestrictionCheckAtMs = 0L;
-        this.lastBuyAffordabilityCheckAtMs = 0L;
-        this.cachedBuyAffordability = false;
-        this.complete = false;
+        blockedSellItems.clear();
+        withdrawFailureCounts.clear();
+        tradeRestrictionUnlockedCache = null;
+        lastTradeRestrictionCheckAtMs = 0L;
+        lastBuyAffordabilityCheckAtMs = 0L;
+        cachedBuyAffordability = false;
         KspWalkerGuard.clear("GE Sell:target-area");
         super.shutdown();
     }
 
-    public boolean isComplete() {
-        return this.complete;
+    public boolean isComplete()
+    {
+        return complete;
     }
 
-    public GEArea getTargetArea() {
-        return this.targetArea;
+    public GEArea getTargetArea()
+    {
+        return targetArea;
     }
 }
