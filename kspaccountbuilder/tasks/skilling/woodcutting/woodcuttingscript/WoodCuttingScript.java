@@ -39,7 +39,7 @@ public class WoodCuttingScript extends Script {
     private static final int LOOP_DELAY_MS = 100;
     private static final int WEB_WALK_COOLDOWN_MS = 1_000;
     private static final int OBJECT_INTERACTION_COOLDOWN_MS = 100;
-    private static final int OBJECT_INTERACTION_START_TIMEOUT_MS = 1_500;
+    private static final int OBJECT_INTERACTION_START_TIMEOUT_MS = 2_500;
     private static final long BANK_ACTION_COOLDOWN_MS = 500L;
     private static final long BANK_INVENTORY_ACTION_TIMEOUT_MS = 1_500L;
     private static final int TREE_SEARCH_PADDING_TILES = 8;
@@ -196,6 +196,23 @@ public class WoodCuttingScript extends Script {
                 return false;
             }
 
+            activeAxe = resolveBestOwnedAxeName(targetAxe);
+            if (activeAxe == null) {
+                Microbot.status = "No usable axe available";
+                return false;
+            }
+        }
+
+        req = resolveWoodcuttingReq(activeAxe);
+        canEquip = req != null && canEquipDesiredAxe(req, attackLevel);
+
+        if (!Rs2Equipment.isWearing(activeAxe) && !Rs2Inventory.hasItem(activeAxe)) {
+            if (!Rs2Bank.isOpen()) {
+                if (!ensureInventoryTabOpen() || !bankActionReady()) return false;
+                if (Rs2Bank.openBank() || Rs2Bank.walkToBankAndUseBank()) markBankAction();
+                return false;
+            }
+
             if (KspBankWidgetHelper.closeBankTutorialOverlayIfOpenAndWait()) return false;
             if (!KspBankMode.ensureWithdrawAsItem()) return false;
             if (!bankActionReady()) return false;
@@ -322,11 +339,6 @@ public class WoodCuttingScript extends Script {
             return false;
         }
 
-        /*
-         * Important fix:
-         * If the player is already inside the current task area,
-         * clear any leftover walker route immediately and allow object interaction.
-         */
         if (this.targetArea.contains(playerLocation)) {
             this.clearTargetAreaWalkIfNeeded();
             Microbot.status = "Inside woodcutting area";
@@ -505,17 +517,19 @@ public class WoodCuttingScript extends Script {
     }
 
     private boolean canDispatchObjectInteraction(long now) {
-        if (Rs2Player.isMoving() || Rs2Player.isAnimating() || Rs2Player.isInteracting()) {
-            pendingObjectInteractionAtMs = 0L;
-            return false;
-        }
-
         if (pendingObjectInteractionAtMs > 0L) {
-            if (now - pendingObjectInteractionAtMs < OBJECT_INTERACTION_START_TIMEOUT_MS) return false;
+            if (Rs2Player.isMoving() || Rs2Player.isAnimating() || Rs2Player.isInteracting()) {
+                return false;
+            }
+            if (now - pendingObjectInteractionAtMs < OBJECT_INTERACTION_START_TIMEOUT_MS) {
+                return false;
+            }
             pendingObjectInteractionAtMs = 0L;
         }
 
-        return true;
+        return !Rs2Player.isMoving()
+                && !Rs2Player.isAnimating()
+                && !Rs2Player.isInteracting();
     }
 
     private boolean bankInventoryActionPending() {
@@ -555,9 +569,6 @@ public class WoodCuttingScript extends Script {
         TreeLevel treeLevel = this.getTargetTreeLevel(woodcuttingLevel);
         int searchRadius = this.getAreaSearchRadius() + TREE_SEARCH_PADDING_TILES;
 
-        /*
-         * Prefer objects inside the actual current task area first.
-         */
         Rs2TileObjectModel tree = this.findMatchingTree(searchCenter, searchRadius, treeLevel, true);
 
         if (tree != null) {
@@ -573,9 +584,6 @@ public class WoodCuttingScript extends Script {
             return tree;
         }
 
-        /*
-         * Fallback: allow nearby objects only if no inside-area object was found.
-         */
         tree = this.findMatchingTree(searchCenter, searchRadius, treeLevel, false);
 
         if (tree == null) {
