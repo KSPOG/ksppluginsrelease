@@ -17,7 +17,7 @@ import javax.inject.Singleton;
 import net.runelite.api.Quest;
 import net.runelite.api.QuestState;
 import net.runelite.api.Skill;
-import net.runelite.api.VarClientID;
+import net.runelite.api.VarClientStr;
 import net.runelite.api.gameval.InterfaceID;
 import net.runelite.api.widgets.ComponentID;
 import net.runelite.api.widgets.Widget;
@@ -504,7 +504,7 @@ public class SellScript extends Script
             if (!isVisible(input)) return false;
             String text = Long.toString(value);
             input.setText(text + "*");
-            Microbot.getClient().setVarcStrValue(VarClientID.MESLAYERINPUT, text);
+            Microbot.getClient().setVarcStrValue(VarClientStr.INPUT_TEXT, text);
             return true;
         }, false);
     }
