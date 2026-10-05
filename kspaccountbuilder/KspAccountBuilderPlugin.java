@@ -24,7 +24,7 @@ import javax.inject.Inject;
         isExternal = true
 )
 @Slf4j
-@SuppressWarnings("unused") // Loaded dynamically by the hub build/plugin discovery process.
+@SuppressWarnings("unused")
 public class KspAccountBuilderPlugin extends Plugin
 {
     public static final String VERSION = "1.7.20";
@@ -46,6 +46,7 @@ public class KspAccountBuilderPlugin extends Plugin
 
     private KspRandomEventSolver randomEventSolver;
     private KspLevelUpDialogueEvent levelUpDialogueEvent;
+    private boolean runtimeActive;
 
     @Provides
     KspAccountBuilderConfig provideConfig(ConfigManager configManager)
@@ -54,45 +55,80 @@ public class KspAccountBuilderPlugin extends Plugin
     }
 
     @Override
-    protected void startUp()
+    protected synchronized void startUp()
     {
+        cleanupRuntime("restart-before-start");
         log.info("Starting KSP Account Builder plugin");
+
         migrateSingleSkillTargetDefaults();
         overlayManager.add(overlay);
+
         randomEventSolver = new KspRandomEventSolver();
         Microbot.getBlockingEventManager().add(randomEventSolver);
+
         levelUpDialogueEvent = new KspLevelUpDialogueEvent();
         Microbot.getBlockingEventManager().add(levelUpDialogueEvent);
+
+        runtimeActive = true;
         script.run(config);
     }
 
     @Override
-    protected void shutDown()
+    protected synchronized void shutDown()
     {
-        log.info("Stopping KSP Account Builder plugin");
-        script.shutdown();
-        if (randomEventSolver != null)
-        {
-            Microbot.getBlockingEventManager().remove(randomEventSolver);
-            randomEventSolver = null;
-        }
-        if (levelUpDialogueEvent != null)
-        {
-            Microbot.getBlockingEventManager().remove(levelUpDialogueEvent);
-            levelUpDialogueEvent = null;
-        }
-        overlayManager.remove(overlay);
+        cleanupRuntime("plugin-stop");
     }
 
-    public void prepareHotUnload()
+    public synchronized void prepareHotUnload()
     {
-        log.info("Preparing KSP Account Builder for hot unload");
-        script.shutdown();
+        cleanupRuntime("hot-unload");
     }
 
     public void afterHotReload()
     {
         log.info("KSP Account Builder hot reload completed | version={}", VERSION);
+    }
+
+    private void cleanupRuntime(String reason)
+    {
+        if (!runtimeActive && randomEventSolver == null && levelUpDialogueEvent == null)
+        {
+            // Still stop the script in case Source Loader calls hot-unload before
+            // the normal plugin lifecycle flag was established.
+            if (script != null)
+            {
+                script.shutdown();
+            }
+            return;
+        }
+
+        log.info("Stopping KSP Account Builder runtime | reason={}", reason);
+        runtimeActive = false;
+
+        if (script != null)
+        {
+            script.shutdown();
+        }
+
+        KspWalkerGuard.clearActiveWalker("ksp_account_builder_" + reason);
+        KspWalkerGuard.clear("Woodcutting:target-area");
+
+        if (randomEventSolver != null)
+        {
+            Microbot.getBlockingEventManager().remove(randomEventSolver);
+            randomEventSolver = null;
+        }
+
+        if (levelUpDialogueEvent != null)
+        {
+            Microbot.getBlockingEventManager().remove(levelUpDialogueEvent);
+            levelUpDialogueEvent = null;
+        }
+
+        if (overlayManager != null && overlay != null)
+        {
+            overlayManager.remove(overlay);
+        }
     }
 
     private void migrateSingleSkillTargetDefaults()
