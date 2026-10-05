@@ -11,7 +11,6 @@ import net.runelite.client.plugins.microbot.kspaccountbuilder.KspBankMode;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.KspTaskDebug;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.KspWalkerGuard;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.ksputil.KspBankWidgetHelper;
-import net.runelite.client.plugins.microbot.kspaccountbuilder.ksputil.KspGrandExchangeHelper;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.questing.cooksassistant.reqs.Items;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.selling.gearea.GEArea;
 import net.runelite.client.plugins.microbot.util.bank.Rs2Bank;
@@ -20,7 +19,6 @@ import net.runelite.client.plugins.microbot.util.grandexchange.GrandExchangeActi
 import net.runelite.client.plugins.microbot.util.grandexchange.GrandExchangeRequest;
 import net.runelite.client.plugins.microbot.util.grandexchange.GrandExchangeSlots;
 import net.runelite.client.plugins.microbot.util.grandexchange.Rs2GrandExchange;
-import net.runelite.client.plugins.microbot.ksputil.KspGrandExchangeSafe;
 import net.runelite.client.plugins.microbot.util.grandexchange.models.GrandExchangeOfferDetails;
 import net.runelite.client.plugins.microbot.util.inventory.Rs2Inventory;
 import net.runelite.client.plugins.microbot.util.player.Rs2Player;
@@ -312,15 +310,14 @@ public class CooksScript extends Script {
         if (Rs2GrandExchange.isOpen()) return true;
 
         if (Rs2Bank.isOpen()) {
-            KspGrandExchangeHelper.closeBankBeforeExchange();
+            Rs2Bank.closeBank();
             return false;
         }
 
         if (System.currentTimeMillis() - lastActionAtMs < ACTION_COOLDOWN_MS) return false;
 
         status = "Opening Grand Exchange";
-        boolean clicked = KspGrandExchangeHelper.openExchangeDirectly()
-                || KspGrandExchangeHelper.interactClerk();
+        boolean clicked = Rs2GrandExchange.openExchange();
         if (clicked) lastActionAtMs = System.currentTimeMillis();
         return false;
     }
@@ -352,12 +349,7 @@ public class CooksScript extends Script {
         if (offerPrice <= 0) return false;
 
         int slotsBefore = Rs2GrandExchange.getAvailableSlotsCount();
-        boolean offered = KspGrandExchangeSafe.buy(
-                buyRequest.itemName,
-                buyRequest.quantity,
-                (long) offerPrice,
-                true,
-                false);
+        boolean offered = Rs2GrandExchange.buyItem(buyRequest.itemName, (int) Math.min(Integer.MAX_VALUE, (long) (offerPrice)), buyRequest.quantity);
         if (!offered) return false;
 
         if (!sleepUntil(() ->

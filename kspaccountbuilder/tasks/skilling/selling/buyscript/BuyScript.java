@@ -18,7 +18,6 @@ import net.runelite.client.plugins.microbot.Microbot;
 import net.runelite.client.plugins.microbot.Script;
 import net.runelite.client.plugins.microbot.globval.enums.InterfaceTab;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.ksputil.KspBankWidgetHelper;
-import net.runelite.client.plugins.microbot.kspaccountbuilder.ksputil.KspGrandExchangeHelper;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.KspTaskDebug;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.KspWalkerGuard;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.combat.melee.food.Food;
@@ -29,7 +28,6 @@ import net.runelite.client.plugins.microbot.util.grandexchange.GrandExchangeActi
 import net.runelite.client.plugins.microbot.util.grandexchange.GrandExchangeRequest;
 import net.runelite.client.plugins.microbot.util.grandexchange.GrandExchangeSlots;
 import net.runelite.client.plugins.microbot.util.grandexchange.Rs2GrandExchange;
-import net.runelite.client.plugins.microbot.ksputil.KspGrandExchangeSafe;
 import net.runelite.client.plugins.microbot.util.grandexchange.models.GrandExchangeOfferDetails;
 import net.runelite.client.plugins.microbot.util.inventory.Rs2Inventory;
 import net.runelite.client.plugins.microbot.util.inventory.Rs2ItemModel;
@@ -1206,8 +1204,7 @@ public class BuyScript extends Script {
         }
 
         int slotsBefore = Rs2GrandExchange.getAvailableSlotsCount();
-        boolean offered = KspGrandExchangeSafe.buy(
-                itemName, quantity, (long) buyPrice, true, false);
+        boolean offered = Rs2GrandExchange.buyItem(itemName, (int) Math.min(Integer.MAX_VALUE, (long) (buyPrice)), quantity);
         if (offered && !waitForOfferCommit(slotsBefore)) offered = false;
 
         this.debug(
@@ -1242,8 +1239,7 @@ public class BuyScript extends Script {
         }
 
         int slotsBefore = Rs2GrandExchange.getAvailableSlotsCount();
-        boolean offered = KspGrandExchangeSafe.buy(
-                itemName, quantity, (long) buyPrice, true, false);
+        boolean offered = Rs2GrandExchange.buyItem(itemName, (int) Math.min(Integer.MAX_VALUE, (long) (buyPrice)), quantity);
         if (offered && !waitForOfferCommit(slotsBefore)) offered = false;
 
         this.debug(
@@ -1649,15 +1645,14 @@ public class BuyScript extends Script {
         if (Rs2GrandExchange.isOpen()) return true;
 
         if (Rs2Bank.isOpen()) {
-            KspGrandExchangeHelper.closeBankBeforeExchange();
+            Rs2Bank.closeBank();
             return false;
         }
 
         if (System.currentTimeMillis() - lastActionAtMs < ACTION_COOLDOWN_MS) return false;
 
         Microbot.status = "Opening GE";
-        boolean dispatched = KspGrandExchangeHelper.openExchangeDirectly()
-                || KspGrandExchangeHelper.interactClerk();
+        boolean dispatched = Rs2GrandExchange.openExchange();
         if (dispatched) lastActionAtMs = System.currentTimeMillis();
         return false;
     }
@@ -1670,12 +1665,7 @@ public class BuyScript extends Script {
         Microbot.status = "Selling " + item.getName();
 
         int slotsBefore = Rs2GrandExchange.getAvailableSlotsCount();
-        boolean offered = KspGrandExchangeSafe.sell(
-                item.getName(),
-                item.getQuantity(),
-                (long) this.getAdjustedSellPrice(item),
-                true,
-                false);
+        boolean offered = Rs2GrandExchange.sellItem(item.getName(), item.getQuantity(), (int) Math.min(Integer.MAX_VALUE, (long) (this.getAdjustedSellPrice(item))));
         if (offered && !waitForOfferCommit(slotsBefore)) offered = false;
 
         if (offered) {
@@ -1709,8 +1699,7 @@ public class BuyScript extends Script {
         }
 
         int slotsBefore = Rs2GrandExchange.getAvailableSlotsCount();
-        boolean offered = KspGrandExchangeSafe.buy(
-                itemName, 1, (long) buyPrice, true, false);
+        boolean offered = Rs2GrandExchange.buyItem(itemName, (int) Math.min(Integer.MAX_VALUE, (long) (buyPrice)), 1);
         if (offered && !waitForOfferCommit(slotsBefore)) offered = false;
 
         this.debug(
