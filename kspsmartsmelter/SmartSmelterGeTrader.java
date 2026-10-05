@@ -10,7 +10,6 @@ import net.runelite.client.plugins.microbot.util.grandexchange.GrandExchangeActi
 import net.runelite.client.plugins.microbot.util.grandexchange.GrandExchangeRequest;
 import net.runelite.client.plugins.microbot.util.grandexchange.GrandExchangeSlots;
 import net.runelite.client.plugins.microbot.util.grandexchange.Rs2GrandExchange;
-import net.runelite.client.plugins.microbot.ksputil.KspGrandExchangeSafe;
 import net.runelite.client.plugins.microbot.util.grandexchange.models.WikiPrice;
 import net.runelite.client.plugins.microbot.util.world.Rs2WorldUtil;
 
@@ -23,10 +22,9 @@ import static net.runelite.client.plugins.microbot.util.Global.sleepUntil;
 /**
  * Grand Exchange interaction for Smart Smelter.
  *
- * <p>This deliberately follows the proven Jewellery Crafter pattern:
- * initial offers are placed through {@link Rs2GrandExchange#processOffer(GrandExchangeRequest)}
- * with an explicit BUY slot and exact price/quantity, then verified against the client's
- * live {@link GrandExchangeOffer} array. We do not guess GE setup child widgets.</p>
+ * <p>Offers are placed through Microbot's current Grand Exchange request flow,
+ * which is backed by RuneLite's GE widgets/state. Placement is then verified
+ * against the live {@link GrandExchangeOffer} array.</p>
  */
 @Slf4j
 final class SmartSmelterGeTrader
@@ -78,14 +76,17 @@ final class SmartSmelterGeTrader
         Microbot.status = "Buying " + quantity + " x " + itemName
                 + " in GE slot " + (slot.ordinal() + 1);
 
-        if (!KspGrandExchangeSafe.processOffer(
-                slot,
-                GrandExchangeAction.BUY,
-                itemName,
-                true,
-                quantity,
-                (long) price,
-                false))
+        GrandExchangeRequest request = GrandExchangeRequest.builder()
+                .slot(slot)
+                .action(GrandExchangeAction.BUY)
+                .itemName(itemName)
+                .exact(true)
+                .quantity(quantity)
+                .price(price)
+                .closeAfterCompletion(false)
+                .build();
+
+        if (!Rs2GrandExchange.processOffer(request))
         {
             Microbot.status = Rs2GrandExchange.isOpen()
                     ? "GE buy placement failed: " + itemName
@@ -148,12 +149,16 @@ final class SmartSmelterGeTrader
         }
 
         Microbot.status = "Selling " + quantity + " x " + itemName;
-        if (!KspGrandExchangeSafe.sell(
-                itemName,
-                quantity,
-                (long) price,
-                true,
-                false))
+        GrandExchangeRequest request = GrandExchangeRequest.builder()
+                .action(GrandExchangeAction.SELL)
+                .itemName(itemName)
+                .exact(true)
+                .quantity(quantity)
+                .price(price)
+                .closeAfterCompletion(false)
+                .build();
+
+        if (!Rs2GrandExchange.processOffer(request))
         {
             Microbot.status = Rs2GrandExchange.isOpen()
                     ? "GE sell placement failed: " + itemName
@@ -447,9 +452,6 @@ final class SmartSmelterGeTrader
                 return 0;
             }
 
-            // RuneLite's real-time Wiki pricing is already side-aware: buyPrice is
-            // the current instant-buy/high side and sellPrice is the instant-sell/low
-            // side. Use that market value directly instead of applying a manual %.
             int marketPrice = action == GrandExchangeAction.BUY
                     ? market.buyPrice
                     : market.sellPrice;
@@ -483,10 +485,6 @@ final class SmartSmelterGeTrader
         }
     }
 
-    /**
-     * Keeps the generated InterfaceID access in one place so the overview logic mirrors
-     * Jewellery Crafter without tying the rest of the trader to widget child arithmetic.
-     */
     private static final class Rs2WidgetVisible
     {
         private Rs2WidgetVisible() {}
