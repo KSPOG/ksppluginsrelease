@@ -17,7 +17,6 @@ import net.runelite.client.plugins.microbot.util.grandexchange.GrandExchangeActi
 import net.runelite.client.plugins.microbot.util.grandexchange.GrandExchangeRequest;
 import net.runelite.client.plugins.microbot.util.grandexchange.GrandExchangeSlots;
 import net.runelite.client.plugins.microbot.util.grandexchange.Rs2GrandExchange;
-import net.runelite.client.plugins.microbot.ksputil.KspGrandExchangeSafe;
 import net.runelite.client.plugins.microbot.util.inventory.Rs2Inventory;
 import net.runelite.client.plugins.microbot.util.magic.Rs2Magic;
 import net.runelite.client.plugins.microbot.util.keyboard.Rs2Keyboard;
@@ -432,14 +431,7 @@ public class KspSmartSuperheatScript extends Script
         boolean placed = false;
         try
         {
-            placed = KspGrandExchangeSafe.processOffer(
-                    o.slot,
-                    o.action,
-                    o.itemName,
-                    true,
-                    o.quantity,
-                    (long) o.price,
-                    false);
+            placed = Rs2GrandExchange.processOffer(GrandExchangeRequest.builder().slot(o.slot).action(o.action).itemName(o.itemName).exact(true).quantity(o.quantity).price((int) Math.min(Integer.MAX_VALUE, (long) (o.price))).closeAfterCompletion(false).build());
         }
         catch (NullPointerException e)
         {
@@ -594,7 +586,7 @@ public class KspSmartSuperheatScript extends Script
         // Same chatbox-value flow as Jewellery Crafter, with the settle delays
         // Microbot's own GE setPrice() uses so the new value is not submitted too early.
         sleep(600, 1000);
-        KspGrandExchangeSafe.setChatboxValue(newPrice);
+        Rs2GrandExchange.setChatboxValue((int) Math.min(Integer.MAX_VALUE, (long) (newPrice)));
         sleep(500, 750);
         Rs2Keyboard.enter();
         sleep(800, 1100);

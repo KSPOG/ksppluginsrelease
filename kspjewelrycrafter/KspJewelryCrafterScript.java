@@ -22,7 +22,6 @@ import net.runelite.client.plugins.microbot.util.gameobject.Rs2GameObject;
 import net.runelite.client.plugins.microbot.util.grandexchange.GrandExchangeAction;
 import net.runelite.client.plugins.microbot.util.grandexchange.GrandExchangeSlots;
 import net.runelite.client.plugins.microbot.util.grandexchange.Rs2GrandExchange;
-import net.runelite.client.plugins.microbot.ksputil.KspGrandExchangeSafe;
 import net.runelite.client.plugins.microbot.util.inventory.Rs2Inventory;
 import net.runelite.client.plugins.microbot.util.keyboard.Rs2Keyboard;
 import net.runelite.client.plugins.microbot.util.player.Rs2Player;
@@ -950,7 +949,7 @@ public class KspJewelryCrafterScript extends Script
             if (!sleepUntil(() -> gePriceInputOpen() || !Rs2GrandExchange.isOpen(), 3_000)) { status = "Waiting for GE " + label + " input"; sleep(250, 450); continue; }
             if (!Rs2GrandExchange.isOpen()) return false;
             sleep(600, 1_000);
-            KspGrandExchangeSafe.setChatboxValue(value);
+            Rs2GrandExchange.setChatboxValue((int) Math.min(Integer.MAX_VALUE, (long) (value)));
             sleep(500, 750);
             Rs2Keyboard.enter();
             if (!Rs2GrandExchange.isOpen()) return false;

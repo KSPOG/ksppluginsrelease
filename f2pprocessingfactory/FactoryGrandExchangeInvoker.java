@@ -12,7 +12,6 @@ import net.runelite.client.plugins.microbot.util.grandexchange.GrandExchangeActi
 import net.runelite.client.plugins.microbot.util.grandexchange.GrandExchangeRequest;
 import net.runelite.client.plugins.microbot.util.grandexchange.GrandExchangeSlots;
 import net.runelite.client.plugins.microbot.util.grandexchange.Rs2GrandExchange;
-import net.runelite.client.plugins.microbot.ksputil.KspGrandExchangeSafe;
 import net.runelite.client.plugins.microbot.util.keyboard.Rs2Keyboard;
 import net.runelite.client.plugins.microbot.util.widget.Rs2Widget;
 
@@ -135,14 +134,7 @@ final class FactoryGrandExchangeInvoker
             {
                 return fail("initial BUY widget state changed before native placement");
             }
-            success = KspGrandExchangeSafe.processOffer(
-                slot,
-                GrandExchangeAction.BUY,
-                itemName,
-                true,
-                quantity,
-                (long) price,
-                false);
+            success = Rs2GrandExchange.processOffer(GrandExchangeRequest.builder().slot(slot).action(GrandExchangeAction.BUY).itemName(itemName).exact(true).quantity(quantity).price((int) Math.min(Integer.MAX_VALUE, (long) (price))).closeAfterCompletion(false).build());
         }
         catch (Exception ex)
         {
@@ -210,12 +202,7 @@ final class FactoryGrandExchangeInvoker
             {
                 return fail("initial SELL widget state changed before native placement");
             }
-            success = KspGrandExchangeSafe.sell(
-                itemName,
-                quantity,
-                (long) price,
-                true,
-                false);
+            success = Rs2GrandExchange.sellItem(itemName, quantity, (int) Math.min(Integer.MAX_VALUE, (long) (price)));
         }
         catch (Exception ex)
         {
@@ -449,7 +436,7 @@ final class FactoryGrandExchangeInvoker
                 continue;
             }
 
-            KspGrandExchangeSafe.setChatboxValue(price);
+            Rs2GrandExchange.setChatboxValue((int) Math.min(Integer.MAX_VALUE, (long) (price)));
             sleep(250, 450);
             if (!pressEnterForPricePrompt(price))
             {
