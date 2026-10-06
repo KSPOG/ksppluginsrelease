@@ -102,7 +102,7 @@ final class KspRuntimeDebugMonitor
 
         for (Plugin plugin : loaded)
         {
-            if (!isKspPlugin(plugin)) continue;
+            if (plugin instanceof KspSupportPlugin || !isKspPlugin(plugin)) continue;
 
             String key = instanceKey(plugin);
             seen.add(key);
@@ -183,6 +183,7 @@ final class KspRuntimeDebugMonitor
         List<String> activeScripts = new ArrayList<>();
 
         collectOperationalFields(plugin, "plugin", values);
+        if (active) values.put("microbot.status", safeText(Microbot.status));
 
         for (Field field : allFields(plugin.getClass()))
         {
