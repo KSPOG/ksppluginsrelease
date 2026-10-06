@@ -168,7 +168,6 @@ final class KspDebugPanel extends PluginPanel
             autoScroll = new JCheckBox("Auto-scroll", true);
             pause = new JButton("Pause");
             JButton clear = new JButton("Clear"), copy = new JButton("Copy");
-            Collections.addAll(Arrays.asList());
             bar.add(levelFilter); bar.add(pluginFilter); bar.add(search); bar.add(pause); bar.add(clear); bar.add(copy); bar.add(autoScroll);
 
             levelFilter.addActionListener(e -> { if (!updatingFilter) rebuild(); });
@@ -213,9 +212,6 @@ final class KspDebugPanel extends PluginPanel
         JScrollBar bar = scroll.getVerticalScrollBar();
         boolean follow = autoScroll == null || autoScroll.isSelected();
         int oldValue = bar.getValue();
-        int oldMax = bar.getMaximum();
-        int oldExtent = bar.getVisibleAmount();
-        double ratio = oldMax <= oldExtent ? 0.0 : (double) oldValue / (oldMax - oldExtent);
 
         StringBuilder body = new StringBuilder();
         for (Entry e : filtered()) body.append(render(e));
@@ -226,11 +222,7 @@ final class KspDebugPanel extends PluginPanel
             if (scroll == null) return;
             JScrollBar b = scroll.getVerticalScrollBar();
             if (follow) b.setValue(b.getMaximum());
-            else
-            {
-                int range = Math.max(0, b.getMaximum() - b.getVisibleAmount());
-                b.setValue((int) Math.round(Math.min(1.0, Math.max(0.0, ratio)) * range));
-            }
+            else b.setValue(Math.min(oldValue, Math.max(b.getMinimum(), b.getMaximum() - b.getVisibleAmount())));
         });
     }
 
@@ -306,7 +298,6 @@ final class KspDebugPanel extends PluginPanel
         String s = raw.trim();
         if (s.regionMatches(true, 0, "<html>", 0, 6)) s = s.substring(6);
         if (s.toLowerCase(Locale.ROOT).endsWith("</html>")) s = s.substring(0, s.length() - 7);
-        // RuneLite descriptors sometimes contain malformed '#RRGGBBM' colors; keep the valid RGB part.
         s = s.replaceAll("(?i)color=#([0-9a-f]{6})[a-z]+", "color=#$1");
         return s;
     }
