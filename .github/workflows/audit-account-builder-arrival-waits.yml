@@ -1,0 +1,27 @@
+name: Audit Account Builder arrival waits
+on:
+  push:
+    branches: [fix/account-builder-immediate-arrival-actions]
+permissions:
+  contents: read
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Show Account Builder movement gates with context
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          for p in sorted(Path('kspaccountbuilder').rglob('*.java')):
+              lines=p.read_text(errors='ignore').splitlines()
+              hits=[i for i,l in enumerate(lines) if 'Rs2Player.isMoving()' in l]
+              if not hits: continue
+              print(f'===== {p} ({len(hits)} hits) =====')
+              for i in hits:
+                  lo=max(0,i-5); hi=min(len(lines),i+7)
+                  for n in range(lo,hi):
+                      print(f'{n+1:4}: {lines[n]}')
+                  print('---')
+          PY
