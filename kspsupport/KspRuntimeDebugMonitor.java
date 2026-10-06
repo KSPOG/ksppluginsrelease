@@ -22,25 +22,33 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 
-/** Central low-noise diagnostics for every source-loaded KSP plugin. */
+/** Central low-overhead diagnostics for KSP plugins. */
 final class KspRuntimeDebugMonitor
 {
     private static final Logger log = LoggerFactory.getLogger("KSP.RuntimeDebug");
     private static final long POLL_MS = 2_000L;
     private static final long HEARTBEAT_MS = 30_000L;
+    private static final long SLOW_SCAN_WARN_MS = 50L;
+    private static final long SLOW_SCAN_WARN_COOLDOWN_MS = 10_000L;
     private static final int MAX_VALUE_LENGTH = 120;
     private static final int MAX_CHANGED_FIELDS = 8;
+
+    private static final Map<Class<?>, List<Field>> FIELD_CACHE = new ConcurrentHashMap<>();
 
     private final PluginManager pluginManager;
     private final KspDebugPanel panel;
     private final Map<String, Snapshot> previous = new HashMap<>();
     private final Map<String, Long> lastHeartbeat = new HashMap<>();
     private final Map<String, String> duplicateSignatures = new HashMap<>();
+
     private ScheduledExecutorService executor;
+    private String previousGlobalStatus;
+    private long lastSlowScanWarnAt;
 
     KspRuntimeDebugMonitor(PluginManager pluginManager, KspDebugPanel panel)
     {
@@ -55,10 +63,11 @@ final class KspRuntimeDebugMonitor
         {
             Thread t = new Thread(r, "ksp-runtime-debug");
             t.setDaemon(true);
+            t.setPriority(Thread.MIN_PRIORITY);
             return t;
         });
         executor.scheduleWithFixedDelay(this::scanSafely, 0L, POLL_MS, TimeUnit.MILLISECONDS);
-        info("runtime monitor started | poll=" + POLL_MS + "ms heartbeat=" + HEARTBEAT_MS + "ms");
+        info("runtime monitor started | poll=" + POLL_MS + "ms heartbeat=" + HEARTBEAT_MS + "ms | active-only deep scan=true");
     }
 
     synchronized void stop()
@@ -71,17 +80,32 @@ final class KspRuntimeDebugMonitor
         previous.clear();
         lastHeartbeat.clear();
         duplicateSignatures.clear();
+        previousGlobalStatus = null;
         info("runtime monitor stopped");
         if (panel != null) panel.disposeConsole();
     }
 
     private void scanSafely()
     {
-        try { scan(); }
+        long started = System.nanoTime();
+        try
+        {
+            scan();
+        }
         catch (Throwable t)
         {
             log.warn("[KSP-DBG] monitor scan failed", t);
             warn("monitor scan failed | " + t.getClass().getSimpleName() + ": " + safeText(t.getMessage()));
+        }
+        finally
+        {
+            long elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started);
+            long now = System.currentTimeMillis();
+            if (elapsedMs >= SLOW_SCAN_WARN_MS && now - lastSlowScanWarnAt >= SLOW_SCAN_WARN_COOLDOWN_MS)
+            {
+                lastSlowScanWarnAt = now;
+                warn("slow debug scan | elapsed=" + elapsedMs + "ms");
+            }
         }
     }
 
@@ -94,6 +118,7 @@ final class KspRuntimeDebugMonitor
         long now = System.currentTimeMillis();
         Set<String> seen = new HashSet<>();
         Map<String, List<String>> activeInstancesByClass = new HashMap<>();
+        List<Heartbeat> heartbeats = new ArrayList<>();
         int activeCount = 0;
 
         for (Plugin plugin : loaded)
@@ -105,8 +130,11 @@ final class KspRuntimeDebugMonitor
 
             boolean enabled = safeEnabled(plugin);
             boolean active = safeActive(plugin);
-            Snapshot current = snapshot(plugin, enabled, active);
-            Snapshot old = previous.put(key, current);
+            Snapshot old = previous.get(key);
+            Snapshot current = active
+                    ? snapshotActive(plugin, enabled)
+                    : new Snapshot(descriptorName(plugin), enabled, false, Collections.emptyMap());
+            previous.put(key, current);
 
             if (active)
             {
@@ -115,10 +143,13 @@ final class KspRuntimeDebugMonitor
             }
 
             if (old == null)
-                info("discovered | plugin=" + current.pluginName + " | enabled=" + enabled + " | active=" + active);
+            {
+                if (enabled || active)
+                    info("discovered | plugin=" + current.pluginName + " | enabled=" + enabled + " | active=" + active);
+            }
             else
             {
-                if (old.enabled != current.enabled || old.active != current.active)
+                if (old.enabled != enabled || old.active != active)
                     info("lifecycle | plugin=" + current.pluginName + " | enabled=" + enabled + " | active=" + active);
 
                 if (active)
@@ -132,10 +163,15 @@ final class KspRuntimeDebugMonitor
             if (active && now - lastHeartbeat.getOrDefault(key, 0L) >= HEARTBEAT_MS)
             {
                 lastHeartbeat.put(key, now);
-                info("heartbeat | plugin=" + current.pluginName + " | " + compactState(current.values)
-                        + " | client=" + clientSnapshot());
+                heartbeats.add(new Heartbeat(current.pluginName, compactState(current.values)));
             }
         }
+
+        logGlobalStatusOnce();
+
+        String client = heartbeats.isEmpty() ? null : clientSnapshot();
+        for (Heartbeat heartbeat : heartbeats)
+            info("heartbeat | plugin=" + heartbeat.pluginName + " | " + heartbeat.state + " | client=" + client);
 
         for (String oldKey : new ArrayList<>(previous.keySet()))
         {
@@ -147,6 +183,16 @@ final class KspRuntimeDebugMonitor
 
         if (panel != null) panel.setActiveCount(activeCount);
         checkDuplicateInstances(activeInstancesByClass);
+    }
+
+    /** Microbot.status is global, so log it once instead of once per active plugin. */
+    private void logGlobalStatusOnce()
+    {
+        String current = safeText(Microbot.status);
+        if (java.util.Objects.equals(previousGlobalStatus, current)) return;
+        previousGlobalStatus = current;
+        if (!current.isEmpty() && !"null".equals(current))
+            info("state-change | plugin=Client | changed=status=" + current);
     }
 
     private void checkDuplicateInstances(Map<String, List<String>> activeByClass)
@@ -171,13 +217,13 @@ final class KspRuntimeDebugMonitor
         }
     }
 
-    private Snapshot snapshot(Plugin plugin, boolean enabled, boolean active)
+    /** Expensive reflection is only performed for active KSP plugins. */
+    private Snapshot snapshotActive(Plugin plugin, boolean enabled)
     {
         Map<String, String> values = new LinkedHashMap<>();
         List<String> activeScripts = new ArrayList<>();
 
         collectOperationalFields(plugin, "plugin", values);
-        if (active) values.put("status", safeText(Microbot.status));
 
         for (Field field : allFields(plugin.getClass()))
         {
@@ -186,19 +232,19 @@ final class KspRuntimeDebugMonitor
             if (!(value instanceof Script)) continue;
 
             Script script = (Script) value;
-            String scriptName = script.getClass().getSimpleName();
-            boolean running = false;
-            try { running = script.isRunning(); } catch (Throwable ignored) { }
+            boolean running;
+            try { running = script.isRunning(); }
+            catch (Throwable ignored) { running = false; }
+            if (!running) continue;
 
-            values.put(scriptName + ".running", Boolean.toString(running));
-            if (running) activeScripts.add(scriptName);
+            String scriptName = script.getClass().getSimpleName();
+            activeScripts.add(scriptName);
             collectOperationalFields(script, scriptName, values);
         }
 
         activeScripts.sort(Comparator.naturalOrder());
         if (!activeScripts.isEmpty()) values.put("activeScripts", String.join(",", activeScripts));
-
-        return new Snapshot(descriptorName(plugin), enabled, active, values);
+        return new Snapshot(descriptorName(plugin), enabled, true, values);
     }
 
     private void collectOperationalFields(Object owner, String prefix, Map<String, String> out)
@@ -214,6 +260,30 @@ final class KspRuntimeDebugMonitor
             if (!isSimpleValue(value)) continue;
             out.put(prefix + "." + field.getName(), safeText(value));
         }
+    }
+
+    private static List<Field> allFields(Class<?> type)
+    {
+        return FIELD_CACHE.computeIfAbsent(type, KspRuntimeDebugMonitor::discoverFields);
+    }
+
+    private static List<Field> discoverFields(Class<?> type)
+    {
+        List<Field> fields = new ArrayList<>();
+        for (Class<?> c = type; c != null && c != Object.class; c = c.getSuperclass())
+        {
+            try
+            {
+                for (Field field : c.getDeclaredFields())
+                {
+                    try { field.setAccessible(true); }
+                    catch (Throwable ignored) { }
+                    fields.add(field);
+                }
+            }
+            catch (Throwable ignored) { }
+        }
+        return Collections.unmodifiableList(fields);
     }
 
     private static String changedFields(Map<String, String> oldValues, Map<String, String> newValues)
@@ -239,15 +309,13 @@ final class KspRuntimeDebugMonitor
     {
         List<String> preferred = new ArrayList<>();
         addIfPresent(preferred, values, "activeScripts");
-        addIfPresent(preferred, values, "status");
-
         if (preferred.size() < 4)
         {
-            for (Map.Entry<String, String> e : values.entrySet())
+            for (Map.Entry<String, String> entry : values.entrySet())
             {
-                String lower = e.getKey().toLowerCase(Locale.ROOT);
-                if (!(lower.contains("state") || lower.contains("task") || lower.contains("stage"))) continue;
-                preferred.add(shortKey(e.getKey()) + "=" + e.getValue());
+                String lower = entry.getKey().toLowerCase(Locale.ROOT);
+                if (!(lower.contains("state") || lower.contains("task") || lower.contains("stage") || lower.contains("status"))) continue;
+                preferred.add(shortKey(entry.getKey()) + "=" + entry.getValue());
                 if (preferred.size() >= 4) break;
             }
         }
@@ -263,8 +331,7 @@ final class KspRuntimeDebugMonitor
     private static String shortKey(String key)
     {
         if (key == null) return "?";
-        if (key.startsWith("plugin.")) return key.substring(7);
-        return key;
+        return key.startsWith("plugin.") ? key.substring(7) : key;
     }
 
     private static boolean isOperationalField(String name)
@@ -301,34 +368,16 @@ final class KspRuntimeDebugMonitor
 
     private static Object read(Field field, Object owner)
     {
-        try
-        {
-            if (!field.isAccessible()) field.setAccessible(true);
-            return field.get(owner);
-        }
+        try { return field.get(owner); }
         catch (Throwable ignored) { return null; }
-    }
-
-    private static List<Field> allFields(Class<?> type)
-    {
-        List<Field> fields = new ArrayList<>();
-        for (Class<?> c = type; c != null && c != Object.class; c = c.getSuperclass())
-        {
-            try { Collections.addAll(fields, c.getDeclaredFields()); }
-            catch (Throwable ignored) { }
-        }
-        return fields;
     }
 
     private boolean isKspPlugin(Plugin plugin)
     {
         if (plugin == null) return false;
-        ClassLoader loader = plugin.getClass().getClassLoader();
-        if (loader != null)
-        {
-            String name = loader.getClass().getSimpleName();
-            if (name.contains("MemoryPluginClassLoader") || name.contains("PluginJarClassLoader")) return true;
-        }
+
+        String className = plugin.getClass().getName().toLowerCase(Locale.ROOT);
+        if (className.startsWith("net.runelite.client.plugins.microbot.ksp")) return true;
 
         PluginDescriptor descriptor = plugin.getClass().getAnnotation(PluginDescriptor.class);
         if (descriptor == null) return false;
@@ -351,8 +400,9 @@ final class KspRuntimeDebugMonitor
 
     private static String descriptorName(Plugin plugin)
     {
-        PluginDescriptor d = plugin.getClass().getAnnotation(PluginDescriptor.class);
-        return d == null || d.name() == null || d.name().isEmpty() ? plugin.getClass().getSimpleName() : d.name();
+        PluginDescriptor descriptor = plugin.getClass().getAnnotation(PluginDescriptor.class);
+        return descriptor == null || descriptor.name() == null || descriptor.name().isEmpty()
+                ? plugin.getClass().getSimpleName() : descriptor.name();
     }
 
     private static String instanceKey(Plugin plugin)
@@ -374,7 +424,10 @@ final class KspRuntimeDebugMonitor
                         + " moving=" + (player.getPoseAnimation() != player.getIdlePoseAnimation());
             }).orElse("client-thread-unavailable");
         }
-        catch (Throwable t) { return "client-snapshot-error=" + t.getClass().getSimpleName(); }
+        catch (Throwable t)
+        {
+            return "client-snapshot-error=" + t.getClass().getSimpleName();
+        }
     }
 
     private void info(String message)
@@ -387,6 +440,17 @@ final class KspRuntimeDebugMonitor
     {
         log.warn("[KSP-DBG] {}", message);
         if (panel != null) panel.append("WARN", "[KSP-DBG] " + message);
+    }
+
+    private static final class Heartbeat
+    {
+        final String pluginName, state;
+
+        Heartbeat(String pluginName, String state)
+        {
+            this.pluginName = pluginName;
+            this.state = state;
+        }
     }
 
     private static final class Snapshot
