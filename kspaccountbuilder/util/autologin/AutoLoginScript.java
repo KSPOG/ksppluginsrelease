@@ -87,9 +87,6 @@ public class AutoLoginScript extends Script
             return;
         }
 
-        // A valid logged-in scene is the terminal condition for this helper.
-        // Handle it before break-handler gates so a stale/active break state cannot
-        // leave AutoLogin active forever and block Account Builder task selection.
         if (Microbot.isLoggedIn())
         {
             handleLoggedInState();
@@ -152,29 +149,30 @@ public class AutoLoginScript extends Script
             return;
         }
 
-        if (Microbot.getClientThread() == null)
-        {
-            debug("logged in detected; waiting for client thread before handoff");
-            return;
-        }
-
-        boolean playerReady = Microbot.getClientThread()
-                .runOnClientThreadOptional(() ->
-                {
-                    Client client = Microbot.getClient();
-                    return client != null
-                            && client.getLocalPlayer() != null
-                            && client.getLocalPlayer().getWorldLocation() != null;
-                })
-                .orElse(false);
-
-        if (!playerReady)
+        if (!isLoggedInSceneReady())
         {
             debug("logged in detected; waiting for local player/world location before handoff");
             return;
         }
 
         stopAfterLoginComplete();
+    }
+
+    private boolean isLoggedInSceneReady()
+    {
+        try
+        {
+            Client client = Microbot.getClient();
+            return Microbot.isLoggedIn()
+                    && client != null
+                    && client.getLocalPlayer() != null
+                    && client.getLocalPlayer().getWorldLocation() != null;
+        }
+        catch (Exception ex)
+        {
+            debug("logged-in scene readiness check failed: {}", ex.getMessage());
+            return false;
+        }
     }
 
     private void stopAfterLoginComplete()
@@ -202,7 +200,23 @@ public class AutoLoginScript extends Script
         }
     }
 
-    public boolean isActive() { return active; }
+    public boolean isActive()
+    {
+        if (!active)
+        {
+            return false;
+        }
+
+        // Account Builder calls this from its own scheduler. Do not require the
+        // AutoLogin scheduler to get another tick before releasing task startup.
+        if (isLoggedInSceneReady())
+        {
+            stopAfterLoginComplete();
+            return false;
+        }
+
+        return true;
+    }
 
     private void handleLoginScreenWithLoginManager(Client client)
     {
