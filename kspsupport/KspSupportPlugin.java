@@ -15,18 +15,13 @@ import net.runelite.client.ui.ClientToolbar;
 import net.runelite.client.ui.NavigationButton;
 import net.runelite.client.util.LinkBrowser;
 
-/**
- * Hidden always-on listener for shared KSP support features.
- *
- * Besides handling the Support button, this plugin owns the centralized runtime
- * diagnostics monitor and its KSP-only toolbar console.
- */
+/** Shared KSP support handler and centralized runtime diagnostics UI. */
 @PluginDescriptor(
         name = "KSP Support",
         description = "Shared KSP support-link and runtime diagnostics handler.",
         tags = {"ksp", "support", "discord", "debug"},
         authors = {"KSP"},
-        version = "1.1.0",
+        version = "1.2.0",
         enabledByDefault = true,
         alwaysOn = true,
         hidden = true,
@@ -68,7 +63,6 @@ public class KspSupportPlugin extends Plugin
         debugPanel = null;
     }
 
-    /** Source Loader hot-refresh hook. */
     public void prepareHotUnload()
     {
         stopDebugMonitor();
@@ -114,8 +108,6 @@ public class KspSupportPlugin extends Plugin
     public void onConfigChanged(ConfigChanged event)
     {
         if (event != null && KspSupportConfig.SUPPORT_KEY.equals(event.getKey()))
-        {
             LinkBrowser.browse(KspSupportConfig.SUPPORT_URL);
-        }
     }
 }
