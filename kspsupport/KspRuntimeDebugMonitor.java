@@ -41,14 +41,16 @@ final class KspRuntimeDebugMonitor
     private static final int MAX_VALUE_LENGTH = 140;
 
     private final PluginManager pluginManager;
+    private final KspDebugPanel panel;
     private final Map<String, Snapshot> previous = new HashMap<>();
     private final Map<String, Long> lastHeartbeat = new HashMap<>();
     private final Map<String, String> duplicateSignatures = new HashMap<>();
     private ScheduledExecutorService executor;
 
-    KspRuntimeDebugMonitor(PluginManager pluginManager)
+    KspRuntimeDebugMonitor(PluginManager pluginManager, KspDebugPanel panel)
     {
         this.pluginManager = pluginManager;
+        this.panel = panel;
     }
 
     synchronized void start()
@@ -61,7 +63,7 @@ final class KspRuntimeDebugMonitor
             return t;
         });
         executor.scheduleWithFixedDelay(this::scanSafely, 0L, POLL_MS, TimeUnit.MILLISECONDS);
-        log.info("[KSP-DBG] runtime monitor started | poll={}ms heartbeat={}ms", POLL_MS, HEARTBEAT_MS);
+        info("runtime monitor started | poll=" + POLL_MS + "ms heartbeat=" + HEARTBEAT_MS + "ms");
     }
 
     synchronized void stop()
@@ -74,7 +76,7 @@ final class KspRuntimeDebugMonitor
         previous.clear();
         lastHeartbeat.clear();
         duplicateSignatures.clear();
-        log.info("[KSP-DBG] runtime monitor stopped");
+        info("runtime monitor stopped");
     }
 
     private void scanSafely()
@@ -86,6 +88,7 @@ final class KspRuntimeDebugMonitor
         catch (Throwable t)
         {
             log.warn("[KSP-DBG] monitor scan failed", t);
+            warn("monitor scan failed | " + t.getClass().getSimpleName() + ": " + safeText(t.getMessage()));
         }
     }
 
@@ -117,22 +120,23 @@ final class KspRuntimeDebugMonitor
 
             if (old == null)
             {
-                log.info("[KSP-DBG] discovered | {}", current.describe());
+                info("discovered | " + current.describe());
             }
             else
             {
                 if (old.enabled != current.enabled || old.active != current.active)
-                    log.info("[KSP-DBG] lifecycle | {}", current.describe());
+                    info("lifecycle | " + current.describe());
 
                 if (current.active && !old.state.equals(current.state))
-                    log.info("[KSP-DBG] state-change | plugin={} instance={} {} -> {}",
-                            current.pluginName, current.instanceId, emptyAsDash(old.state), emptyAsDash(current.state));
+                    info("state-change | plugin=" + current.pluginName
+                            + " instance=" + current.instanceId
+                            + " " + emptyAsDash(old.state) + " -> " + emptyAsDash(current.state));
             }
 
             if (current.active && now - lastHeartbeat.getOrDefault(key, 0L) >= HEARTBEAT_MS)
             {
                 lastHeartbeat.put(key, now);
-                log.info("[KSP-DBG] heartbeat | {} | client={}", current.describe(), clientSnapshot());
+                info("heartbeat | " + current.describe() + " | client=" + clientSnapshot());
             }
         }
 
@@ -142,7 +146,7 @@ final class KspRuntimeDebugMonitor
             Snapshot removed = previous.remove(oldKey);
             lastHeartbeat.remove(oldKey);
             if (removed != null)
-                log.info("[KSP-DBG] unloaded | plugin={} instance={}", removed.pluginName, removed.instanceId);
+                info("unloaded | plugin=" + removed.pluginName + " instance=" + removed.instanceId);
         }
 
         checkDuplicateInstances(activeInstancesByClass);
@@ -162,12 +166,12 @@ final class KspRuntimeDebugMonitor
 
             if (instances.size() > 1 && !signature.equals(previousSignature))
             {
-                log.warn("[KSP-DBG] DUPLICATE ACTIVE PLUGIN INSTANCES | class={} count={} instances={}",
-                        className, instances.size(), instances);
+                warn("DUPLICATE ACTIVE PLUGIN INSTANCES | class=" + className
+                        + " count=" + instances.size() + " instances=" + instances);
             }
             else if (instances.size() <= 1 && previousSignature != null && previousSignature.contains(","))
             {
-                log.info("[KSP-DBG] duplicate cleared | class={} activeInstances={}", className, instances.size());
+                info("duplicate cleared | class=" + className + " activeInstances=" + instances.size());
             }
 
             if (signature.isEmpty()) duplicateSignatures.remove(className);
@@ -368,6 +372,18 @@ final class KspRuntimeDebugMonitor
         {
             return "client-snapshot-error=" + t.getClass().getSimpleName();
         }
+    }
+
+    private void info(String message)
+    {
+        log.info("[KSP-DBG] {}", message);
+        if (panel != null) panel.append("INFO", "[KSP-DBG] " + message);
+    }
+
+    private void warn(String message)
+    {
+        log.warn("[KSP-DBG] {}", message);
+        if (panel != null) panel.append("WARN", "[KSP-DBG] " + message);
     }
 
     private static String emptyAsDash(String value)
