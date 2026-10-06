@@ -26,7 +26,7 @@ final class KspDebugPanel extends PluginPanel
 
     private final Deque<Entry> entries = new ArrayDeque<>();
     private final Set<String> plugins = new LinkedHashSet<>();
-    private final JLabel active = value("0"), events = value("0"), warnings = value("0");
+    private final JLabel active = value("0"), events = value("0"), issues = value("0");
     private final JLabel currentPlugin = value("-"), currentState = value("-");
     private final JTextArea recent = textArea();
 
@@ -38,7 +38,7 @@ final class KspDebugPanel extends PluginPanel
     private JCheckBox autoScroll;
     private JButton pause;
     private boolean paused, updatingFilter;
-    private int warnCount, unseen;
+    private int issueCount, unseen;
 
     KspDebugPanel()
     {
@@ -60,7 +60,7 @@ final class KspDebugPanel extends PluginPanel
         JPanel stats = card();
         stats.add(row("Active plugins", active));
         stats.add(row("Events", events));
-        stats.add(row("Warnings", warnings));
+        stats.add(row("Warnings/Errors", issues));
         body.add(stats);
         body.add(Box.createVerticalStrut(8));
 
@@ -86,8 +86,8 @@ final class KspDebugPanel extends PluginPanel
 
     void append(String level, String message)
     {
-        String lvl = "WARN".equalsIgnoreCase(level) ? "WARN" : "INFO";
-        String msg = message == null ? "" : message.replace('\r', ' ').replace('\n', ' ');
+        String lvl = normalizeLevel(level);
+        String msg = message == null ? "" : message.replace('\r', '\n');
         String raw = pluginOf(msg);
         Entry e = new Entry(LocalTime.now().format(TIME), lvl, plain(raw), styled(raw), typeOf(msg), msg);
 
@@ -96,9 +96,9 @@ final class KspDebugPanel extends PluginPanel
             entries.addLast(e);
             while (entries.size() > MAX) entries.removeFirst();
             if (!"System".equals(e.plugin)) plugins.add(e.plugin);
-            if ("WARN".equals(e.level)) warnCount++;
+            if (!"INFO".equals(e.level)) issueCount++;
             events.setText(Integer.toString(entries.size()));
-            warnings.setText(Integer.toString(warnCount));
+            issues.setText(Integer.toString(issueCount));
             updateCurrent(e);
             refreshRecent();
             refreshPlugins();
@@ -133,19 +133,6 @@ final class KspDebugPanel extends PluginPanel
         });
     }
 
-    private boolean autoScrollEnabled()
-    {
-        return autoScroll != null && autoScroll.isSelected();
-    }
-
-    private void updateAutoScrollLabel()
-    {
-        if (autoScroll == null) return;
-        autoScroll.setText(unseen > 0 && !autoScroll.isSelected()
-                ? "Auto-scroll (" + unseen + " new)"
-                : "Auto-scroll");
-    }
-
     private void updateCurrent(Entry e)
     {
         if (!"System".equals(e.plugin))
@@ -153,7 +140,8 @@ final class KspDebugPanel extends PluginPanel
             currentPlugin.setText("<html>" + e.pluginHtml + "</html>");
             currentPlugin.setToolTipText(e.plugin);
         }
-        if ("state-change".equals(e.type)) currentState.setText(shorten(after(e.message, "changed="), 28));
+        if ("ERROR".equals(e.level)) currentState.setText("ERROR");
+        else if ("state-change".equals(e.type)) currentState.setText(shorten(after(e.message, "changed="), 28));
         else if ("lifecycle".equals(e.type)) currentState.setText("Lifecycle changed");
         else if ("unloaded".equals(e.type)) currentState.setText("Unloaded");
     }
@@ -167,8 +155,8 @@ final class KspDebugPanel extends PluginPanel
         {
             Entry e = copy.get(i);
             if ("heartbeat".equals(e.type)) continue;
-            out.insert(0, e.time + " " + ("WARN".equals(e.level) ? "! " : "  ")
-                    + shorten(e.plugin, 18) + " · " + shorten(summary(e), 70) + '\n');
+            String mark = "ERROR".equals(e.level) ? "X " : "WARN".equals(e.level) ? "! " : "  ";
+            out.insert(0, e.time + " " + mark + shorten(e.plugin, 18) + " · " + shorten(oneLine(summary(e)), 70) + '\n');
             shown++;
         }
         recent.setText(out.toString());
@@ -187,7 +175,7 @@ final class KspDebugPanel extends PluginPanel
 
             JPanel bar = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 6));
             bar.setBackground(CARD);
-            levelFilter = new JComboBox<>(new String[]{"ALL", "INFO", "WARN"});
+            levelFilter = new JComboBox<>(new String[]{"ALL", "INFO", "WARN", "ERROR"});
             pluginFilter = new JComboBox<>(new String[]{"ALL PLUGINS"});
             search = new JTextField(22);
             search.putClientProperty("JTextField.placeholderText", "Search logs...");
@@ -199,12 +187,7 @@ final class KspDebugPanel extends PluginPanel
             levelFilter.addActionListener(e -> { if (!updatingFilter) manualRebuild(); });
             pluginFilter.addActionListener(e -> { if (!updatingFilter) manualRebuild(); });
             search.addActionListener(e -> manualRebuild());
-            pause.addActionListener(e ->
-            {
-                paused = !paused;
-                pause.setText(paused ? "Resume" : "Pause");
-                if (!paused) manualRebuild();
-            });
+            pause.addActionListener(e -> { paused = !paused; pause.setText(paused ? "Resume" : "Pause"); if (!paused) manualRebuild(); });
             clear.addActionListener(e -> clear());
             copy.addActionListener(e -> copy());
             refresh.addActionListener(e -> manualRebuild());
@@ -229,8 +212,7 @@ final class KspDebugPanel extends PluginPanel
             JTextArea help = textArea();
             help.setLineWrap(true);
             help.setWrapStyleWord(true);
-            help.setText("KSP DEBUG\n\nPlugin descriptor colors and fonts are rendered in the console.\n\n"
-                    + "Auto-scroll OFF freezes the visible document completely. New messages remain buffered until Refresh, a filter/search change, Resume, or Auto-scroll is enabled again.");
+            help.setText("KSP DEBUG\n\nINFO: runtime state/lifecycle\nWARN: KSP/plugin warnings\nERROR: real Logback errors + stack traces\n\nAuto-scroll OFF freezes the visible document. New messages remain buffered until Refresh or Auto-scroll is enabled.");
             help.setBorder(new EmptyBorder(10, 10, 10, 10));
             JScrollPane hs = new JScrollPane(help);
             hs.setPreferredSize(new Dimension(245, 0));
@@ -247,6 +229,14 @@ final class KspDebugPanel extends PluginPanel
         frame.toFront();
     }
 
+    private boolean autoScrollEnabled() { return autoScroll != null && autoScroll.isSelected(); }
+
+    private void updateAutoScrollLabel()
+    {
+        if (autoScroll == null) return;
+        autoScroll.setText(unseen > 0 && !autoScroll.isSelected() ? "Auto-scroll (" + unseen + " new)" : "Auto-scroll");
+    }
+
     private void manualRebuild()
     {
         unseen = 0;
@@ -257,13 +247,10 @@ final class KspDebugPanel extends PluginPanel
     private void rebuild(boolean followBottom)
     {
         if (html == null || scroll == null) return;
-
-        JScrollBar bar = scroll.getVerticalScrollBar();
-        int oldValue = bar.getValue();
+        int oldValue = scroll.getVerticalScrollBar().getValue();
         StringBuilder body = new StringBuilder();
         for (Entry e : filtered()) body.append(render(e));
         html.setText(document(body.toString()));
-
         SwingUtilities.invokeLater(() -> SwingUtilities.invokeLater(() ->
         {
             if (scroll == null) return;
@@ -309,8 +296,8 @@ final class KspDebugPanel extends PluginPanel
     private void clear()
     {
         entries.clear();
-        warnCount = unseen = 0;
-        events.setText("0"); warnings.setText("0"); recent.setText("");
+        issueCount = unseen = 0;
+        events.setText("0"); issues.setText("0"); recent.setText("");
         updateAutoScrollLabel();
         if (html != null) html.setText(document(""));
     }
@@ -325,19 +312,27 @@ final class KspDebugPanel extends PluginPanel
 
     private static String render(Entry e)
     {
-        String levelColor = "WARN".equals(e.level) ? "#ffb454" : "#78dc8c";
-        String typeColor = "WARN".equals(e.level) ? "#ff7b72" : "#8ab4f8";
+        String levelColor = "ERROR".equals(e.level) ? "#ff5f56" : "WARN".equals(e.level) ? "#ffb454" : "#78dc8c";
+        String typeColor = "ERROR".equals(e.level) ? "#ff7b72" : "WARN".equals(e.level) ? "#ffd166" : "#8ab4f8";
+        String body = esc(summaryWithoutType(e)).replace("\n", "<br>");
         return "<div class='line'><span class='time'>[" + esc(e.time) + "]</span> "
                 + "<span style='color:" + levelColor + ";font-weight:bold'>[" + e.level + "]</span> "
                 + "<span class='plugin'>[" + e.pluginHtml + "]</span> "
                 + "<span style='color:" + typeColor + ";font-weight:bold'>" + esc(e.type) + "</span> "
-                + "<span>" + esc(summaryWithoutType(e)) + "</span></div>";
+                + "<span>" + body + "</span></div>";
     }
 
     private static String document(String body)
     {
         return "<html><head><style>body{background:#1e1e1e;color:#dcdcdc;font-family:Consolas,'Courier New',monospace;font-size:12px;margin:8px;}"
-                + ".line{margin:0 0 3px 0;white-space:normal}.time{color:#888}.plugin{color:#eee}</style></head><body>" + body + "</body></html>";
+                + ".line{margin:0 0 5px 0;white-space:normal}.time{color:#888}.plugin{color:#eee}</style></head><body>" + body + "</body></html>";
+    }
+
+    private static String normalizeLevel(String level)
+    {
+        if ("ERROR".equalsIgnoreCase(level)) return "ERROR";
+        if ("WARN".equalsIgnoreCase(level)) return "WARN";
+        return "INFO";
     }
 
     private static String styled(String raw)
@@ -346,30 +341,17 @@ final class KspDebugPanel extends PluginPanel
         String s = raw.trim();
         if (s.regionMatches(true, 0, "<html>", 0, 6)) s = s.substring(6);
         if (s.toLowerCase(Locale.ROOT).endsWith("</html>")) s = s.substring(0, s.length() - 7);
-
         StringBuilder out = new StringBuilder();
         Matcher m = TAG.matcher(s);
         int pos = 0;
         while (m.find())
         {
             out.append(esc(s.substring(pos, m.start())));
-            String tag = m.group();
-            String low = tag.toLowerCase(Locale.ROOT);
+            String tag = m.group(), low = tag.toLowerCase(Locale.ROOT);
             Matcher fm = FONT.matcher(tag);
-            if (fm.matches())
-            {
-                String color = sanitizeColor(fm.group(1));
-                out.append("<font color=\"").append(esc(color)).append("\">");
-            }
-            else if ("</font>".equals(low) || "<b>".equals(low) || "</b>".equals(low)
-                    || "<i>".equals(low) || "</i>".equals(low) || "<u>".equals(low) || "</u>".equals(low))
-            {
-                out.append(low);
-            }
-            else
-            {
-                out.append(esc(tag));
-            }
+            if (fm.matches()) out.append("<font color=\"").append(esc(sanitizeColor(fm.group(1)))).append("\">");
+            else if ("</font>".equals(low) || "<b>".equals(low) || "</b>".equals(low) || "<i>".equals(low) || "</i>".equals(low)) out.append(low);
+            else out.append(esc(tag));
             pos = m.end();
         }
         out.append(esc(s.substring(pos)));
@@ -385,15 +367,13 @@ final class KspDebugPanel extends PluginPanel
             String hex = c.substring(1, 7);
             if (hex.matches("[0-9a-fA-F]{6}")) return "#" + hex;
         }
-        if (c.matches("[A-Za-z]+")) return c;
-        return "#dddddd";
+        return c.matches("[A-Za-z]+") ? c : "#dddddd";
     }
 
     private static String plain(String raw)
     {
         if (raw == null || raw.isEmpty()) return "System";
-        String s = TAG.matcher(raw).replaceAll("");
-        return s.replace("&lt;", "<").replace("&gt;", ">").replace("&amp;", "&").trim();
+        return TAG.matcher(raw).replaceAll("").replace("&lt;", "<").replace("&gt;", ">").replace("&amp;", "&").trim();
     }
 
     private static String pluginOf(String message)
@@ -440,17 +420,9 @@ final class KspDebugPanel extends PluginPanel
         return i < 0 ? plain(text) : plain(text.substring(i + key.length()).trim());
     }
 
-    private static String shorten(String s, int max)
-    {
-        if (s == null || s.isEmpty()) return "-";
-        return s.length() <= max ? s : s.substring(0, Math.max(1, max - 3)) + "...";
-    }
-
-    private static String esc(String s)
-    {
-        if (s == null) return "";
-        return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\"", "&quot;");
-    }
+    private static String oneLine(String s) { return s == null ? "" : s.replace('\n', ' ').replace('\r', ' '); }
+    private static String shorten(String s, int max) { return s == null || s.isEmpty() ? "-" : s.length() <= max ? s : s.substring(0, Math.max(1, max - 3)) + "..."; }
+    private static String esc(String s) { return s == null ? "" : s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\"", "&quot;"); }
 
     private static JPanel card()
     {
@@ -495,15 +467,9 @@ final class KspDebugPanel extends PluginPanel
     private static final class Entry
     {
         final String time, level, plugin, pluginHtml, type, message;
-
         Entry(String time, String level, String plugin, String pluginHtml, String type, String message)
         {
-            this.time = time;
-            this.level = level;
-            this.plugin = plugin;
-            this.pluginHtml = pluginHtml;
-            this.type = type;
-            this.message = message;
+            this.time = time; this.level = level; this.plugin = plugin; this.pluginHtml = pluginHtml; this.type = type; this.message = message;
         }
     }
 }
