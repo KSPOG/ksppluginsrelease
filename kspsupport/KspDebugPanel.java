@@ -10,7 +10,6 @@ import java.time.format.DateTimeFormatter;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
-import java.util.List;
 import javax.swing.JButton;
 import javax.swing.JCheckBox;
 import javax.swing.JComboBox;
@@ -35,7 +34,7 @@ final class KspDebugPanel extends PluginPanel
 
     KspDebugPanel()
     {
-        super();
+        super(false);
         setLayout(new BorderLayout(0, 6));
 
         output.setEditable(false);
