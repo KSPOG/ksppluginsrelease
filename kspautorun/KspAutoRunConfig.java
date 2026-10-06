@@ -1,7 +1,6 @@
 package net.runelite.client.plugins.microbot.kspautorun;
 
 
-import net.runelite.client.plugins.microbot.kspsupport.KspSupportConfig;
 import net.runelite.client.config.Config;
 import net.runelite.client.config.ConfigGroup;
 import net.runelite.client.config.ConfigInformation;
@@ -13,7 +12,7 @@ import net.runelite.client.config.Range;
         "Automatically enables Run when your run energy reaches the configured threshold. " +
         "The Run orb is activated using a Microbot widget invoke; no natural mouse click is used."
 )
-public interface KspAutoRunConfig extends Config, KspSupportConfig
+public interface KspAutoRunConfig extends Config
 {
     String GROUP = "kspAutoRunInvoke";
 

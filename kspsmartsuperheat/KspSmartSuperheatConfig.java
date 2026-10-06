@@ -1,7 +1,6 @@
 package net.runelite.client.plugins.microbot.kspsmartsuperheat;
 
 
-import net.runelite.client.plugins.microbot.kspsupport.KspSupportConfig;
 import net.runelite.client.config.Config;
 import net.runelite.client.config.ConfigGroup;
 import net.runelite.client.config.ConfigItem;
@@ -10,7 +9,7 @@ import net.runelite.client.config.Range;
 import net.runelite.client.plugins.microbot.kspmule.KspMuleConfig;
 
 @ConfigGroup("kspSmartSuperheat")
-public interface KspSmartSuperheatConfig extends Config, KspMuleConfig, KspSupportConfig
+public interface KspSmartSuperheatConfig extends Config, KspMuleConfig
 {
     @ConfigSection(name = "Local Mule", description = "Automatic excess-GP transfer to KSP Trade Receiver", position = 90)
     String muleSection = KspMuleConfig.SECTION;
