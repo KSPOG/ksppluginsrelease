@@ -11,14 +11,13 @@ import net.runelite.client.plugins.microbot.util.walker.Rs2Walker;
 /**
  * Thin Account Builder walking facade.
  *
- * Rs2Walker now owns route lifecycle, stall recovery, retry timing, doors/transports,
- * interim targets and active-route recovery. Keep only Account Builder-specific
- * world-map safety and destination checks here.
+ * Rs2Walker owns route lifecycle, stall recovery, retry timing, doors/transports,
+ * interim targets and active-route recovery. Account Builder therefore uses live
+ * walker/player state rather than additional millisecond refire delays.
  */
 public final class KspWalkerGuard
 {
     private static final Map<String, WorldPoint> KEY_TARGETS = new ConcurrentHashMap<>();
-    private static final Map<String, Long> KEY_LAST_DISPATCH = new ConcurrentHashMap<>();
     private static volatile String activeWalkerKey;
 
     private KspWalkerGuard() {}
@@ -28,12 +27,9 @@ public final class KspWalkerGuard
             Supplier<WorldPoint> targetSupplier,
             Predicate<WorldPoint> destinationMatcher,
             int arriveDistance,
-            long refireCooldownMs)
+            long ignoredRefireCooldownMs)
     {
-        if (blockWalkingForOpenWorldMap() || targetSupplier == null || destinationMatcher == null)
-        {
-            return false;
-        }
+        if (blockWalkingForOpenWorldMap() || targetSupplier == null || destinationMatcher == null) return false;
 
         WorldPoint player = Rs2Player.getWorldLocation();
         if (player != null && destinationMatcher.test(player))
@@ -51,23 +47,16 @@ public final class KspWalkerGuard
             KEY_TARGETS.put(walkKey, target);
         }
 
-        if (!mayDispatch(walkKey, target, arriveDistance, refireCooldownMs))
-        {
-            return false;
-        }
+        if (!mayDispatch(walkKey, target, arriveDistance)) return false;
 
         activeWalkerKey = walkKey;
-        KEY_LAST_DISPATCH.put(walkKey, System.currentTimeMillis());
         Rs2Walker.walkTo(target, arriveDistance);
         return true;
     }
 
-    public static boolean walkToPoint(String key, WorldPoint target, int arriveDistance, long refireCooldownMs)
+    public static boolean walkToPoint(String key, WorldPoint target, int arriveDistance, long ignoredRefireCooldownMs)
     {
-        if (blockWalkingForOpenWorldMap() || target == null)
-        {
-            return false;
-        }
+        if (blockWalkingForOpenWorldMap() || target == null) return false;
 
         WorldPoint player = Rs2Player.getWorldLocation();
         if (isSameDestination(player, target, Math.max(0, arriveDistance)))
@@ -84,23 +73,16 @@ public final class KspWalkerGuard
             KEY_TARGETS.put(walkKey, target);
         }
 
-        if (!mayDispatch(walkKey, target, arriveDistance, refireCooldownMs))
-        {
-            return false;
-        }
+        if (!mayDispatch(walkKey, target, arriveDistance)) return false;
 
         activeWalkerKey = walkKey;
-        KEY_LAST_DISPATCH.put(walkKey, System.currentTimeMillis());
         Rs2Walker.walkTo(target, arriveDistance);
         return true;
     }
 
-    public static boolean walkFastCanvasToPoint(String key, WorldPoint target, int arriveDistance, long refireCooldownMs)
+    public static boolean walkFastCanvasToPoint(String key, WorldPoint target, int arriveDistance, long ignoredRefireCooldownMs)
     {
-        if (blockWalkingForOpenWorldMap() || target == null)
-        {
-            return false;
-        }
+        if (blockWalkingForOpenWorldMap() || target == null) return false;
 
         WorldPoint player = Rs2Player.getWorldLocation();
         if (isSameDestination(player, target, Math.max(0, arriveDistance)))
@@ -109,11 +91,7 @@ public final class KspWalkerGuard
             return false;
         }
 
-        if (Rs2Player.isMoving() || !prepareCoreWalkerTarget(target, arriveDistance))
-        {
-            return false;
-        }
-
+        if (Rs2Player.isMoving() || !prepareCoreWalkerTarget(target, arriveDistance)) return false;
         return Rs2Walker.walkFastCanvas(target);
     }
 
@@ -136,35 +114,26 @@ public final class KspWalkerGuard
         clearKey(key, reason != null ? reason : "ksp_account_builder_reached_destination");
     }
 
-    private static boolean mayDispatch(String key, WorldPoint target, int arriveDistance, long refireCooldownMs)
+    private static boolean mayDispatch(String key, WorldPoint target, int arriveDistance)
     {
         WorldPoint currentTarget = Rs2Walker.getCurrentTarget();
         if (currentTarget != null)
         {
-            if (isSameDestination(currentTarget, target, Math.max(2, arriveDistance + 2)))
-            {
-                return false;
-            }
-            if (activeWalkerKey != null && !activeWalkerKey.equals(key))
-            {
-                Rs2Walker.clearWalkingRoute("ksp_account_builder_owner_changed");
-            }
-            else
-            {
-                Rs2Walker.clearWalkingRoute("ksp_account_builder_retarget");
-            }
+            if (isSameDestination(currentTarget, target, Math.max(2, arriveDistance + 2))) return false;
+            Rs2Walker.clearWalkingRoute(activeWalkerKey != null && !activeWalkerKey.equals(key)
+                    ? "ksp_account_builder_owner_changed"
+                    : "ksp_account_builder_retarget");
         }
 
-        long last = KEY_LAST_DISPATCH.getOrDefault(key, 0L);
-        long cooldown = Math.max(0L, refireCooldownMs);
-        return System.currentTimeMillis() - last >= cooldown;
+        // If the previous route has already caused movement, it is still doing useful work.
+        // If both route and movement are gone while the destination is not reached, refire now.
+        return !Rs2Player.isMoving();
     }
 
     private static void clearKey(String key, String reason)
     {
         String walkKey = normalizeKey(key);
         KEY_TARGETS.remove(walkKey);
-        KEY_LAST_DISPATCH.remove(walkKey);
 
         if (walkKey.equals(activeWalkerKey))
         {
@@ -181,16 +150,10 @@ public final class KspWalkerGuard
     private static boolean prepareCoreWalkerTarget(WorldPoint target, int arriveDistance)
     {
         WorldPoint currentTarget = Rs2Walker.getCurrentTarget();
-        if (currentTarget == null)
-        {
-            return true;
-        }
+        if (currentTarget == null) return true;
 
         int sameDestinationDistance = Math.max(2, arriveDistance + 2);
-        if (isSameDestination(currentTarget, target, sameDestinationDistance))
-        {
-            return false;
-        }
+        if (isSameDestination(currentTarget, target, sameDestinationDistance)) return false;
 
         Rs2Walker.clearWalkingRoute("ksp_account_builder_retarget");
         return true;
@@ -198,11 +161,7 @@ public final class KspWalkerGuard
 
     private static boolean blockWalkingForOpenWorldMap()
     {
-        if (!KspWorldMapGuard.closeIfOpen())
-        {
-            return false;
-        }
-
+        if (!KspWorldMapGuard.closeIfOpen()) return false;
         clearActiveWalker("ksp_account_builder_world_map_open");
         return true;
     }
