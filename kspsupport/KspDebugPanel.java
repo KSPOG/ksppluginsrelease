@@ -11,6 +11,7 @@ import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.List;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /** Compact sidebar plus a styled, filterable KSP debug console. */
@@ -20,7 +21,8 @@ final class KspDebugPanel extends PluginPanel
     private static final DateTimeFormatter TIME = DateTimeFormatter.ofPattern("HH:mm:ss");
     private static final Color BG = new Color(30, 30, 30), CARD = new Color(40, 40, 40);
     private static final Color MUTED = new Color(155, 155, 155), GREEN = new Color(120, 220, 140);
-    private static final Pattern TAGS = Pattern.compile("<[^>]+>");
+    private static final Pattern TAG = Pattern.compile("<[^>]+>");
+    private static final Pattern FONT = Pattern.compile("(?i)<font\\s+color\\s*=\\s*['\"]?([^'\"\\s>]+)['\"]?\\s*>");
 
     private final Deque<Entry> entries = new ArrayDeque<>();
     private final Set<String> plugins = new LinkedHashSet<>();
@@ -36,7 +38,7 @@ final class KspDebugPanel extends PluginPanel
     private JCheckBox autoScroll;
     private JButton pause;
     private boolean paused, updatingFilter;
-    private int warnCount;
+    private int warnCount, unseen;
 
     KspDebugPanel()
     {
@@ -100,7 +102,18 @@ final class KspDebugPanel extends PluginPanel
             updateCurrent(e);
             refreshRecent();
             refreshPlugins();
-            if (!paused) rebuild();
+
+            if (!paused && autoScrollEnabled())
+            {
+                unseen = 0;
+                updateAutoScrollLabel();
+                rebuild(true);
+            }
+            else if (html != null)
+            {
+                unseen++;
+                updateAutoScrollLabel();
+            }
         });
     }
 
@@ -118,6 +131,19 @@ final class KspDebugPanel extends PluginPanel
             html = null;
             scroll = null;
         });
+    }
+
+    private boolean autoScrollEnabled()
+    {
+        return autoScroll != null && autoScroll.isSelected();
+    }
+
+    private void updateAutoScrollLabel()
+    {
+        if (autoScroll == null) return;
+        autoScroll.setText(unseen > 0 && !autoScroll.isSelected()
+                ? "Auto-scroll (" + unseen + " new)"
+                : "Auto-scroll");
     }
 
     private void updateCurrent(Entry e)
@@ -167,15 +193,31 @@ final class KspDebugPanel extends PluginPanel
             search.putClientProperty("JTextField.placeholderText", "Search logs...");
             autoScroll = new JCheckBox("Auto-scroll", true);
             pause = new JButton("Pause");
-            JButton clear = new JButton("Clear"), copy = new JButton("Copy");
-            bar.add(levelFilter); bar.add(pluginFilter); bar.add(search); bar.add(pause); bar.add(clear); bar.add(copy); bar.add(autoScroll);
+            JButton clear = new JButton("Clear"), copy = new JButton("Copy"), refresh = new JButton("Refresh");
+            bar.add(levelFilter); bar.add(pluginFilter); bar.add(search); bar.add(pause); bar.add(clear); bar.add(copy); bar.add(refresh); bar.add(autoScroll);
 
-            levelFilter.addActionListener(e -> { if (!updatingFilter) rebuild(); });
-            pluginFilter.addActionListener(e -> { if (!updatingFilter) rebuild(); });
-            search.addActionListener(e -> rebuild());
-            pause.addActionListener(e -> { paused = !paused; pause.setText(paused ? "Resume" : "Pause"); if (!paused) rebuild(); });
+            levelFilter.addActionListener(e -> { if (!updatingFilter) manualRebuild(); });
+            pluginFilter.addActionListener(e -> { if (!updatingFilter) manualRebuild(); });
+            search.addActionListener(e -> manualRebuild());
+            pause.addActionListener(e ->
+            {
+                paused = !paused;
+                pause.setText(paused ? "Resume" : "Pause");
+                if (!paused) manualRebuild();
+            });
             clear.addActionListener(e -> clear());
             copy.addActionListener(e -> copy());
+            refresh.addActionListener(e -> manualRebuild());
+            autoScroll.addActionListener(e ->
+            {
+                updateAutoScrollLabel();
+                if (autoScroll.isSelected() && !paused)
+                {
+                    unseen = 0;
+                    updateAutoScrollLabel();
+                    rebuild(true);
+                }
+            });
 
             html = new JEditorPane();
             html.setEditable(false);
@@ -188,7 +230,7 @@ final class KspDebugPanel extends PluginPanel
             help.setLineWrap(true);
             help.setWrapStyleWord(true);
             help.setText("KSP DEBUG\n\nPlugin descriptor colors and fonts are rendered in the console.\n\n"
-                    + "Disable Auto-scroll to keep the viewport fixed while new events arrive.");
+                    + "Auto-scroll OFF freezes the visible document completely. New messages remain buffered until Refresh, a filter/search change, Resume, or Auto-scroll is enabled again.");
             help.setBorder(new EmptyBorder(10, 10, 10, 10));
             JScrollPane hs = new JScrollPane(help);
             hs.setPreferredSize(new Dimension(245, 0));
@@ -199,31 +241,36 @@ final class KspDebugPanel extends PluginPanel
             frame.add(bar, BorderLayout.NORTH);
             frame.add(split, BorderLayout.CENTER);
             refreshPlugins();
-            rebuild();
+            rebuild(true);
         }
         frame.setVisible(true);
         frame.toFront();
     }
 
-    private void rebuild()
+    private void manualRebuild()
+    {
+        unseen = 0;
+        updateAutoScrollLabel();
+        rebuild(autoScrollEnabled());
+    }
+
+    private void rebuild(boolean followBottom)
     {
         if (html == null || scroll == null) return;
 
         JScrollBar bar = scroll.getVerticalScrollBar();
-        boolean follow = autoScroll == null || autoScroll.isSelected();
         int oldValue = bar.getValue();
-
         StringBuilder body = new StringBuilder();
         for (Entry e : filtered()) body.append(render(e));
         html.setText(document(body.toString()));
 
-        SwingUtilities.invokeLater(() ->
+        SwingUtilities.invokeLater(() -> SwingUtilities.invokeLater(() ->
         {
             if (scroll == null) return;
             JScrollBar b = scroll.getVerticalScrollBar();
-            if (follow) b.setValue(b.getMaximum());
+            if (followBottom) b.setValue(b.getMaximum());
             else b.setValue(Math.min(oldValue, Math.max(b.getMinimum(), b.getMaximum() - b.getVisibleAmount())));
-        });
+        }));
     }
 
     private List<Entry> filtered()
@@ -262,8 +309,9 @@ final class KspDebugPanel extends PluginPanel
     private void clear()
     {
         entries.clear();
-        warnCount = 0;
+        warnCount = unseen = 0;
         events.setText("0"); warnings.setText("0"); recent.setText("");
+        updateAutoScrollLabel();
         if (html != null) html.setText(document(""));
     }
 
@@ -289,7 +337,7 @@ final class KspDebugPanel extends PluginPanel
     private static String document(String body)
     {
         return "<html><head><style>body{background:#1e1e1e;color:#dcdcdc;font-family:Consolas,'Courier New',monospace;font-size:12px;margin:8px;}"
-                + ".line{white-space:nowrap;margin:0 0 2px 0}.time{color:#888}.plugin{color:#eee}</style></head><body>" + body + "</body></html>";
+                + ".line{margin:0 0 3px 0;white-space:normal}.time{color:#888}.plugin{color:#eee}</style></head><body>" + body + "</body></html>";
     }
 
     private static String styled(String raw)
@@ -298,14 +346,53 @@ final class KspDebugPanel extends PluginPanel
         String s = raw.trim();
         if (s.regionMatches(true, 0, "<html>", 0, 6)) s = s.substring(6);
         if (s.toLowerCase(Locale.ROOT).endsWith("</html>")) s = s.substring(0, s.length() - 7);
-        s = s.replaceAll("(?i)color=#([0-9a-f]{6})[a-z]+", "color=#$1");
-        return s;
+
+        StringBuilder out = new StringBuilder();
+        Matcher m = TAG.matcher(s);
+        int pos = 0;
+        while (m.find())
+        {
+            out.append(esc(s.substring(pos, m.start())));
+            String tag = m.group();
+            String low = tag.toLowerCase(Locale.ROOT);
+            Matcher fm = FONT.matcher(tag);
+            if (fm.matches())
+            {
+                String color = sanitizeColor(fm.group(1));
+                out.append("<font color=\"").append(esc(color)).append("\">");
+            }
+            else if ("</font>".equals(low) || "<b>".equals(low) || "</b>".equals(low)
+                    || "<i>".equals(low) || "</i>".equals(low) || "<u>".equals(low) || "</u>".equals(low))
+            {
+                out.append(low);
+            }
+            else
+            {
+                out.append(esc(tag));
+            }
+            pos = m.end();
+        }
+        out.append(esc(s.substring(pos)));
+        return out.toString();
+    }
+
+    private static String sanitizeColor(String color)
+    {
+        if (color == null || color.isEmpty()) return "#dddddd";
+        String c = color.trim();
+        if (c.startsWith("#") && c.length() >= 7)
+        {
+            String hex = c.substring(1, 7);
+            if (hex.matches("[0-9a-fA-F]{6}")) return "#" + hex;
+        }
+        if (c.matches("[A-Za-z]+")) return c;
+        return "#dddddd";
     }
 
     private static String plain(String raw)
     {
         if (raw == null || raw.isEmpty()) return "System";
-        String s = TAGS.matcher(raw).replaceAll("");
+        String s = TAG.matcher(raw).replaceAll("");
         return s.replace("&lt;", "<").replace("&gt;", ">").replace("&amp;", "&").trim();
     }
 
@@ -387,9 +474,9 @@ final class KspDebugPanel extends PluginPanel
         return p;
     }
 
-    private static JLabel value(String s)
+    private static JLabel value(String text)
     {
-        JLabel l = new JLabel(s);
+        JLabel l = new JLabel(text);
         l.setForeground(GREEN);
         return l;
     }
@@ -400,6 +487,7 @@ final class KspDebugPanel extends PluginPanel
         a.setEditable(false);
         a.setBackground(BG);
         a.setForeground(new Color(220, 220, 220));
+        a.setCaretColor(Color.WHITE);
         a.setFont(new Font(Font.MONOSPACED, Font.PLAIN, 11));
         return a;
     }
@@ -407,7 +495,15 @@ final class KspDebugPanel extends PluginPanel
     private static final class Entry
     {
         final String time, level, plugin, pluginHtml, type, message;
+
         Entry(String time, String level, String plugin, String pluginHtml, String type, String message)
-        { this.time = time; this.level = level; this.plugin = plugin; this.pluginHtml = pluginHtml; this.type = type; this.message = message; }
+        {
+            this.time = time;
+            this.level = level;
+            this.plugin = plugin;
+            this.pluginHtml = pluginHtml;
+            this.type = type;
+            this.message = message;
+        }
     }
 }
