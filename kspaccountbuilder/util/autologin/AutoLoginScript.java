@@ -87,6 +87,15 @@ public class AutoLoginScript extends Script
             return;
         }
 
+        // A valid logged-in scene is the terminal condition for this helper.
+        // Handle it before break-handler gates so a stale/active break state cannot
+        // leave AutoLogin active forever and block Account Builder task selection.
+        if (Microbot.isLoggedIn())
+        {
+            handleLoggedInState();
+            return;
+        }
+
         if (!kspLoginAllowed.getAsBoolean())
         {
             transitionTo(LoginState.PAUSED_FOR_KSP_BREAK);
@@ -120,12 +129,6 @@ public class AutoLoginScript extends Script
                 lastWelcomePlayClickAtMillis = System.currentTimeMillis();
                 sleepUntil(() -> !active || !isPlayButtonVisible(), WELCOME_PLAY_CLICK_COOLDOWN_MS);
             }
-            return;
-        }
-
-        if (Microbot.isLoggedIn())
-        {
-            handleLoggedInState();
             return;
         }
 
