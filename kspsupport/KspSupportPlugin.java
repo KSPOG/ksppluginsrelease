@@ -21,7 +21,7 @@ import net.runelite.client.util.LinkBrowser;
         description = "Shared KSP support-link and runtime diagnostics handler.",
         tags = {"ksp", "support", "discord", "debug"},
         authors = {"KSP"},
-        version = "1.2.0",
+        version = "1.3.0",
         enabledByDefault = true,
         alwaysOn = true,
         hidden = true,
@@ -33,13 +33,14 @@ public class KspSupportPlugin extends Plugin
     @Inject private ClientToolbar clientToolbar;
 
     private KspRuntimeDebugMonitor debugMonitor;
+    private KspErrorLogBridge errorBridge;
     private KspDebugPanel debugPanel;
     private NavigationButton debugNavigation;
 
     @Override
     protected void startUp()
     {
-        stopDebugMonitor();
+        stopDebug();
         removeDebugNavigation();
 
         debugPanel = new KspDebugPanel();
@@ -53,28 +54,37 @@ public class KspSupportPlugin extends Plugin
 
         debugMonitor = new KspRuntimeDebugMonitor(pluginManager, debugPanel);
         debugMonitor.start();
+        errorBridge = new KspErrorLogBridge(pluginManager, debugPanel);
+        errorBridge.attach();
     }
 
     @Override
     protected void shutDown()
     {
-        stopDebugMonitor();
+        stopDebug();
         removeDebugNavigation();
         debugPanel = null;
     }
 
     public void prepareHotUnload()
     {
-        stopDebugMonitor();
+        stopDebug();
         removeDebugNavigation();
         debugPanel = null;
     }
 
-    private synchronized void stopDebugMonitor()
+    private synchronized void stopDebug()
     {
-        if (debugMonitor == null) return;
-        debugMonitor.stop();
-        debugMonitor = null;
+        if (errorBridge != null)
+        {
+            errorBridge.detach();
+            errorBridge = null;
+        }
+        if (debugMonitor != null)
+        {
+            debugMonitor.stop();
+            debugMonitor = null;
+        }
     }
 
     private synchronized void removeDebugNavigation()
