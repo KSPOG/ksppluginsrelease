@@ -10,16 +10,15 @@ import java.util.function.Predicate;
 
 public final class TaskWalker
 {
-    private static final long WALK_REFIRE_COOLDOWN_MS = 8_000L;
+    // KspWalkerGuard already suppresses duplicate active-walker requests. Keep only a short
+    // recovery refire window so a finished/failed walker never leaves a task idle for 8 seconds.
+    private static final long WALK_REFIRE_COOLDOWN_MS = 750L;
 
     private TaskWalker() {}
 
     public static synchronized boolean walkToArea(WorldArea area, WorldPoint target, int reachedDistance)
     {
-        if (area == null || target == null)
-        {
-            return false;
-        }
+        if (area == null || target == null) return false;
 
         WorldPoint playerLocation = Rs2Player.getWorldLocation();
         if (playerLocation != null && area.contains(playerLocation))
@@ -38,10 +37,7 @@ public final class TaskWalker
 
     public static synchronized boolean walkToArea(Predicate<WorldPoint> containsTargetArea, WorldArea area, WorldPoint target, int reachedDistance)
     {
-        if (containsTargetArea == null || target == null)
-        {
-            return false;
-        }
+        if (containsTargetArea == null || target == null) return false;
 
         WorldPoint playerLocation = Rs2Player.getWorldLocation();
         if (playerLocation != null && containsTargetArea.test(playerLocation))
@@ -58,5 +54,8 @@ public final class TaskWalker
         );
     }
 
-    public static synchronized boolean walkToNearestBankAndOpen() { return Rs2Bank.isOpen() || Rs2Bank.walkToBankAndUseBank() || Rs2Bank.openBank(); }
+    public static synchronized boolean walkToNearestBankAndOpen()
+    {
+        return Rs2Bank.isOpen() || Rs2Bank.walkToBankAndUseBank() || Rs2Bank.openBank();
+    }
 }
