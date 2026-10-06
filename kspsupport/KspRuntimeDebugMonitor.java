@@ -26,19 +26,14 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 
-/**
- * Central diagnostics for every source-loaded KSP plugin.
- *
- * Logs lifecycle/state transitions immediately and a low-frequency heartbeat for
- * active plugins. It deliberately avoids per-tick logging and skips fields whose
- * names look credential/account related.
- */
+/** Central low-noise diagnostics for every source-loaded KSP plugin. */
 final class KspRuntimeDebugMonitor
 {
     private static final Logger log = LoggerFactory.getLogger("KSP.RuntimeDebug");
     private static final long POLL_MS = 2_000L;
     private static final long HEARTBEAT_MS = 30_000L;
-    private static final int MAX_VALUE_LENGTH = 140;
+    private static final int MAX_VALUE_LENGTH = 120;
+    private static final int MAX_CHANGED_FIELDS = 8;
 
     private final PluginManager pluginManager;
     private final KspDebugPanel panel;
@@ -77,14 +72,12 @@ final class KspRuntimeDebugMonitor
         lastHeartbeat.clear();
         duplicateSignatures.clear();
         info("runtime monitor stopped");
+        if (panel != null) panel.disposeConsole();
     }
 
     private void scanSafely()
     {
-        try
-        {
-            scan();
-        }
+        try { scan(); }
         catch (Throwable t)
         {
             log.warn("[KSP-DBG] monitor scan failed", t);
@@ -95,13 +88,13 @@ final class KspRuntimeDebugMonitor
     private void scan()
     {
         if (pluginManager == null) return;
-
         Collection<Plugin> loaded = pluginManager.getPlugins();
         if (loaded == null) return;
 
         long now = System.currentTimeMillis();
         Set<String> seen = new HashSet<>();
         Map<String, List<String>> activeInstancesByClass = new HashMap<>();
+        int activeCount = 0;
 
         for (Plugin plugin : loaded)
         {
@@ -116,27 +109,31 @@ final class KspRuntimeDebugMonitor
             Snapshot old = previous.put(key, current);
 
             if (active)
+            {
+                activeCount++;
                 activeInstancesByClass.computeIfAbsent(plugin.getClass().getName(), k -> new ArrayList<>()).add(key);
+            }
 
             if (old == null)
-            {
-                info("discovered | " + current.describe());
-            }
+                info("discovered | plugin=" + current.pluginName + " | enabled=" + enabled + " | active=" + active);
             else
             {
                 if (old.enabled != current.enabled || old.active != current.active)
-                    info("lifecycle | " + current.describe());
+                    info("lifecycle | plugin=" + current.pluginName + " | enabled=" + enabled + " | active=" + active);
 
-                if (current.active && !old.state.equals(current.state))
-                    info("state-change | plugin=" + current.pluginName
-                            + " instance=" + current.instanceId
-                            + " " + emptyAsDash(old.state) + " -> " + emptyAsDash(current.state));
+                if (active)
+                {
+                    String changes = changedFields(old.values, current.values);
+                    if (!changes.isEmpty())
+                        info("state-change | plugin=" + current.pluginName + " | changed=" + changes);
+                }
             }
 
-            if (current.active && now - lastHeartbeat.getOrDefault(key, 0L) >= HEARTBEAT_MS)
+            if (active && now - lastHeartbeat.getOrDefault(key, 0L) >= HEARTBEAT_MS)
             {
                 lastHeartbeat.put(key, now);
-                info("heartbeat | " + current.describe() + " | client=" + clientSnapshot());
+                info("heartbeat | plugin=" + current.pluginName + " | " + compactState(current.values)
+                        + " | client=" + clientSnapshot());
             }
         }
 
@@ -145,10 +142,10 @@ final class KspRuntimeDebugMonitor
             if (seen.contains(oldKey)) continue;
             Snapshot removed = previous.remove(oldKey);
             lastHeartbeat.remove(oldKey);
-            if (removed != null)
-                info("unloaded | plugin=" + removed.pluginName + " instance=" + removed.instanceId);
+            if (removed != null) info("unloaded | plugin=" + removed.pluginName);
         }
 
+        if (panel != null) panel.setActiveCount(activeCount);
         checkDuplicateInstances(activeInstancesByClass);
     }
 
@@ -162,17 +159,12 @@ final class KspRuntimeDebugMonitor
             List<String> instances = activeByClass.getOrDefault(className, Collections.emptyList());
             Collections.sort(instances);
             String signature = String.join(",", instances);
-            String previousSignature = duplicateSignatures.get(className);
+            String old = duplicateSignatures.get(className);
 
-            if (instances.size() > 1 && !signature.equals(previousSignature))
-            {
-                warn("DUPLICATE ACTIVE PLUGIN INSTANCES | class=" + className
-                        + " count=" + instances.size() + " instances=" + instances);
-            }
-            else if (instances.size() <= 1 && previousSignature != null && previousSignature.contains(","))
-            {
-                info("duplicate cleared | class=" + className + " activeInstances=" + instances.size());
-            }
+            if (instances.size() > 1 && !signature.equals(old))
+                warn("DUPLICATE ACTIVE PLUGIN INSTANCES | class=" + className + " | count=" + instances.size());
+            else if (instances.size() <= 1 && old != null && old.contains(","))
+                info("duplicate cleared | class=" + className + " | activeInstances=" + instances.size());
 
             if (signature.isEmpty()) duplicateSignatures.remove(className);
             else duplicateSignatures.put(className, signature);
@@ -181,13 +173,11 @@ final class KspRuntimeDebugMonitor
 
     private Snapshot snapshot(Plugin plugin, boolean enabled, boolean active)
     {
-        String pluginName = descriptorName(plugin);
-        String instanceId = Integer.toHexString(System.identityHashCode(plugin));
         Map<String, String> values = new LinkedHashMap<>();
         List<String> activeScripts = new ArrayList<>();
 
         collectOperationalFields(plugin, "plugin", values);
-        if (active) values.put("microbot.status", safeText(Microbot.status));
+        if (active) values.put("status", safeText(Microbot.status));
 
         for (Field field : allFields(plugin.getClass()))
         {
@@ -198,73 +188,105 @@ final class KspRuntimeDebugMonitor
             Script script = (Script) value;
             String scriptName = script.getClass().getSimpleName();
             boolean running = false;
-            try { running = script.isRunning(); }
-            catch (Throwable ignored) { }
+            try { running = script.isRunning(); } catch (Throwable ignored) { }
 
+            values.put(scriptName + ".running", Boolean.toString(running));
             if (running) activeScripts.add(scriptName);
-            values.put("script." + scriptName + ".running", Boolean.toString(running));
-            collectOperationalFields(script, "script." + scriptName, values);
+            collectOperationalFields(script, scriptName, values);
         }
 
         activeScripts.sort(Comparator.naturalOrder());
         if (!activeScripts.isEmpty()) values.put("activeScripts", String.join(",", activeScripts));
 
-        String state = join(values);
-        return new Snapshot(pluginName, plugin.getClass().getName(), instanceId, enabled, active, state);
+        return new Snapshot(descriptorName(plugin), enabled, active, values);
     }
 
     private void collectOperationalFields(Object owner, String prefix, Map<String, String> out)
     {
         if (owner == null) return;
-
         for (Field field : allFields(owner.getClass()))
         {
             if (Modifier.isStatic(field.getModifiers()) || field.isSynthetic()) continue;
-            String name = field.getName();
-            String lower = name.toLowerCase(Locale.ROOT);
+            String lower = field.getName().toLowerCase(Locale.ROOT);
             if (!isOperationalField(lower) || isSensitiveField(lower)) continue;
 
             Object value = read(field, owner);
             if (!isSimpleValue(value)) continue;
-            out.put(prefix + "." + name, safeText(value));
+            out.put(prefix + "." + field.getName(), safeText(value));
         }
+    }
+
+    private static String changedFields(Map<String, String> oldValues, Map<String, String> newValues)
+    {
+        List<String> changes = new ArrayList<>();
+        Set<String> keys = new HashSet<>(oldValues.keySet());
+        keys.addAll(newValues.keySet());
+        List<String> sorted = new ArrayList<>(keys);
+        Collections.sort(sorted);
+
+        for (String key : sorted)
+        {
+            String before = oldValues.get(key);
+            String after = newValues.get(key);
+            if (java.util.Objects.equals(before, after)) continue;
+            changes.add(shortKey(key) + "=" + safeText(after));
+            if (changes.size() >= MAX_CHANGED_FIELDS) break;
+        }
+        return String.join("; ", changes);
+    }
+
+    private static String compactState(Map<String, String> values)
+    {
+        List<String> preferred = new ArrayList<>();
+        addIfPresent(preferred, values, "activeScripts");
+        addIfPresent(preferred, values, "status");
+
+        if (preferred.size() < 4)
+        {
+            for (Map.Entry<String, String> e : values.entrySet())
+            {
+                String lower = e.getKey().toLowerCase(Locale.ROOT);
+                if (!(lower.contains("state") || lower.contains("task") || lower.contains("stage"))) continue;
+                preferred.add(shortKey(e.getKey()) + "=" + e.getValue());
+                if (preferred.size() >= 4) break;
+            }
+        }
+        return preferred.isEmpty() ? "state=-" : String.join(" | ", preferred);
+    }
+
+    private static void addIfPresent(List<String> out, Map<String, String> values, String key)
+    {
+        String value = values.get(key);
+        if (value != null && !value.isEmpty()) out.add(key + "=" + value);
+    }
+
+    private static String shortKey(String key)
+    {
+        if (key == null) return "?";
+        if (key.startsWith("plugin.")) return key.substring(7);
+        return key;
     }
 
     private static boolean isOperationalField(String name)
     {
-        return name.contains("state")
-                || name.contains("status")
-                || name.contains("task")
-                || name.contains("step")
-                || name.contains("stage")
-                || name.contains("phase")
-                || name.contains("mode")
-                || name.contains("action")
-                || name.contains("targetarea")
-                || name.contains("currentarea");
+        return name.contains("state") || name.contains("status") || name.contains("task")
+                || name.contains("step") || name.contains("stage") || name.contains("phase")
+                || name.contains("mode") || name.contains("action")
+                || name.contains("targetarea") || name.contains("currentarea");
     }
 
     private static boolean isSensitiveField(String name)
     {
-        return name.contains("pass")
-                || name.contains("token")
-                || name.contains("secret")
-                || name.contains("apikey")
-                || name.contains("api_key")
-                || name.contains("email")
-                || name.contains("username")
-                || name.contains("account")
-                || name.contains("sessionid")
+        return name.contains("pass") || name.contains("token") || name.contains("secret")
+                || name.contains("apikey") || name.contains("api_key") || name.contains("email")
+                || name.contains("username") || name.contains("account") || name.contains("sessionid")
                 || name.contains("cookie");
     }
 
     private static boolean isSimpleValue(Object value)
     {
-        return value == null
-                || value instanceof CharSequence
-                || value instanceof Number
-                || value instanceof Boolean
-                || value instanceof Enum;
+        return value == null || value instanceof CharSequence || value instanceof Number
+                || value instanceof Boolean || value instanceof Enum;
     }
 
     private static String safeText(Object value)
@@ -284,10 +306,7 @@ final class KspRuntimeDebugMonitor
             if (!field.isAccessible()) field.setAccessible(true);
             return field.get(owner);
         }
-        catch (Throwable ignored)
-        {
-            return null;
-        }
+        catch (Throwable ignored) { return null; }
     }
 
     private static List<Field> allFields(Class<?> type)
@@ -304,9 +323,12 @@ final class KspRuntimeDebugMonitor
     private boolean isKspPlugin(Plugin plugin)
     {
         if (plugin == null) return false;
-
         ClassLoader loader = plugin.getClass().getClassLoader();
-        if (loader != null && loader.getClass().getSimpleName().contains("MemoryPluginClassLoader")) return true;
+        if (loader != null)
+        {
+            String name = loader.getClass().getSimpleName();
+            if (name.contains("MemoryPluginClassLoader") || name.contains("PluginJarClassLoader")) return true;
+        }
 
         PluginDescriptor descriptor = plugin.getClass().getAnnotation(PluginDescriptor.class);
         if (descriptor == null) return false;
@@ -329,27 +351,13 @@ final class KspRuntimeDebugMonitor
 
     private static String descriptorName(Plugin plugin)
     {
-        PluginDescriptor descriptor = plugin.getClass().getAnnotation(PluginDescriptor.class);
-        return descriptor == null || descriptor.name() == null || descriptor.name().isEmpty()
-                ? plugin.getClass().getSimpleName()
-                : descriptor.name();
+        PluginDescriptor d = plugin.getClass().getAnnotation(PluginDescriptor.class);
+        return d == null || d.name() == null || d.name().isEmpty() ? plugin.getClass().getSimpleName() : d.name();
     }
 
     private static String instanceKey(Plugin plugin)
     {
         return plugin.getClass().getName() + "@" + Integer.toHexString(System.identityHashCode(plugin));
-    }
-
-    private static String join(Map<String, String> values)
-    {
-        if (values.isEmpty()) return "";
-        StringBuilder out = new StringBuilder();
-        for (Map.Entry<String, String> entry : values.entrySet())
-        {
-            if (out.length() > 0) out.append(" | ");
-            out.append(entry.getKey()).append('=').append(entry.getValue());
-        }
-        return out.toString();
     }
 
     private static String clientSnapshot()
@@ -360,18 +368,13 @@ final class KspRuntimeDebugMonitor
             {
                 if (Microbot.getClient() == null) return "client=null";
                 Player player = Microbot.getClient().getLocalPlayer();
-                if (player == null) return "loggedIn=false status=" + safeText(Microbot.status);
+                if (player == null) return "loggedIn=false";
                 return "loc=" + player.getWorldLocation()
-                        + " plane=" + Microbot.getClient().getPlane()
                         + " anim=" + player.getAnimation()
-                        + " moving=" + (player.getPoseAnimation() != player.getIdlePoseAnimation())
-                        + " status=" + safeText(Microbot.status);
+                        + " moving=" + (player.getPoseAnimation() != player.getIdlePoseAnimation());
             }).orElse("client-thread-unavailable");
         }
-        catch (Throwable t)
-        {
-            return "client-snapshot-error=" + t.getClass().getSimpleName();
-        }
+        catch (Throwable t) { return "client-snapshot-error=" + t.getClass().getSimpleName(); }
     }
 
     private void info(String message)
@@ -386,38 +389,18 @@ final class KspRuntimeDebugMonitor
         if (panel != null) panel.append("WARN", "[KSP-DBG] " + message);
     }
 
-    private static String emptyAsDash(String value)
-    {
-        return value == null || value.isEmpty() ? "-" : value;
-    }
-
     private static final class Snapshot
     {
         final String pluginName;
-        final String className;
-        final String instanceId;
-        final boolean enabled;
-        final boolean active;
-        final String state;
+        final boolean enabled, active;
+        final Map<String, String> values;
 
-        Snapshot(String pluginName, String className, String instanceId, boolean enabled, boolean active, String state)
+        Snapshot(String pluginName, boolean enabled, boolean active, Map<String, String> values)
         {
             this.pluginName = pluginName;
-            this.className = className;
-            this.instanceId = instanceId;
             this.enabled = enabled;
             this.active = active;
-            this.state = state == null ? "" : state;
-        }
-
-        String describe()
-        {
-            return "plugin=" + pluginName
-                    + " class=" + className
-                    + " instance=" + instanceId
-                    + " enabled=" + enabled
-                    + " active=" + active
-                    + (state.isEmpty() ? "" : " | " + state);
+            this.values = values;
         }
     }
 }
