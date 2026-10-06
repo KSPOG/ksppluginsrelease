@@ -1,7 +1,6 @@
 package net.runelite.client.plugins.microbot.kspmadcow;
 
 
-import net.runelite.client.plugins.microbot.kspsupport.KspSupportConfig;
 import net.runelite.client.config.Config;
 import net.runelite.client.config.ConfigGroup;
 import net.runelite.client.config.ConfigItem;
@@ -10,7 +9,7 @@ import net.runelite.client.config.Range;
 import net.runelite.client.plugins.microbot.kspmule.KspMuleConfig;
 
 @ConfigGroup(KspMadCowConfig.GROUP)
-public interface KspMadCowConfig extends Config, KspMuleConfig, KspSupportConfig {
+public interface KspMadCowConfig extends Config, KspMuleConfig {
     String GROUP = "kspmadcow";
 
     @ConfigSection(name = "Supplies", description = "Food, Cowbell and boosting-potion settings", position = 0)
