@@ -2,7 +2,6 @@ package net.runelite.client.plugins.microbot.kspaccountbuilder;
 
 import java.awt.event.KeyEvent;
 import net.runelite.api.Player;
-import net.runelite.api.coords.WorldPoint;
 import net.runelite.api.widgets.Widget;
 import net.runelite.client.plugins.microbot.Microbot;
 import net.runelite.client.plugins.microbot.util.keyboard.Rs2Keyboard;
@@ -27,27 +26,28 @@ public final class KspWorldMapGuard
 
     /**
      * True only when scene-dependent Account Builder work is safe to query.
-     * This method is intentionally cheap and does not synchronously invoke the
-     * client thread, so fast task loops cannot create another client-thread
-     * bottleneck merely by checking readiness.
+     * Player/world-location access is performed on RuneLite's client thread;
+     * direct access from Account Builder scheduler threads can throw and must
+     * never silently lock the builder in its pre-task guard.
      */
     public static boolean isSceneReady()
     {
+        if (!Microbot.isLoggedIn()
+                || Microbot.getClient() == null
+                || Microbot.getClientThread() == null)
+        {
+            return false;
+        }
+
         try
         {
-            if (!Microbot.isLoggedIn() || Microbot.getClient() == null)
-            {
-                return false;
-            }
-
-            Player localPlayer = Microbot.getClient().getLocalPlayer();
-            if (localPlayer == null)
-            {
-                return false;
-            }
-
-            WorldPoint location = localPlayer.getWorldLocation();
-            return location != null;
+            return Microbot.getClientThread()
+                    .runOnClientThreadOptional(() ->
+                    {
+                        Player localPlayer = Microbot.getClient().getLocalPlayer();
+                        return localPlayer != null && localPlayer.getWorldLocation() != null;
+                    })
+                    .orElse(false);
         }
         catch (RuntimeException ignored)
         {
@@ -91,13 +91,9 @@ public final class KspWorldMapGuard
     private static boolean isOpen()
     {
         Widget keyWidget = Rs2Widget.getWidget(WORLD_MAP_KEY_WIDGET_ID);
-        if (keyWidget != null
+        return keyWidget != null
+                && !keyWidget.isHidden()
                 && keyWidget.getText() != null
-                && keyWidget.getText().contains("Key"))
-        {
-            return true;
-        }
-
-        return Rs2Widget.findWidget("Game features") != null;
+                && keyWidget.getText().contains("Key");
     }
 }
