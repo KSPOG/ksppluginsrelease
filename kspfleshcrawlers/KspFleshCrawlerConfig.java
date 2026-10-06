@@ -1,7 +1,6 @@
 package net.runelite.client.plugins.microbot.kspfleshcrawlers;
 
 
-import net.runelite.client.plugins.microbot.kspsupport.KspSupportConfig;
 import net.runelite.client.config.Config;
 import net.runelite.client.config.ConfigGroup;
 import net.runelite.client.config.ConfigItem;
@@ -10,7 +9,7 @@ import net.runelite.client.config.Range;
 import net.runelite.client.plugins.microbot.kspmule.KspMuleConfig;
 
 @ConfigGroup(KspFleshCrawlerConfig.GROUP)
-public interface KspFleshCrawlerConfig extends Config, KspMuleConfig, KspSupportConfig {
+public interface KspFleshCrawlerConfig extends Config, KspMuleConfig {
     String GROUP = "kspfleshcrawlers";
 
     @ConfigSection(name = "Training", description = "Combat goals and melee balancing", position = 0, closedByDefault = false)
