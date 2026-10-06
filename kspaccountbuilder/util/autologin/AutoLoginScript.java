@@ -160,13 +160,22 @@ public class AutoLoginScript extends Script
 
     private boolean isLoggedInSceneReady()
     {
+        if (!Microbot.isLoggedIn() || Microbot.getClientThread() == null)
+        {
+            return false;
+        }
+
         try
         {
-            Client client = Microbot.getClient();
-            return Microbot.isLoggedIn()
-                    && client != null
-                    && client.getLocalPlayer() != null
-                    && client.getLocalPlayer().getWorldLocation() != null;
+            return Microbot.getClientThread()
+                    .runOnClientThreadOptional(() ->
+                    {
+                        Client client = Microbot.getClient();
+                        return client != null
+                                && client.getLocalPlayer() != null
+                                && client.getLocalPlayer().getWorldLocation() != null;
+                    })
+                    .orElse(false);
         }
         catch (Exception ex)
         {
@@ -207,8 +216,6 @@ public class AutoLoginScript extends Script
             return false;
         }
 
-        // Account Builder calls this from its own scheduler. Do not require the
-        // AutoLogin scheduler to get another tick before releasing task startup.
         if (isLoggedInSceneReady())
         {
             stopAfterLoginComplete();
