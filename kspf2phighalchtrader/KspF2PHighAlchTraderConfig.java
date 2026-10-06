@@ -1,7 +1,6 @@
 package net.runelite.client.plugins.microbot.kspf2phighalchtrader;
 
 
-import net.runelite.client.plugins.microbot.kspsupport.KspSupportConfig;
 import net.runelite.client.config.Config;
 import net.runelite.client.config.ConfigGroup;
 import net.runelite.client.config.ConfigInformation;
@@ -18,7 +17,7 @@ import net.runelite.client.config.Range;
         "The plugin will not intentionally buy an item above the configured minimum profit threshold. " +
         "Its custom anti-ban runs only between confirmed alch casts so GE and banking transitions are not interrupted."
 )
-public interface KspF2PHighAlchTraderConfig extends Config, KspSupportConfig {
+public interface KspF2PHighAlchTraderConfig extends Config {
     String GROUP = "ksp-f2p-high-alch-trader";
 
 
