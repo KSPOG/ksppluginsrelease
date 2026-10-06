@@ -522,7 +522,8 @@ public class MeleeScript
                 .where(item -> !item.isDespawned())
                 .where(Rs2TileItemModel::isLootAble)
                 .where(Rs2TileItemModel::isOwned)
-                .where(item -> this.isLocationInTargetArea(item.getWorldLocation(), stage))
+                // Owned drops may land just outside the configured combat area.
+                // Keep combat targets area-bound, but allow nearby owned loot within LOOT_RADIUS.
                 .where(this::canStoreLoot)
                 .where(item -> this.matchesConfiguredLootName(stage.lootNames, item.getName()))
                 .within(LOOT_RADIUS)
