@@ -150,7 +150,7 @@ public class FireMakingScript extends Script
                     Rs2Player.isMoving(),
                     Rs2Player.isAnimating(),
                     Rs2Player.isInteracting(),
-                    Rs2Inventory.count(targetLogName),
+                    Rs2Inventory.count(getTargetLogId(targetLogName)),
                     Rs2Bank.isOpen(),
                     isBurnInterfaceOpen(targetLogName, targetLogId),
                     awaitingFireStartAtMs != 0L);
@@ -296,12 +296,12 @@ public class FireMakingScript extends Script
             return false;
         }
 
-        if (!Rs2Inventory.hasItem(targetLogName))
+        if (!Rs2Inventory.hasItem(getTargetLogId(targetLogName)))
         {
-            if (Rs2Bank.count(targetLogName) <= 0) return false;
+            if (Rs2Bank.count(getTargetLogId(targetLogName)) <= 0) return false;
             if (!KspBankMode.ensureWithdrawAsItem()) return false;
             int before = Rs2Inventory.emptySlotCount();
-            if (Rs2Bank.withdrawAll(targetLogName)) markBankAction(before);
+            if (Rs2Bank.withdrawAll(getTargetLogId(targetLogName))) markBankAction(before);
             return false;
         }
 
@@ -329,9 +329,9 @@ public class FireMakingScript extends Script
         pendingBankActionAtMs = System.currentTimeMillis();
     }
 
-    private boolean hasLogsForCurrentTarget(String targetLogName) { return Rs2Inventory.hasItem(targetLogName); }
+    private boolean hasLogsForCurrentTarget(String targetLogName) { return Rs2Inventory.hasItem(getTargetLogId(targetLogName)); }
 
-    private boolean hasLogsAvailable(String targetLogName) { return Rs2Inventory.hasItem(targetLogName) || Rs2Bank.count(targetLogName) > 0; }
+    private boolean hasLogsAvailable(String targetLogName) { return Rs2Inventory.hasItem(getTargetLogId(targetLogName)) || Rs2Bank.count(getTargetLogId(targetLogName)) > 0; }
 
     private boolean ensureInTargetArea()
     {
@@ -384,6 +384,7 @@ public class FireMakingScript extends Script
 
     private void useCampfire(int targetLogId, WorldPoint fireLocation)
     {
+        if (!canBurnLog(targetLogId)) return;
         if (fireLocation == null || !isInTargetArea(fireLocation)) return;
         if (isBurnInterfaceOpen(null, targetLogId)) return;
 
@@ -460,7 +461,8 @@ public class FireMakingScript extends Script
         long now = System.currentTimeMillis();
         if (now - lastFireInteractAtMs < FIRE_INTERACT_COOLDOWN_MS) return;
 
-        if (!Rs2Inventory.combine(TINDERBOX_NAME, targetLogName)) return;
+        if (!canBurnLog(getTargetLogId(targetLogName))) return;
+        if (!Rs2Inventory.combine(590, getTargetLogId(targetLogName))) return;
 
         lastFireInteractAtMs = now;
         awaitingFireStartAtMs = now;
@@ -470,6 +472,7 @@ public class FireMakingScript extends Script
 
     private boolean handleBurnPrompt(String targetLogName, int targetLogId)
     {
+        if (!canBurnLog(targetLogId)) return false;
         if (!isBurnInterfaceOpen(targetLogName, targetLogId))
         {
             lastBurnPromptActionAtMs = 0L;
@@ -886,6 +889,19 @@ public class FireMakingScript extends Script
         {
             KspTaskDebug.info(log, true, "Firemaking", message, args);
         }
+    }
+
+    private boolean canBurnLog(int logId)
+    {
+        int level = Microbot.getClient().getRealSkillLevel(Skill.FIREMAKING);
+        for (LogsLvl logs : LogsLvl.values())
+        {
+            if (getTargetLogId(logs.getDisplayName()) == logId)
+            {
+                return level >= logs.getRequiredLevel() && Rs2Inventory.hasItem(logId);
+            }
+        }
+        return false;
     }
 
     private int getTargetLogId(String targetLogName)
