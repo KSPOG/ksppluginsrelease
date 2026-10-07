@@ -64,6 +64,12 @@ import net.runelite.client.plugins.microbot.util.tabs.Rs2Tab;
 import net.runelite.client.plugins.microbot.util.walker.Rs2Walker;
 import net.runelite.client.ui.ClientUI;
 
+import net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.questing.sheepshearer.sheepscript.SheepScript;
+import net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.questing.xmarksthespot.xmarksscript.XMarksScript;
+import net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.questing.therestlessghost.ghostscript.GhostScript;
+import net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.questing.impcatcher.impscript.ImpScript;
+import net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.questing.shared.SimpleQuestScript;
+
 import javax.inject.Inject;
 import javax.inject.Singleton;
 import java.time.Duration;
@@ -81,6 +87,10 @@ public class KspAccountBuilderScript extends Script
         GOBLIN_DIPLOMACY(30),
         ROMEO_AND_JULIET(30),
         RUNE_MYSTERIES(30),
+        SHEEP_SHEARER(30),
+        X_MARKS_THE_SPOT(30),
+        THE_RESTLESS_GHOST(30),
+        IMP_CATCHER(30),
         STRONGHOLD_OF_SECURITY(30),
         RUNE_ESSENCE(7),
         MINING(7),
@@ -178,6 +188,18 @@ public class KspAccountBuilderScript extends Script
 
     @Inject
     private RuneMystScript runeMystScript;
+
+    @Inject
+    private SheepScript sheepScript;
+
+    @Inject
+    private XMarksScript xMarksScript;
+
+    @Inject
+    private GhostScript ghostScript;
+
+    @Inject
+    private ImpScript impScript;
 
     @Inject
     private EssenceMining essenceMining;
@@ -403,6 +425,10 @@ public class KspAccountBuilderScript extends Script
         gobScript.setDebugLogging(enabled);
         romeoScript.setDebugLogging(enabled);
         runeMystScript.setDebugLogging(enabled);
+        sheepScript.setDebugLogging(enabled);
+        xMarksScript.setDebugLogging(enabled);
+        ghostScript.setDebugLogging(enabled);
+        impScript.setDebugLogging(enabled);
         essenceMining.setDebugLogging(enabled);
         if (autoLoginScript != null) autoLoginScript.setDebugLogging(enabled);
         debugLoggingApplied = true;
@@ -711,6 +737,15 @@ public class KspAccountBuilderScript extends Script
 
     private boolean handleForcedTaskBlockers(BuilderTask forcedTask)
     {
+        SimpleQuestScript questScript = newQuestScript(forcedTask);
+        if (questScript != null && questScript.isComplete())
+        {
+            currentTask = forcedTask;
+            taskStarted = false;
+            Microbot.status = forcedTask + " complete";
+            return true;
+        }
+
         if ((forcedTask == BuilderTask.ROMEO_AND_JULIET || forcedTask == BuilderTask.RUNE_MYSTERIES)
                 && isOneTimeTaskCompleted(forcedTask))
         {
@@ -754,6 +789,13 @@ public class KspAccountBuilderScript extends Script
         }
 
         boolean forced = isSingleSkillTaskForced();
+        SimpleQuestScript questScript = newQuestScript(currentTask);
+        if (questScript != null)
+        {
+            if (!questScript.isComplete()) return false;
+            markOneTimeComplete(KspAccountTaskCache.OneTimeTask.valueOf(currentTask.name()));
+            return finishOneTimeTask(forced, currentTask + " complete");
+        }
         switch (currentTask)
         {
             case TUTORIAL_ISLAND:
@@ -841,6 +883,7 @@ public class KspAccountBuilderScript extends Script
         if (task == BuilderTask.TUTORIAL_ISLAND
                 || task == BuilderTask.ROMEO_AND_JULIET
                 || task == BuilderTask.RUNE_MYSTERIES
+                || newQuestScript(task) != null
                 || task == BuilderTask.STRONGHOLD_OF_SECURITY)
         {
             clearActivitySwitchTimerState();
@@ -858,6 +901,10 @@ public class KspAccountBuilderScript extends Script
                 return romeoScript.run();
             case RUNE_MYSTERIES:
                 return runeMystScript.run();
+            case SHEEP_SHEARER: return sheepScript.run();
+            case X_MARKS_THE_SPOT: return xMarksScript.run();
+            case THE_RESTLESS_GHOST: return ghostScript.run();
+            case IMP_CATCHER: return impScript.run();
             case RUNE_ESSENCE:
                 return essenceMining.run();
             case STRONGHOLD_OF_SECURITY:
@@ -1174,6 +1221,12 @@ public class KspAccountBuilderScript extends Script
 
     private void startSingleSkillResourceRecovery(BuilderTask forcedTask)
     {
+        SimpleQuestScript questScript = newQuestScript(forcedTask);
+        if (questScript != null)
+        {
+            Microbot.status = "Not enough GP for " + forcedTask + " inputs (need " + questScript.getMissingRequirementCost() + ")";
+            return;
+        }
         if (forcedTask == null
                 || forcedTask == BuilderTask.GE_BUY
                 || forcedTask == BuilderTask.ROMEO_AND_JULIET
@@ -1310,6 +1363,7 @@ public class KspAccountBuilderScript extends Script
                 && currentTask != null
                 && currentTask != BuilderTask.TUTORIAL_ISLAND
                 && currentTask != BuilderTask.RUNE_MYSTERIES
+                && newQuestScript(currentTask) == null
                 && currentTask != BuilderTask.STRONGHOLD_OF_SECURITY;
     }
 
@@ -1336,6 +1390,9 @@ public class KspAccountBuilderScript extends Script
     private boolean hasResourcesForTask(BuilderTask task)
     {
         if (task == null || isTaskTemporarilyDisabled(task)) return false;
+        SimpleQuestScript questScript = newQuestScript(task);
+        if (questScript != null)
+            return !questScript.isComplete() && getAvailableCoins() >= questScript.getMissingRequirementCost();
 
         switch (task)
         {
@@ -1368,6 +1425,8 @@ public class KspAccountBuilderScript extends Script
     private boolean isOneTimeTaskCompleted(BuilderTask task)
     {
         if (task == null) return false;
+        SimpleQuestScript questScript = newQuestScript(task);
+        if (questScript != null) return questScript.isComplete();
 
         KspAccountTaskCache.OneTimeTask oneTimeTask;
         try
@@ -1951,6 +2010,10 @@ public class KspAccountBuilderScript extends Script
             case GOBLIN_DIPLOMACY: return gobScript;
             case ROMEO_AND_JULIET: return romeoScript;
             case RUNE_MYSTERIES: return runeMystScript;
+            case SHEEP_SHEARER: return sheepScript;
+            case X_MARKS_THE_SPOT: return xMarksScript;
+            case THE_RESTLESS_GHOST: return ghostScript;
+            case IMP_CATCHER: return impScript;
             case RUNE_ESSENCE: return essenceMining;
             case STRONGHOLD_OF_SECURITY: return strongholdScript;
             case MINING: return miningScript;
@@ -1964,6 +2027,19 @@ public class KspAccountBuilderScript extends Script
             case GE_BUY: return buyScript;
             case SMITHING: return smithScript;
             case SMELTING: return smeltScript;
+            default: return null;
+        }
+    }
+
+    private SimpleQuestScript newQuestScript(BuilderTask task)
+    {
+        if (task == null) return null;
+        switch (task)
+        {
+            case SHEEP_SHEARER: return sheepScript;
+            case X_MARKS_THE_SPOT: return xMarksScript;
+            case THE_RESTLESS_GHOST: return ghostScript;
+            case IMP_CATCHER: return impScript;
             default: return null;
         }
     }
@@ -2556,6 +2632,10 @@ public class KspAccountBuilderScript extends Script
             case GOBLIN_DIPLOMACY:
             case ROMEO_AND_JULIET:
             case RUNE_MYSTERIES:
+            case SHEEP_SHEARER:
+            case X_MARKS_THE_SPOT:
+            case THE_RESTLESS_GHOST:
+            case IMP_CATCHER:
             case CRAFTING:
                 return true;
             case RUNE_ESSENCE: return essenceMining.isInTaskArea();

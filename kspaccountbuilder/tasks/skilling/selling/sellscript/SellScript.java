@@ -840,6 +840,16 @@ public class SellScript extends Script
             for (GobReqs item : GobReqs.values())
                 if (item.getDisplayName().equalsIgnoreCase(itemName)) reserved += item.getQuantity();
 
+        if (isQuestIncomplete(Quest.SHEEP_SHEARER) && "Ball of wool".equalsIgnoreCase(itemName))
+        {
+            int stage = Microbot.getClientThread().runOnClientThreadOptional(() -> Microbot.getClient().getVarpValue(net.runelite.api.gameval.VarPlayerID.SHEEP)).orElse(0);
+            reserved += stage > 1 ? Math.max(0, 21 - stage) : 20;
+        }
+        if (isQuestIncomplete(Quest.IMP_CATCHER)
+                && ("Black bead".equalsIgnoreCase(itemName) || "White bead".equalsIgnoreCase(itemName)
+                || "Red bead".equalsIgnoreCase(itemName) || "Yellow bead".equalsIgnoreCase(itemName))) reserved++;
+        if (isQuestIncomplete(Quest.X_MARKS_THE_SPOT) && "Spade".equalsIgnoreCase(itemName)) reserved++;
+
         return reserved;
     }
 
