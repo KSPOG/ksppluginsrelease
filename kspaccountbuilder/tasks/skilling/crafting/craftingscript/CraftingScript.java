@@ -36,6 +36,7 @@ public class CraftingScript extends Script
     private static final int FURNACE_SEARCH_RADIUS = 12;
     private static final int ACTION_COOLDOWN_MS = 100;
     private static final long PRODUCTION_ACTION_TIMEOUT_MS = 1_500L;
+    private static final long LEATHER_PROGRESS_TIMEOUT_MS = 4_800L;
     private static final long ACTION_DISPATCH_TIMEOUT_MS = 1_500L;
 
     private volatile CraftingState state = CraftingState.WAITING;
@@ -45,6 +46,9 @@ public class CraftingScript extends Script
     private boolean debugLogging;
     private long lastActionAtMs;
     private boolean expectingXpDrop;
+    private boolean leatherBatchActive;
+    private int lastLeatherCount = -1;
+    private long lastLeatherProgressAtMs;
     private boolean bankInventoryReset;
     private long pendingProductionActionAtMs;
     private String pendingProductionRecipe;
@@ -72,6 +76,8 @@ public class CraftingScript extends Script
             {
                 return;
             }
+
+            if (isLeatherBatchActive()) return;
 
             if (this.progressiveCrafting)
             {
@@ -194,6 +200,7 @@ public class CraftingScript extends Script
     private void prepareInventory(CraftInventory recipe)
     {
         expectingXpDrop = false;
+        clearLeatherBatch();
 
         if (!ensureInArea(Areas.EDGE_BANK, BANK_WALK_KEY))
         {
@@ -371,6 +378,50 @@ public class CraftingScript extends Script
         Rs2Keyboard.keyPress(KeyEvent.VK_SPACE);
         expectingXpDrop = true;
         lastActionAtMs = System.currentTimeMillis();
+        if (recipe.getRecipeType() == RecipeType.LEATHER)
+        {
+            leatherBatchActive = true;
+            lastLeatherCount = Rs2Inventory.count(getFirstConsumable(recipe).getItemName(), true);
+            lastLeatherProgressAtMs = lastActionAtMs;
+        }
+    }
+
+    private boolean isLeatherBatchActive()
+    {
+        if (!leatherBatchActive) return false;
+
+        Ingredient leather = getFirstConsumable(targetRecipe);
+        int count = leather == null ? 0 : Rs2Inventory.count(leather.getItemName(), true);
+        if (Rs2Bank.isOpen() || Rs2Player.isMoving() || count <= 0
+                || !Rs2Inventory.hasItem("Needle", true)
+                || !Rs2Inventory.hasItem("Thread", true))
+        {
+            clearLeatherBatch();
+            return false;
+        }
+
+        long now = System.currentTimeMillis();
+        if (Rs2Player.isAnimating() || count < lastLeatherCount)
+        {
+            lastLeatherCount = count;
+            lastLeatherProgressAtMs = now;
+            return true;
+        }
+
+        if (Rs2Widget.isProductionWidgetOpen()
+                || now - lastLeatherProgressAtMs >= LEATHER_PROGRESS_TIMEOUT_MS)
+        {
+            clearLeatherBatch();
+            return false;
+        }
+        return true;
+    }
+
+    private void clearLeatherBatch()
+    {
+        leatherBatchActive = false;
+        lastLeatherCount = -1;
+        lastLeatherProgressAtMs = 0L;
     }
 
     private boolean isCraftingProductionWidgetOpen(CraftInventory recipe)
@@ -524,6 +575,7 @@ public class CraftingScript extends Script
     public void shutdown()
     {
         state = CraftingState.WAITING;
+        clearLeatherBatch();
         clearProductionAction();
         pendingWorldActionAtMs = 0L;
         pendingWorldAction = null;

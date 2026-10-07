@@ -28,7 +28,7 @@ import javax.inject.Inject;
 @SuppressWarnings("unused")
 public class KspAccountBuilderPlugin extends Plugin
 {
-    public static final String VERSION = "1.9.8";
+    public static final String VERSION = "1.9.9";
 
     @Inject
     private KspAccountBuilderScript script;
