@@ -1,6 +1,6 @@
 # Account Builder quest regression checks
 
-`QuestRegressionTest.java` exercises the actual compiled quest scripts using mocked client state. It lives outside the plugin source folders so the source loader does not compile Mockito test code.
+`QuestRegressionTest.java.txt` exercises the actual compiled quest scripts using mocked client state. The `.txt` extension is intentional: the KSP source loader discovers Java files under `.github` too, and its runtime classpath does not include Mockito. Keep test sources stored with this extension.
 
 Coverage includes partial Sheep Shearer delivery, inventory/bank/active-offer purchase budgets, duplicate-offer prevention, collection to bank, unnoted withdrawal, all four X Marks the Spot dig tiles and exact-tile gating, Imp Catcher tower floors, Restless Ghost amulet/skull recovery, full inventory preparation, cutscene guarding, and game-state completion.
 
@@ -12,7 +12,9 @@ Coverage includes partial Sheep Shearer delivery, inventory/bank/active-offer pu
 - Tests use Mockito Core 5.14.2, Byte Buddy and Byte Buddy Agent 1.15.4, and Objenesis 3.3.
 - Launch with `-javaagent:<byte-buddy-agent.jar>` so static mocking does not depend on dynamic JVM attachment.
 
-With compiled plugin classes and dependencies available, compile this test with the plugin classes, client JAR, and Mockito Core on the classpath. Run `QuestRegressionTest` with those plus Byte Buddy, its agent, and Objenesis on the classpath. The expected result is `PASS: 38 quest regression checks`.
+Copy `QuestRegressionTest.java.txt` to a temporary directory outside this repository as `QuestRegressionTest.java` before compiling. Do not create the `.java` copy anywhere in the source-loader checkout.
+
+With compiled plugin classes and dependencies available, compile this temporary copy with the plugin classes, client JAR, and Mockito Core on the classpath. Run `QuestRegressionTest` with those plus Byte Buddy, its agent, and Objenesis on the classpath. The expected result is `PASS: 38 quest regression checks`.
 
 These are mocked regression checks, not a claim of live quest completion. In-game validation should run each quest from both an unstarted and interrupted state, with some required items banked and some missing, and verify both Run Single Quest and normal task selection.
 
