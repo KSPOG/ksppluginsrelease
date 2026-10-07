@@ -369,6 +369,7 @@ public class KspMadCowScript extends Script {
     private volatile long minigameTeleportCooldownUntilMs;
     /** Current banking cycle has abandoned Ferox and is explicitly targeting Lumbridge top bank. */
     private boolean lumbridgeFallbackBanking;
+    private boolean bankingCycleActive;
     /**
      * A cooldown-fallback bank cycle completed at Lumbridge. Before Cowbell travel, route
      * through the original Lumbridge altar coordinates and restore any missing Prayer.
@@ -1076,7 +1077,8 @@ public class KspMadCowScript extends Script {
         }
 
         boolean minigamesOpen = Rs2Widget.findWidget(MINIGAME_TELEPORT_MENU_TITLE, true) != null;
-        boolean hadBankingState = initialBankCheckPending
+        boolean hadBankingState = bankingCycleActive
+                || initialBankCheckPending
                 || lmsBankTeleportIssued
                 || lumbridgeFallbackBanking
                 || bankActionPending
@@ -1085,6 +1087,7 @@ public class KspMadCowScript extends Script {
                 || Rs2Bank.isOpen();
 
         initialBankCheckPending = false;
+        bankingCycleActive = false;
         bankActionPending = false;
         resetFeroxBankOpenState();
         postBankRefreshPending = false;
@@ -1120,7 +1123,9 @@ public class KspMadCowScript extends Script {
         // Previously it forced an LMS Minigame Teleport whenever the plugin started
         // or returned outside the instance, even when every actual restock trigger
         // was satisfied/disabled. Only enter the banking route for a concrete need.
-        boolean bankingNeeded = !hasRequiredFoodAmount()
+        boolean bankingNeeded = bankingCycleActive
+                || hasUnwantedInventoryItems()
+                || !hasRequiredFoodAmount()
                 || !hasCowbell()
                 || (config.demonicBrutus() && !Rs2Inventory.hasItem(ABYSSAL_POTATO_ID))
                 || Rs2Inventory.isFull();
@@ -1149,6 +1154,8 @@ public class KspMadCowScript extends Script {
             cancelBankingAutomationIfDisabled();
             return;
         }
+
+        bankingCycleActive = true;
 
         if (!lumbridgeFallbackBanking && isMinigameTeleportCooldownActive()) {
             activateLumbridgeBankFallback("Minigame Teleport cooldown is active");
@@ -1349,6 +1356,7 @@ public class KspMadCowScript extends Script {
             return;
         }
 
+        bankingCycleActive = false;
         initialBankCheckPending = false;
         suppliesErrorShown = false;
         travelRequired = true;
@@ -2388,6 +2396,11 @@ public class KspMadCowScript extends Script {
         int total = Rs2Inventory.itemQuantity(AIR_RUNE_ID);
         int reserve = minimumMagicRuneReserve(Runes.AIR);
         return Math.max(0, total - reserve);
+    }
+
+    private boolean hasUnwantedInventoryItems() {
+        return Rs2Inventory.all().stream()
+                .anyMatch(item -> item != null && !keepDuringBanking(item));
     }
 
     private boolean keepDuringBanking(Rs2ItemModel item) {
@@ -6969,6 +6982,7 @@ public class KspMadCowScript extends Script {
             log.debug("Unable to disable Brutus prayers during shutdown", ex);
         }
 
+        bankingCycleActive = false;
         clearWalkerRouteIfActive("brutus-shutdown");
         resetSpecialDetection();
         bankActionPending = false;
