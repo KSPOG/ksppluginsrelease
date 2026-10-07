@@ -43,7 +43,7 @@ public class KspJewelryCrafterScript extends Script
 {
     private static final int LOOP_MS = 650;
     private static final int EDGEVILLE_FURNACE_ID = 16469;
-    private static final int EDGEVILLE_DIRECT_BANK_RADIUS = 20;
+    private static final int WORK_BANK_RADIUS = 20;
     private static final int BANK_WIDGET_GROUP = 12;
     private static final int BANK_WIDGET_CHILD = 1;
     private static final int GE_QUANTITY_X_CHILD = 7;
@@ -55,8 +55,6 @@ public class KspJewelryCrafterScript extends Script
     private static final int GE_PRICE_CLICK_DELAY_MIN_MS = 650;
     private static final int GE_PRICE_CLICK_DELAY_MAX_MS = 950;
     private static final long TARGET_INTERACTION_TIMEOUT_MS = 8_000L;
-    private static final WorldPoint EDGEVILLE_BANK = new WorldPoint(3096, 3494, 0);
-    private static final WorldPoint EDGEVILLE_FURNACE = new WorldPoint(3109, 3499, 0);
     private static final WorldPoint GRAND_EXCHANGE = new WorldPoint(3164, 3487, 0);
 
     private KspJewelryCrafterConfig config;
@@ -297,7 +295,7 @@ public class KspJewelryCrafterScript extends Script
         }
         resetCraftingMonitor();
 
-        if (!openVerifiedBank(true, "Interacting with Edgeville bank")) return;
+        if (!openVerifiedBank(true, "Interacting with " + workLocation() + " bank")) return;
         if (!Rs2Bank.setWithdrawAsItem())
         {
             status = "Setting bank withdraw mode";
@@ -428,7 +426,7 @@ public class KspJewelryCrafterScript extends Script
 
     private boolean bankWidgetOpen() { return Rs2Widget.isWidgetVisible(BANK_WIDGET_GROUP, BANK_WIDGET_CHILD); }
 
-    private boolean openVerifiedBank(boolean edgeville, String openingStatus)
+    private boolean openVerifiedBank(boolean workBank, String openingStatus)
     {
         if (KspMuleWorkerService.isTransferPriorityActive())
         {
@@ -454,17 +452,17 @@ public class KspJewelryCrafterScript extends Script
         }
         bankInteractionSentAt = 0L;
 
-        if (edgeville && distanceTo(EDGEVILLE_BANK) > EDGEVILLE_DIRECT_BANK_RADIUS)
+        if (workBank && distanceTo(workLocation().getBankPoint()) > WORK_BANK_RADIUS)
         {
-            status = "Walking to Edgeville";
-            if (!Rs2Player.isMoving()) Rs2Walker.walkTo(EDGEVILLE_BANK, 10);
+            status = "Walking to " + workLocation();
+            if (!Rs2Player.isMoving()) Rs2Walker.walkTo(workLocation().getBankPoint(), 10);
             return false;
         }
 
         status = openingStatus;
         long attemptStartedAt = System.currentTimeMillis();
         bankInteractionSentAt = attemptStartedAt;
-        if (!openBankWithoutCamera(edgeville))
+        if (!openBankWithoutCamera(workBank))
         {
             if (System.currentTimeMillis() - attemptStartedAt < 750L) bankInteractionSentAt = 0L;
             else bankInteractionSentAt = System.currentTimeMillis();
@@ -487,12 +485,12 @@ public class KspJewelryCrafterScript extends Script
         return true;
     }
 
-    private boolean openBankWithoutCamera(boolean edgeville)
+    private boolean openBankWithoutCamera(boolean workBank)
     {
         GameObject bank = Rs2GameObject.get("Bank booth", true);
         if (bank != null) return interactGameObjectWithoutCamera(bank, "Bank");
-        WorldPoint destination = EDGEVILLE_BANK;
-        status = edgeville ? "Approaching Edgeville bank" : "Walking to bank without camera movement";
+        WorldPoint destination = workBank ? workLocation().getBankPoint() : GRAND_EXCHANGE;
+        status = workBank ? "Approaching " + workLocation() + " bank" : "Walking to bank without camera movement";
         if (!Rs2Player.isMoving()) Rs2Walker.walkTo(destination, 10);
         return false;
     }
@@ -715,20 +713,20 @@ public class KspJewelryCrafterScript extends Script
         if (!isJewelryProductionOpen() && furnaceInteractionSentAt > 0L)
         {
             long elapsed = System.currentTimeMillis() - furnaceInteractionSentAt;
-            if (Rs2Player.isMoving() || elapsed < TARGET_INTERACTION_TIMEOUT_MS) { status = Rs2Player.isMoving() ? "Approaching Edgeville furnace" : "Waiting for jewellery interface"; return; }
+            if (Rs2Player.isMoving() || elapsed < TARGET_INTERACTION_TIMEOUT_MS) { status = Rs2Player.isMoving() ? "Approaching " + workLocation() + " furnace" : "Waiting for jewellery interface"; return; }
             furnaceInteractionSentAt = 0L;
         }
-        TileObject furnace = Rs2GameObject.findObjectById(EDGEVILLE_FURNACE_ID);
+        TileObject furnace = findWorkFurnace();
         if (furnace == null)
         {
-            status = distanceTo(EDGEVILLE_FURNACE) <= 6 ? "Finding nearby Edgeville furnace" : "Walking to Edgeville furnace";
-            if (!Rs2Player.isMoving()) Rs2Walker.walkTo(EDGEVILLE_FURNACE, 3);
+            status = distanceTo(workLocation().getFurnacePoint()) <= 6 ? "Finding nearby " + workLocation() + " furnace" : "Walking to " + workLocation() + " furnace";
+            if (!Rs2Player.isMoving()) Rs2Walker.walkTo(workLocation().getFurnacePoint(), 3);
             return;
         }
         if (!isJewelryProductionOpen())
         {
             status = "Opening jewellery furnace interface";
-            if (!interactGameObjectWithoutCamera(furnace, "Smelt")) { status = "Unable to use Edgeville furnace"; return; }
+            if (!interactGameObjectWithoutCamera(furnace, "Smelt")) { status = "Unable to use " + workLocation() + " furnace"; return; }
             furnaceInteractionSentAt = System.currentTimeMillis();
             if (!sleepUntil(this::isJewelryProductionOpen, 5_000)) { status = "Waiting for jewellery interface"; return; }
             furnaceInteractionSentAt = 0L;
@@ -1338,6 +1336,22 @@ public class KspJewelryCrafterScript extends Script
         return true;
     }
 
+    private JewelryWorkLocation workLocation()
+    {
+        JewelryWorkLocation location = config.furnaceLocation();
+        return location == null ? JewelryWorkLocation.EDGEVILLE : location;
+    }
+
+    private TileObject findWorkFurnace()
+    {
+        TileObject furnace = workLocation() == JewelryWorkLocation.EDGEVILLE
+                ? Rs2GameObject.findObjectById(EDGEVILLE_FURNACE_ID)
+                : Rs2GameObject.get("Furnace", true);
+        return furnace != null
+                && furnace.getWorldLocation().distanceTo(workLocation().getFurnacePoint()) <= 8
+                ? furnace : null;
+    }
+
     private void returnToFurnace()
     {
         if (Rs2GrandExchange.isOpen())
@@ -1345,7 +1359,7 @@ public class KspJewelryCrafterScript extends Script
             Rs2GrandExchange.closeExchange();
             if (Rs2GrandExchange.isOpen()) { status = "Closing Grand Exchange"; return; }
         }
-        if (distanceTo(EDGEVILLE_BANK) > EDGEVILLE_DIRECT_BANK_RADIUS) { status = "Returning to Edgeville"; if (!Rs2Player.isMoving()) Rs2Walker.walkTo(EDGEVILLE_BANK, 10); return; }
+        if (distanceTo(workLocation().getBankPoint()) > WORK_BANK_RADIUS) { status = "Returning to " + workLocation(); if (!Rs2Player.isMoving()) Rs2Walker.walkTo(workLocation().getBankPoint(), 10); return; }
         state = JewelryCrafterState.BANKING;
         status = "Preparing next crafting inventory";
     }
