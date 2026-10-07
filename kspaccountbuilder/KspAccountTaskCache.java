@@ -23,7 +23,11 @@ public class KspAccountTaskCache
     {
         STRONGHOLD_OF_SECURITY,
         ROMEO_AND_JULIET,
-        RUNE_MYSTERIES
+        RUNE_MYSTERIES,
+        SHEEP_SHEARER,
+        X_MARKS_THE_SPOT,
+        THE_RESTLESS_GHOST,
+        IMP_CATCHER
     }
 
     private static final String CACHE_FILE_NAME = "ksp-account-builder-task-state.json";
