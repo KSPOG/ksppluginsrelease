@@ -51,6 +51,7 @@ extends Script {
     private static final int WEB_WALK_COOLDOWN_MS = 1_000;
     private static final int ANVIL_INTERACT_COOLDOWN_MS = 100;
     private static final int SMITH_START_GRACE_MS = 900;
+    private static final long SMITH_PROGRESS_TIMEOUT_MS = 4_800L;
     private static final long SMITH_WIDGET_ACTION_TIMEOUT_MS = 1_500L;
     private static final long ACTION_DISPATCH_TIMEOUT_MS = 1_500L;
     private static final int ANVIL_APPROACH_DISTANCE = 6;
@@ -66,6 +67,8 @@ extends Script {
     private long lastSmithAnimationAtMs;
     private WorldPoint lastWalkTarget;
     private boolean expectingSmithXpDrop;
+    private int lastSmithBarCount = -1;
+    private long lastSmithProgressAtMs;
     private boolean debugLogging;
     private boolean walkingToTargetArea;
     private boolean bankInventoryReset;
@@ -100,6 +103,7 @@ extends Script {
             if (!super.run() || !Microbot.isLoggedIn()) {
                 return;
             }
+            if (this.isSmithingBatchActive()) return;
             this.selectTargetRecipe();
             KspTaskDebug.throttled(log, this.debugLogging, "Smithing", "loop", 5_000L,
                     "loop | recipe={} area={} player={} moving={} animating={} interacting={} bankOpen={} smithWidgetOpen={} bars={} awaitingStart={}",
@@ -452,6 +456,8 @@ extends Script {
 
         awaitingSmithStartAtMs = System.currentTimeMillis();
         expectingSmithXpDrop = true;
+        lastSmithBarCount = Rs2Inventory.count(getBarName(recipe));
+        lastSmithProgressAtMs = awaitingSmithStartAtMs;
         return true;
     }
 
@@ -570,7 +576,7 @@ extends Script {
     }
 
     private boolean isSmithingWidgetOpen() {
-        return Rs2Widget.isSmithingWidgetOpen() || Rs2Widget.getWidget((int)312, (int)1) != null;
+        return Rs2Widget.isSmithingWidgetOpen();
     }
 
     private int getSmithingChildId(SmithRecipe recipe) {
@@ -595,6 +601,39 @@ extends Script {
             }
         }
         return 9;
+    }
+
+    private boolean isSmithingBatchActive() {
+        if (!expectingSmithXpDrop || targetRecipe == null) return false;
+
+        int bars = Rs2Inventory.count(getBarName(targetRecipe));
+        if (Rs2Bank.isOpen() || Rs2Player.isMoving()
+                || bars < targetRecipe.getBarRequirement()) {
+            clearSmithingBatch();
+            return false;
+        }
+
+        long now = System.currentTimeMillis();
+        if (Rs2Player.isAnimating() || bars < lastSmithBarCount) {
+            lastSmithBarCount = bars;
+            lastSmithProgressAtMs = now;
+            return true;
+        }
+
+        // A visible selection interface means production has stopped or has not started.
+        if (isSmithingWidgetOpen()
+                || now - lastSmithProgressAtMs >= SMITH_PROGRESS_TIMEOUT_MS) {
+            clearSmithingBatch();
+            return false;
+        }
+        return true;
+    }
+
+    private void clearSmithingBatch() {
+        expectingSmithXpDrop = false;
+        lastSmithBarCount = -1;
+        lastSmithProgressAtMs = 0L;
+        awaitingSmithStartAtMs = 0L;
     }
 
     private boolean isWaitingForSmithStart() {
@@ -641,7 +680,7 @@ extends Script {
         this.lastAnvilInteractAtMs = 0L;
         this.lastWebWalkAtMs = 0L;
         this.lastWalkTarget = null;
-        this.expectingSmithXpDrop = false;
+        this.clearSmithingBatch();
         this.clearSmithWidgetAction();
         this.pendingWorldActionAtMs = 0L;
         this.pendingWorldAction = null;
