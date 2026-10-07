@@ -136,6 +136,11 @@ public class MeleeScript
                         Microbot.getClient().getBoostedSkillLevel(Skill.HITPOINTS),
                         Microbot.getClient().getRealSkillLevel(Skill.HITPOINTS),
                         Rs2Bank.isOpen());
+                if (this.needsWarriorFoodRestock(stage)) {
+                    this.state = CombatState.BANKING;
+                    this.handleBanking(stage);
+                    return;
+                }
                 if (this.handleHealing()) {
                     this.state = CombatState.PREPARING;
                     return;
@@ -289,7 +294,15 @@ public class MeleeScript
         return name != null && name.toLowerCase(Locale.ENGLISH).contains("bone");
     }
 
+    private boolean needsWarriorFoodRestock(TrainingStage stage) {
+        return stage != null
+                && stage.primaryNpc == NPC.AL_KHARID_WARRIOR
+                && this.getFoodCountInInventory() <= 0;
+    }
+
     private boolean shouldBank(TrainingStage stage) {
+        if (this.needsWarriorFoodRestock(stage)) return true;
+
         if (this.hasInventoryEquipmentToEquip()) {
             return false;
         }

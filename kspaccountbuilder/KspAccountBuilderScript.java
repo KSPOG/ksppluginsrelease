@@ -1627,7 +1627,8 @@ public class KspAccountBuilderScript extends Script
             if (level < logs.getRequiredLevel()) continue;
             if (level >= LogsLvl.WILLOW_LOGS.getRequiredLevel() && logs != LogsLvl.WILLOW_LOGS) continue;
             if (level >= LogsLvl.OAK_LOGS.getRequiredLevel() && logs == LogsLvl.LOGS) continue;
-            if (stored(logs.getDisplayName()) > 0) return true;
+            if (Rs2Inventory.count(logs.getDisplayName(), true)
+                    + Math.max(0, Rs2Bank.count(logs.getDisplayName(), true)) > 0) return true;
         }
         return false;
     }
