@@ -396,7 +396,7 @@ public class BuyScript extends Script {
                 budget.getDetails()
         );
 
-        if (budget.estimatedCost <= 0L || budget.getAvailableCoins() > 0L) {
+        if (budget.hasEnoughCoins()) {
             return true;
         }
 
@@ -443,6 +443,13 @@ public class BuyScript extends Script {
     }
 
     public boolean canAffordMissingBuys() {
+        if (!this.pendingMissingToolBuys.isEmpty()
+                || !this.pendingFishingSupplyBuys.isEmpty()
+                || !this.pendingOreBuys.isEmpty()
+                || Rs2GrandExchange.hasBoughtOffer()) {
+            return true;
+        }
+
         String desiredPickaxe = this.resolveDesiredPickaxeName();
         String desiredAxe = this.resolveDesiredAxeName();
         if (Rs2Bank.isOpen()) {
@@ -451,7 +458,7 @@ public class BuyScript extends Script {
         this.calculateSmithingOreNeeds();
         this.calculateCraftingNeeds();
         BuyBudget budget = this.calculateMissingBuyBudget(desiredPickaxe, desiredAxe);
-        return budget.estimatedCost <= 0L || budget.getAvailableCoins() > 0L;
+        return budget.hasEnoughCoins();
     }
 
     private void addToolToBudgetIfMissing(BuyBudget budget, String itemName) {
