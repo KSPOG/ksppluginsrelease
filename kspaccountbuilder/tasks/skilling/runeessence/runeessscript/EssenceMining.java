@@ -34,6 +34,7 @@ public class EssenceMining extends Script
     private static final long WALK_REFIRE_COOLDOWN_MS = 1_000L;
     private static final long ACTION_COOLDOWN_MS = 100L;
     private static final long ACTION_DISPATCH_TIMEOUT_MS = 1_500L;
+    private static final long MINING_PROGRESS_TIMEOUT_MS = 4_800L;
     private static final WorldPoint AUBURY_POSITION = new WorldPoint(3253, 3399, 0);
     private static final WorldPoint[] ESSENCE_MINE_PORTAL_LOCATIONS = {
             new WorldPoint(2932, 4854, 0),
@@ -49,6 +50,9 @@ public class EssenceMining extends Script
     private long lastActionAtMs;
     private long pendingWorldActionAtMs;
     private String pendingWorldAction;
+    private boolean essenceMiningPending;
+    private int lastEssenceCount;
+    private long lastMiningProgressAtMs;
     private long pendingBankActionAtMs;
     private int pendingBankEmptySlots = -1;
     private EssenceState state = EssenceState.PREPARING;
@@ -114,6 +118,7 @@ public class EssenceMining extends Script
             return;
         }
 
+        clearEssenceMiningAction();
         if (Rs2Inventory.isFull() || !hasPickaxe())
         {
             bankInventory();
@@ -222,7 +227,8 @@ public class EssenceMining extends Script
     {
         state = EssenceState.MINING;
         status = "Mining rune essence";
-        if (Rs2Player.isAnimating() || Rs2Player.isInteracting() || isWorldActionPending("essence-rock") || !canAct())
+        if (isEssenceMiningActionPending() || Rs2Player.isMoving()
+                || Rs2Player.isAnimating() || Rs2Player.isInteracting() || !canAct())
         {
             return;
         }
@@ -234,12 +240,48 @@ public class EssenceMining extends Script
         if (essenceRock != null && essenceRock.click("Mine"))
         {
             lastActionAtMs = System.currentTimeMillis();
-            markWorldAction("essence-rock");
+            essenceMiningPending = true;
+            lastEssenceCount = getEssenceCount();
+            lastMiningProgressAtMs = lastActionAtMs;
         }
+    }
+
+    private boolean isEssenceMiningActionPending()
+    {
+        if (!essenceMiningPending) return false;
+
+        long now = System.currentTimeMillis();
+        int count = getEssenceCount();
+        if (Rs2Player.isMoving() || Rs2Player.isAnimating()
+                || Rs2Player.isInteracting() || count > lastEssenceCount)
+        {
+            lastEssenceCount = count;
+            lastMiningProgressAtMs = now;
+            return true;
+        }
+
+        // Retain the click through dispatch and mining animation gaps.
+        // Retry only after movement, animation and inventory progress have all stopped.
+        if (now - lastMiningProgressAtMs < MINING_PROGRESS_TIMEOUT_MS) return true;
+        clearEssenceMiningAction();
+        return false;
+    }
+
+    private int getEssenceCount()
+    {
+        return Rs2Inventory.count(1436) + Rs2Inventory.count(7936);
+    }
+
+    private void clearEssenceMiningAction()
+    {
+        essenceMiningPending = false;
+        lastEssenceCount = 0;
+        lastMiningProgressAtMs = 0L;
     }
 
     private void exitMine()
     {
+        clearEssenceMiningAction();
         state = EssenceState.EXITING_MINE;
         status = "Leaving rune essence mine";
         if (Rs2Player.isAnimating() || Rs2Player.isInteracting() || isWorldActionPending("portal") || !canAct()) return;
@@ -423,6 +465,7 @@ public class EssenceMining extends Script
     @Override
     public void shutdown()
     {
+        clearEssenceMiningAction();
         KspWalkerGuard.clear(WALK_KEY_AUBURY);
         KspWalkerGuard.clear(WALK_KEY_BANK);
         KspWalkerGuard.clear(WALK_KEY_PORTAL);
