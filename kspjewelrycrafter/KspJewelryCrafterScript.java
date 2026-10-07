@@ -48,8 +48,8 @@ public class KspJewelryCrafterScript extends Script
     private static final int BANK_WIDGET_CHILD = 1;
     private static final int GE_QUANTITY_X_CHILD = 7;
     private static final int GE_PRICE_X_CHILD = 12;
-    private static final int GE_SEARCH_GROUP = 162;
-    private static final int GE_SEARCH_PROMPT_CHILD = 52;
+    private static final int GE_SEARCH_GROUP = InterfaceID.CHATBOX;
+    private static final int GE_SEARCH_PROMPT_CHILD = InterfaceID.Chatbox.MES_LAYER_SCROLLCONTENTS & 0xFFFF;
     private static final int GE_SELECTED_PRICE_CHILD = 41;
     private static final int GE_VALUE_ENTRY_ATTEMPTS = 3;
     private static final int GE_PRICE_CLICK_DELAY_MIN_MS = 650;
