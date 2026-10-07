@@ -119,6 +119,9 @@ public final class KspWalkerGuard
         WorldPoint currentTarget = Rs2Walker.getCurrentTarget();
         if (currentTarget != null)
         {
+            // The core walker may retarget to a reachable tile during recovery.
+            // Keep the route owned by this step instead of replacing its adjusted goal.
+            if (key.equals(activeWalkerKey)) return false;
             if (isSameDestination(currentTarget, target, Math.max(2, arriveDistance + 2))) return false;
             Rs2Walker.clearWalkingRoute(activeWalkerKey != null && !activeWalkerKey.equals(key)
                     ? "ksp_account_builder_owner_changed"
