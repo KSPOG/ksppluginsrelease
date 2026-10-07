@@ -547,6 +547,7 @@ public class KspMadCowScript extends Script {
         quickLeaveClickIssued = false;
         quickLeaveLastAttemptAtMs = 0L;
         altarInteractionIssued = false;
+        bankingCycleActive = false;
         bankActionPending = false;
         bankActionStartedAtMs = 0L;
         bankActionDescription = "";
