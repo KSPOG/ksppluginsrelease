@@ -20,7 +20,7 @@ Microbot jewellery crafter with live profitability filtering and automatic GE re
 - When inputs run out, crafted output is sold at the GE and the proceeds are reused to buy the next profitable recipe's inputs.
 - Missing moulds are bought once as reusable tooling.
 - GE offers time out, abort, collect to bank, and retry with progressively more aggressive prices.
-- Uses the Edgeville furnace/bank for the crafting loop and the Grand Exchange for liquidation/restocking.
+- Work location selects the Edgeville (default) or Al Kharid furnace/bank for the crafting loop. Liquidation/restocking still uses the Grand Exchange.
 
 ## Recipe coverage
 
@@ -48,3 +48,9 @@ The script intentionally refuses to craft when a current two-sided market quote 
 - Shows batch/session statistics and estimated net profit/hour.
 - Shows active GE offer, retry count and restock queue progress.
 - Profit values are explicitly estimated rather than falsely labelled as realized P&L.
+
+
+## v0.1.29 - Al Kharid work location
+
+- Added Work location with Edgeville and Al Kharid options, following Smart Smelter's paired furnace/bank configuration.
+- Banking, furnace interactions and return trips from the GE use the selected location.

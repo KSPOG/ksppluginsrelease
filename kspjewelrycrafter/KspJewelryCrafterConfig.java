@@ -17,6 +17,9 @@ public interface KspJewelryCrafterConfig extends Config, KspMuleConfig
     @ConfigSection(name = "Local Mule", description = "Automatic excess-GP transfer to KSP Trade Receiver", position = 90)
     String muleSection = KspMuleConfig.SECTION;
 
+    @ConfigItem(keyName = "furnaceLocation", name = "Work location", description = "Furnace and bank used for jewellery production", position = -1)
+    default JewelryWorkLocation furnaceLocation() { return JewelryWorkLocation.EDGEVILLE; }
+
     @ConfigItem(keyName = "selectionMode", name = "Recipe selection", description = "How a profitable eligible recipe is selected", position = 0)
     default JewelrySelectionMode selectionMode() { return JewelrySelectionMode.BEST_PROFIT; }
     @ConfigItem(keyName = "fixedRecipe", name = "Fixed recipe", description = "Used only when Recipe selection is Fixed recipe", position = 1)
