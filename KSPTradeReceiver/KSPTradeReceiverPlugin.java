@@ -1,5 +1,6 @@
 package net.runelite.client.plugins.microbot.KSPTradeReceiver;
 
+import net.runelite.client.plugins.microbot.kspsupport.KspBreakService;
 import com.google.inject.Provides;
 import net.runelite.api.events.ChatMessage;
 import net.runelite.client.config.ConfigManager;
@@ -22,7 +23,9 @@ import javax.inject.Inject;
 )
 public class KSPTradeReceiverPlugin extends Plugin
 {
-    public static final String VERSION = "0.2.6";
+    private final KspBreakService breaks = new KspBreakService();
+
+    public static final String VERSION = "0.2.7";
 
     @Inject private KSPTradeReceiverConfig config;
     @Inject private KSPTradeReceiverScript script;
@@ -39,6 +42,7 @@ public class KSPTradeReceiverPlugin extends Plugin
     @Override
     protected void startUp()
     {
+        breaks.start(config);
         overlayManager.add(overlay);
         muleCoordinator.start(config);
         script.run(config);
@@ -47,11 +51,22 @@ public class KSPTradeReceiverPlugin extends Plugin
     @Override
     protected void shutDown()
     {
-        muleCoordinator.shutdown();
-        script.shutdown();
-        overlayManager.remove(overlay);
+        try
+        {
+            muleCoordinator.shutdown();
+            script.shutdown();
+            overlayManager.remove(overlay);
+        }
+        finally
+        {
+            breaks.shutdown();
+        }
     }
 
     @Subscribe
     public void onChatMessage(ChatMessage event) { script.onChatMessage(event); }
+    public void prepareHotUnload() throws Exception
+    {
+        shutDown();
+    }
 }

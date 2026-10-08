@@ -1,5 +1,6 @@
 package net.runelite.client.plugins.microbot.kspwillowchopper;
 
+import net.runelite.client.plugins.microbot.kspsupport.KspBreakService;
 import com.google.inject.Provides;
 import net.runelite.api.ChatMessageType;
 import net.runelite.api.GameObject;
@@ -62,6 +63,8 @@ import java.util.regex.Pattern;
         isExternal = PluginConstants.IS_EXTERNAL
 )
 public class KspWillowChopperPlugin extends Plugin {
+    private final KspBreakService breaks = new KspBreakService();
+
     /** Intentionally unchanged at the user's request. */
     public static final String VERSION = "0.1.3";
 
@@ -101,6 +104,7 @@ public class KspWillowChopperPlugin extends Plugin {
 
     @Override
     protected void startUp() {
+        breaks.start(config);
         runtimeActive = true;
         currentForestryEvent = KspForestryEvent.NONE;
         completedForestryEvents.set(0);
@@ -123,17 +127,24 @@ public class KspWillowChopperPlugin extends Plugin {
 
     @Override
     protected void shutDown() {
-        runtimeActive = false;
-        currentForestryEvent = KspForestryEvent.NONE;
-        forestryHandlers.clear();
-        saplingEvent = null;
+        try
+        {
+            runtimeActive = false;
+            currentForestryEvent = KspForestryEvent.NONE;
+            forestryHandlers.clear();
+            saplingEvent = null;
 
-        script.shutdown();
-        muleService.shutdown();
-        ritualCircles.clear();
-        saplingIngredients.clear();
-        overlayManager.remove(overlay);
-        purgeLegacyGlobalForestryHandlers();
+            script.shutdown();
+            muleService.shutdown();
+            ritualCircles.clear();
+            saplingIngredients.clear();
+            overlayManager.remove(overlay);
+            purgeLegacyGlobalForestryHandlers();
+        }
+        finally
+        {
+            breaks.shutdown();
+        }
     }
 
     /**
@@ -185,6 +196,7 @@ public class KspWillowChopperPlugin extends Plugin {
      * that thread, but never Microbot's shared BlockingEvent executor.
      */
     public boolean runForestryIfNeeded() {
+        if (KspBreakService.shouldPause()) return false;
         if (!runtimeActive || config == null || !config.enableForestry()) {
             currentForestryEvent = KspForestryEvent.NONE;
             return false;
@@ -332,6 +344,7 @@ public class KspWillowChopperPlugin extends Plugin {
     }
 
     public boolean canStartForestryInteraction(long hash, String action) {
+        if (KspBreakService.shouldPause()) return false;
         long elapsed = System.currentTimeMillis() - lastForestryInteractionMillis.get();
         long key = forestryInteractionKey(hash, action);
         return runtimeActive
@@ -343,6 +356,7 @@ public class KspWillowChopperPlugin extends Plugin {
     }
 
     public boolean moveDirectlyToForestryTarget(long hash, WorldPoint target, Point minimap, Polygon canvas) {
+        if (KspBreakService.shouldPause()) return false;
         if (!runtimeActive || target == null) {
             return false;
         }
@@ -400,6 +414,7 @@ public class KspWillowChopperPlugin extends Plugin {
     }
 
     public boolean isForestryEventEnabled(KspForestryEvent event) {
+        if (KspBreakService.shouldPause()) return false;
         if (!runtimeActive || config == null || !config.enableForestry()
                 || event == null || event == KspForestryEvent.NONE) {
             return false;
@@ -452,5 +467,9 @@ public class KspWillowChopperPlugin extends Plugin {
         } catch (Exception ex) {
             return "Unknown";
         }
+    }
+    public void prepareHotUnload() throws Exception
+    {
+        shutDown();
     }
 }

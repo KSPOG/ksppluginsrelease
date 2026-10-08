@@ -11,7 +11,7 @@ import net.runelite.api.gameval.ObjectID;
 import net.runelite.client.eventbus.EventBus;
 import net.runelite.client.eventbus.Subscribe;
 import net.runelite.client.plugins.microbot.Microbot;
-import net.runelite.client.plugins.microbot.Script;
+import net.runelite.client.plugins.microbot.kspsupport.KspBreakAwareScript;
 import net.runelite.client.plugins.microbot.api.tileobject.models.Rs2TileObjectModel;
 import net.runelite.client.plugins.microbot.util.bank.Rs2Bank;
 import net.runelite.client.plugins.microbot.util.depositbox.Rs2DepositBox;
@@ -43,7 +43,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
  */
 @Slf4j
 @Singleton
-public class KspWillowChopperScript extends Script {
+public class KspWillowChopperScript extends KspBreakAwareScript {
     private static final int TINDERBOX_ID = ItemID.TINDERBOX;
     private static final int BURN_INTERFACE_WIDGET = 17694735;
     private static final int FIRE_ID = ObjectID.FIRE;
@@ -202,7 +202,7 @@ public class KspWillowChopperScript extends Script {
                 return;
             }
 
-            if (Microbot.pauseAllScripts.get()) {
+            if (net.runelite.client.plugins.microbot.kspsupport.KspBreakService.shouldPause()) {
                 state = RuntimeState.PAUSED;
                 status = "Paused globally";
                 return;
@@ -671,7 +671,7 @@ public class KspWillowChopperScript extends Script {
     private boolean canImmediateRetarget() {
         if (!sessionStarted
                 || !Microbot.isLoggedIn()
-                || Microbot.pauseAllScripts.get()
+                || net.runelite.client.plugins.microbot.kspsupport.KspBreakService.shouldPause()
                 || state != RuntimeState.CHOPPING
                 || plugin.getCurrentForestryEvent() != KspForestryEvent.NONE
                 || Rs2Inventory.isFull()) {
@@ -741,7 +741,7 @@ public class KspWillowChopperScript extends Script {
                 || !activeTree.isCampfireBurnable()
                 || !burnBatchActive
                 || !Microbot.isLoggedIn()
-                || Microbot.pauseAllScripts.get()
+                || net.runelite.client.plugins.microbot.kspsupport.KspBreakService.shouldPause()
                 || plugin.getCurrentForestryEvent() != KspForestryEvent.NONE) {
             return false;
         }

@@ -9,7 +9,7 @@ import net.runelite.api.gameval.InterfaceID;
 import net.runelite.api.gameval.ItemID;
 import net.runelite.api.widgets.Widget;
 import net.runelite.client.plugins.microbot.Microbot;
-import net.runelite.client.plugins.microbot.Script;
+import net.runelite.client.plugins.microbot.kspsupport.KspBreakAwareScript;
 import net.runelite.client.plugins.microbot.api.tileobject.models.Rs2TileObjectModel;
 import net.runelite.client.plugins.microbot.kspbank.KspVerifiedBank;
 import net.runelite.client.plugins.microbot.kspsmartsmelter.model.FurnaceLocation;
@@ -33,7 +33,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 
-public class KspSmartSmelterScript extends Script {
+public class KspSmartSmelterScript extends KspBreakAwareScript {
     private static final int CANNONBALL_INTERFACE = 17694733;
     private static final int CANNONBALL_BUTTON = 17694734;
     private static final int EDGEVILLE_FURNACE_ID = 16469;

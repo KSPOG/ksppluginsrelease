@@ -10,7 +10,7 @@ import net.runelite.api.GrandExchangeOfferState;
 import net.runelite.api.Skill;
 import net.runelite.api.gameval.ItemID;
 import net.runelite.client.plugins.microbot.Microbot;
-import net.runelite.client.plugins.microbot.Script;
+import net.runelite.client.plugins.microbot.kspsupport.KspBreakAwareScript;
 import net.runelite.client.plugins.microbot.util.bank.Rs2Bank;
 import net.runelite.client.plugins.microbot.util.equipment.Rs2Equipment;
 import net.runelite.client.plugins.microbot.util.grandexchange.GrandExchangeAction;
@@ -28,7 +28,7 @@ import static net.runelite.client.plugins.microbot.util.Global.sleep;
 import static net.runelite.client.plugins.microbot.util.Global.sleepUntil;
 
 @Slf4j
-public class KspBonesToBananasScript extends Script
+public class KspBonesToBananasScript extends KspBreakAwareScript
 {
     private static final int LOOP_MS = 650;
     private static final int MAX_GE_RETRIES = 5;
@@ -74,7 +74,7 @@ public class KspBonesToBananasScript extends Script
             }
             catch (Exception ex)
             {
-                if (Microbot.pauseAllScripts.get())
+                if (net.runelite.client.plugins.microbot.kspsupport.KspBreakService.shouldPause())
                 {
                     status = "Paused for priority plugin";
                     return;

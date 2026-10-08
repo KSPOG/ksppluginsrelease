@@ -1,13 +1,17 @@
 package net.runelite.client.plugins.microbot.kspf2pgatheringprofit;
 
+import net.runelite.client.config.ConfigSection;
+import net.runelite.client.plugins.microbot.kspsupport.KspBreakConfig;
 import net.runelite.client.config.Config;
 import net.runelite.client.config.ConfigGroup;
 import net.runelite.client.config.ConfigItem;
 import net.runelite.client.config.Range;
 
 @ConfigGroup(KspF2pGatheringProfitConfig.GROUP)
-public interface KspF2pGatheringProfitConfig extends Config
-{
+public interface KspF2pGatheringProfitConfig extends Config, KspBreakConfig {
+    @ConfigSection(name = "Break Handler", description = "Randomized logout breaks", position = 100)
+    String breakHandlerSection = KspBreakConfig.SECTION;
+
     String GROUP = "ksp-f2p-gathering-profit";
 
     enum Objective { MAX_GP, MAX_XP, BALANCED, GP_PRIORITY, XP_PRIORITY }

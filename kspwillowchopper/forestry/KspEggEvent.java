@@ -65,7 +65,7 @@ public class KspEggEvent implements BlockingEvent {
                 plugin.markForestryInteraction(forester.getHash(), "Talk-to");
                 sleepUntil(Rs2Dialogue::isInDialogue, 4_000);
                 long dialogueDeadline = System.currentTimeMillis() + 8_000L;
-                while (Rs2Dialogue.isInDialogue() && System.currentTimeMillis() < dialogueDeadline) {
+                while (!net.runelite.client.plugins.microbot.kspsupport.KspBreakService.shouldPause() && Rs2Dialogue.isInDialogue() && System.currentTimeMillis() < dialogueDeadline) {
                     Rs2Dialogue.clickContinue();
                     sleep(120);
                 }

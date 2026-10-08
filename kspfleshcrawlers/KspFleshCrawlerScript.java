@@ -8,7 +8,7 @@ import net.runelite.api.TileItem;
 import net.runelite.api.coords.WorldPoint;
 import net.runelite.client.plugins.grounditems.GroundItem;
 import net.runelite.client.plugins.microbot.Microbot;
-import net.runelite.client.plugins.microbot.Script;
+import net.runelite.client.plugins.microbot.kspsupport.KspBreakAwareScript;
 import net.runelite.client.plugins.microbot.util.bank.Rs2Bank;
 import net.runelite.client.plugins.microbot.util.combat.Rs2Combat;
 import net.runelite.client.plugins.microbot.util.grounditem.Rs2GroundItem;
@@ -30,7 +30,7 @@ import java.util.stream.Collectors;
 
 @Singleton
 @SuppressWarnings({"deprecation", "removal"})
-public class KspFleshCrawlerScript extends Script {
+public class KspFleshCrawlerScript extends KspBreakAwareScript {
     private static final String NPC_NAME = "Flesh Crawler";
     private static final long ATTACK_COMMIT_GRACE_MS = 3_000L;
     private static final long COMBAT_STALL_TIMEOUT_MS = 6_000L;

@@ -1,5 +1,6 @@
 package net.runelite.client.plugins.microbot.KSPGELooter;
 
+import net.runelite.client.plugins.microbot.kspsupport.KspBreakService;
 import com.google.inject.Provides;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.plugins.Plugin;
@@ -21,7 +22,9 @@ import javax.inject.Inject;
 )
 public class KSPGELooterPlugin extends Plugin
 {
-    public static final String VERSION = "0.1.14";
+    private final KspBreakService breaks = new KspBreakService();
+
+    public static final String VERSION = "0.1.15";
 
     @Inject private KSPGELooterConfig config;
     @Inject private KSPGELooterScript script;
@@ -38,6 +41,7 @@ public class KSPGELooterPlugin extends Plugin
     @Override
     protected void startUp()
     {
+        breaks.start(config);
         muleService.start(config);
         overlayManager.add(overlay);
         script.run(config);
@@ -46,8 +50,19 @@ public class KSPGELooterPlugin extends Plugin
     @Override
     protected void shutDown()
     {
-        muleService.shutdown();
-        script.shutdown();
-        overlayManager.remove(overlay);
+        try
+        {
+            muleService.shutdown();
+            script.shutdown();
+            overlayManager.remove(overlay);
+        }
+        finally
+        {
+            breaks.shutdown();
+        }
+    }
+    public void prepareHotUnload() throws Exception
+    {
+        shutDown();
     }
 }

@@ -1,6 +1,7 @@
 package net.runelite.client.plugins.microbot.kspaiofighter;
 
 
+import net.runelite.client.plugins.microbot.kspsupport.KspBreakConfig;
 import net.runelite.client.config.Config;
 import net.runelite.client.config.ConfigGroup;
 import net.runelite.client.config.ConfigInformation;
@@ -12,8 +13,10 @@ import net.runelite.client.plugins.microbot.util.magic.Rs2CombatSpells;
 
 @ConfigGroup(KspAioFighterConfig.GROUP)
 @ConfigInformation("Configure combat, training, supplies and loot here. Equipment loadouts and attack areas are managed from the AIO Fighter side panel.")
-public interface KspAioFighterConfig extends Config, KspMuleConfig
-{
+public interface KspAioFighterConfig extends Config, KspMuleConfig, KspBreakConfig {
+    @ConfigSection(name = "Break Handler", description = "Randomized logout breaks", position = 100)
+    String breakHandlerSection = KspBreakConfig.SECTION;
+
 	String GROUP = "kspaiofighter";
 
 	@ConfigSection(name = "Combat", description = "NPC and combat settings", position = 0)

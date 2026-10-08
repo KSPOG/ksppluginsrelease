@@ -13,7 +13,7 @@ import net.runelite.api.coords.WorldPoint;
 import net.runelite.api.gameval.ItemID;
 import net.runelite.api.gameval.NpcID;
 import net.runelite.client.plugins.microbot.Microbot;
-import net.runelite.client.plugins.microbot.Script;
+import net.runelite.client.plugins.microbot.kspsupport.KspBreakAwareScript;
 import net.runelite.client.plugins.microbot.mining.data.LocationOption;
 import net.runelite.client.plugins.microbot.mining.data.MiningOreOption;
 import net.runelite.client.plugins.microbot.mining.data.MiningRockLocations;
@@ -50,7 +50,7 @@ enum State {
 }
 
 @Singleton
-public class AutoMiningScript extends Script {
+public class AutoMiningScript extends KspBreakAwareScript {
     private static final Logger log = LoggerFactory.getLogger(AutoMiningScript.class);
 
     private static final int GEM_MINE_UNDERGROUND = 11410;

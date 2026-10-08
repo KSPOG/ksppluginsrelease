@@ -1,5 +1,6 @@
 package net.runelite.client.plugins.microbot.kspfleshcrawlers;
 
+import net.runelite.client.plugins.microbot.kspsupport.KspBreakService;
 import com.google.inject.Provides;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.plugins.Plugin;
@@ -24,7 +25,9 @@ import java.time.Instant;
         enabledByDefault = false
 )
 public class KspFleshCrawlerPlugin extends Plugin {
-    public static final String VERSION = "2.0.6";
+    private final KspBreakService breaks = new KspBreakService();
+
+    public static final String VERSION = "2.0.7";
 
     @Inject private KspFleshCrawlerConfig config;
     @Inject private KspFleshCrawlerScript script;
@@ -40,6 +43,7 @@ public class KspFleshCrawlerPlugin extends Plugin {
 
     @Override
     protected void startUp() {
+        breaks.start(config);
         startedAt = Instant.now();
         startXp = Microbot.isLoggedIn() ? Microbot.getClient().getOverallExperience() : 0L;
         muleService.start(config);
@@ -49,11 +53,18 @@ public class KspFleshCrawlerPlugin extends Plugin {
 
     @Override
     protected void shutDown() {
-        muleService.shutdown();
-        script.shutdown();
-        overlayManager.remove(overlay);
-        startedAt = null;
-        startXp = 0L;
+        try
+        {
+            muleService.shutdown();
+            script.shutdown();
+            overlayManager.remove(overlay);
+            startedAt = null;
+            startXp = 0L;
+        }
+        finally
+        {
+            breaks.shutdown();
+        }
     }
 
     String getRuntimeText() {
@@ -64,4 +75,8 @@ public class KspFleshCrawlerPlugin extends Plugin {
     long getXpPerHour() { long seconds = getRuntimeSeconds(); return seconds <= 0 ? 0L : (getXpGained() * 3600L) / seconds; }
     long getKillsPerHour() { long seconds = getRuntimeSeconds(); return seconds <= 0 ? 0L : (script.getKills() * 3600L) / seconds; }
     private long getRuntimeSeconds() { return startedAt == null ? 0L : Math.max(0L, Duration.between(startedAt, Instant.now()).getSeconds()); }
+    public void prepareHotUnload() throws Exception
+    {
+        shutDown();
+    }
 }

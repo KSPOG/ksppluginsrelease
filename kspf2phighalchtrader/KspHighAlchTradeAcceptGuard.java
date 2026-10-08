@@ -64,6 +64,7 @@ public class KspHighAlchTradeAcceptGuard
 
     private void tick()
     {
+        if (net.runelite.client.plugins.microbot.kspsupport.KspBreakService.isBreakActive()) return;
         KspF2PHighAlchTraderConfig current = config;
         if (stopping || current == null || !current.enableMule() || !Microbot.isLoggedIn()) return;
         if (KspHighAlchMuleService.state != KspHighAlchMuleService.MuleState.TRADING) return;

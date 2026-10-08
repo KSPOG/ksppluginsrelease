@@ -1,5 +1,6 @@
 package net.runelite.client.plugins.microbot.kspautorun;
 
+import net.runelite.client.plugins.microbot.kspsupport.KspBreakService;
 import com.google.inject.Provides;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.plugins.Plugin;
@@ -19,7 +20,9 @@ import javax.inject.Inject;
 )
 public class KspAutoRunPlugin extends Plugin
 {
-    public static final String VERSION = "1.0.0";
+    private final KspBreakService breaks = new KspBreakService();
+
+    public static final String VERSION = "1.0.1";
 
     @Inject
     private KspAutoRunConfig config;
@@ -28,14 +31,30 @@ public class KspAutoRunPlugin extends Plugin
     private KspAutoRunScript script;
 
     @Override
-    protected void startUp() { script.run(config); }
+    protected void startUp() {
+        breaks.start(config);
+        script.run(config);
+    }
 
     @Override
-    protected void shutDown() { script.shutdown(); }
+    protected void shutDown() {
+        try
+        {
+            script.shutdown();
+        }
+        finally
+        {
+            breaks.shutdown();
+        }
+    }
 
     @Provides
     KspAutoRunConfig provideConfig(ConfigManager configManager)
     {
         return configManager.getConfig(KspAutoRunConfig.class);
+    }
+    public void prepareHotUnload() throws Exception
+    {
+        shutDown();
     }
 }

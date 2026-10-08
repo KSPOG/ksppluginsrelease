@@ -1,5 +1,6 @@
 package net.runelite.client.plugins.microbot.kspf2pgatheringprofit;
 
+import net.runelite.client.plugins.microbot.kspsupport.KspBreakService;
 import com.google.inject.Provides;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.plugins.Plugin;
@@ -22,7 +23,9 @@ import java.time.Instant;
 )
 public class KspF2pGatheringProfitPlugin extends Plugin
 {
-    public static final String VERSION = "0.0.5";
+    private final KspBreakService breaks = new KspBreakService();
+
+    public static final String VERSION = "0.0.6";
 
     @Inject private KspF2pGatheringProfitConfig config;
     @Inject private KspF2pGatheringProfitScript script;
@@ -34,6 +37,7 @@ public class KspF2pGatheringProfitPlugin extends Plugin
     @Override
     protected void startUp()
     {
+        breaks.start(config);
         started = Instant.now();
         overlayManager.add(overlay);
         script.run(config);
@@ -42,9 +46,16 @@ public class KspF2pGatheringProfitPlugin extends Plugin
     @Override
     protected void shutDown()
     {
-        script.shutdown();
-        overlayManager.remove(overlay);
-        started = null;
+        try
+        {
+            script.shutdown();
+            overlayManager.remove(overlay);
+            started = null;
+        }
+        finally
+        {
+            breaks.shutdown();
+        }
     }
 
     @Provides
@@ -56,4 +67,8 @@ public class KspF2pGatheringProfitPlugin extends Plugin
     public KspF2pGatheringProfitScript getScript() { return script; }
 
     public Instant getStarted() { return started; }
+    public void prepareHotUnload() throws Exception
+    {
+        shutDown();
+    }
 }

@@ -1,5 +1,6 @@
 package net.runelite.client.plugins.microbot.kspmadcow;
 
+import net.runelite.client.plugins.microbot.kspsupport.KspBreakService;
 import com.google.inject.Provides;
 import net.runelite.api.ChatMessageType;
 import net.runelite.api.events.ActorDeath;
@@ -36,8 +37,10 @@ import org.slf4j.LoggerFactory;
         isExternal = PluginConstants.IS_EXTERNAL
 )
 public class KspMadCowPlugin extends Plugin {
+    private final KspBreakService breaks = new KspBreakService();
+
     private static final Logger log = LoggerFactory.getLogger(KspMadCowPlugin.class);
-    public static final String VERSION = "0.1.60";
+    public static final String VERSION = "0.1.61";
 
     @Inject private KspMadCowConfig config;
     @Inject private KspMadCowScript script;
@@ -54,6 +57,7 @@ public class KspMadCowPlugin extends Plugin {
 
     @Override
     protected void startUp() {
+        breaks.start(config);
         stopping.set(false);
         muleService.start(config);
         if (!overlayAdded) { overlayManager.add(overlay); overlayAdded = true; }
@@ -62,10 +66,17 @@ public class KspMadCowPlugin extends Plugin {
 
     @Override
     protected void shutDown() {
-        stopping.set(true);
-        muleService.shutdown();
-        script.shutdown();
-        if (overlayAdded) { overlayManager.remove(overlay); overlayAdded = false; }
+        try
+        {
+            stopping.set(true);
+            muleService.shutdown();
+            script.shutdown();
+            if (overlayAdded) { overlayManager.remove(overlay); overlayAdded = false; }
+        }
+        finally
+        {
+            breaks.shutdown();
+        }
     }
 
     private void requestPluginStop() {
@@ -95,5 +106,9 @@ public class KspMadCowPlugin extends Plugin {
             log.warn("KSP Mad Cow stopping after player death");
             requestPluginStop();
         }
+    }
+    public void prepareHotUnload() throws Exception
+    {
+        shutDown();
     }
 }

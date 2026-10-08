@@ -13,7 +13,7 @@ import net.runelite.api.gameval.InterfaceID;
 import net.runelite.api.gameval.VarbitID;
 import net.runelite.api.widgets.Widget;
 import net.runelite.client.plugins.microbot.Microbot;
-import net.runelite.client.plugins.microbot.Script;
+import net.runelite.client.plugins.microbot.kspsupport.KspBreakAwareScript;
 import net.runelite.client.plugins.microbot.kspmule.KspMuleWorkerService;
 import net.runelite.client.plugins.microbot.util.menu.NewMenuEntry;
 import net.runelite.client.plugins.microbot.util.misc.Rs2UiHelper;
@@ -39,7 +39,7 @@ import static net.runelite.client.plugins.microbot.util.Global.sleepUntil;
 
 @Slf4j
 @Singleton
-public class KspJewelryCrafterScript extends Script
+public class KspJewelryCrafterScript extends KspBreakAwareScript
 {
     private static final int LOOP_MS = 650;
     private static final int EDGEVILLE_FURNACE_ID = 16469;

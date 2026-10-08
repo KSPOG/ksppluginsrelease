@@ -1,5 +1,6 @@
 package net.runelite.client.plugins.microbot.mining;
 
+import net.runelite.client.plugins.microbot.kspsupport.KspBreakService;
 import com.google.inject.Provides;
 import net.runelite.api.Client;
 import net.runelite.api.InventoryID;
@@ -34,12 +35,14 @@ import java.awt.*;
         isExternal = PluginConstants.IS_EXTERNAL
 )
 public class AutoMiningPlugin extends Plugin {
-    public static final String version = "1.0.35";
+    private final KspBreakService breaks = new KspBreakService();
+
+    public static final String version = "1.0.36";
     @Inject private Client client;
     @Inject private AutoMiningConfig config;
     @Inject private OverlayManager overlayManager;
     @Inject private AutoMiningOverlay autoMiningOverlay;
-    @Inject AutoMiningScript autoMiningScript;
+    @Inject private AutoMiningScript autoMiningScript;
     private final KspMuleWorkerService muleService = new KspMuleWorkerService("Auto Mining");
 
     @Provides
@@ -60,14 +63,26 @@ public class AutoMiningPlugin extends Plugin {
 
     @Override
     protected void startUp() throws AWTException {
+        breaks.start(config);
         muleService.start(config);
         if (overlayManager != null) overlayManager.add(autoMiningOverlay);
         autoMiningScript.run(config);
     }
 
     protected void shutDown() {
-        muleService.shutdown();
-        autoMiningScript.shutdown();
-        overlayManager.remove(autoMiningOverlay);
+        try
+        {
+            muleService.shutdown();
+            autoMiningScript.shutdown();
+            overlayManager.remove(autoMiningOverlay);
+        }
+        finally
+        {
+            breaks.shutdown();
+        }
+    }
+    public void prepareHotUnload() throws Exception
+    {
+        shutDown();
     }
 }

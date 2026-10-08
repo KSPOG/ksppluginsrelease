@@ -4,7 +4,7 @@ import net.runelite.api.Player;
 import net.runelite.api.Skill;
 import net.runelite.api.coords.WorldPoint;
 import net.runelite.client.plugins.microbot.Microbot;
-import net.runelite.client.plugins.microbot.Script;
+import net.runelite.client.plugins.microbot.kspsupport.KspBreakAwareScript;
 import net.runelite.client.plugins.microbot.api.npc.models.Rs2NpcModel;
 import net.runelite.client.plugins.microbot.api.tileobject.models.Rs2TileObjectModel;
 import net.runelite.client.plugins.microbot.kspbank.KspVerifiedBank;
@@ -27,7 +27,7 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
-public class KspF2pGatheringProfitScript extends Script
+public class KspF2pGatheringProfitScript extends KspBreakAwareScript
 {
     public enum EscapeState { SAFE, THREAT, RETREATING, HOPPING, COOLDOWN }
 

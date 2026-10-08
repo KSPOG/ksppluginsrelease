@@ -1,6 +1,7 @@
 package net.runelite.client.plugins.microbot.kspwillowchopper;
 
 
+import net.runelite.client.plugins.microbot.kspsupport.KspBreakConfig;
 import net.runelite.client.config.Config;
 import net.runelite.client.config.ConfigGroup;
 import net.runelite.client.config.ConfigInformation;
@@ -18,7 +19,10 @@ import net.runelite.client.plugins.microbot.kspmule.KspMuleConfig;
                 + "<p>Non-log resources cannot use Firemaking mode.</p>"
                 + "<p>Forestry helpers run inside this plugin and do not register themselves as Microbot global blocking events.</p>"
                 + "</html>")
-public interface KspWillowChopperConfig extends Config, KspMuleConfig {
+public interface KspWillowChopperConfig extends Config, KspMuleConfig, KspBreakConfig {
+    @ConfigSection(name = "Break Handler", description = "Randomized logout breaks", position = 100)
+    String breakHandlerSection = KspBreakConfig.SECTION;
+
     String GROUP = "KspWillowChopper";
 
     @ConfigSection(

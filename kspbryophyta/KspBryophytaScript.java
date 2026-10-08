@@ -12,7 +12,7 @@ import net.runelite.api.widgets.WidgetInfo;
 import net.runelite.api.coords.WorldArea;
 import net.runelite.api.coords.WorldPoint;
 import net.runelite.client.plugins.microbot.Microbot;
-import net.runelite.client.plugins.microbot.Script;
+import net.runelite.client.plugins.microbot.kspsupport.KspBreakAwareScript;
 import net.runelite.client.plugins.microbot.globval.enums.InterfaceTab;
 import net.runelite.client.plugins.microbot.api.npc.models.Rs2NpcModel;
 import net.runelite.client.plugins.microbot.api.tileitem.models.Rs2TileItemModel;
@@ -44,7 +44,7 @@ import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
 @Singleton
-public class KspBryophytaScript extends Script {
+public class KspBryophytaScript extends KspBreakAwareScript {
     static final int BRYOPHYTA_NPC_ID = 8195;
     static final int GROWTHLING_NPC_ID = 8194;
     private static final int BRYOPHYTA_CHEST_OBJECT_ID = 56378;
@@ -831,6 +831,7 @@ public class KspBryophytaScript extends Script {
     }
 
     private boolean serviceLairGateWidgetNow() {
+        if (net.runelite.client.plugins.microbot.kspsupport.KspBreakService.shouldPause()) return false;
         if (!lairEntryPending) return false;
         return Microbot.getClientThread().runOnClientThreadOptional(() -> {
             Widget optionRoot = Microbot.getClient().getWidget(InterfaceID.DIALOG_OPTION, 1);

@@ -8,7 +8,7 @@ import net.runelite.api.TileItem;
 import net.runelite.api.coords.WorldPoint;
 import net.runelite.api.gameval.VarbitID;
 import net.runelite.client.plugins.microbot.Microbot;
-import net.runelite.client.plugins.microbot.Script;
+import net.runelite.client.plugins.microbot.kspsupport.KspBreakAwareScript;
 import net.runelite.client.plugins.microbot.api.tileitem.models.Rs2TileItemModel;
 import net.runelite.client.plugins.microbot.util.bank.Rs2Bank;
 import net.runelite.client.plugins.microbot.util.equipment.Rs2Equipment;
@@ -36,7 +36,7 @@ import static net.runelite.client.plugins.microbot.util.Global.sleep;
 import static net.runelite.client.plugins.microbot.util.Global.sleepUntil;
 
 @Slf4j
-public class KSPGELooterScript extends Script
+public class KSPGELooterScript extends KspBreakAwareScript
 {
     private static final int NATURE_RUNE_ID = 561;
     private static final int FIRE_RUNE_ID = 554;
@@ -94,7 +94,7 @@ public class KSPGELooterScript extends Script
             {
                 if (stopping) return;
                 boolean baseCanRun = super.run();
-                boolean sharedPause = Microbot.pauseAllScripts.get();
+                boolean sharedPause = net.runelite.client.plugins.microbot.kspsupport.KspBreakService.shouldPause();
 
                 if (!Microbot.isLoggedIn())
                 {

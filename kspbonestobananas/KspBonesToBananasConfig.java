@@ -1,13 +1,17 @@
 package net.runelite.client.plugins.microbot.kspbonestobananas;
 
+import net.runelite.client.config.ConfigSection;
+import net.runelite.client.plugins.microbot.kspsupport.KspBreakConfig;
 import net.runelite.client.config.Config;
 import net.runelite.client.config.ConfigGroup;
 import net.runelite.client.config.ConfigItem;
 import net.runelite.client.config.Range;
 
 @ConfigGroup("kspBonesToBananas")
-public interface KspBonesToBananasConfig extends Config
-{
+public interface KspBonesToBananasConfig extends Config, KspBreakConfig {
+    @ConfigSection(name = "Break Handler", description = "Randomized logout breaks", position = 100)
+    String breakHandlerSection = KspBreakConfig.SECTION;
+
     enum AntibanProfile
     {
         LIGHT("Light", 0, 180, .015, .004, .012, 3_000, 4_500, 4_000, 9_000, 80, 140),

@@ -21,7 +21,7 @@ import net.runelite.client.util.LinkBrowser;
         description = "Shared KSP support-link and runtime diagnostics handler.",
         tags = {"ksp", "support", "discord", "debug"},
         authors = {"KSP"},
-        version = "1.3.1",
+        version = "1.3.2",
         enabledByDefault = true,
         alwaysOn = true,
         hidden = true,

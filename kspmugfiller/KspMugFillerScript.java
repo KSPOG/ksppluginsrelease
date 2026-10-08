@@ -3,7 +3,7 @@ package net.runelite.client.plugins.microbot.kspmugfiller;
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.coords.WorldPoint;
 import net.runelite.client.plugins.microbot.Microbot;
-import net.runelite.client.plugins.microbot.Script;
+import net.runelite.client.plugins.microbot.kspsupport.KspBreakAwareScript;
 import net.runelite.client.plugins.microbot.api.tileobject.models.Rs2TileObjectModel;
 import net.runelite.client.plugins.microbot.kspbank.KspVerifiedBank;
 import net.runelite.client.plugins.microbot.util.bank.Rs2Bank;
@@ -20,7 +20,7 @@ import java.util.concurrent.TimeUnit;
 import static net.runelite.client.plugins.microbot.util.Global.sleepUntil;
 
 @Slf4j
-public class KspMugFillerScript extends Script
+public class KspMugFillerScript extends KspBreakAwareScript
 {
     // Verified OSRS item IDs:
     // Beer = 1917, Beer glass = 1919.
