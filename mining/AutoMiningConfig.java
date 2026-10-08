@@ -1,6 +1,7 @@
 package net.runelite.client.plugins.microbot.mining;
 
 
+import net.runelite.client.plugins.microbot.kspsupport.KspBreakConfig;
 import net.runelite.client.config.Config;
 import net.runelite.client.config.ConfigGroup;
 import net.runelite.client.config.ConfigInformation;
@@ -22,8 +23,10 @@ import net.runelite.client.plugins.microbot.util.inventory.InteractOrder;
         "<p>4. <strong>Dropping:</strong> Inventory pickaxes are retained automatically; all other inventory items are dropped.</p>" +
         "<p></p>" +
         "<p>5. <strong>Basalt:</strong> Enable UseBank to note basalt at Snowflake.</p>")
-public interface AutoMiningConfig extends Config, KspMuleConfig
-{
+public interface AutoMiningConfig extends Config, KspMuleConfig, KspBreakConfig {
+    @ConfigSection(name = "Break Handler", description = "Randomized logout breaks", position = 100)
+    String breakHandlerSection = KspBreakConfig.SECTION;
+
     @ConfigSection(name = "General", description = "General settings", position = 0)
     String generalSection = "general";
     @ConfigSection(name = "Dropping", description = "Dropping settings", position = 1)

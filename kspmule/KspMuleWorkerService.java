@@ -99,6 +99,7 @@ public final class KspMuleWorkerService
     {
         KspMuleConfig c = config;
         if (stopping || c == null) return;
+        if (!pauseOwned && net.runelite.client.plugins.microbot.kspsupport.KspBreakService.shouldPause()) return;
         if (!c.muleEnabled())
         {
             if (requestId != null) cancelCurrent();
@@ -665,9 +666,8 @@ public final class KspMuleWorkerService
 
     private void acquirePause()
     {
-        if (!Microbot.pauseAllScripts.get())
+        if (Microbot.pauseAllScripts.compareAndSet(false, true))
         {
-            Microbot.pauseAllScripts.set(true);
             pauseOwned = true;
         }
     }

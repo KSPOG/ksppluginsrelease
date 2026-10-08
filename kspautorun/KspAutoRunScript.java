@@ -6,7 +6,7 @@ import net.runelite.api.widgets.Widget;
 import net.runelite.api.widgets.WidgetInfo;
 import net.runelite.client.plugins.microbot.Microbot;
 import net.runelite.client.plugins.microbot.MicrobotConfig;
-import net.runelite.client.plugins.microbot.Script;
+import net.runelite.client.plugins.microbot.kspsupport.KspBreakAwareScript;
 import net.runelite.client.plugins.microbot.util.menu.NewMenuEntry;
 import net.runelite.client.plugins.microbot.util.misc.Rs2UiHelper;
 import net.runelite.client.plugins.microbot.util.player.Rs2Player;
@@ -14,7 +14,7 @@ import net.runelite.client.plugins.microbot.util.player.Rs2Player;
 import java.awt.Rectangle;
 import java.util.concurrent.TimeUnit;
 
-public class KspAutoRunScript extends Script
+public class KspAutoRunScript extends KspBreakAwareScript
 {
     private static final long CHECK_INTERVAL_MS = 250L;
     private static final long RUN_TOGGLE_CONFIRMATION_TIMEOUT_MS = 3_000L;
@@ -52,7 +52,7 @@ public class KspAutoRunScript extends Script
                     setMicrobotAutoRun(false);
                 }
 
-                if (Microbot.pauseAllScripts.get() || Thread.currentThread().isInterrupted())
+                if (net.runelite.client.plugins.microbot.kspsupport.KspBreakService.shouldPause() || Thread.currentThread().isInterrupted())
                 {
                     state = "paused";
                     return;

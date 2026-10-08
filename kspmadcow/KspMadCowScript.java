@@ -26,7 +26,7 @@ import net.runelite.api.gameval.VarbitID;
 import net.runelite.api.widgets.Widget;
 import net.runelite.api.widgets.WidgetInfo;
 import net.runelite.client.plugins.microbot.Microbot;
-import net.runelite.client.plugins.microbot.Script;
+import net.runelite.client.plugins.microbot.kspsupport.KspBreakAwareScript;
 import net.runelite.client.plugins.microbot.api.npc.models.Rs2NpcModel;
 import net.runelite.client.plugins.microbot.api.tileitem.models.Rs2TileItemModel;
 import net.runelite.client.plugins.microbot.api.tileobject.models.Rs2TileObjectModel;
@@ -73,7 +73,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 @Singleton
-public class KspMadCowScript extends Script {
+public class KspMadCowScript extends KspBreakAwareScript {
     private static final Logger log = LoggerFactory.getLogger(KspMadCowScript.class);
     public enum CombatMode {
         MELEE("Melee"),

@@ -6,7 +6,7 @@ import net.runelite.api.GrandExchangeOfferState;
 import net.runelite.api.ItemComposition;
 import net.runelite.api.Skill;
 import net.runelite.client.plugins.microbot.Microbot;
-import net.runelite.client.plugins.microbot.Script;
+import net.runelite.client.plugins.microbot.kspsupport.KspBreakAwareScript;
 import net.runelite.client.plugins.microbot.util.bank.Rs2Bank;
 import net.runelite.client.plugins.microbot.util.equipment.Rs2Equipment;
 import net.runelite.client.plugins.microbot.util.grandexchange.Rs2GrandExchange;
@@ -35,7 +35,7 @@ import java.util.concurrent.TimeUnit;
 import javax.inject.Singleton;
 
 @Singleton
-public class KspF2PHighAlchTraderScript extends Script {
+public class KspF2PHighAlchTraderScript extends KspBreakAwareScript {
     public enum State {
         STARTING,
         SCANNING_MARKET,

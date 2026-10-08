@@ -1,5 +1,6 @@
 package net.runelite.client.plugins.microbot.kspsmartsuperheat;
 
+import net.runelite.client.plugins.microbot.kspsupport.KspBreakService;
 import com.google.inject.Provides;
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.client.config.ConfigManager;
@@ -19,7 +20,9 @@ import javax.inject.Inject;
 @Slf4j
 public class KspSmartSuperheatPlugin extends Plugin
 {
-    public static final String VERSION = "0.1.7";
+    private final KspBreakService breaks = new KspBreakService();
+
+    public static final String VERSION = "0.1.8";
     @Inject private KspSmartSuperheatConfig config;
     @Inject private KspSmartSuperheatScript script;
     @Inject private KspSmartSuperheatOverlay overlay;
@@ -29,6 +32,23 @@ public class KspSmartSuperheatPlugin extends Plugin
     @Provides KspSmartSuperheatConfig provideConfig(ConfigManager manager) { return manager.getConfig(KspSmartSuperheatConfig.class); }
     KspSmartSuperheatScript getScript() { return script; }
 
-    @Override protected void startUp() { muleService.start(config); overlays.add(overlay); script.run(config); log.info("KSP Smart Superheat v{} started", VERSION); }
-    @Override protected void shutDown() { muleService.shutdown(); script.stopScript(); overlays.remove(overlay); log.info("KSP Smart Superheat stopped"); }
+    @Override protected void startUp() {
+        breaks.start(config); muleService.start(config); overlays.add(overlay); script.run(config); log.info("KSP Smart Superheat v{} started", VERSION); }
+    @Override protected void shutDown() {
+        try
+        {
+            muleService.shutdown();
+            script.stopScript();
+            overlays.remove(overlay);
+            log.info("KSP Smart Superheat stopped");
+        }
+        finally
+        {
+            breaks.shutdown();
+        }
+    }
+    public void prepareHotUnload() throws Exception
+    {
+        shutDown();
+    }
 }

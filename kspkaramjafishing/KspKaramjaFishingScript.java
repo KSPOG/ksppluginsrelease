@@ -3,7 +3,7 @@ package net.runelite.client.plugins.microbot.kspkaramjafishing;
 import net.runelite.api.coords.WorldPoint;
 import net.runelite.client.game.FishingSpot;
 import net.runelite.client.plugins.microbot.Microbot;
-import net.runelite.client.plugins.microbot.Script;
+import net.runelite.client.plugins.microbot.kspsupport.KspBreakAwareScript;
 import net.runelite.client.plugins.microbot.api.npc.models.Rs2NpcModel;
 import net.runelite.client.plugins.microbot.util.depositbox.DepositBoxLocation;
 import net.runelite.client.plugins.microbot.util.depositbox.Rs2DepositBox;
@@ -14,7 +14,7 @@ import net.runelite.client.plugins.microbot.util.walker.Rs2Walker;
 import java.util.Arrays;
 import java.util.concurrent.TimeUnit;
 
-public class KspKaramjaFishingScript extends Script
+public class KspKaramjaFishingScript extends KspBreakAwareScript
 {
     private static final WorldPoint FISH = new WorldPoint(2924, 3178, 0);
     private static final WorldPoint PORT_DOCK = new WorldPoint(3029, 3217, 0);

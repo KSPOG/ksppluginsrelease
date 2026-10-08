@@ -1,5 +1,6 @@
 package net.runelite.client.plugins.microbot.kspbryophyta;
 
+import net.runelite.client.plugins.microbot.kspsupport.KspBreakService;
 import com.google.inject.Provides;
 import net.runelite.api.ChatMessageType;
 import net.runelite.api.events.ChatMessage;
@@ -34,7 +35,9 @@ import java.awt.image.BufferedImage;
         isExternal = PluginConstants.IS_EXTERNAL
 )
 public class KspBryophytaPlugin extends Plugin {
-    public static final String VERSION = "0.1.28";
+    private final KspBreakService breaks = new KspBreakService();
+
+    public static final String VERSION = "0.1.29";
 
     @Inject private KspBryophytaConfig config;
     @Inject private ConfigManager configManager;
@@ -55,6 +58,7 @@ public class KspBryophytaPlugin extends Plugin {
 
     @Override
     protected void startUp() {
+        breaks.start(config);
         configManager.setDefaultConfiguration(config, false);
         muleService.start(config);
         overlayManager.add(overlay);
@@ -64,10 +68,17 @@ public class KspBryophytaPlugin extends Plugin {
 
     @Override
     protected void shutDown() {
-        muleService.shutdown();
-        script.shutdown();
-        overlayManager.remove(overlay);
-        removeEquipmentPanel();
+        try
+        {
+            muleService.shutdown();
+            script.shutdown();
+            overlayManager.remove(overlay);
+            removeEquipmentPanel();
+        }
+        finally
+        {
+            breaks.shutdown();
+        }
     }
 
     @Subscribe public void onClientTick(ClientTick event) { if (script.isRunning()) script.onClientTick(); }
@@ -118,5 +129,9 @@ public class KspBryophytaPlugin extends Plugin {
             graphics.drawImage(source, 0, 0, width, height, null);
         } finally { graphics.dispose(); }
         return scaled;
+    }
+    public void prepareHotUnload() throws Exception
+    {
+        shutDown();
     }
 }

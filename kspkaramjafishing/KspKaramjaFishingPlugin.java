@@ -1,5 +1,6 @@
 package net.runelite.client.plugins.microbot.kspkaramjafishing;
 
+import net.runelite.client.plugins.microbot.kspsupport.KspBreakService;
 import com.google.inject.Provides;
 import net.runelite.api.Skill;
 import net.runelite.client.config.ConfigManager;
@@ -24,7 +25,9 @@ import javax.inject.Inject;
 )
 public class KspKaramjaFishingPlugin extends Plugin
 {
-    public static final String VERSION = "0.1.2";
+    private final KspBreakService breaks = new KspBreakService();
+
+    public static final String VERSION = "0.1.3";
 
     @Inject private KspKaramjaFishingConfig config;
     @Inject private KspKaramjaFishingScript script;
@@ -41,6 +44,7 @@ public class KspKaramjaFishingPlugin extends Plugin
     @Override
     protected void startUp()
     {
+        breaks.start(config);
         started = System.currentTimeMillis();
         startXp = Microbot.getClient().getSkillExperience(Skill.FISHING);
         muleService.start(config);
@@ -51,13 +55,24 @@ public class KspKaramjaFishingPlugin extends Plugin
     @Override
     protected void shutDown()
     {
-        muleService.shutdown();
-        script.shutdown();
-        overlayManager.remove(overlay);
+        try
+        {
+            muleService.shutdown();
+            script.shutdown();
+            overlayManager.remove(overlay);
+        }
+        finally
+        {
+            breaks.shutdown();
+        }
     }
 
     public KspKaramjaFishingScript getScript() { return script; }
     public int xp() { return Math.max(0, Microbot.getClient().getSkillExperience(Skill.FISHING) - startXp); }
     public int xpHour() { return (int) Math.round(xp() * 3_600_000.0 / Math.max(1, System.currentTimeMillis() - started)); }
     public String runtime() { long s = Math.max(0, System.currentTimeMillis() - started) / 1000; return String.format("%02d:%02d:%02d", s / 3600, s / 60 % 60, s % 60); }
+    public void prepareHotUnload() throws Exception
+    {
+        shutDown();
+    }
 }

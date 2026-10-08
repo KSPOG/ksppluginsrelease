@@ -33,6 +33,7 @@ final class BankActuator {
     @Inject BankActuator(Client client,BankSnapshotReader snapshots){this.client=client;this.snapshots=snapshots;}
 
     boolean ensureBankOpen(){
+        if (!net.runelite.client.plugins.microbot.kspsupport.KspBreakService.awaitResume()) return false;
         if(bankReady())return true;
         if(bankUiOpen()){
             log.info("Bank Organizer: bank UI is already open; waiting for live bank contents.");
@@ -122,6 +123,7 @@ final class BankActuator {
             BankSnapshot.BankStack stack=findStack(id); if(stack==null){if(attempt==3)return ActuatorResult.fail("Could not find item "+id+" in the live bank.");Global.sleep(120);continue;}
             if(!scrollTo(stack.slot())){if(attempt==3)return ActuatorResult.fail("Could not scroll item "+id+" into view.");Global.sleep(120);continue;}
             DragBounds b=itemToTabBounds(id,target); if(b==null){Global.sleep(100);b=itemToTabBounds(id,target);} if(b==null){if(attempt==3)return ActuatorResult.fail("Could not locate drag bounds for item "+id+" -> "+name+".");continue;}
+            if (net.runelite.client.plugins.microbot.kspsupport.KspBreakService.shouldPause()) { attempt--; continue; }
             Microbot.drag(center(b.source),center(b.target));
             if(waitForItemTab(id,target,stack.quantity(),MOVE_VERIFY_MS))return ActuatorResult.ok("Moved item to "+name+".");
         }
@@ -129,6 +131,7 @@ final class BankActuator {
     }
     ActuatorResult moveWithinOpenTab(BankSnapshot.BankStack source,BankSnapshot.BankStack target){
         if(!scrollTo(source.slot()))return ActuatorResult.fail("Could not scroll source item into view."); DragBounds b=itemToItemBounds(source.slot(),target.slot()); if(b==null)return ActuatorResult.fail("Source or target slot bounds were unavailable.");
+        if (net.runelite.client.plugins.microbot.kspsupport.KspBreakService.shouldPause()) return ActuatorResult.fail("Paused before bank drag; run again after the break.");
         Microbot.drag(b.source,b.target); return ActuatorResult.ok("Inserted "+source.name()+" before "+target.name()+".");
     }
 

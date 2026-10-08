@@ -55,7 +55,7 @@ public class AutoLoginScript extends Script
         {
             try
             {
-                if (!active || Thread.currentThread().isInterrupted())
+                if (!active || net.runelite.client.plugins.microbot.kspsupport.KspBreakService.shouldPause() || Thread.currentThread().isInterrupted())
                 {
                     return;
                 }

@@ -11,7 +11,7 @@ import net.runelite.api.events.ChatMessage;
 import net.runelite.api.gameval.InterfaceID;
 import net.runelite.api.widgets.Widget;
 import net.runelite.client.plugins.microbot.Microbot;
-import net.runelite.client.plugins.microbot.Script;
+import net.runelite.client.plugins.microbot.kspsupport.KspBreakAwareScript;
 import net.runelite.client.plugins.microbot.api.player.models.Rs2PlayerModel;
 import net.runelite.client.plugins.microbot.util.bank.Rs2Bank;
 import net.runelite.client.plugins.microbot.util.inventory.Rs2Inventory;
@@ -27,7 +27,7 @@ import java.util.Locale;
 import java.util.concurrent.TimeUnit;
 
 @Slf4j
-public class KSPTradeReceiverScript extends Script
+public class KSPTradeReceiverScript extends KspBreakAwareScript
 {
     private static final long REQUEST_RESPONSE_COOLDOWN_MS = 1_000L;
     private static final String OTHER_PLAYER_ACCEPTED = "other player has accepted";

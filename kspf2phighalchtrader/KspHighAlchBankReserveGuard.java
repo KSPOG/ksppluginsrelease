@@ -92,6 +92,7 @@ public class KspHighAlchBankReserveGuard
     private void tick()
     {
         if (stopping || config == null) return;
+        if (!pauseOwned && net.runelite.client.plugins.microbot.kspsupport.KspBreakService.shouldPause()) return;
 
         long reserve = config.enableMule() ? Math.max(0L, config.muleKeepInBank()) : 0L;
         if (reserve <= 0L)
@@ -206,9 +207,8 @@ public class KspHighAlchBankReserveGuard
 
     private void acquirePause()
     {
-        if (!Microbot.pauseAllScripts.get())
+        if (Microbot.pauseAllScripts.compareAndSet(false, true))
         {
-            Microbot.pauseAllScripts.set(true);
             pauseOwned = true;
         }
     }

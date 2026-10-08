@@ -122,6 +122,7 @@ public class KspHighAlchMuleService
     private void tick()
     {
         if (stopping || config == null) return;
+        if (!pauseOwned && net.runelite.client.plugins.microbot.kspsupport.KspBreakService.shouldPause()) return;
 
         if (!config.enableMule())
         {
@@ -604,9 +605,8 @@ public class KspHighAlchMuleService
 
     private void acquirePause()
     {
-        if (!Microbot.pauseAllScripts.get())
+        if (Microbot.pauseAllScripts.compareAndSet(false, true))
         {
-            Microbot.pauseAllScripts.set(true);
             pauseOwned = true;
         }
     }

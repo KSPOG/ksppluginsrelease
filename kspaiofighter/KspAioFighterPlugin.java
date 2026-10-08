@@ -1,5 +1,6 @@
 package net.runelite.client.plugins.microbot.kspaiofighter;
 
+import net.runelite.client.plugins.microbot.kspsupport.KspBreakService;
 import com.google.inject.Provides;
 import javax.inject.Inject;
 import javax.swing.JOptionPane;
@@ -36,6 +37,8 @@ import net.runelite.client.ui.overlay.OverlayManager;
 )
 public class KspAioFighterPlugin extends Plugin
 {
+    private final KspBreakService breaks = new KspBreakService();
+
 	static final String version = "1.9.25";
 	private static final String WALK_HERE = "Walk here";
 	private static final String SET_SAFE_SPOT = "Set Safe Spot";
@@ -80,6 +83,7 @@ public class KspAioFighterPlugin extends Plugin
 	@Override
 	protected void startUp()
 	{
+        breaks.start(config);
 		automationRunning = false;
 		preparingStart = false;
 		inventoryLoadInProgress = false;
@@ -97,10 +101,17 @@ public class KspAioFighterPlugin extends Plugin
 	@Override
 	protected void shutDown()
 	{
-		resetAreaCallback = null;
-		stopAutomation();
-		removeEquipmentPanel();
-	}
+        try
+        {
+            resetAreaCallback = null;
+            stopAutomation();
+            removeEquipmentPanel();
+        }
+        finally
+        {
+            breaks.shutdown();
+        }
+    }
 
 	private void startAutomation()
 	{
@@ -516,4 +527,8 @@ public class KspAioFighterPlugin extends Plugin
 				? WorldPoint.fromLocalInstance(Microbot.getClient(), selectedTile.getLocalLocation())
 				: selectedTile.getWorldLocation();
 	}
+    public void prepareHotUnload() throws Exception
+    {
+        shutDown();
+    }
 }

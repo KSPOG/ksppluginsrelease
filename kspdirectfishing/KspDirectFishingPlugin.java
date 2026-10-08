@@ -1,5 +1,6 @@
 package net.runelite.client.plugins.microbot.kspdirectfishing;
 
+import net.runelite.client.plugins.microbot.kspsupport.KspBreakService;
 import com.google.inject.Provides;
 import net.runelite.api.Skill;
 import net.runelite.client.config.ConfigManager;
@@ -22,7 +23,9 @@ import javax.inject.Inject;
         isExternal = PluginConstants.IS_EXTERNAL
 )
 public class KspDirectFishingPlugin extends Plugin {
-    public static final String VERSION = "0.1.8";
+    private final KspBreakService breaks = new KspBreakService();
+
+    public static final String VERSION = "0.1.9";
     @Inject private KspDirectFishingConfig config;
     @Inject private KspDirectFishingScript script;
     @Inject private KspDirectFishingOverlay overlay;
@@ -30,12 +33,24 @@ public class KspDirectFishingPlugin extends Plugin {
     private final KspMuleWorkerService muleService=new KspMuleWorkerService("Direct Fishing");
     private long startTime; private int startFishingXp,startCookingXp;
     @Provides KspDirectFishingConfig provideConfig(ConfigManager configManager){return configManager.getConfig(KspDirectFishingConfig.class);}
-    @Override protected void startUp(){startTime=System.currentTimeMillis();startFishingXp=Microbot.getClient().getSkillExperience(Skill.FISHING);startCookingXp=Microbot.getClient().getSkillExperience(Skill.COOKING);muleService.start(config);overlayManager.add(overlay);script.run(config);}
-    @Override protected void shutDown(){muleService.shutdown();script.shutdown();overlayManager.remove(overlay);}
+    @Override protected void startUp(){
+        breaks.start(config);startTime=System.currentTimeMillis();startFishingXp=Microbot.getClient().getSkillExperience(Skill.FISHING);startCookingXp=Microbot.getClient().getSkillExperience(Skill.COOKING);muleService.start(config);overlayManager.add(overlay);script.run(config);}
+    @Override protected void shutDown(){
+        try { muleService.shutdown();script.shutdown();overlayManager.remove(overlay);
+        }
+        finally
+        {
+            breaks.shutdown();
+        }
+    }
     public KspDirectFishingScript getScript(){return script;}
     public int getFishingXpGained(){return Math.max(0,Microbot.getClient().getSkillExperience(Skill.FISHING)-startFishingXp);}
     public int getCookingXpGained(){return Math.max(0,Microbot.getClient().getSkillExperience(Skill.COOKING)-startCookingXp);}
     public int getFishingXpPerHour(){return perHour(getFishingXpGained());} public int getCookingXpPerHour(){return perHour(getCookingXpGained());}
     private int perHour(int gained){long elapsed=Math.max(1L,System.currentTimeMillis()-startTime);return(int)Math.round(gained*3_600_000.0/elapsed);}
     public String getFormattedRuntime(){long elapsed=Math.max(0L,System.currentTimeMillis()-startTime),hours=elapsed/3_600_000L,minutes=(elapsed%3_600_000L)/60_000L,seconds=(elapsed%60_000L)/1_000L;return String.format("%02d:%02d:%02d",hours,minutes,seconds);}
+    public void prepareHotUnload() throws Exception
+    {
+        shutDown();
+    }
 }

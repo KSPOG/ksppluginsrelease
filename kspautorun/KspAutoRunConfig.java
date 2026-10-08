@@ -1,6 +1,8 @@
 package net.runelite.client.plugins.microbot.kspautorun;
 
 
+import net.runelite.client.config.ConfigSection;
+import net.runelite.client.plugins.microbot.kspsupport.KspBreakConfig;
 import net.runelite.client.config.Config;
 import net.runelite.client.config.ConfigGroup;
 import net.runelite.client.config.ConfigInformation;
@@ -12,8 +14,10 @@ import net.runelite.client.config.Range;
         "Automatically enables Run when your run energy reaches the configured threshold. " +
         "The Run orb is activated using a Microbot widget invoke; no natural mouse click is used."
 )
-public interface KspAutoRunConfig extends Config
-{
+public interface KspAutoRunConfig extends Config, KspBreakConfig {
+    @ConfigSection(name = "Break Handler", description = "Randomized logout breaks", position = 100)
+    String breakHandlerSection = KspBreakConfig.SECTION;
+
     String GROUP = "kspAutoRunInvoke";
 
     @Range(

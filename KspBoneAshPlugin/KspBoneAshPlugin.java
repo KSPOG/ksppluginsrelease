@@ -1,5 +1,6 @@
 package net.runelite.client.plugins.microbot.KspBoneAshPlugin;
 
+import net.runelite.client.plugins.microbot.kspsupport.KspBreakService;
 import com.google.inject.Provides;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.plugins.Plugin;
@@ -22,7 +23,9 @@ import javax.inject.Inject;
 )
 public class KspBoneAshPlugin extends Plugin
 {
-    public static final String VERSION = "0.0.3";
+    private final KspBreakService breaks = new KspBreakService();
+
+    public static final String VERSION = "0.0.4";
 
     @Inject private KspBoneAshConfig config;
     @Inject private KspBoneAshScript script;
@@ -37,6 +40,7 @@ public class KspBoneAshPlugin extends Plugin
     @Override
     protected void startUp()
     {
+        breaks.start(config);
         muleService.start(config);
         script.run(config, this);
     }
@@ -44,7 +48,18 @@ public class KspBoneAshPlugin extends Plugin
     @Override
     protected void shutDown()
     {
-        muleService.shutdown();
-        script.shutdown();
+        try
+        {
+            muleService.shutdown();
+            script.shutdown();
+        }
+        finally
+        {
+            breaks.shutdown();
+        }
+    }
+    public void prepareHotUnload() throws Exception
+    {
+        shutDown();
     }
 }

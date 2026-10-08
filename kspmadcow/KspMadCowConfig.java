@@ -1,6 +1,7 @@
 package net.runelite.client.plugins.microbot.kspmadcow;
 
 
+import net.runelite.client.plugins.microbot.kspsupport.KspBreakConfig;
 import net.runelite.client.config.Config;
 import net.runelite.client.config.ConfigGroup;
 import net.runelite.client.config.ConfigItem;
@@ -9,7 +10,10 @@ import net.runelite.client.config.Range;
 import net.runelite.client.plugins.microbot.kspmule.KspMuleConfig;
 
 @ConfigGroup(KspMadCowConfig.GROUP)
-public interface KspMadCowConfig extends Config, KspMuleConfig {
+public interface KspMadCowConfig extends Config, KspMuleConfig, KspBreakConfig {
+    @ConfigSection(name = "Break Handler", description = "Randomized logout breaks", position = 100)
+    String breakHandlerSection = KspBreakConfig.SECTION;
+
     String GROUP = "kspmadcow";
 
     @ConfigSection(name = "Supplies", description = "Food, Cowbell and boosting-potion settings", position = 0)

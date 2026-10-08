@@ -1,6 +1,7 @@
 package net.runelite.client.plugins.microbot.kspjewelrycrafter;
 
 
+import net.runelite.client.plugins.microbot.kspsupport.KspBreakConfig;
 import net.runelite.client.config.Config;
 import net.runelite.client.config.ConfigGroup;
 import net.runelite.client.config.ConfigItem;
@@ -9,8 +10,10 @@ import net.runelite.client.config.Range;
 import net.runelite.client.plugins.microbot.kspmule.KspMuleConfig;
 
 @ConfigGroup("kspjewelrycrafter")
-public interface KspJewelryCrafterConfig extends Config, KspMuleConfig
-{
+public interface KspJewelryCrafterConfig extends Config, KspMuleConfig, KspBreakConfig {
+    @ConfigSection(name = "Break Handler", description = "Randomized logout breaks", position = 100)
+    String breakHandlerSection = KspBreakConfig.SECTION;
+
     @ConfigSection(name = "Anti-ban", description = "Task-aware behavior variation that only runs in safe idle windows", position = 50)
     String antibanSection = "antiban";
 

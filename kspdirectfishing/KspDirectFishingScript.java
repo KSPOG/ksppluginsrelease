@@ -6,7 +6,7 @@ import net.runelite.api.coords.WorldPoint;
 import net.runelite.api.gameval.ItemID;
 import net.runelite.api.gameval.ObjectID;
 import net.runelite.client.plugins.microbot.*;
-import net.runelite.client.plugins.microbot.Script;
+import net.runelite.client.plugins.microbot.kspsupport.KspBreakAwareScript;
 import net.runelite.client.plugins.microbot.api.npc.models.Rs2NpcModel;
 import net.runelite.client.plugins.microbot.api.tileobject.models.Rs2TileObjectModel;
 import net.runelite.client.plugins.microbot.util.bank.Rs2Bank;
@@ -21,7 +21,7 @@ import java.util.*;
 import java.util.concurrent.TimeUnit;
 
 @Slf4j
-public class KspDirectFishingScript extends Script {
+public class KspDirectFishingScript extends KspBreakAwareScript {
     private static final int DIRECT_BANK_OBJECT_SEARCH_RADIUS=20,DIRECT_FIRE_DISTANCE=4,INVALID_DIRECT_BANK_OBJECT_ID=10527;
     private static final long BANK_OPEN_RETRY_DELAY=3_000,FIRE_STATUS_REFRESH_DELAY=1_500,FISH_INTERACTION_TIMEOUT=15_000,FAILED_CLICK_RETRY_DELAY=750;
     private static final int[] SUPPORTED_FIRE_IDS={ObjectID.FIRE,ObjectID.FORESTRY_FIRE,ObjectID.EAGLEPEAK_CAMPFIRE_TIDY,ObjectID.FIRE_COOK,43475};

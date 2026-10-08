@@ -142,6 +142,8 @@ public class KspLocalMuleCoordinatorService
             return;
         }
 
+        if (net.runelite.client.plugins.microbot.kspsupport.KspBreakService.shouldPause()) return;
+
         if (!config.enableLocalMule())
         {
             status = "Local mule disabled";

@@ -1,6 +1,7 @@
 package net.runelite.client.plugins.microbot.kspsmartsmelter;
 
 
+import net.runelite.client.plugins.microbot.kspsupport.KspBreakConfig;
 import net.runelite.client.config.Config;
 import net.runelite.client.config.ConfigGroup;
 import net.runelite.client.config.ConfigInformation;
@@ -20,7 +21,10 @@ import net.runelite.client.plugins.microbot.kspsmartsmelter.model.RankingMode;
         "Cannonballs require an ammo mould or double ammo mould." +
         "</body></html>"
 )
-public interface KspSmartSmelterConfig extends Config, KspMuleConfig {
+public interface KspSmartSmelterConfig extends Config, KspMuleConfig, KspBreakConfig {
+    @ConfigSection(name = "Break Handler", description = "Randomized logout breaks", position = 100)
+    String breakHandlerSection = KspBreakConfig.SECTION;
+
     @ConfigSection(name = "Anti-ban", description = "Task-aware behavior variation that only runs in safe idle windows", position = 50)
     String antibanSection = "antiban";
 

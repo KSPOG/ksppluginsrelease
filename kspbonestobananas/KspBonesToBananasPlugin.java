@@ -1,5 +1,6 @@
 package net.runelite.client.plugins.microbot.kspbonestobananas;
 
+import net.runelite.client.plugins.microbot.kspsupport.KspBreakService;
 import com.google.inject.Provides;
 import javax.inject.Inject;
 import lombok.extern.slf4j.Slf4j;
@@ -21,7 +22,9 @@ import net.runelite.client.ui.overlay.OverlayManager;
 @Slf4j
 public class KspBonesToBananasPlugin extends Plugin
 {
-    public static final String VERSION = "0.0.1";
+    private final KspBreakService breaks = new KspBreakService();
+
+    public static final String VERSION = "0.0.2";
 
     @Inject private KspBonesToBananasConfig config;
     @Inject private KspBonesToBananasScript script;
@@ -39,6 +42,7 @@ public class KspBonesToBananasPlugin extends Plugin
     @Override
     protected void startUp()
     {
+        breaks.start(config);
         overlayManager.add(overlay);
         script.run(config);
         log.info("KSP Bones to Bananas v{} started", VERSION);
@@ -47,8 +51,19 @@ public class KspBonesToBananasPlugin extends Plugin
     @Override
     protected void shutDown()
     {
-        script.stopScript();
-        overlayManager.remove(overlay);
-        log.info("KSP Bones to Bananas stopped");
+        try
+        {
+            script.stopScript();
+            overlayManager.remove(overlay);
+            log.info("KSP Bones to Bananas stopped");
+        }
+        finally
+        {
+            breaks.shutdown();
+        }
+    }
+    public void prepareHotUnload() throws Exception
+    {
+        shutDown();
     }
 }

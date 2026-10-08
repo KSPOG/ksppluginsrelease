@@ -31,7 +31,7 @@ import net.runelite.api.coords.WorldPoint;
 import net.runelite.api.coords.LocalPoint;
 import net.runelite.api.widgets.WidgetInfo;
 import net.runelite.client.plugins.microbot.Microbot;
-import net.runelite.client.plugins.microbot.Script;
+import net.runelite.client.plugins.microbot.kspsupport.KspBreakAwareScript;
 import net.runelite.client.plugins.microbot.api.npc.models.Rs2NpcModel;
 import net.runelite.client.plugins.microbot.api.tileitem.models.Rs2TileItemModel;
 import net.runelite.client.plugins.microbot.globval.enums.InterfaceTab;
@@ -60,7 +60,7 @@ import net.runelite.client.plugins.microbot.util.walker.Rs2Walker;
 import net.runelite.client.config.ConfigManager;
 
 @Slf4j
-public class KspAioFighterScript extends Script
+public class KspAioFighterScript extends KspBreakAwareScript
 {
 	private static final Set<Skill> MELEE_SKILLS = EnumSet.of(Skill.ATTACK, Skill.STRENGTH, Skill.DEFENCE);
 	private static final int HIGH_ALCH_FIRE_RUNES_PER_CAST = 5;

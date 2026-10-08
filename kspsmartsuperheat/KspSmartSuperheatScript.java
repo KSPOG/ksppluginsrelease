@@ -10,7 +10,7 @@ import net.runelite.api.widgets.Widget;
 import net.runelite.api.gameval.InterfaceID;
 import net.runelite.api.gameval.ItemID;
 import net.runelite.client.plugins.microbot.Microbot;
-import net.runelite.client.plugins.microbot.Script;
+import net.runelite.client.plugins.microbot.kspsupport.KspBreakAwareScript;
 import net.runelite.client.plugins.microbot.util.bank.Rs2Bank;
 import net.runelite.client.plugins.microbot.util.equipment.Rs2Equipment;
 import net.runelite.client.plugins.microbot.util.grandexchange.GrandExchangeAction;
@@ -34,7 +34,7 @@ import static net.runelite.client.plugins.microbot.util.Global.sleep;
 import static net.runelite.client.plugins.microbot.util.Global.sleepUntil;
 
 @Slf4j
-public class KspSmartSuperheatScript extends Script
+public class KspSmartSuperheatScript extends KspBreakAwareScript
 {
     private static final int LOOP_MS = 650, BANK_GROUP = 12, BANK_ROOT = 1, GE_PRICE_X_CHILD = 12, MAX_GE_ATTEMPTS = 5;
     private static final String[] FIRE_STAVES = {"Staff of fire", "Fire battlestaff", "Mystic fire staff", "Lava battlestaff", "Mystic lava staff", "Steam battlestaff", "Mystic steam staff", "Smoke battlestaff", "Mystic smoke staff"};
@@ -77,7 +77,7 @@ public class KspSmartSuperheatScript extends Script
             {
                 // Priority plugins pause cooperatively; an already-running bank call may lose its widget mid-action.
                 // Treat that as a transient handoff and retry the same state after the pause is released.
-                if (Microbot.pauseAllScripts.get()) { status = "Paused for priority plugin"; return; }
+                if (net.runelite.client.plugins.microbot.kspsupport.KspBreakService.shouldPause()) { status = "Paused for priority plugin"; return; }
                 state = SmartSuperheatState.ERROR; status = "Error - check log"; log.error("Smart Superheat tick failed", e);
             }
         }, 0, LOOP_MS, TimeUnit.MILLISECONDS);
@@ -735,7 +735,7 @@ public class KspSmartSuperheatScript extends Script
         }
         catch (RuntimeException e)
         {
-            if (Microbot.pauseAllScripts.get() || !Rs2Bank.isOpen()) { status = "Bank handoff interrupted - recovering"; return false; }
+            if (net.runelite.client.plugins.microbot.kspsupport.KspBreakService.shouldPause() || !Rs2Bank.isOpen()) { status = "Bank handoff interrupted - recovering"; return false; }
             throw e;
         }
     }
@@ -755,14 +755,14 @@ public class KspSmartSuperheatScript extends Script
         }
         catch (RuntimeException e)
         {
-            if (Microbot.pauseAllScripts.get() || !Rs2Bank.isOpen()) { status = "Bank handoff interrupted - recovering"; return false; }
+            if (net.runelite.client.plugins.microbot.kspsupport.KspBreakService.shouldPause() || !Rs2Bank.isOpen()) { status = "Bank handoff interrupted - recovering"; return false; }
             throw e;
         }
     }
 
     private boolean bankActionReady()
     {
-        if (Microbot.pauseAllScripts.get()) { status = "Paused for priority plugin"; return false; }
+        if (net.runelite.client.plugins.microbot.kspsupport.KspBreakService.shouldPause()) { status = "Paused for priority plugin"; return false; }
         if (!Rs2Bank.isOpen()) { status = "Bank closed - recovering"; return false; }
         return true;
     }

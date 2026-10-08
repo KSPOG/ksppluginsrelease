@@ -1,5 +1,8 @@
 package net.runelite.client.plugins.microbot.kspkebabbuyer;
 
+import net.runelite.client.plugins.microbot.kspsupport.KspBreakService;
+import com.google.inject.Provides;
+import net.runelite.client.config.ConfigManager;
 import net.runelite.client.plugins.Plugin;
 import net.runelite.client.plugins.PluginDescriptor;
 import net.runelite.client.ui.overlay.OverlayManager;
@@ -18,7 +21,12 @@ import javax.inject.Inject;
 )
 public class KspKebabBuyerPlugin extends Plugin
 {
-    public static final String VERSION = "0.0.6";
+    private final KspBreakService breaks = new KspBreakService();
+
+    @Inject private KspKebabBuyerConfig config;
+    @Provides KspKebabBuyerConfig provideConfig(ConfigManager manager) { return manager.getConfig(KspKebabBuyerConfig.class); }
+
+    public static final String VERSION = "0.0.7";
 
     @Inject
     private KspKebabBuyerScript script;
@@ -32,6 +40,7 @@ public class KspKebabBuyerPlugin extends Plugin
     @Override
     protected void startUp()
     {
+        breaks.start(config);
         overlayManager.add(overlay);
         script.run();
     }
@@ -39,12 +48,23 @@ public class KspKebabBuyerPlugin extends Plugin
     @Override
     protected void shutDown()
     {
-        script.shutdown();
-        overlayManager.remove(overlay);
+        try
+        {
+            script.shutdown();
+            overlayManager.remove(overlay);
+        }
+        finally
+        {
+            breaks.shutdown();
+        }
     }
 
     KspKebabBuyerScript getScript()
     {
         return script;
+    }
+    public void prepareHotUnload() throws Exception
+    {
+        shutDown();
     }
 }

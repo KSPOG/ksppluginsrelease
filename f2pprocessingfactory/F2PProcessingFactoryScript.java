@@ -19,7 +19,7 @@ import net.runelite.api.gameval.VarbitID;
 import net.runelite.api.widgets.Widget;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.plugins.microbot.Microbot;
-import net.runelite.client.plugins.microbot.Script;
+import net.runelite.client.plugins.microbot.kspsupport.KspBreakAwareScript;
 import net.runelite.client.plugins.microbot.util.bank.Rs2Bank;
 import net.runelite.client.plugins.microbot.util.grandexchange.Rs2GrandExchange;
 import net.runelite.client.plugins.microbot.util.grandexchange.GrandExchangeSlots;
@@ -47,7 +47,7 @@ import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
 @Slf4j
-public class F2PProcessingFactoryScript extends Script
+public class F2PProcessingFactoryScript extends KspBreakAwareScript
 {
     private static final int LOOP_DELAY_MILLIS = 600;
     private static final int BANK_OPEN_TIMEOUT_MILLIS = 6_000;
