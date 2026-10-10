@@ -222,6 +222,12 @@ final class KspAioFighterAreaMapDialog extends JDialog
 
         rememberCurrentCentre();
         activeMapSpace = selected;
+
+        // Surface and dungeon coordinates are independent map spaces. A selection
+        // from one must never remain actionable or visible after switching to the
+        // other, otherwise a dungeon view can still show/apply a surface area.
+        mapCanvas.clearSelection();
+
         WorldPoint remembered = "Dungeon".equals(selected) ? dungeonCentre : surfaceCentre;
         WorldPoint target = new WorldPoint(remembered.getX(), remembered.getY(), mapCanvas.getPlane());
         mapCanvas.centerOn(target);
@@ -254,8 +260,21 @@ final class KspAioFighterAreaMapDialog extends JDialog
     private void centerOnAndSync(WorldPoint target)
     {
         if (!valid(target)) return;
+
+        String targetMapSpace = isDungeonSpace(target) ? "Dungeon" : "Surface";
+        boolean changingMapSpace = !targetMapSpace.equals(activeMapSpace);
+        if (changingMapSpace)
+        {
+            rememberCurrentCentre();
+        }
+
         mapCanvas.centerOn(target);
-        activeMapSpace = isDungeonSpace(target) ? "Dungeon" : "Surface";
+        activeMapSpace = targetMapSpace;
+        if (changingMapSpace)
+        {
+            mapCanvas.clearSelection();
+        }
+
         if (isDungeonSpace(target)) dungeonCentre = target;
         else surfaceCentre = target;
 
@@ -278,17 +297,23 @@ final class KspAioFighterAreaMapDialog extends JDialog
         worldYField.setText(Integer.toString(point.getY()));
     }
 
+    private boolean isInActiveMapSpace(WorldPoint point)
+    {
+        if (!valid(point)) return false;
+        return "Dungeon".equals(activeMapSpace) == isDungeonSpace(point);
+    }
+
     private void refreshSelectionState()
     {
         WorldPoint first = mapCanvas.getFirst();
         WorldPoint second = mapCanvas.getSecond();
-        if (!valid(first))
+        if (!valid(first) || !isInActiveMapSpace(first))
         {
             selectionLabel.setText("Select first corner tile");
             useArea.setEnabled(false);
             return;
         }
-        if (!valid(second))
+        if (!valid(second) || !isInActiveMapSpace(second))
         {
             selectionLabel.setText("First corner: " + format(first) + " - select opposite corner");
             useArea.setEnabled(false);
@@ -303,14 +328,22 @@ final class KspAioFighterAreaMapDialog extends JDialog
         selectionLabel.setText("Area: (" + minX + ", " + minY + ") to (" + maxX + ", " + maxY + ")"
             + "  |  " + (maxX - minX + 1) + " x " + (maxY - minY + 1)
             + "  |  " + space + "  |  plane " + first.getPlane());
-        useArea.setEnabled(first.getPlane() == second.getPlane());
+        useArea.setEnabled(first.getPlane() == second.getPlane()
+            && isDungeonSpace(first) == isDungeonSpace(second));
     }
 
     private void applySelection()
     {
         WorldPoint first = mapCanvas.getFirst();
         WorldPoint second = mapCanvas.getSecond();
-        if (!valid(first) || !valid(second) || first.getPlane() != second.getPlane()) return;
+        if (!valid(first) || !valid(second)
+            || first.getPlane() != second.getPlane()
+            || isDungeonSpace(first) != isDungeonSpace(second)
+            || !isInActiveMapSpace(first)
+            || !isInActiveMapSpace(second))
+        {
+            return;
+        }
         onAreaSelected.accept(first, second);
         dispose();
     }
