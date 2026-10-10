@@ -63,20 +63,24 @@ final class KspAioFighterInventoryLoader
         }
 
         Map<InventoryKey, Integer> requested = aggregate(setup);
-        // Depositing converts both noted and unnoted items to the same bank stock.
-        // Validate their combined demand against everything we already own.
-        Map<InventoryKey, Integer> stockNeeded = new LinkedHashMap<>();
-        requested.forEach((key, quantity) ->
-            stockNeeded.merge(new InventoryKey(key.name, false), quantity, Integer::sum));
-        List<String> missing = new ArrayList<>();
-        for (Map.Entry<InventoryKey, Integer> entry : stockNeeded.entrySet())
+
+        // Depositing normalizes noted/unnoted copies into bank stock. Validate by
+        // display name here, but keep the actual withdrawal plan keyed by item ID.
+        Map<String, Integer> stockNeeded = new LinkedHashMap<>();
+        for (Map.Entry<InventoryKey, Integer> entry : requested.entrySet())
         {
-            InventoryKey key = entry.getKey();
-            int bankQuantity = Rs2Bank.count(key.name, true);
-            int inventoryQuantity = Rs2Inventory.itemQuantity(key.name, true);
+            stockNeeded.merge(entry.getKey().normalizedName(), entry.getValue(), Integer::sum);
+        }
+
+        List<String> missing = new ArrayList<>();
+        for (Map.Entry<String, Integer> entry : stockNeeded.entrySet())
+        {
+            String name = entry.getKey();
+            int bankQuantity = Rs2Bank.count(name, true);
+            int inventoryQuantity = Rs2Inventory.itemQuantity(name, true);
             if ((long) bankQuantity + inventoryQuantity < entry.getValue())
             {
-                missing.add(key.name + " x" + entry.getValue()
+                missing.add(name + " x" + entry.getValue()
                     + " (inventory: " + inventoryQuantity + ", bank: " + bankQuantity + ")");
             }
         }
@@ -107,14 +111,28 @@ final class KspAioFighterInventoryLoader
                 return false;
             }
 
-            Microbot.status = "KSP AIO Fighter: withdrawing " + entry.getValue() + " " + key.name;
-            Rs2Bank.withdrawX(true, key.name, entry.getValue(), true);
+            int expectedQuantity = entry.getValue();
+            Microbot.status = "KSP AIO Fighter: withdrawing " + expectedQuantity + " " + key.name;
+            Rs2Bank.withdrawX(true, key.name, expectedQuantity, true);
+
+            // Bank actions are asynchronous. Do not fire the next withdrawal (or
+            // close the bank) until this exact saved item ID is actually present.
+            if (!sleepUntil(() -> inventoryQuantity(key.id) >= expectedQuantity, 3_000))
+            {
+                Rs2Bank.setWithdrawAsItem();
+                Rs2Bank.closeBank();
+                lastError = "Could not withdraw the saved " + style + " item "
+                    + key.name + " x" + expectedQuantity + " (item id " + key.id + ").";
+                return false;
+            }
         }
 
+        // Give the client one final inventory update while the bank is still open.
+        boolean complete = matchesExactly(setup) || sleepUntil(() -> matchesExactly(setup), 2_500);
         Rs2Bank.setWithdrawAsItem();
         Rs2Bank.closeBank();
 
-        if (!matchesExactly(setup))
+        if (!complete)
         {
             lastError = "The bank load finished, but the inventory does not match the saved " + style + " setup.";
             return false;
@@ -140,12 +158,22 @@ final class KspAioFighterInventoryLoader
         return wanted.equals(actual);
     }
 
+    private int inventoryQuantity(int itemId)
+    {
+        int quantity = 0;
+        for (Rs2ItemModel item : Rs2Inventory.getList(value -> value != null && value.getId() == itemId))
+        {
+            quantity += Math.max(1, item.getQuantity());
+        }
+        return quantity;
+    }
+
     private Map<InventoryKey, Integer> aggregate(List<KspAioFighterInventoryItem> setup)
     {
         Map<InventoryKey, Integer> result = new LinkedHashMap<>();
         for (KspAioFighterInventoryItem item : setup)
         {
-            InventoryKey key = new InventoryKey(item.getName(), item.isNoted());
+            InventoryKey key = new InventoryKey(item.getId(), item.getName(), item.isNoted());
             result.merge(key, item.getQuantity(), Integer::sum);
         }
         return result;
@@ -177,13 +205,20 @@ final class KspAioFighterInventoryLoader
 
     private static final class InventoryKey
     {
+        private final int id;
         private final String name;
         private final boolean noted;
 
-        private InventoryKey(String name, boolean noted)
+        private InventoryKey(int id, String name, boolean noted)
         {
+            this.id = id;
             this.name = name == null ? "" : name.trim();
             this.noted = noted;
+        }
+
+        private String normalizedName()
+        {
+            return name.toLowerCase(java.util.Locale.ROOT);
         }
 
         @Override
@@ -192,10 +227,16 @@ final class KspAioFighterInventoryLoader
             if (this == other) return true;
             if (!(other instanceof InventoryKey)) return false;
             InventoryKey key = (InventoryKey) other;
-            return noted == key.noted && name.equalsIgnoreCase(key.name);
+            return id == key.id && noted == key.noted && name.equalsIgnoreCase(key.name);
         }
 
         @Override
-        public int hashCode() { return 31 * name.toLowerCase(java.util.Locale.ROOT).hashCode() + Boolean.hashCode(noted); }
+        public int hashCode()
+        {
+            int result = Integer.hashCode(id);
+            result = 31 * result + normalizedName().hashCode();
+            result = 31 * result + Boolean.hashCode(noted);
+            return result;
+        }
     }
 }
