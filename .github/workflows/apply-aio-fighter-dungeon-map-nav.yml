@@ -1,0 +1,321 @@
+name: Apply AIO Fighter Dungeon Map Navigation
+
+on:
+  push:
+    branches:
+      - feature/aio-fighter-dungeon-map-nav
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/aio-fighter-dungeon-map-nav
+          fetch-depth: 0
+
+      - name: Patch dungeon-aware map picker
+        shell: python
+        run: |
+          from pathlib import Path
+
+          path = Path('kspaiofighter/KspAioFighterAreaMapDialog.java')
+          s = path.read_text()
+
+          def replace_once(old, new, label):
+              global s
+              count = s.count(old)
+              if count != 1:
+                  raise RuntimeError(f'{label}: expected 1 occurrence, found {count}')
+              s = s.replace(old, new, 1)
+
+          replace_once(
+              'import javax.swing.JPanel;\nimport javax.swing.SwingConstants;',
+              'import javax.swing.JPanel;\nimport javax.swing.JTextField;\nimport javax.swing.SwingConstants;',
+              'JTextField import')
+
+          replace_once(
+              '"<html><b>Select Attack Area</b><br>Click two corner tiles. Drag to pan; mouse wheel zooms."\n                + " Missing imagery still shows a coordinate grid.</html>");',
+              '"<html><b>Select Attack Area</b><br>Click two corner tiles or jump directly to any WorldPoint."\n                + " Surface, dungeon/high-Y and planes 0-3 are supported. Missing imagery still shows a coordinate grid.</html>");',
+              'instructions')
+
+          replace_once(
+              '''        JButton centreButton = new JButton("Centre");
+        centreButton.setToolTipText("Centre on your current/configured location");
+        centreButton.addActionListener(e -> mapCanvas.centerOn(playerOrFallbackCentre));
+        mapControls.add(centreButton);
+
+        JButton openExplv = new JButton("Open Explv");''',
+              '''        JButton centreButton = new JButton("Player");
+        centreButton.setToolTipText("Centre on your current/configured location");
+        centreButton.addActionListener(e -> {
+            mapCanvas.centerOn(playerOrFallbackCentre);
+            plane.setSelectedItem(mapCanvas.getPlane());
+        });
+        mapControls.add(centreButton);
+
+        JButton openKspMaps = new JButton("Open KSP Maps");
+        openKspMaps.setToolTipText("Open the same WorldPoint in the KSP Maps web viewer");
+        openKspMaps.addActionListener(e -> openKspMapsInBrowser());
+        mapControls.add(openKspMaps);
+
+        JButton openExplv = new JButton("Open Explv");''',
+              'map buttons')
+
+          replace_once(
+              '''        mapControls.add(openExplv);
+
+        north.add(mapControls, BorderLayout.EAST);
+        add(north, BorderLayout.NORTH);''',
+              '''        mapControls.add(openExplv);
+
+        WorldPoint visibleCentre = mapCanvas.getCentreWorldPoint();
+        JPanel coordinateControls = new JPanel(new FlowLayout(FlowLayout.LEFT, 5, 0));
+        coordinateControls.add(new JLabel("World X:"));
+        JTextField worldX = new JTextField(Integer.toString(visibleCentre.getX()), 6);
+        coordinateControls.add(worldX);
+        coordinateControls.add(new JLabel("Y:"));
+        JTextField worldY = new JTextField(Integer.toString(visibleCentre.getY()), 6);
+        coordinateControls.add(worldY);
+        JButton goToWorldPoint = new JButton("Go to WorldPoint");
+        goToWorldPoint.setToolTipText("Supports surface and dungeon/high-Y coordinates, e.g. 3118, 9837, 0");
+        goToWorldPoint.addActionListener(e -> {
+            try
+            {
+                int x = Integer.parseInt(worldX.getText().trim());
+                int y = Integer.parseInt(worldY.getText().trim());
+                Integer selectedPlane = (Integer) plane.getSelectedItem();
+                int z = selectedPlane == null ? mapCanvas.getPlane() : selectedPlane;
+                WorldPoint target = new WorldPoint(x, y, z);
+                if (valid(target))
+                {
+                    mapCanvas.centerOn(target);
+                }
+            }
+            catch (NumberFormatException ignored)
+            {
+            }
+        });
+        coordinateControls.add(goToWorldPoint);
+        JLabel coordinateHint = new JLabel("Dungeon maps commonly use high world Y values (e.g. 9000+)");
+        coordinateHint.setForeground(Color.LIGHT_GRAY);
+        coordinateControls.add(coordinateHint);
+
+        north.add(mapControls, BorderLayout.EAST);
+        north.add(coordinateControls, BorderLayout.SOUTH);
+        add(north, BorderLayout.NORTH);''',
+              'coordinate controls')
+
+          replace_once(
+              '''    private void openExplvInBrowser()
+    {''',
+              '''    private void openKspMapsInBrowser()
+    {
+        if (!Desktop.isDesktopSupported())
+        {
+            return;
+        }
+
+        try
+        {
+            WorldPoint centre = mapCanvas.getCentreWorldPoint();
+            String url = "https://kspog.github.io/kspmaps/?centreX=" + centre.getX()
+                + "&centreY=" + centre.getY()
+                + "&centreZ=" + mapCanvas.getPlane()
+                + "&zoom=" + mapCanvas.getZoom();
+            Desktop.getDesktop().browse(URI.create(url));
+        }
+        catch (Exception ignored)
+        {
+        }
+    }
+
+    private void openExplvInBrowser()
+    {''',
+              'KSP Maps browser method')
+
+          replace_once(
+              '''        private static final String KSP_TILE_BASE =
+            "https://raw.githubusercontent.com/KSPOG/kspmaps/main/tiles/";
+        private static final String EXPLV_TILE_BASE =''',
+              '''        private static final String KSP_TILE_BASE =
+            "https://raw.githubusercontent.com/KSPOG/kspmaps/main/tiles/";
+        private static final String KSP_REGION_BASE =
+            "https://raw.githubusercontent.com/KSPOG/kspmaps/main/data/regions/";
+        private static final String EXPLV_TILE_BASE =''',
+              'region base')
+
+          replace_once(
+              '''        private final Map<String, BufferedImage> tiles = new ConcurrentHashMap<>();
+        private final Set<String> loading = ConcurrentHashMap.newKeySet();
+        private final Set<String> failed = ConcurrentHashMap.newKeySet();
+        private final Runnable selectionChanged;''',
+              '''        private final Map<String, BufferedImage> tiles = new ConcurrentHashMap<>();
+        private final Set<String> loading = ConcurrentHashMap.newKeySet();
+        private final Set<String> failed = ConcurrentHashMap.newKeySet();
+        private final Map<String, BufferedImage> regions = new ConcurrentHashMap<>();
+        private final Set<String> regionLoading = ConcurrentHashMap.newKeySet();
+        private final Set<String> regionFailed = ConcurrentHashMap.newKeySet();
+        private final Runnable selectionChanged;''',
+              'region caches')
+
+          replace_once(
+              '''                drawTiles(g);
+                drawCoordinateGrid(g);''',
+              '''                drawTiles(g);
+                drawKspRegions(g);
+                drawCoordinateGrid(g);''',
+              'region paint order')
+
+          marker = '''        private BufferedImage getOrRequestTile(int tileX, int standardTileY)
+        {'''
+          region_methods = r'''        private void drawKspRegions(Graphics2D g)
+        {
+            WorldPoint a = screenToWorld(0, 0);
+            WorldPoint b = screenToWorld(getWidth(), getHeight());
+
+            int minRegionX = Math.max(0, Math.min(a.getX(), b.getX()) >> 6);
+            int maxRegionX = Math.min(255, Math.max(a.getX(), b.getX()) >> 6);
+            int minRegionY = Math.max(0, Math.min(a.getY(), b.getY()) >> 6);
+            int maxRegionY = Math.min(255, Math.max(a.getY(), b.getY()) >> 6);
+
+            int regionCount = (maxRegionX - minRegionX + 1) * (maxRegionY - minRegionY + 1);
+            if (regionCount <= 0 || regionCount > 256)
+            {
+                return;
+            }
+
+            double displayPixelsPerWorldTile = RS_TILE_PX * scale();
+            int displayRegionSize = Math.max(1, (int) Math.round(64.0 * displayPixelsPerWorldTile));
+
+            for (int regionX = minRegionX; regionX <= maxRegionX; regionX++)
+            {
+                for (int regionY = minRegionY; regionY <= maxRegionY; regionY++)
+                {
+                    int regionId = (regionX << 8) | regionY;
+                    BufferedImage image = getOrRequestRegion(regionId);
+                    if (image == null)
+                    {
+                        continue;
+                    }
+
+                    int baseX = regionX << 6;
+                    int baseY = regionY << 6;
+                    int drawX = (int) Math.round((worldEdgeMaxPixelX(baseX) - centreMaxPixelX) * scale()
+                        + getWidth() / 2.0);
+                    int drawY = (int) Math.round((worldEdgeMaxPixelY(baseY + 64) - centreMaxPixelY) * scale()
+                        + getHeight() / 2.0);
+
+                    g.drawImage(image, drawX, drawY, displayRegionSize, displayRegionSize, null);
+                }
+            }
+        }
+
+        private BufferedImage getOrRequestRegion(int regionId)
+        {
+            String key = plane + "/" + regionId;
+            BufferedImage cached = regions.get(key);
+            if (cached != null || regionFailed.contains(key))
+            {
+                return cached;
+            }
+            if (!regionLoading.add(key))
+            {
+                return null;
+            }
+
+            new SwingWorker<BufferedImage, Void>()
+            {
+                @Override
+                protected BufferedImage doInBackground()
+                {
+                    return readTile(KSP_REGION_BASE + key + ".png");
+                }
+
+                @Override
+                protected void done()
+                {
+                    regionLoading.remove(key);
+                    try
+                    {
+                        BufferedImage image = get();
+                        if (image != null)
+                        {
+                            regions.put(key, image);
+                        }
+                        else
+                        {
+                            regionFailed.add(key);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        regionFailed.add(key);
+                    }
+                    repaint();
+                }
+            }.execute();
+
+            return null;
+        }
+
+'''
+          if s.count(marker) != 1:
+              raise RuntimeError('tile loader marker not unique')
+          s = s.replace(marker, region_methods + marker, 1)
+
+          replace_once(
+              'String text = "Map tiles: KSP Maps -> Explv fallback  |  zoom " + zoom + "  |  plane " + plane;',
+              'String text = "Imagery: KSP RuneLite regions -> KSP tiles -> Explv fallback  |  "\n                + (getCentreWorldPoint().getY() >= 6400 ? "high-Y/dungeon space" : "main world")\n                + "  |  zoom " + zoom + "  |  plane " + plane;',
+              'attribution')
+
+          replace_once(
+              '''        private static double worldCentreMaxPixelX(int worldX)
+        {
+            return ((worldX + 0.5 - RS_OFFSET_X) * RS_TILE_PX) + (RS_TILE_PX / 4.0);
+        }
+
+        private static double worldCentreMaxPixelY(int worldY)
+        {
+            return MAP_HEIGHT_MAX_ZOOM_PX - ((worldY + 0.5 - RS_OFFSET_Y) * RS_TILE_PX);
+        }''',
+              '''        private static double worldCentreMaxPixelX(int worldX)
+        {
+            return ((worldX + 0.5 - RS_OFFSET_X) * RS_TILE_PX) + (RS_TILE_PX / 4.0);
+        }
+
+        private static double worldCentreMaxPixelY(int worldY)
+        {
+            return MAP_HEIGHT_MAX_ZOOM_PX - ((worldY + 0.5 - RS_OFFSET_Y) * RS_TILE_PX);
+        }
+
+        private static double worldEdgeMaxPixelX(int worldX)
+        {
+            return ((worldX - RS_OFFSET_X) * RS_TILE_PX) + (RS_TILE_PX / 4.0);
+        }
+
+        private static double worldEdgeMaxPixelY(int worldY)
+        {
+            return MAP_HEIGHT_MAX_ZOOM_PX - ((worldY - RS_OFFSET_Y) * RS_TILE_PX);
+        }''',
+              'world edge projection')
+
+          path.write_text(s)
+
+          # One-shot patcher: remove itself so the final PR only carries the Java change.
+          workflow = Path('.github/workflows/apply-aio-fighter-dungeon-map-nav.yml')
+          if workflow.exists():
+              workflow.unlink()
+
+      - name: Commit patched source
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --quiet && exit 0
+          git commit -m "Add dungeon-aware AIO Fighter map navigation"
+          git push origin HEAD:feature/aio-fighter-dungeon-map-nav
