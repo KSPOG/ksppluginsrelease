@@ -116,11 +116,17 @@ public class KspAioFighterPlugin extends Plugin
 	private void startAutomation()
 	{
 		final long generation;
+		final KspAioFighterGearStyle startStyle;
 		synchronized (this)
 		{
 			if (automationRunning || preparingStart || inventoryLoadInProgress) return;
 			preparingStart = true;
 			generation = ++startGeneration;
+
+			// Resolve the next combat setup before prepareForRun() mutates target values.
+			// Otherwise disabling level targets temporarily sets every target to 99 and
+			// can make the inventory loader incorrectly fall back to the Attack setup.
+			startStyle = inventoryLoader.activeStyle();
 
 			// The side-panel slot selections are authoritative. Refresh the legacy CSV
 			// compatibility mirror immediately before every run so stale hidden settings
@@ -137,7 +143,7 @@ public class KspAioFighterPlugin extends Plugin
 			String error = "";
 			try
 			{
-				loaded = inventoryLoader.loadActiveSetup();
+				loaded = startStyle == null || inventoryLoader.load(startStyle);
 				if (!loaded) error = inventoryLoader.getLastError();
 			}
 			catch (Exception ex)

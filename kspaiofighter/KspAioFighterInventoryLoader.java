@@ -151,7 +151,7 @@ final class KspAioFighterInventoryLoader
         return result;
     }
 
-    private KspAioFighterGearStyle activeStyle()
+    KspAioFighterGearStyle activeStyle()
     {
         if (config.trainAttack() && level(Skill.ATTACK) < config.attackTarget()) return KspAioFighterGearStyle.ATTACK;
         if (config.trainStrength() && level(Skill.STRENGTH) < config.strengthTarget()) return KspAioFighterGearStyle.STRENGTH;
