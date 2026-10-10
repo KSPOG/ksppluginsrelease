@@ -122,13 +122,31 @@ final class KspAioFighterAreaMapDialog extends JDialog
         JPanel mapControls = new JPanel(new FlowLayout(FlowLayout.RIGHT, 5, 0));
         mapControls.add(new JLabel("Plane:"));
 
-        JComboBox<Integer> plane = new JComboBox<>(new Integer[]{0, 1, 2, 3});
-        plane.setSelectedItem(mapCanvas.getPlane());
+        JComboBox<String> plane = new JComboBox<>(new String[]{"0", "1", "2", "3", "Dungeon"});
+        plane.setToolTipText("Dungeon opens the high-Y dungeon map space while preserving the real RuneLite plane (0-3)");
+        plane.setSelectedItem(mapCanvas.getCentreWorldPoint().getY() >= 6400
+            ? "Dungeon"
+            : Integer.toString(mapCanvas.getPlane()));
         plane.addActionListener(e -> {
-            Integer selected = (Integer) plane.getSelectedItem();
-            if (selected != null)
+            String selected = (String) plane.getSelectedItem();
+            if (selected == null) return;
+
+            if ("Dungeon".equals(selected))
             {
-                mapCanvas.setPlane(selected);
+                WorldPoint centre = mapCanvas.getCentreWorldPoint();
+                if (centre.getY() < 6400)
+                {
+                    mapCanvas.centerOn(new WorldPoint(centre.getX(), 9600, mapCanvas.getPlane()));
+                }
+                return;
+            }
+
+            try
+            {
+                mapCanvas.setPlane(Integer.parseInt(selected));
+            }
+            catch (NumberFormatException ignored)
+            {
             }
         });
         mapControls.add(plane);
@@ -137,7 +155,9 @@ final class KspAioFighterAreaMapDialog extends JDialog
         centreButton.setToolTipText("Centre on your current/configured location");
         centreButton.addActionListener(e -> {
             mapCanvas.centerOn(playerOrFallbackCentre);
-            plane.setSelectedItem(mapCanvas.getPlane());
+            plane.setSelectedItem(playerOrFallbackCentre.getY() >= 6400
+                ? "Dungeon"
+                : Integer.toString(mapCanvas.getPlane()));
         });
         mapControls.add(centreButton);
 
@@ -162,8 +182,18 @@ final class KspAioFighterAreaMapDialog extends JDialog
             {
                 int x = Integer.parseInt(worldX.getText().trim());
                 int y = Integer.parseInt(worldY.getText().trim());
-                Integer selectedPlane = (Integer) plane.getSelectedItem();
-                int z = selectedPlane == null ? mapCanvas.getPlane() : selectedPlane;
+                String selectedPlane = (String) plane.getSelectedItem();
+                int z = mapCanvas.getPlane();
+                if (selectedPlane != null && !"Dungeon".equals(selectedPlane))
+                {
+                    try
+                    {
+                        z = Integer.parseInt(selectedPlane);
+                    }
+                    catch (NumberFormatException ignored)
+                    {
+                    }
+                }
                 WorldPoint target = new WorldPoint(x, y, z);
                 if (valid(target))
                 {
@@ -176,7 +206,7 @@ final class KspAioFighterAreaMapDialog extends JDialog
         });
         coordinateControls.add(goToWorldPoint);
 
-        JLabel coordinateHint = new JLabel("Dungeon maps commonly use high world Y values (for example 9000+)");
+        JLabel coordinateHint = new JLabel("Dungeon = high-Y map space; actual saved plane remains 0-3");
         coordinateHint.setForeground(Color.LIGHT_GRAY);
         coordinateControls.add(coordinateHint);
 
