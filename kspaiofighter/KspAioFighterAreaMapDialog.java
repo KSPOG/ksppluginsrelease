@@ -40,9 +40,11 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.BiConsumer;
 
 /**
- * Native Swing area picker using the same public OSRS map tiles and coordinate
- * transform used by Explv's Map. This avoids requiring a browser callback or
- * clipboard parsing while keeping the familiar two-click rectangular Area flow.
+ * Native two-corner OSRS attack-area picker.
+ *
+ * KSP-owned map tiles are preferred. Explv is retained only as an imagery
+ * fallback while kspmaps coverage is being populated. Coordinate selection and
+ * the fallback grid do not depend on either imagery source.
  */
 final class KspAioFighterAreaMapDialog extends JDialog
 {
@@ -50,7 +52,7 @@ final class KspAioFighterAreaMapDialog extends JDialog
     private static final int DEFAULT_Y = 3468;
     private static final int DEFAULT_PLANE = 0;
 
-    private final ExplvMapCanvas mapCanvas;
+    private final KspMapCanvas mapCanvas;
     private final JLabel selectionLabel = new JLabel("Select two corner tiles", SwingConstants.CENTER);
     private final JButton useArea = new JButton("Use Area");
     private final BiConsumer<WorldPoint, WorldPoint> onAreaSelected;
@@ -80,13 +82,14 @@ final class KspAioFighterAreaMapDialog extends JDialog
         WorldPoint safeCentre = valid(centre)
             ? centre
             : new WorldPoint(DEFAULT_X, DEFAULT_Y, DEFAULT_PLANE);
+
         int initialPlane = safeCentre.getPlane();
         if (valid(existingFirst) && valid(existingSecond) && existingFirst.getPlane() == existingSecond.getPlane())
         {
             initialPlane = existingFirst.getPlane();
         }
 
-        mapCanvas = new ExplvMapCanvas(safeCentre, initialPlane, this::refreshSelectionState);
+        mapCanvas = new KspMapCanvas(safeCentre, initialPlane, this::refreshSelectionState);
         if (valid(existingFirst) && valid(existingSecond) && existingFirst.getPlane() == existingSecond.getPlane())
         {
             mapCanvas.setSelection(existingFirst, existingSecond);
@@ -110,28 +113,34 @@ final class KspAioFighterAreaMapDialog extends JDialog
 
         JPanel north = new JPanel(new BorderLayout(8, 6));
         JLabel instructions = new JLabel(
-            "<html><b>Select Attack Area</b><br>Click two corner tiles. Drag to pan; mouse wheel zooms.</html>");
+            "<html><b>Select Attack Area</b><br>Click two corner tiles. Drag to pan; mouse wheel zooms."
+                + " Missing imagery still shows a coordinate grid.</html>");
         north.add(instructions, BorderLayout.CENTER);
 
         JPanel mapControls = new JPanel(new FlowLayout(FlowLayout.RIGHT, 5, 0));
         mapControls.add(new JLabel("Plane:"));
+
         JComboBox<Integer> plane = new JComboBox<>(new Integer[]{0, 1, 2, 3});
         plane.setSelectedItem(mapCanvas.getPlane());
         plane.addActionListener(e -> {
             Integer selected = (Integer) plane.getSelectedItem();
-            if (selected != null) mapCanvas.setPlane(selected);
+            if (selected != null)
+            {
+                mapCanvas.setPlane(selected);
+            }
         });
         mapControls.add(plane);
 
         JButton centreButton = new JButton("Centre");
-        centreButton.setToolTipText("Centre the map on your current/configured location");
+        centreButton.setToolTipText("Centre on your current/configured location");
         centreButton.addActionListener(e -> mapCanvas.centerOn(playerOrFallbackCentre));
         mapControls.add(centreButton);
 
         JButton openExplv = new JButton("Open Explv");
-        openExplv.setToolTipText("Open the same location on explv.github.io in your browser");
+        openExplv.setToolTipText("Open the same coordinates in Explv for comparison");
         openExplv.addActionListener(e -> openExplvInBrowser());
         mapControls.add(openExplv);
+
         north.add(mapControls, BorderLayout.EAST);
         add(north, BorderLayout.NORTH);
 
@@ -145,8 +154,10 @@ final class KspAioFighterAreaMapDialog extends JDialog
         JPanel buttons = new JPanel(new FlowLayout(FlowLayout.RIGHT, 5, 0));
         JButton clear = new JButton("Clear Selection");
         clear.addActionListener(e -> mapCanvas.clearSelection());
+
         JButton cancel = new JButton("Cancel");
         cancel.addActionListener(e -> dispose());
+
         useArea.addActionListener(e -> applySelection());
         buttons.add(clear);
         buttons.add(cancel);
@@ -159,12 +170,14 @@ final class KspAioFighterAreaMapDialog extends JDialog
     {
         WorldPoint first = mapCanvas.getFirst();
         WorldPoint second = mapCanvas.getSecond();
+
         if (!valid(first))
         {
             selectionLabel.setText("Select first corner tile");
             useArea.setEnabled(false);
             return;
         }
+
         if (!valid(second))
         {
             selectionLabel.setText("First corner: " + format(first) + " - select opposite corner");
@@ -176,6 +189,7 @@ final class KspAioFighterAreaMapDialog extends JDialog
         int maxX = Math.max(first.getX(), second.getX());
         int minY = Math.min(first.getY(), second.getY());
         int maxY = Math.max(first.getY(), second.getY());
+
         selectionLabel.setText("Area: (" + minX + ", " + minY + ") to (" + maxX + ", " + maxY + ")"
             + "  |  " + (maxX - minX + 1) + " x " + (maxY - minY + 1)
             + "  |  plane " + first.getPlane());
@@ -186,14 +200,22 @@ final class KspAioFighterAreaMapDialog extends JDialog
     {
         WorldPoint first = mapCanvas.getFirst();
         WorldPoint second = mapCanvas.getSecond();
-        if (!valid(first) || !valid(second) || first.getPlane() != second.getPlane()) return;
+        if (!valid(first) || !valid(second) || first.getPlane() != second.getPlane())
+        {
+            return;
+        }
+
         onAreaSelected.accept(first, second);
         dispose();
     }
 
     private void openExplvInBrowser()
     {
-        if (!Desktop.isDesktopSupported()) return;
+        if (!Desktop.isDesktopSupported())
+        {
+            return;
+        }
+
         try
         {
             WorldPoint centre = mapCanvas.getCentreWorldPoint();
@@ -208,21 +230,33 @@ final class KspAioFighterAreaMapDialog extends JDialog
         }
     }
 
-    private static boolean valid(WorldPoint point) { return point != null && point.getX() > 0 && point.getY() > 0; }
-
-    private static String format(WorldPoint point) { return "(" + point.getX() + ", " + point.getY() + ", " + point.getPlane() + ")"; }
-
-    private static final class ExplvMapCanvas extends JPanel
+    private static boolean valid(WorldPoint point)
     {
-        // Explv Position.js constants / transform.
+        return point != null && point.getX() > 0 && point.getY() > 0;
+    }
+
+    private static String format(WorldPoint point)
+    {
+        return "(" + point.getX() + ", " + point.getY() + ", " + point.getPlane() + ")";
+    }
+
+    private static final class KspMapCanvas extends JPanel
+    {
         private static final int MAX_ZOOM = 11;
         private static final int MIN_ZOOM = 4;
         private static final int TILE_SIZE = 256;
+        private static final int DRAG_THRESHOLD = 4;
+
+        // Explv-compatible projection, shared with KSPOG/kspmaps v0.1.
         private static final double MAP_HEIGHT_MAX_ZOOM_PX = 364544.0;
         private static final double RS_TILE_PX = 32.0;
         private static final int RS_OFFSET_X = 960;
         private static final int RS_OFFSET_Y = 6208;
-        private static final int DRAG_THRESHOLD = 4;
+
+        private static final String KSP_TILE_BASE =
+            "https://raw.githubusercontent.com/KSPOG/kspmaps/main/tiles/";
+        private static final String EXPLV_TILE_BASE =
+            "https://raw.githubusercontent.com/Explv/osrs_map_tiles/master/";
 
         private final Map<String, BufferedImage> tiles = new ConcurrentHashMap<>();
         private final Set<String> loading = ConcurrentHashMap.newKeySet();
@@ -241,7 +275,7 @@ final class KspAioFighterAreaMapDialog extends JDialog
         private double pressCentreY;
         private boolean dragging;
 
-        private ExplvMapCanvas(WorldPoint centre, int plane, Runnable selectionChanged)
+        private KspMapCanvas(WorldPoint centre, int plane, Runnable selectionChanged)
         {
             this.plane = clampPlane(plane);
             this.selectionChanged = selectionChanged;
@@ -254,7 +288,10 @@ final class KspAioFighterAreaMapDialog extends JDialog
                 @Override
                 public void mousePressed(MouseEvent e)
                 {
-                    if (!SwingUtilities.isLeftMouseButton(e)) return;
+                    if (!SwingUtilities.isLeftMouseButton(e))
+                    {
+                        return;
+                    }
                     pressPoint = e.getPoint();
                     pressCentreX = centreMaxPixelX;
                     pressCentreY = centreMaxPixelY;
@@ -264,11 +301,22 @@ final class KspAioFighterAreaMapDialog extends JDialog
                 @Override
                 public void mouseDragged(MouseEvent e)
                 {
-                    if (pressPoint == null) return;
+                    if (pressPoint == null)
+                    {
+                        return;
+                    }
+
                     int dx = e.getX() - pressPoint.x;
                     int dy = e.getY() - pressPoint.y;
-                    if (!dragging && Math.hypot(dx, dy) >= DRAG_THRESHOLD) dragging = true;
-                    if (!dragging) return;
+                    if (!dragging && Math.hypot(dx, dy) >= DRAG_THRESHOLD)
+                    {
+                        dragging = true;
+                    }
+                    if (!dragging)
+                    {
+                        return;
+                    }
+
                     double scale = scale();
                     centreMaxPixelX = pressCentreX - dx / scale;
                     centreMaxPixelY = pressCentreY - dy / scale;
@@ -283,7 +331,11 @@ final class KspAioFighterAreaMapDialog extends JDialog
                         pressPoint = null;
                         return;
                     }
-                    if (!dragging) select(screenToWorld(e.getX(), e.getY()));
+
+                    if (!dragging)
+                    {
+                        select(screenToWorld(e.getX(), e.getY()));
+                    }
                     pressPoint = null;
                     dragging = false;
                 }
@@ -292,7 +344,11 @@ final class KspAioFighterAreaMapDialog extends JDialog
                 public void mouseMoved(MouseEvent e)
                 {
                     hover = screenToWorld(e.getX(), e.getY());
-                    setToolTipText("Tile " + format(hover) + " | zoom " + zoom);
+                    int regionId = ((hover.getX() >> 6) << 8) | (hover.getY() >> 6);
+                    setToolTipText("Tile " + format(hover)
+                        + " | region " + regionId
+                        + " | local " + (hover.getX() & 63) + "," + (hover.getY() & 63)
+                        + " | zoom " + zoom);
                     repaint();
                 }
 
@@ -304,8 +360,12 @@ final class KspAioFighterAreaMapDialog extends JDialog
                 }
 
                 @Override
-                public void mouseWheelMoved(MouseWheelEvent e) { zoomAt(e.getX(), e.getY(), e.getWheelRotation() < 0 ? 1 : -1); }
+                public void mouseWheelMoved(MouseWheelEvent e)
+                {
+                    zoomAt(e.getX(), e.getY(), e.getWheelRotation() < 0 ? 1 : -1);
+                }
             };
+
             addMouseListener(mouse);
             addMouseMotionListener(mouse);
             addMouseWheelListener(mouse);
@@ -339,7 +399,11 @@ final class KspAioFighterAreaMapDialog extends JDialog
         void setPlane(int plane)
         {
             int next = clampPlane(plane);
-            if (this.plane == next) return;
+            if (this.plane == next)
+            {
+                return;
+            }
+
             this.plane = next;
             hover = null;
             if ((first != null && first.getPlane() != next) || (second != null && second.getPlane() != next))
@@ -355,7 +419,10 @@ final class KspAioFighterAreaMapDialog extends JDialog
         {
             this.first = first;
             this.second = second;
-            if (valid(first)) this.plane = clampPlane(first.getPlane());
+            if (valid(first))
+            {
+                plane = clampPlane(first.getPlane());
+            }
             selectionChanged.run();
             repaint();
         }
@@ -370,7 +437,11 @@ final class KspAioFighterAreaMapDialog extends JDialog
 
         void centerOn(WorldPoint point)
         {
-            if (!valid(point)) return;
+            if (!valid(point))
+            {
+                return;
+            }
+
             centreMaxPixelX = worldCentreMaxPixelX(point.getX());
             centreMaxPixelY = worldCentreMaxPixelY(point.getY());
             plane = clampPlane(point.getPlane());
@@ -379,7 +450,11 @@ final class KspAioFighterAreaMapDialog extends JDialog
 
         private void select(WorldPoint point)
         {
-            if (!valid(point)) return;
+            if (!valid(point))
+            {
+                return;
+            }
+
             if (first == null || second != null)
             {
                 first = point;
@@ -389,6 +464,7 @@ final class KspAioFighterAreaMapDialog extends JDialog
             {
                 second = point;
             }
+
             selectionChanged.run();
             repaint();
         }
@@ -396,7 +472,10 @@ final class KspAioFighterAreaMapDialog extends JDialog
         private void zoomAt(int screenX, int screenY, int delta)
         {
             int nextZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, zoom + delta));
-            if (nextZoom == zoom) return;
+            if (nextZoom == zoom)
+            {
+                return;
+            }
 
             double oldScale = scale();
             double maxUnderMouseX = centreMaxPixelX + (screenX - getWidth() / 2.0) / oldScale;
@@ -418,6 +497,7 @@ final class KspAioFighterAreaMapDialog extends JDialog
             {
                 g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
                 drawTiles(g);
+                drawCoordinateGrid(g);
                 drawSelection(g);
                 drawHover(g);
                 drawAttribution(g);
@@ -444,10 +524,18 @@ final class KspAioFighterAreaMapDialog extends JDialog
 
             for (int tileX = minTileX; tileX <= maxTileX; tileX++)
             {
-                if (tileX < 0 || tileX >= worldTiles) continue;
+                if (tileX < 0 || tileX >= worldTiles)
+                {
+                    continue;
+                }
+
                 for (int tileY = minTileY; tileY <= maxTileY; tileY++)
                 {
-                    if (tileY < 0 || tileY >= worldTiles) continue;
+                    if (tileY < 0 || tileY >= worldTiles)
+                    {
+                        continue;
+                    }
+
                     int drawX = (int) Math.round(tileX * TILE_SIZE - left);
                     int drawY = (int) Math.round(tileY * TILE_SIZE - top);
                     BufferedImage image = getOrRequestTile(tileX, tileY);
@@ -464,24 +552,22 @@ final class KspAioFighterAreaMapDialog extends JDialog
             int tmsY = ((1 << zoom) - 1) - standardTileY;
             String key = plane + "/" + zoom + "/" + tileX + "/" + tmsY;
             BufferedImage cached = tiles.get(key);
-            if (cached != null || failed.contains(key)) return cached;
-            if (!loading.add(key)) return null;
+            if (cached != null || failed.contains(key))
+            {
+                return cached;
+            }
+            if (!loading.add(key))
+            {
+                return null;
+            }
 
             new SwingWorker<BufferedImage, Void>()
             {
                 @Override
-                protected BufferedImage doInBackground() throws Exception
+                protected BufferedImage doInBackground()
                 {
-                    String url = "https://raw.githubusercontent.com/Explv/osrs_map_tiles/master/"
-                        + key + ".png";
-                    URLConnection connection = URI.create(url).toURL().openConnection();
-                    connection.setConnectTimeout(4_000);
-                    connection.setReadTimeout(7_000);
-                    connection.setRequestProperty("User-Agent", "KSP-AIO-Fighter");
-                    try (InputStream input = connection.getInputStream())
-                    {
-                        return ImageIO.read(input);
-                    }
+                    BufferedImage image = readTile(KSP_TILE_BASE + key + ".png");
+                    return image != null ? image : readTile(EXPLV_TILE_BASE + key + ".png");
                 }
 
                 @Override
@@ -491,8 +577,14 @@ final class KspAioFighterAreaMapDialog extends JDialog
                     try
                     {
                         BufferedImage image = get();
-                        if (image != null) tiles.put(key, image);
-                        else failed.add(key);
+                        if (image != null)
+                        {
+                            tiles.put(key, image);
+                        }
+                        else
+                        {
+                            failed.add(key);
+                        }
                     }
                     catch (Exception ex)
                     {
@@ -501,13 +593,71 @@ final class KspAioFighterAreaMapDialog extends JDialog
                     repaint();
                 }
             }.execute();
+
             return null;
+        }
+
+        private BufferedImage readTile(String url)
+        {
+            try
+            {
+                URLConnection connection = URI.create(url).toURL().openConnection();
+                connection.setConnectTimeout(2_500);
+                connection.setReadTimeout(5_000);
+                connection.setRequestProperty("User-Agent", "KSP-AIO-Fighter");
+                try (InputStream input = connection.getInputStream())
+                {
+                    return ImageIO.read(input);
+                }
+            }
+            catch (Exception ignored)
+            {
+                return null;
+            }
+        }
+
+        private void drawCoordinateGrid(Graphics2D g)
+        {
+            int step = zoom >= 10 ? 1 : zoom == 9 ? 4 : zoom == 8 ? 8 : 64;
+            WorldPoint a = screenToWorld(0, 0);
+            WorldPoint b = screenToWorld(getWidth(), getHeight());
+
+            int minX = Math.min(a.getX(), b.getX()) - step;
+            int maxX = Math.max(a.getX(), b.getX()) + step;
+            int minY = Math.min(a.getY(), b.getY()) - step;
+            int maxY = Math.max(a.getY(), b.getY()) + step;
+
+            int startX = Math.floorDiv(minX, step) * step;
+            int startY = Math.floorDiv(minY, step) * step;
+
+            for (int x = startX; x <= maxX; x += step)
+            {
+                boolean regionLine = x % 64 == 0;
+                g.setColor(new Color(255, 255, 255, regionLine ? 90 : 32));
+                g.setStroke(new BasicStroke(regionLine ? 1.5f : 1f));
+                Point p1 = worldToScreen(new WorldPoint(x, minY, plane));
+                Point p2 = worldToScreen(new WorldPoint(x, maxY, plane));
+                g.drawLine(p1.x, p1.y, p2.x, p2.y);
+            }
+
+            for (int y = startY; y <= maxY; y += step)
+            {
+                boolean regionLine = y % 64 == 0;
+                g.setColor(new Color(255, 255, 255, regionLine ? 90 : 32));
+                g.setStroke(new BasicStroke(regionLine ? 1.5f : 1f));
+                Point p1 = worldToScreen(new WorldPoint(minX, y, plane));
+                Point p2 = worldToScreen(new WorldPoint(maxX, y, plane));
+                g.drawLine(p1.x, p1.y, p2.x, p2.y);
+            }
         }
 
         private void drawSelection(Graphics2D g)
         {
             WorldPoint end = second != null ? second : hover;
-            if (first == null || end == null || first.getPlane() != plane || end.getPlane() != plane) return;
+            if (first == null || end == null || first.getPlane() != plane || end.getPlane() != plane)
+            {
+                return;
+            }
 
             double tileScreenSize = RS_TILE_PX * scale();
             Point a = worldToScreen(first);
@@ -526,7 +676,11 @@ final class KspAioFighterAreaMapDialog extends JDialog
 
         private void drawHover(Graphics2D g)
         {
-            if (hover == null || hover.getPlane() != plane) return;
+            if (hover == null || hover.getPlane() != plane)
+            {
+                return;
+            }
+
             double tileScreenSize = RS_TILE_PX * scale();
             Point p = worldToScreen(hover);
             int x = (int) Math.round(p.x - tileScreenSize / 2.0);
@@ -538,7 +692,7 @@ final class KspAioFighterAreaMapDialog extends JDialog
 
         private void drawAttribution(Graphics2D g)
         {
-            String text = "Map tiles: Explv/osrs_map_tiles  |  zoom " + zoom + "  |  plane " + plane;
+            String text = "Map tiles: KSP Maps -> Explv fallback  |  zoom " + zoom + "  |  plane " + plane;
             int width = g.getFontMetrics().stringWidth(text) + 10;
             int y = getHeight() - 8;
             g.setColor(new Color(0, 0, 0, 150));
@@ -566,16 +720,29 @@ final class KspAioFighterAreaMapDialog extends JDialog
         private WorldPoint maxPixelToWorld(double maxPixelX, double maxPixelY)
         {
             int x = (int) Math.round((maxPixelX - RS_TILE_PX) / RS_TILE_PX) + RS_OFFSET_X;
-            int y = (int) Math.round((MAP_HEIGHT_MAX_ZOOM_PX - maxPixelY + (RS_TILE_PX / 4.0) - RS_TILE_PX) / RS_TILE_PX) + RS_OFFSET_Y;
+            int y = (int) Math.round((MAP_HEIGHT_MAX_ZOOM_PX - maxPixelY + (RS_TILE_PX / 4.0) - RS_TILE_PX)
+                / RS_TILE_PX) + RS_OFFSET_Y;
             return new WorldPoint(x, y, plane);
         }
 
-        private double scale() { return Math.pow(2.0, zoom - MAX_ZOOM); }
+        private double scale()
+        {
+            return Math.pow(2.0, zoom - MAX_ZOOM);
+        }
 
-        private static double worldCentreMaxPixelX(int worldX) { return ((worldX + 0.5 - RS_OFFSET_X) * RS_TILE_PX) + (RS_TILE_PX / 4.0); }
+        private static double worldCentreMaxPixelX(int worldX)
+        {
+            return ((worldX + 0.5 - RS_OFFSET_X) * RS_TILE_PX) + (RS_TILE_PX / 4.0);
+        }
 
-        private static double worldCentreMaxPixelY(int worldY) { return MAP_HEIGHT_MAX_ZOOM_PX - ((worldY + 0.5 - RS_OFFSET_Y) * RS_TILE_PX); }
+        private static double worldCentreMaxPixelY(int worldY)
+        {
+            return MAP_HEIGHT_MAX_ZOOM_PX - ((worldY + 0.5 - RS_OFFSET_Y) * RS_TILE_PX);
+        }
 
-        private static int clampPlane(int value) { return Math.max(0, Math.min(3, value)); }
+        private static int clampPlane(int value)
+        {
+            return Math.max(0, Math.min(3, value));
+        }
     }
 }
