@@ -14,6 +14,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
+import static net.runelite.client.plugins.microbot.util.Global.sleepUntil;
+
 @Singleton
 final class KspAioFighterInventoryLoader
 {
@@ -61,14 +63,21 @@ final class KspAioFighterInventoryLoader
         }
 
         Map<InventoryKey, Integer> requested = aggregate(setup);
+        // Depositing converts both noted and unnoted items to the same bank stock.
+        // Validate their combined demand against everything we already own.
+        Map<InventoryKey, Integer> stockNeeded = new LinkedHashMap<>();
+        requested.forEach((key, quantity) ->
+            stockNeeded.merge(new InventoryKey(key.name, false), quantity, Integer::sum));
         List<String> missing = new ArrayList<>();
-        for (Map.Entry<InventoryKey, Integer> entry : requested.entrySet())
+        for (Map.Entry<InventoryKey, Integer> entry : stockNeeded.entrySet())
         {
             InventoryKey key = entry.getKey();
-            int available = Rs2Bank.count(key.name, true);
-            if (available < entry.getValue())
+            int bankQuantity = Rs2Bank.count(key.name, true);
+            int inventoryQuantity = Rs2Inventory.itemQuantity(key.name, true);
+            if ((long) bankQuantity + inventoryQuantity < entry.getValue())
             {
-                missing.add(key.name + " x" + entry.getValue() + " (bank: " + available + ")");
+                missing.add(key.name + " x" + entry.getValue()
+                    + " (inventory: " + inventoryQuantity + ", bank: " + bankQuantity + ")");
             }
         }
 
@@ -79,7 +88,8 @@ final class KspAioFighterInventoryLoader
             return false;
         }
 
-        if (!Rs2Bank.depositAll())
+        if (!Rs2Inventory.isEmpty() && (!Rs2Bank.depositAll()
+            || !sleepUntil(Rs2Inventory::isEmpty, 2_500)))
         {
             Rs2Bank.closeBank();
             lastError = "Could not clear the current inventory before loading the saved setup.";

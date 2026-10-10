@@ -39,7 +39,7 @@ public class KspAioFighterPlugin extends Plugin
 {
     private final KspBreakService breaks = new KspBreakService();
 
-	static final String version = "1.9.25";
+	static final String version = "1.9.26";
 	private static final String WALK_HERE = "Walk here";
 	private static final String SET_SAFE_SPOT = "Set Safe Spot";
 	private static final String AREA_TILE_TARGET = "KSP AIO Fighter";

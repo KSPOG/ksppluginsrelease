@@ -1,0 +1,99 @@
+package net.runelite.client.plugins.microbot.kspaiofighter;
+
+import java.util.*;
+import java.util.function.Predicate;
+import net.runelite.api.Client;
+import net.runelite.client.plugins.microbot.Microbot;
+import net.runelite.client.plugins.microbot.util.bank.Rs2Bank;
+import net.runelite.client.plugins.microbot.util.inventory.Rs2Inventory;
+import net.runelite.client.plugins.microbot.util.inventory.Rs2ItemModel;
+import org.mockito.MockedStatic;
+import static org.mockito.Mockito.*;
+
+/** Copy outside the repository as .java; keep test dependencies out of Source Loader. */
+public final class KspAioFighterInventoryLoaderTest
+{
+    private static final int KEY = 983, SHARK = 385, NOTED_SHARK = 386;
+    private static void check(boolean condition, String message) {
+        if (!condition) throw new AssertionError(message);
+    }
+    private static String name(int id) { return id == KEY ? "Brass key" : "Shark"; }
+    private static KspAioFighterInventoryItem item(int id, int quantity) {
+        return new KspAioFighterInventoryItem(id, quantity, 0, name(id), id == NOTED_SHARK);
+    }
+    private static void scenario(String label, List<KspAioFighterInventoryItem> setup,
+            Map<Integer, Integer> carried, Map<String, Integer> stored,
+            boolean expected, boolean depositSucceeds) throws Exception
+    {
+        Map<Integer, Integer> inventory = new LinkedHashMap<>(carried);
+        Map<String, Integer> stock = new HashMap<>(stored);
+        boolean[] notedMode = {false};
+        int[] deposits = {0}, withdrawals = {0};
+        KspAioFighterInventorySettings settings = mock(KspAioFighterInventorySettings.class);
+        when(settings.isEnabled(KspAioFighterGearStyle.STRENGTH)).thenReturn(true);
+        when(settings.get(KspAioFighterGearStyle.STRENGTH)).thenReturn(setup);
+        KspAioFighterInventoryLoader loader = new KspAioFighterInventoryLoader(mock(KspAioFighterConfig.class), settings);
+        try (MockedStatic<Microbot> microbot = mockStatic(Microbot.class);
+             MockedStatic<Rs2Bank> bank = mockStatic(Rs2Bank.class);
+             MockedStatic<Rs2Inventory> inv = mockStatic(Rs2Inventory.class))
+        {
+            microbot.when(Microbot::isLoggedIn).thenReturn(true);
+            microbot.when(Microbot::getClient).thenReturn(mock(Client.class));
+            bank.when(Rs2Bank::walkToBankAndUseBank).thenReturn(true);
+            bank.when(() -> Rs2Bank.count(anyString(), eq(true))).thenAnswer(call -> stock.getOrDefault(call.getArgument(0), 0));
+            inv.when(Rs2Inventory::isEmpty).thenAnswer(call -> inventory.isEmpty());
+            inv.when(() -> Rs2Inventory.itemQuantity(anyString(), eq(true))).thenAnswer(call ->
+                inventory.entrySet().stream().filter(e -> name(e.getKey()).equalsIgnoreCase(call.getArgument(0)))
+                    .mapToInt(Map.Entry::getValue).sum());
+            inv.when(() -> Rs2Inventory.getList(any(Predicate.class))).thenAnswer(call -> {
+                List<Rs2ItemModel> models = new ArrayList<>();
+                for (Map.Entry<Integer, Integer> entry : inventory.entrySet()) {
+                    Rs2ItemModel model = mock(Rs2ItemModel.class);
+                    when(model.getId()).thenReturn(entry.getKey());
+                    when(model.getQuantity()).thenReturn(entry.getValue());
+                    models.add(model);
+                }
+                return models;
+            });
+            bank.when(Rs2Bank::depositAll).thenAnswer(call -> {
+                deposits[0]++;
+                if (!depositSucceeds) return false;
+                inventory.forEach((id, quantity) -> stock.merge(name(id), quantity, Integer::sum));
+                inventory.clear();
+                return true;
+            });
+            bank.when(Rs2Bank::setWithdrawAsItem).thenAnswer(call -> { notedMode[0] = false; return true; });
+            bank.when(() -> Rs2Bank.setWithdrawAs(true)).thenAnswer(call -> { notedMode[0] = true; return true; });
+            bank.when(() -> Rs2Bank.withdrawX(eq(true), anyString(), anyInt(), eq(true))).thenAnswer(call -> {
+                String wanted = call.getArgument(1);
+                int quantity = call.getArgument(2);
+                check(stock.getOrDefault(wanted, 0) >= quantity, "cannot overdraw: " + label);
+                stock.merge(wanted, -quantity, Integer::sum);
+                int id = wanted.equals("Brass key") ? KEY : notedMode[0] ? NOTED_SHARK : SHARK;
+                inventory.merge(id, quantity, Integer::sum);
+                withdrawals[0]++;
+                return true;
+            });
+            check(loader.load(KspAioFighterGearStyle.STRENGTH) == expected, label + ": " + loader.getLastError());
+            if (!expected) {
+                check(withdrawals[0] == 0, "failed validation/deposit must not withdraw: " + label);
+                check(inventory.equals(carried), "failure must preserve carried items: " + label);
+            }
+            if (label.equals("already exact")) check(deposits[0] == 0 && withdrawals[0] == 0, "exact setup needs no banking");
+            if (label.equals("empty inventory")) check(deposits[0] == 0, "do not deposit an empty inventory");
+        }
+        System.out.println("PASS: " + label);
+    }
+    public static void main(String[] args) throws Exception
+    {
+        scenario("carried brass key absent from bank", List.of(item(KEY, 1), item(SHARK, 3)), Map.of(KEY, 1), Map.of("Shark", 3), true, true);
+        scenario("partial stack plus bank stock", List.of(item(SHARK, 5)), Map.of(SHARK, 2), Map.of("Shark", 3), true, true);
+        scenario("genuinely insufficient combined stock", List.of(item(SHARK, 5)), Map.of(SHARK, 2), Map.of("Shark", 2), false, true);
+        scenario("noted inventory can supply unnoted setup", List.of(item(SHARK, 3)), Map.of(NOTED_SHARK, 3), Map.of(), true, true);
+        scenario("combined noted and unnoted demand", List.of(item(SHARK, 2), item(NOTED_SHARK, 3)), Map.of(), Map.of("Shark", 4), false, true);
+        scenario("enough stock for both forms", List.of(item(SHARK, 2), item(NOTED_SHARK, 3)), Map.of(), Map.of("Shark", 5), true, true);
+        scenario("already exact", List.of(item(KEY, 1)), Map.of(KEY, 1), Map.of(), true, true);
+        scenario("empty inventory", List.of(item(KEY, 1)), Map.of(), Map.of("Brass key", 1), true, true);
+        scenario("deposit failure", List.of(item(KEY, 1), item(SHARK, 3)), Map.of(KEY, 1), Map.of("Shark", 3), false, false);
+    }
+}
