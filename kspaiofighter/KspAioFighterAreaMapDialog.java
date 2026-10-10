@@ -10,6 +10,7 @@ import javax.swing.JComboBox;
 import javax.swing.JDialog;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
+import javax.swing.JTextField;
 import javax.swing.SwingConstants;
 import javax.swing.SwingUtilities;
 import javax.swing.SwingWorker;
@@ -42,9 +43,10 @@ import java.util.function.BiConsumer;
 /**
  * Native two-corner OSRS attack-area picker.
  *
- * KSP-owned map tiles are preferred. Explv is retained only as an imagery
- * fallback while kspmaps coverage is being populated. Coordinate selection and
- * the fallback grid do not depend on either imagery source.
+ * KSP-owned RuneLite region images are preferred, followed by KSP TMS tiles.
+ * Explv is retained only as an imagery fallback while kspmaps coverage is being
+ * populated. Coordinate selection and the fallback grid do not depend on any
+ * imagery source, so surface and high-Y dungeon coordinates remain selectable.
  */
 final class KspAioFighterAreaMapDialog extends JDialog
 {
@@ -101,8 +103,8 @@ final class KspAioFighterAreaMapDialog extends JDialog
 
         buildUi(safeCentre);
         refreshSelectionState();
-        setMinimumSize(new Dimension(760, 560));
-        setPreferredSize(new Dimension(940, 720));
+        setMinimumSize(new Dimension(820, 600));
+        setPreferredSize(new Dimension(980, 760));
         pack();
     }
 
@@ -113,8 +115,8 @@ final class KspAioFighterAreaMapDialog extends JDialog
 
         JPanel north = new JPanel(new BorderLayout(8, 6));
         JLabel instructions = new JLabel(
-            "<html><b>Select Attack Area</b><br>Click two corner tiles. Drag to pan; mouse wheel zooms."
-                + " Missing imagery still shows a coordinate grid.</html>");
+            "<html><b>Select Attack Area</b><br>Click two corner tiles or jump directly to any WorldPoint."
+                + " Surface, dungeon/high-Y and planes 0-3 are supported. Missing imagery still shows a coordinate grid.</html>");
         north.add(instructions, BorderLayout.CENTER);
 
         JPanel mapControls = new JPanel(new FlowLayout(FlowLayout.RIGHT, 5, 0));
@@ -131,9 +133,12 @@ final class KspAioFighterAreaMapDialog extends JDialog
         });
         mapControls.add(plane);
 
-        JButton centreButton = new JButton("Centre");
+        JButton centreButton = new JButton("Player");
         centreButton.setToolTipText("Centre on your current/configured location");
-        centreButton.addActionListener(e -> mapCanvas.centerOn(playerOrFallbackCentre));
+        centreButton.addActionListener(e -> {
+            mapCanvas.centerOn(playerOrFallbackCentre);
+            plane.setSelectedItem(mapCanvas.getPlane());
+        });
         mapControls.add(centreButton);
 
         JButton openExplv = new JButton("Open Explv");
@@ -141,7 +146,42 @@ final class KspAioFighterAreaMapDialog extends JDialog
         openExplv.addActionListener(e -> openExplvInBrowser());
         mapControls.add(openExplv);
 
+        WorldPoint visibleCentre = mapCanvas.getCentreWorldPoint();
+        JPanel coordinateControls = new JPanel(new FlowLayout(FlowLayout.LEFT, 5, 0));
+        coordinateControls.add(new JLabel("World X:"));
+        JTextField worldX = new JTextField(Integer.toString(visibleCentre.getX()), 6);
+        coordinateControls.add(worldX);
+        coordinateControls.add(new JLabel("Y:"));
+        JTextField worldY = new JTextField(Integer.toString(visibleCentre.getY()), 6);
+        coordinateControls.add(worldY);
+
+        JButton goToWorldPoint = new JButton("Go to WorldPoint");
+        goToWorldPoint.setToolTipText("Supports surface and dungeon/high-Y coordinates, e.g. 3118, 9837, 0");
+        goToWorldPoint.addActionListener(e -> {
+            try
+            {
+                int x = Integer.parseInt(worldX.getText().trim());
+                int y = Integer.parseInt(worldY.getText().trim());
+                Integer selectedPlane = (Integer) plane.getSelectedItem();
+                int z = selectedPlane == null ? mapCanvas.getPlane() : selectedPlane;
+                WorldPoint target = new WorldPoint(x, y, z);
+                if (valid(target))
+                {
+                    mapCanvas.centerOn(target);
+                }
+            }
+            catch (NumberFormatException ignored)
+            {
+            }
+        });
+        coordinateControls.add(goToWorldPoint);
+
+        JLabel coordinateHint = new JLabel("Dungeon maps commonly use high world Y values (for example 9000+)");
+        coordinateHint.setForeground(Color.LIGHT_GRAY);
+        coordinateControls.add(coordinateHint);
+
         north.add(mapControls, BorderLayout.EAST);
+        north.add(coordinateControls, BorderLayout.SOUTH);
         add(north, BorderLayout.NORTH);
 
         mapCanvas.setBorder(BorderFactory.createLineBorder(ColorScheme.DARKER_GRAY_COLOR));
@@ -247,7 +287,7 @@ final class KspAioFighterAreaMapDialog extends JDialog
         private static final int TILE_SIZE = 256;
         private static final int DRAG_THRESHOLD = 4;
 
-        // Explv-compatible projection, shared with KSPOG/kspmaps v0.1.
+        // Explv-compatible projection, shared with KSPOG/kspmaps.
         private static final double MAP_HEIGHT_MAX_ZOOM_PX = 364544.0;
         private static final double RS_TILE_PX = 32.0;
         private static final int RS_OFFSET_X = 960;
@@ -255,12 +295,17 @@ final class KspAioFighterAreaMapDialog extends JDialog
 
         private static final String KSP_TILE_BASE =
             "https://raw.githubusercontent.com/KSPOG/kspmaps/main/tiles/";
+        private static final String KSP_REGION_BASE =
+            "https://raw.githubusercontent.com/KSPOG/kspmaps/main/data/regions/";
         private static final String EXPLV_TILE_BASE =
             "https://raw.githubusercontent.com/Explv/osrs_map_tiles/master/";
 
         private final Map<String, BufferedImage> tiles = new ConcurrentHashMap<>();
         private final Set<String> loading = ConcurrentHashMap.newKeySet();
         private final Set<String> failed = ConcurrentHashMap.newKeySet();
+        private final Map<String, BufferedImage> regions = new ConcurrentHashMap<>();
+        private final Set<String> regionLoading = ConcurrentHashMap.newKeySet();
+        private final Set<String> regionFailed = ConcurrentHashMap.newKeySet();
         private final Runnable selectionChanged;
 
         private int zoom = 10;
@@ -345,9 +390,11 @@ final class KspAioFighterAreaMapDialog extends JDialog
                 {
                     hover = screenToWorld(e.getX(), e.getY());
                     int regionId = ((hover.getX() >> 6) << 8) | (hover.getY() >> 6);
+                    String worldSpace = hover.getY() >= 6400 ? "high-Y/dungeon" : "main world";
                     setToolTipText("Tile " + format(hover)
                         + " | region " + regionId
                         + " | local " + (hover.getX() & 63) + "," + (hover.getY() & 63)
+                        + " | " + worldSpace
                         + " | zoom " + zoom);
                     repaint();
                 }
@@ -497,6 +544,7 @@ final class KspAioFighterAreaMapDialog extends JDialog
             {
                 g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
                 drawTiles(g);
+                drawKspRegions(g);
                 drawCoordinateGrid(g);
                 drawSelection(g);
                 drawHover(g);
@@ -545,6 +593,96 @@ final class KspAioFighterAreaMapDialog extends JDialog
                     }
                 }
             }
+        }
+
+        private void drawKspRegions(Graphics2D g)
+        {
+            WorldPoint a = screenToWorld(0, 0);
+            WorldPoint b = screenToWorld(getWidth(), getHeight());
+
+            int minRegionX = Math.max(0, Math.min(a.getX(), b.getX()) >> 6);
+            int maxRegionX = Math.min(255, Math.max(a.getX(), b.getX()) >> 6);
+            int minRegionY = Math.max(0, Math.min(a.getY(), b.getY()) >> 6);
+            int maxRegionY = Math.min(255, Math.max(a.getY(), b.getY()) >> 6);
+
+            int regionCount = (maxRegionX - minRegionX + 1) * (maxRegionY - minRegionY + 1);
+            if (regionCount <= 0 || regionCount > 256)
+            {
+                return;
+            }
+
+            double displayPixelsPerWorldTile = RS_TILE_PX * scale();
+            int displayRegionSize = Math.max(1, (int) Math.round(64.0 * displayPixelsPerWorldTile));
+
+            for (int regionX = minRegionX; regionX <= maxRegionX; regionX++)
+            {
+                for (int regionY = minRegionY; regionY <= maxRegionY; regionY++)
+                {
+                    int regionId = (regionX << 8) | regionY;
+                    BufferedImage image = getOrRequestRegion(regionId);
+                    if (image == null)
+                    {
+                        continue;
+                    }
+
+                    int baseX = regionX << 6;
+                    int baseY = regionY << 6;
+                    int drawX = (int) Math.round((worldEdgeMaxPixelX(baseX) - centreMaxPixelX) * scale()
+                        + getWidth() / 2.0);
+                    int drawY = (int) Math.round((worldEdgeMaxPixelY(baseY + 64) - centreMaxPixelY) * scale()
+                        + getHeight() / 2.0);
+
+                    g.drawImage(image, drawX, drawY, displayRegionSize, displayRegionSize, null);
+                }
+            }
+        }
+
+        private BufferedImage getOrRequestRegion(int regionId)
+        {
+            String key = plane + "/" + regionId;
+            BufferedImage cached = regions.get(key);
+            if (cached != null || regionFailed.contains(key))
+            {
+                return cached;
+            }
+            if (!regionLoading.add(key))
+            {
+                return null;
+            }
+
+            new SwingWorker<BufferedImage, Void>()
+            {
+                @Override
+                protected BufferedImage doInBackground()
+                {
+                    return readTile(KSP_REGION_BASE + key + ".png");
+                }
+
+                @Override
+                protected void done()
+                {
+                    regionLoading.remove(key);
+                    try
+                    {
+                        BufferedImage image = get();
+                        if (image != null)
+                        {
+                            regions.put(key, image);
+                        }
+                        else
+                        {
+                            regionFailed.add(key);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        regionFailed.add(key);
+                    }
+                    repaint();
+                }
+            }.execute();
+
+            return null;
         }
 
         private BufferedImage getOrRequestTile(int tileX, int standardTileY)
@@ -692,7 +830,10 @@ final class KspAioFighterAreaMapDialog extends JDialog
 
         private void drawAttribution(Graphics2D g)
         {
-            String text = "Map tiles: KSP Maps -> Explv fallback  |  zoom " + zoom + "  |  plane " + plane;
+            WorldPoint centre = getCentreWorldPoint();
+            String text = "Imagery: KSP RuneLite regions -> KSP tiles -> Explv fallback  |  "
+                + (centre.getY() >= 6400 ? "high-Y/dungeon space" : "main world")
+                + "  |  zoom " + zoom + "  |  plane " + plane;
             int width = g.getFontMetrics().stringWidth(text) + 10;
             int y = getHeight() - 8;
             g.setColor(new Color(0, 0, 0, 150));
@@ -738,6 +879,16 @@ final class KspAioFighterAreaMapDialog extends JDialog
         private static double worldCentreMaxPixelY(int worldY)
         {
             return MAP_HEIGHT_MAX_ZOOM_PX - ((worldY + 0.5 - RS_OFFSET_Y) * RS_TILE_PX);
+        }
+
+        private static double worldEdgeMaxPixelX(int worldX)
+        {
+            return ((worldX - RS_OFFSET_X) * RS_TILE_PX) + (RS_TILE_PX / 4.0);
+        }
+
+        private static double worldEdgeMaxPixelY(int worldY)
+        {
+            return MAP_HEIGHT_MAX_ZOOM_PX - ((worldY - RS_OFFSET_Y) * RS_TILE_PX);
         }
 
         private static int clampPlane(int value)
