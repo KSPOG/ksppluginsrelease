@@ -44,24 +44,10 @@ import net.runelite.client.plugins.microbot.util.widget.Rs2Widget;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-/**
- * Account Builder GE seller.
- *
- * <p>The GE path deliberately follows the two proven KSP implementations:
- * Jewelry Crafter's rule that the selected GE setup must be genuinely ready,
- * and Smart Smelter's use of {@link GrandExchangeRequest}/{@link Rs2GrandExchange#processOffer}
- * plus verification against RuneLite's live {@link GrandExchangeOffer} array.
- * This avoids maintaining a second fragile implementation of the price and
- * quantity chatbox widgets inside Account Builder.</p>
- *
- * <p>Normal progression is scheduler/state driven. Time values are recovery
- * ceilings only and are never used as post-click sleeps.</p>
- */
 @Singleton
 public class SellScript extends Script
 {
     private static final Logger log = LoggerFactory.getLogger(SellScript.class);
-
     private static final int LOOP_DELAY_MS = 100;
     private static final long BANK_ACTION_TIMEOUT_NS = TimeUnit.SECONDS.toNanos(3);
     private static final long GE_ACTION_TIMEOUT_NS = TimeUnit.SECONDS.toNanos(5);
@@ -86,10 +72,7 @@ public class SellScript extends Script
             SellList.LIMPWURT_ROOT, SellList.EARTH_TALISMAN, SellList.BODY_TALISMAN,
             SellList.TUNA, SellList.LOBSTER, SellList.SWORDFISH, SellList.SPINACH_ROLL);
 
-    private enum BankAction
-    {
-        NONE, OPEN, SET_NOTE, DEPOSIT, WITHDRAW, CLOSE
-    }
+    private enum BankAction { NONE, OPEN, SET_NOTE, DEPOSIT, WITHDRAW, CLOSE }
 
     @Inject private KspAccountPlayTimeCache accountPlayTimeCache;
     @Inject private BuyScript buyScript;
@@ -125,10 +108,7 @@ public class SellScript extends Script
     private long lastBuyAffordabilityCheckAtMs;
     private boolean cachedBuyAffordability;
 
-    public void setDebugLogging(boolean debugLogging)
-    {
-        this.debugLogging = debugLogging;
-    }
+    public void setDebugLogging(boolean debugLogging) { this.debugLogging = debugLogging; }
 
     public boolean run(GEArea area)
     {
@@ -178,7 +158,13 @@ public class SellScript extends Script
 
         KspWalkerGuard.clear(WALK_KEY);
 
-        if (pendingOfferItemId > 0 || geOpenRequested || geOverviewRequested
+        // Once a bank batch starts, keep ownership of the state until every
+        // eligible item that fits has been withdrawn and the bank is closed.
+        if (Rs2Bank.isOpen() || bankAction != BankAction.NONE || bankInventoryPrepared)
+        {
+            state = SellState.RESTOCKING_FROM_BANK;
+        }
+        else if (pendingOfferItemId > 0 || geOpenRequested || geOverviewRequested
                 || hasSellableInventoryItems() || hasCompletedSellOffers() || hasOpenSellOffers())
         {
             state = SellState.SELLING_ITEMS;
@@ -195,12 +181,8 @@ public class SellScript extends Script
     private void walkToGe()
     {
         Microbot.status = "Walking to GE";
-        KspWalkerGuard.walkToDestination(
-                WALK_KEY,
-                targetArea::getRandomPoint,
-                targetArea.toWorldArea()::contains,
-                2,
-                0L);
+        KspWalkerGuard.walkToDestination(WALK_KEY, targetArea::getRandomPoint,
+                targetArea.toWorldArea()::contains, 2, 0L);
     }
 
     private void bankSellItems()
@@ -219,7 +201,6 @@ public class SellScript extends Script
         {
             Microbot.status = "Opening GE Bank";
             if (System.nanoTime() < nextBankOpenAttemptNs) return;
-
             try
             {
                 boolean sent = Rs2Bank.openBank();
@@ -228,8 +209,6 @@ public class SellScript extends Script
             }
             catch (RuntimeException ex)
             {
-                // The client can briefly invalidate its local WorldPoint while a
-                // scene is changing. Do not hammer another synchronous scene scan.
                 nextBankOpenAttemptNs = System.nanoTime() + BANK_EXCEPTION_BACKOFF_NS;
                 debug("GE bank open deferred | message={}", ex.getMessage());
             }
@@ -258,6 +237,7 @@ public class SellScript extends Script
             bankInventoryPrepared = true;
         }
 
+        // Drain every eligible item into this inventory before leaving the bank.
         if (dispatchNextWithdrawal()) return;
 
         if (hasSellableInventoryItems())
@@ -266,7 +246,6 @@ public class SellScript extends Script
             return;
         }
 
-        // If there are already live GE offers, leave the bank and service them.
         if (hasOpenSellOffers() || hasCompletedSellOffers())
         {
             closeBank(false);
@@ -327,18 +306,21 @@ public class SellScript extends Script
                     complete = true;
                     Microbot.status = "GE Sell Complete";
                 }
-                else
-                {
-                    state = SellState.SELLING_ITEMS;
-                }
+                else state = SellState.SELLING_ITEMS;
+                return true;
             }
-            return true;
+
+            // OPEN/SET_NOTE/DEPOSIT/WITHDRAW completed from actual widget,
+            // inventory or bank changes. Continue this same tick instead of
+            // burning an extra scheduler cycle per item.
+            return false;
         }
 
         if (bankActionExpired())
         {
             debug("Bank action recovery | action={} item={}", bankAction, pendingWithdrawName);
             clearBankAction();
+            return false;
         }
         return true;
     }
@@ -393,7 +375,6 @@ public class SellScript extends Script
             if (!name.equalsIgnoreCase(desiredAxe) && count > 0)
                 return dispatchWithdrawal(name, count);
         }
-
         return false;
     }
 
@@ -411,7 +392,7 @@ public class SellScript extends Script
                 : Rs2Bank.withdrawX(itemName, amount, true);
         if (!sent) return false;
 
-        Microbot.status = "Withdrawing " + itemName;
+        Microbot.status = "Batch withdrawing " + itemName;
         pendingWithdrawName = itemName;
         pendingWithdrawBankBefore = bankBefore;
         pendingWithdrawInventoryBefore = inventoryBefore;
@@ -422,19 +403,16 @@ public class SellScript extends Script
     private void sellInventory()
     {
         if (!KspWorldMapGuard.isSceneReady()) return;
-
         if (Rs2Bank.isOpen())
         {
-            Rs2Bank.closeBank();
+            state = SellState.RESTOCKING_FROM_BANK;
             return;
         }
-
         if (pendingOfferItemId > 0)
         {
             advancePendingOffer();
             return;
         }
-
         if (!ensureGeOverview()) return;
 
         if (hasCompletedSellOffers())
@@ -470,14 +448,9 @@ public class SellScript extends Script
         Microbot.status = "GE Sell Complete";
     }
 
-    /**
-     * Mirrors Smart Smelter: let Microbot's current GE request flow own the
-     * widgets and verify placement from the live offer array afterwards.
-     */
     private void placeSellOffer(Rs2ItemModel item, int quantity)
     {
         if (item == null || item.getName() == null || quantity <= 0) return;
-
         int itemId = canonicalItemId(item);
         if (itemId <= 0) return;
 
@@ -487,7 +460,6 @@ public class SellScript extends Script
             Microbot.status = "GE sell already active: " + item.getName();
             return;
         }
-
         if (Rs2GrandExchange.getAvailableSlotsCount() <= 0)
         {
             Microbot.status = "Waiting for GE Slot";
@@ -496,7 +468,6 @@ public class SellScript extends Script
 
         int price = getAdjustedSellPrice(item);
         Microbot.status = "Selling " + quantity + " x " + item.getName() + " @ " + price;
-
         GrandExchangeRequest request = GrandExchangeRequest.builder()
                 .action(GrandExchangeAction.SELL)
                 .itemName(item.getName())
@@ -507,10 +478,7 @@ public class SellScript extends Script
                 .build();
 
         boolean accepted;
-        try
-        {
-            accepted = Rs2GrandExchange.processOffer(request);
-        }
+        try { accepted = Rs2GrandExchange.processOffer(request); }
         catch (RuntimeException ex)
         {
             debug("GE sell request failed | item={} message={}", item.getName(), ex.getMessage());
@@ -529,7 +497,6 @@ public class SellScript extends Script
             recoverGeState("processOffer returned false");
             return;
         }
-
         pendingOfferItemId = itemId;
         pendingOfferItemName = item.getName();
         pendingOfferStartedNs = System.nanoTime();
@@ -571,18 +538,9 @@ public class SellScript extends Script
         }
     }
 
-    /**
-     * Jewelry Crafter only proceeds once the GE is on a stable overview/setup.
-     * We keep the same readiness rule but observe it over scheduler ticks rather
-     * than sleeping for UI transitions.
-     */
     private boolean ensureGeOverview()
     {
-        if (Rs2Bank.isOpen())
-        {
-            Rs2Bank.closeBank();
-            return false;
-        }
+        if (Rs2Bank.isOpen()) return false;
 
         if (!Rs2GrandExchange.isOpen())
         {
@@ -592,7 +550,6 @@ public class SellScript extends Script
                 if (System.nanoTime() - geOpenRequestedNs < GE_ACTION_TIMEOUT_NS) return false;
                 geOpenRequested = false;
             }
-
             Microbot.status = "Opening Grand Exchange";
             try
             {
@@ -602,43 +559,33 @@ public class SellScript extends Script
                     geOpenRequestedNs = System.nanoTime();
                 }
             }
-            catch (RuntimeException ex)
-            {
-                debug("GE open deferred | message={}", ex.getMessage());
-            }
+            catch (RuntimeException ex) { debug("GE open deferred | message={}", ex.getMessage()); }
             return false;
         }
 
         geOpenRequested = false;
-
         if (geSubScreenOpen())
         {
-            if (geOverviewRequested
-                    && System.nanoTime() - geOverviewRequestedNs < GE_ACTION_TIMEOUT_NS)
+            if (geOverviewRequested && System.nanoTime() - geOverviewRequestedNs < GE_ACTION_TIMEOUT_NS)
                 return false;
-
             Microbot.status = "Returning to GE overview";
             Rs2GrandExchange.backToOverview();
             geOverviewRequested = true;
             geOverviewRequestedNs = System.nanoTime();
             return false;
         }
-
         geOverviewRequested = false;
         return true;
     }
 
     private boolean geSubScreenOpen()
     {
-        return Rs2GrandExchange.isOfferScreenOpen()
-                || Rs2Widget.isWidgetVisible(InterfaceID.GeOffers.SETUP);
+        return Rs2GrandExchange.isOfferScreenOpen() || Rs2Widget.isWidgetVisible(InterfaceID.GeOffers.SETUP);
     }
 
     private void recoverGeState(String reason)
     {
-        debug("GE recovery | reason={} open={} subScreen={}",
-                reason, Rs2GrandExchange.isOpen(), geSubScreenOpen());
-
+        debug("GE recovery | reason={} open={} subScreen={}", reason, Rs2GrandExchange.isOpen(), geSubScreenOpen());
         if (Rs2GrandExchange.isOpen() && geSubScreenOpen())
         {
             Rs2GrandExchange.backToOverview();
@@ -650,18 +597,15 @@ public class SellScript extends Script
     private GrandExchangeSlots findSellOfferSlot(int itemId)
     {
         if (itemId <= 0) return null;
-
         return clientValue(() ->
         {
             GrandExchangeOffer[] offers = Microbot.getClient().getGrandExchangeOffers();
             if (offers == null) return null;
-
             int max = Math.min(offers.length, GrandExchangeSlots.values().length);
             for (int i = 0; i < max; i++)
             {
                 GrandExchangeOffer offer = offers[i];
                 if (offer == null || offer.getItemId() != itemId) continue;
-
                 GrandExchangeOfferState state = offer.getState();
                 if (state == GrandExchangeOfferState.SELLING || state == GrandExchangeOfferState.SOLD)
                     return GrandExchangeSlots.values()[i];
@@ -719,7 +663,6 @@ public class SellScript extends Script
     {
         if (root == null || root.isHidden() || predicate == null || depth > 14) return null;
         if (predicate.test(root)) return root;
-
         Widget[] dynamic = root.getDynamicChildren();
         if (dynamic != null)
             for (Widget child : dynamic)
@@ -727,7 +670,6 @@ public class SellScript extends Script
                 Widget match = findWidgetRecursive(child, predicate, depth + 1);
                 if (match != null) return match;
             }
-
         Widget[] statics = root.getStaticChildren();
         if (statics != null)
             for (Widget child : statics)
@@ -759,22 +701,17 @@ public class SellScript extends Script
     {
         if (entry.isTradeRestricted() && !hasUnlockedTradeRestrictedItems()) return false;
         if (PROTECTED_SKILL_RESOURCES.contains(entry) && !canAffordGeBuyRequirements()) return false;
-
         int firemakingLevel = Microbot.getClient().getRealSkillLevel(Skill.FIREMAKING);
         if (entry == SellList.LOGS) return firemakingLevel >= 15;
         if (entry == SellList.OAK_LOGS) return firemakingLevel >= 30;
         if (entry == SellList.SILVER_ORE)
             return Microbot.getClient().getRealSkillLevel(Skill.SMITHING) < 20;
-        if (entry == SellList.SMALL_FISHING_NET || entry == SellList.FISHING_ROD
-                || entry == SellList.FISHING_BAIT)
+        if (entry == SellList.SMALL_FISHING_NET || entry == SellList.FISHING_ROD || entry == SellList.FISHING_BAIT)
             return Microbot.getClient().getRealSkillLevel(Skill.FISHING) >= 20;
         return true;
     }
 
-    private boolean hasSellableInventoryItems()
-    {
-        return getNextSellableInventoryItem() != null;
-    }
+    private boolean hasSellableInventoryItems() { return getNextSellableInventoryItem() != null; }
 
     private boolean hasSellableBankItems()
     {
@@ -799,7 +736,6 @@ public class SellScript extends Script
             if (getSellableInventoryQuantity(item.getName(), item.getQuantity()) <= 0) continue;
             if (isAllowedSellItemName(item.getName())) return item;
         }
-
         if (!canAffordGeBuyRequirements()) return null;
         String desiredPickaxe = resolveDesiredPickaxeName();
         String desiredAxe = resolveDesiredAxeName();
@@ -831,39 +767,32 @@ public class SellScript extends Script
     {
         if (itemName == null) return 0;
         int reserved = 0;
-
         if (isQuestIncomplete(Quest.COOKS_ASSISTANT))
             for (Items item : Items.values())
                 if (item.getDisplayName().equalsIgnoreCase(itemName)) reserved++;
-
         if (isQuestIncomplete(Quest.GOBLIN_DIPLOMACY))
             for (GobReqs item : GobReqs.values())
                 if (item.getDisplayName().equalsIgnoreCase(itemName)) reserved += item.getQuantity();
-
         if (isQuestIncomplete(Quest.SHEEP_SHEARER) && "Ball of wool".equalsIgnoreCase(itemName))
         {
-            int stage = Microbot.getClientThread().runOnClientThreadOptional(() -> Microbot.getClient().getVarpValue(net.runelite.api.gameval.VarPlayerID.SHEEP)).orElse(0);
+            int stage = Microbot.getClientThread().runOnClientThreadOptional(
+                    () -> Microbot.getClient().getVarpValue(net.runelite.api.gameval.VarPlayerID.SHEEP)).orElse(0);
             reserved += stage > 1 ? Math.max(0, 21 - stage) : 20;
         }
         if (isQuestIncomplete(Quest.IMP_CATCHER)
                 && ("Black bead".equalsIgnoreCase(itemName) || "White bead".equalsIgnoreCase(itemName)
                 || "Red bead".equalsIgnoreCase(itemName) || "Yellow bead".equalsIgnoreCase(itemName))) reserved++;
         if (isQuestIncomplete(Quest.X_MARKS_THE_SPOT) && "Spade".equalsIgnoreCase(itemName)) reserved++;
-
         return reserved;
     }
 
-    private boolean isQuestIncomplete(Quest quest)
-    {
-        return Rs2Player.getQuestState(quest) != QuestState.FINISHED;
-    }
+    private boolean isQuestIncomplete(Quest quest) { return Rs2Player.getQuestState(quest) != QuestState.FINISHED; }
 
     private boolean hasOutdatedToolInBank()
     {
         if (!canAffordGeBuyRequirements()) return false;
         String desiredPickaxe = resolveDesiredPickaxeName();
         String desiredAxe = resolveDesiredAxeName();
-
         for (String name : PICKAXE_NAMES)
             if (!name.equalsIgnoreCase(desiredPickaxe) && Rs2Bank.count(name) > 0) return true;
         for (String name : AXE_NAMES)
@@ -877,9 +806,7 @@ public class SellScript extends Script
     private boolean canAffordGeBuyRequirements()
     {
         long now = System.currentTimeMillis();
-        if (now - lastBuyAffordabilityCheckAtMs < BUY_AFFORDABILITY_CACHE_MS)
-            return cachedBuyAffordability;
-
+        if (now - lastBuyAffordabilityCheckAtMs < BUY_AFFORDABILITY_CACHE_MS) return cachedBuyAffordability;
         cachedBuyAffordability = buyScript.canAffordMissingBuys();
         lastBuyAffordabilityCheckAtMs = now;
         return cachedBuyAffordability;
@@ -900,7 +827,6 @@ public class SellScript extends Script
         boolean unlocked = getTotalLevel() >= TRADE_RESTRICTION_MIN_TOTAL_LEVEL
                 && getQuestPoints() >= TRADE_RESTRICTION_MIN_QUEST_POINTS
                 && playTimeMillis >= TimeUnit.HOURS.toMillis(TRADE_RESTRICTION_MIN_HOURS_PLAYED);
-
         tradeRestrictionUnlockedCache = unlocked;
         lastTradeRestrictionCheckAtMs = now;
         return unlocked;
@@ -941,10 +867,7 @@ public class SellScript extends Script
             T value = Microbot.getClientThread().invoke(supplier);
             return value == null ? fallback : value;
         }
-        catch (RuntimeException ex)
-        {
-            return fallback;
-        }
+        catch (RuntimeException ex) { return fallback; }
     }
 
     private void debug(String message, Object... args)
