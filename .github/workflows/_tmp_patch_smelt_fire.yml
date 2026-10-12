@@ -17,43 +17,32 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: feature/smelting-random-areas-and-fire-reset
-          token: ${{ secrets.GITHUB_TOKEN }}
       - name: Patch sources
         run: |
-          python3 <<'PY'
+          python3 - <<'PY'
           from pathlib import Path
-
           smelt = Path('kspaccountbuilder/tasks/skilling/smelting/smeltscript/SmeltScript.java')
           s = smelt.read_text()
-          old = '        this.targetArea = area;\n'
-          new = '        this.targetArea = SmeltArea.randomArea();\n        this.debug("Selected random Smelting area | area={}", this.targetArea.getDisplayName());\n'
-          if old not in s:
-              raise SystemExit('Smelt target assignment not found')
-          s = s.replace(old, new, 1)
-
+          s = s.replace('        this.targetArea = area;\n', '        this.targetArea = SmeltArea.randomArea();\n        this.debug("Selected random Smelting area | area={}", this.targetArea.getDisplayName());\n', 1)
           start = s.index('    private boolean openWorkBank() {')
           end = s.index('    private boolean withdrawAndWait(', start)
-          replacement = '''    private boolean openWorkBank() {
+          s = s[:start] + '''    private boolean openWorkBank() {
         if (Rs2Bank.isOpen()) {
             bankInteractionSentAt = 0L;
             return true;
         }
-
         Microbot.status = "Walking to nearest bank";
         if (!Rs2Player.isMoving()) {
-            if (Rs2Bank.openBank()) {
-                if (sleepUntil(Rs2Bank::isOpen, 3_000)) {
-                    bankInteractionSentAt = 0L;
-                    return true;
-                }
+            if (Rs2Bank.openBank() && sleepUntil(Rs2Bank::isOpen, 3_000)) {
+                bankInteractionSentAt = 0L;
+                return true;
             }
             Rs2Bank.walkToBankAndUseBank();
         }
         return false;
     }
 
-'''
-          s = s[:start] + replacement + s[end:]
+''' + s[end:]
           smelt.write_text(s)
 
           fire = Path('kspaccountbuilder/tasks/skilling/firemaking/firemakingscript/FireMakingScript.java')
