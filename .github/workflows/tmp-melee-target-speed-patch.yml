@@ -1,0 +1,138 @@
+name: Temporary Melee target speed patch
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - '.github/workflows/tmp-melee-target-speed-patch.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: perf/melee-fast-target-acquisition
+          fetch-depth: 0
+      - name: Patch MeleeScript
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('kspaccountbuilder/tasks/skilling/combat/melee/meleescript/MeleeScript.java')
+          s = p.read_text()
+
+          s = s.replace('private static final long POST_KILL_LOOT_WINDOW_MS = 350L;',
+                        'private static final long POST_KILL_LOOT_WINDOW_MS = 100L;')
+          s = s.replace('private static final long LOOT_CLICK_COOLDOWN_MS = 650L;',
+                        'private static final long LOOT_CLICK_COOLDOWN_MS = 350L;')
+
+          old = '''        if (clicked) {
+            markLootPickupPending(loot);
+            postKillLootUntilMs = Math.max(postKillLootUntilMs, System.currentTimeMillis() + POST_KILL_LOOT_WINDOW_MS);
+            sleepUntil(() -> Rs2Player.isMoving() || Rs2Player.isInteracting() || findNearestLoot(stage) == null, 450);
+        } else {
+            pendingLootUntilMs = System.currentTimeMillis() + 250L;
+        }
+'''
+          new = '''        if (clicked) {
+            // Do not block the 100 ms combat loop waiting for the pickup. The
+            // pending-loot tracker observes the ground item on subsequent ticks
+            // and releases target acquisition immediately when it disappears.
+            markLootPickupPending(loot);
+            postKillLootUntilMs = Math.max(postKillLootUntilMs, System.currentTimeMillis() + POST_KILL_LOOT_WINDOW_MS);
+        } else {
+            pendingLootUntilMs = System.currentTimeMillis() + 150L;
+        }
+'''
+          assert old in s, 'loot click block not found'
+          s = s.replace(old, new, 1)
+
+          old = '''        String primaryName = stage.primaryNpc.getDisplayName();
+        String secondaryName = stage.secondaryNpc == null ? null : stage.secondaryNpc.getDisplayName();
+        List<Rs2NpcModel> candidates = Microbot.getRs2NpcCache().query()
+                .fromWorldView()
+                .where(npc -> npc.getCombatLevel() > 0 && !npc.isDead())
+                .where(npc -> {
+                    String name = npc.getName();
+                    return name != null
+                            && (name.equalsIgnoreCase(primaryName)
+                            || (secondaryName != null && name.equalsIgnoreCase(secondaryName)));
+                })
+                .where(npc -> this.isNpcInTargetArea(npc, stage))
+                .toListOnClientThread();
+
+        Rs2NpcModel target = null;
+        int bestBusyRank = Integer.MAX_VALUE;
+        int bestDistance = Integer.MAX_VALUE;
+        for (Rs2NpcModel npc : candidates) {
+            if (!this.canAttackNpc(npc, localPlayer) || npc.getWorldLocation() == null) {
+                continue;
+            }
+
+            int busyRank = npc.getInteracting() == null ? 0 : 1;
+            int distance = npc.getWorldLocation().distanceTo(playerLocation);
+            if (busyRank < bestBusyRank || (busyRank == bestBusyRank && distance < bestDistance)) {
+                target = npc;
+                bestBusyRank = busyRank;
+                bestDistance = distance;
+            }
+        }
+'''
+          new = '''        String primaryName = stage.primaryNpc.getDisplayName();
+        String secondaryName = stage.secondaryNpc == null ? null : stage.secondaryNpc.getDisplayName();
+
+        // Fast path: filter availability in the NPC cache query and ask Microbot
+        // for the nearest matching NPC directly. Building a complete list and
+        // ranking it in Java delayed reacquisition after walking/looting.
+        Rs2NpcModel target = Microbot.getRs2NpcCache().query()
+                .fromWorldView()
+                .where(npc -> npc != null && npc.getCombatLevel() > 0 && !npc.isDead())
+                .where(npc -> {
+                    String name = npc.getName();
+                    return name != null
+                            && (name.equalsIgnoreCase(primaryName)
+                            || (secondaryName != null && name.equalsIgnoreCase(secondaryName)));
+                })
+                .where(npc -> this.isNpcInTargetArea(npc, stage))
+                .where(npc -> this.canAttackNpc(npc, localPlayer))
+                .nearestOnClientThread();
+'''
+          assert old in s, 'target selection block not found'
+          s = s.replace(old, new, 1)
+
+          # Once inside the combat area the walker no longer owns movement; clear
+          # stale pending attack state so a previous failed click cannot delay the
+          # first local target scan after arrival.
+          old = '''        if (isPlayerInsideCombatArea(playerLocation, targetArea)) {
+            KspWalkerGuard.clear("Melee:target-area");
+            KspWalkerGuard.clear("Melee:hill-giants-entry");
+            return true;
+        }
+'''
+          new = '''        if (isPlayerInsideCombatArea(playerLocation, targetArea)) {
+            KspWalkerGuard.clear("Melee:target-area");
+            KspWalkerGuard.clear("Melee:hill-giants-entry");
+            if (!Rs2Player.isInCombat() && !Rs2Player.isInteracting()) {
+                pendingAttackAtMs = 0L;
+                pendingAttackNpcIndex = -1;
+            }
+            return true;
+        }
+'''
+          assert old in s, 'combat area arrival block not found'
+          s = s.replace(old, new, 1)
+
+          p.write_text(s)
+          PY
+      - name: Commit patch
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add kspaccountbuilder/tasks/skilling/combat/melee/meleescript/MeleeScript.java
+          git commit -m "Speed up Melee target acquisition"
+          git push origin HEAD:perf/melee-fast-target-acquisition
