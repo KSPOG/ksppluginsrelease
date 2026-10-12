@@ -104,9 +104,6 @@ jobs:
           assert old in s, 'target selection block not found'
           s = s.replace(old, new, 1)
 
-          # Once inside the combat area the walker no longer owns movement; clear
-          # stale pending attack state so a previous failed click cannot delay the
-          # first local target scan after arrival.
           old = '''        if (isPlayerInsideCombatArea(playerLocation, targetArea)) {
             KspWalkerGuard.clear("Melee:target-area");
             KspWalkerGuard.clear("Melee:hill-giants-entry");
