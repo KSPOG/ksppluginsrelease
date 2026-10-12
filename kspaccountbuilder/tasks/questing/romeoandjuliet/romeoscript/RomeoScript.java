@@ -135,6 +135,22 @@ public class RomeoScript extends Script
         WorldPoint player = Rs2Player.getWorldLocation();
         if (player == null) return;
 
+        // Task handoffs can start this quest while a previous bank interface is
+        // still open. Close it before any quest movement so the walker is never
+        // blocked by the bank widget.
+        if (stage > STAGE_NOT_STARTED && Rs2Bank.isOpen())
+        {
+            state = RomeoState.PREPARING;
+            status = "Closing bank before quest route";
+            KspWalkerGuard.clear(WALK_JULIET);
+            if (System.currentTimeMillis() - lastBankActionAtMs >= BANK_ACTION_COOLDOWN_MS)
+            {
+                Rs2Bank.closeBank();
+                lastBankActionAtMs = System.currentTimeMillis();
+            }
+            return;
+        }
+
         if (pendingInteractionKey != null && pendingInteractionKey.startsWith("stairs-"))
         {
             boolean arrived = pendingInteractionKey.equals("stairs-up")
@@ -346,7 +362,17 @@ public class RomeoScript extends Script
             climbToJuliet(player);
             return;
         }
-        if (player.getPlane() != 1) return;
+
+        // A task switch may finish at an upstairs bank such as Lumbridge (plane 2).
+        // Previously this method returned forever on every plane other than 0/1.
+        // Let the web walker descend to Juliet's ground-floor staircase first.
+        if (player.getPlane() != 1)
+        {
+            state = potion ? RomeoState.RETURNING_POTION_TO_JULIET : RomeoState.WALKING_TO_JULIET_HALLWAY;
+            status = "Leaving upper floor for Juliet";
+            KspWalkerGuard.walkToPoint(WALK_JULIET, JULIET_STAIR_ORIGIN, 2, WALK_REFIRE_COOLDOWN_MS);
+            return;
+        }
 
         if (passJulietRoomDoor()) return;
 
