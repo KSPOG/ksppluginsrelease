@@ -74,7 +74,8 @@ public class FireMakingScript extends Script
     {
         shutdown();
 
-        this.targetArea = area;
+        this.targetArea = FireArea.randomArea();
+        debug("Selected random Firemaking area | area={}", this.targetArea.getDisplayName());
 
         mainScheduledFuture = scheduledExecutorService.scheduleWithFixedDelay(() ->
         {
