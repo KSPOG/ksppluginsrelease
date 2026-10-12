@@ -2,8 +2,10 @@ package net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.mi
 
 import net.runelite.api.coords.WorldArea;
 import net.runelite.api.coords.WorldPoint;
+import net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.mining.rocklevel.RockLevel;
 
 import java.util.Arrays;
+import java.util.EnumSet;
 import java.util.concurrent.ThreadLocalRandom;
 
 public enum Areas
@@ -11,219 +13,205 @@ public enum Areas
     TIN_COPPER_VARROCK_EAST(
             "Varrock East Tin & Copper",
             new WorldArea(3281, 3360, 11, 6, 0),
-            AreaType.TIN_COPPER
+            RockLevel.COPPER, RockLevel.TIN
     ),
-    TIN_COPPER_RIMMINGTON(
-            "Rimmington Tin & Copper",
-            new WorldArea(2963, 3226, 31, 27, 0),
-            AreaType.TIN_COPPER
+
+    RIMMINGTON_MINE(
+            "Rimmington Mine",
+            new WorldArea(2966, 3231, 20, 12, 0),
+            RockLevel.CLAY, RockLevel.COPPER, RockLevel.TIN, RockLevel.IRON, RockLevel.GOLD
     ),
-    TIN_COPPER_LUMBRIDGE_SWAMP(
-            "Lumbridge Swamp Tin & Copper",
+
+    LUMBRIDGE_SWAMP_EAST(
+            "Lumbridge Swamp East Mine",
             new WorldArea(3219, 3143, 14, 10, 0),
-            AreaType.TIN_COPPER
+            RockLevel.COPPER, RockLevel.TIN
     ),
-    TIN_COPPER_DWARVEN_NORTH(
-            "Dwarven Mine North Tin & Copper",
+
+    // RuneLite MiningSiteLocation: DWARVEN_WEST_TOP @ 3031,9828
+    // 3 copper, 2 tin, 2 iron. This replaces the old duplicate
+    // TIN_COPPER_DWARVEN_NORTH / IRON_DWARVEN_WEST entries.
+    DWARVEN_WEST_TOP(
+            "Dwarven Mine West Top",
             new WorldArea(3028, 9821, 8, 10, 0),
-            AreaType.TIN_COPPER
+            RockLevel.COPPER, RockLevel.TIN, RockLevel.IRON
     ),
-    TIN_COPPER_DWARVEN_SOUTH(
-            "Dwarven Mine South Tin & Copper",
-            new WorldArea(3035, 9777, 23, 9, 0),
-            AreaType.TIN_COPPER
+
+    // RuneLite MiningSiteLocation: DWARVEN_EAST_TOP @ 3051,9820
+    // 2 clay, 3 tin, 2 iron.
+    DWARVEN_EAST_TOP(
+            "Dwarven Mine East Top",
+            new WorldArea(3051, 9821, 6, 8, 0),
+            RockLevel.CLAY, RockLevel.TIN, RockLevel.IRON
+    ),
+
+    // RuneLite MiningSiteLocation: DWARVEN_EAST_BOTTOM @ 3039,9763
+    // 5 tin, 2 iron, 8 coal, 2 gold, 1 adamantite.
+    // Bounds are the physical bottom site, not a separate rectangle per ore.
+    DWARVEN_EAST_BOTTOM(
+            "Dwarven Mine East Bottom",
+            new WorldArea(3034, 9759, 22, 11, 0),
+            RockLevel.TIN, RockLevel.IRON, RockLevel.COAL, RockLevel.GOLD, RockLevel.ADAMANT
+    ),
+
+    // RuneLite MiningSiteLocation: DWARVEN_EAST_MIDDLE @ 3037,9775
+    // 4 copper, 3 iron, 3 coal, 2 mithril, 2 adamantite.
+    DWARVEN_EAST_MIDDLE(
+            "Dwarven Mine East Middle",
+            new WorldArea(3033, 9770, 21, 8, 0),
+            RockLevel.COPPER, RockLevel.IRON, RockLevel.COAL, RockLevel.MITHRIL, RockLevel.ADAMANT
+    ),
+
+    // Separate coal cluster supplied from the live game. It is not merged into
+    // the East Bottom/Middle sites because it is spatially distinct.
+    DWARVEN_COAL_NORTH(
+            "Dwarven Mine North Coal Cluster",
+            new WorldArea(3036, 9797, 5, 4, 0),
+            RockLevel.COAL
     ),
 
     IRON_VARROCK_EAST(
             "Varrock East Iron",
             new WorldArea(3284, 3367, 6, 4, 0),
-            AreaType.IRON
+            RockLevel.IRON
     ),
-    IRON_DWARVEN_WEST(
-            "Dwarven Mine West Iron",
-            new WorldArea(3028, 9821, 8, 9, 0),
-            AreaType.IRON
-    ),
-    IRON_DWARVEN_EAST(
-            "Dwarven Mine East Iron",
-            new WorldArea(3051, 9821, 6, 8, 0),
-            AreaType.IRON
-    ),
-    IRON_DWARVEN_SOUTH(
-            "Dwarven Mine South Iron",
-            new WorldArea(3032, 9764, 17, 15, 0),
-            AreaType.IRON
-    ),
-    IRON_RIMMINGTON(
-            "Rimmington Iron",
-            new WorldArea(2966, 3231, 20, 12, 0),
-            AreaType.IRON
-    ),
+
     IRON_VARROCK_WEST(
             "Varrock West Iron",
             new WorldArea(3171, 3364, 13, 12, 0),
-            AreaType.IRON
+            RockLevel.IRON
     ),
 
     CLAY_VARROCK_WEST(
             "Varrock West Clay",
             new WorldArea(3179, 3370, 6, 8, 0),
-            AreaType.OTHER
+            RockLevel.CLAY
     ),
+
     SILVER_VARROCK_WEST(
             "Varrock West Silver",
             new WorldArea(3171, 3363, 10, 8, 0),
-            AreaType.OTHER
+            RockLevel.SILVER
     ),
 
+    // RuneLite MiningSiteLocation: BARBARIAN_VILLAGE @ 3078,3421
+    // 5 tin, 4 coal. Keep this coal target narrow around the actual site.
     COAL_BARBARIAN_VILLAGE(
             "Barbarian Village Coal",
-            new WorldArea(3079, 3418, 7, 5, 0),
-            AreaType.COAL
-    ),
-    COAL_DWARVEN_SOUTH(
-            "Dwarven Mine South Coal",
-            new WorldArea(3035, 9759, 21, 8, 0),
-            AreaType.COAL
-    ),
-    COAL_DWARVEN_CENTRAL(
-            "Dwarven Mine Central Coal",
-            new WorldArea(3047, 9774, 7, 4, 0),
-            AreaType.COAL
-    ),
-    COAL_DWARVEN_NORTH(
-            "Dwarven Mine North Coal",
-            new WorldArea(3036, 9797, 5, 4, 0),
-            AreaType.COAL
-    ),
-    COAL_LUMBRIDGE_SWAMP(
-            "Lumbridge Swamp Coal",
-            new WorldArea(3143, 3147, 6, 7, 0),
-            AreaType.COAL
+            new WorldArea(3076, 3418, 10, 7, 0),
+            RockLevel.COAL
     ),
 
-    GOLD_RIMMINGTON(
-            "Rimmington Gold Mine",
-            new WorldArea(2973, 3231, 7, 5, 0),
-            AreaType.GOLD
-    ),
-    GOLD_DWARVEN_MINE(
-            "Dwarven Mine Gold",
-            new WorldArea(3048, 9759, 4, 2, 0),
-            AreaType.GOLD
-    ),
-
-    MITHRIL_DWARVEN_MINE(
-            "Dwarven Mine Mithril",
-            new WorldArea(3033, 9770, 7, 4, 0),
-            AreaType.MITHRIL
-    ),
-    MITHRIL_LUMBRIDGE_SWAMP(
-            "Lumbridge Swamp Mithril",
-            new WorldArea(3141, 3143, 10, 5, 0),
-            AreaType.MITHRIL
-    ),
-
-    ADAMANT_DWARVEN_MINE(
-            "Dwarven Mine Adamantite",
-            new WorldArea(3034, 9763, 10, 13, 0),
-            AreaType.ADAMANT
+    // RuneLite MiningSiteLocation: LUMBRIDGE_SWAMP_WEST @ 3148,3149
+    // 7 coal, 5 mithril, 2 adamantite. The old implementation created separate
+    // overlapping Coal and Mithril areas for the same physical mining site.
+    LUMBRIDGE_SWAMP_WEST(
+            "Lumbridge Swamp West Mine",
+            new WorldArea(3141, 3143, 10, 11, 0),
+            RockLevel.COAL, RockLevel.MITHRIL, RockLevel.ADAMANT
     ),
 
     PORT_SARIM_DEPOSIT_BOX(
             "Port Sarim Deposit Box",
-            new WorldArea(3044, 3234, 9, 4, 0),
-            AreaType.OTHER
+            new WorldArea(3044, 3234, 9, 4, 0)
     );
-
-    public enum AreaType
-    {
-        TIN_COPPER,
-        IRON,
-        COAL,
-        GOLD,
-        MITHRIL,
-        ADAMANT,
-        OTHER
-    }
 
     private final String displayName;
     private final WorldArea worldArea;
-    private final AreaType areaType;
+    private final EnumSet<RockLevel> supportedRocks;
 
-    Areas(String displayName, WorldArea worldArea, AreaType areaType)
+    Areas(String displayName, WorldArea worldArea, RockLevel... supportedRocks)
     {
         this.displayName = displayName;
         this.worldArea = worldArea;
-        this.areaType = areaType;
+        this.supportedRocks = supportedRocks.length == 0
+                ? EnumSet.noneOf(RockLevel.class)
+                : EnumSet.copyOf(Arrays.asList(supportedRocks));
     }
 
     public static Areas randomTinCopperArea()
     {
-        return randomArea(AreaType.TIN_COPPER);
+        Areas[] matching = Arrays.stream(values())
+                .filter(area -> area.supportsRock(RockLevel.TIN) && area.supportsRock(RockLevel.COPPER))
+                .toArray(Areas[]::new);
+        return randomFrom(matching);
     }
 
     public static Areas randomIronArea()
     {
-        return randomArea(AreaType.IRON);
+        return randomAreaForRock(RockLevel.IRON);
     }
 
     public static Areas randomCoalArea()
     {
-        return randomArea(AreaType.COAL);
+        return randomAreaForRock(RockLevel.COAL);
     }
 
     public static Areas randomGoldArea()
     {
-        return randomArea(AreaType.GOLD);
+        return randomAreaForRock(RockLevel.GOLD);
     }
 
     public static Areas randomMithrilArea()
     {
-        return randomArea(AreaType.MITHRIL);
+        return randomAreaForRock(RockLevel.MITHRIL);
     }
 
     public static Areas randomAdamantArea()
     {
-        return randomArea(AreaType.ADAMANT);
+        return randomAreaForRock(RockLevel.ADAMANT);
     }
 
-    private static Areas randomArea(AreaType type)
+    private static Areas randomAreaForRock(RockLevel rock)
     {
         Areas[] matching = Arrays.stream(values())
-                .filter(area -> area.areaType == type)
+                .filter(area -> area.supportsRock(rock))
                 .toArray(Areas[]::new);
+        return randomFrom(matching);
+    }
+
+    private static Areas randomFrom(Areas[] matching)
+    {
+        if (matching.length == 0)
+        {
+            throw new IllegalStateException("No mining areas matched the requested rock");
+        }
         return matching[ThreadLocalRandom.current().nextInt(matching.length)];
+    }
+
+    public boolean supportsRock(RockLevel rock)
+    {
+        return rock != null && supportedRocks.contains(rock);
     }
 
     public boolean isTinCopperArea()
     {
-        return areaType == AreaType.TIN_COPPER;
+        return supportsRock(RockLevel.TIN) && supportsRock(RockLevel.COPPER);
     }
 
     public boolean isIronArea()
     {
-        return areaType == AreaType.IRON;
+        return supportsRock(RockLevel.IRON);
     }
 
     public boolean isCoalArea()
     {
-        return areaType == AreaType.COAL;
+        return supportsRock(RockLevel.COAL);
     }
 
     public boolean isGoldArea()
     {
-        return areaType == AreaType.GOLD;
+        return supportsRock(RockLevel.GOLD);
     }
 
     public boolean isMithrilArea()
     {
-        return areaType == AreaType.MITHRIL;
+        return supportsRock(RockLevel.MITHRIL);
     }
 
     public boolean isAdamantArea()
     {
-        return areaType == AreaType.ADAMANT;
+        return supportsRock(RockLevel.ADAMANT);
     }
 
     public String getDisplayName() { return displayName; }
