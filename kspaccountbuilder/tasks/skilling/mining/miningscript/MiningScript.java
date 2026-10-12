@@ -51,7 +51,6 @@ public class MiningScript extends Script
     private static final long BANK_INVENTORY_ACTION_TIMEOUT_MS = 1_500L;
     private static final int ROCK_SEARCH_PADDING_TILES = 8;
     private static final int OUT_OF_AREA_ROCK_FALLBACK_RADIUS = 4;
-    private static final int MID_TIER_RANDOM_MAX_LEVEL = 55;
     private static final String BANK_WALK_KEY = "Mining:bank";
     private static final String DEPOSIT_BOX_WALK_KEY = "Mining:port-sarim-deposit-box";
     private static final int MUGGER_COMBAT_LEVEL = 6;
@@ -970,8 +969,7 @@ public class MiningScript extends Script
 
     private boolean shouldRandomizeMidTierRock(int miningLevel)
     {
-        return miningLevel >= RockLevel.COAL.getRequiredMiningLevel()
-                && miningLevel < MID_TIER_RANDOM_MAX_LEVEL;
+        return miningLevel >= RockLevel.COAL.getRequiredMiningLevel();
     }
 
     private void initializeStartingTargetRock(int miningLevel)
@@ -984,35 +982,9 @@ public class MiningScript extends Script
 
         if (shouldRandomizeMidTierRock(miningLevel))
         {
-            List<RockLevel> randomOptions;
-            if (canMineSelectedIronSafely() && canMineSilverSafely())
-            {
-                randomOptions = miningLevel >= RockLevel.GOLD.getRequiredMiningLevel()
-                        ? Arrays.asList(RockLevel.IRON, RockLevel.SILVER, RockLevel.COAL, RockLevel.GOLD)
-                        : Arrays.asList(RockLevel.IRON, RockLevel.SILVER, RockLevel.COAL);
-            }
-            else if (canMineSelectedIronSafely())
-            {
-                randomOptions = miningLevel >= RockLevel.GOLD.getRequiredMiningLevel()
-                        ? Arrays.asList(RockLevel.IRON, RockLevel.COAL, RockLevel.GOLD)
-                        : Arrays.asList(RockLevel.IRON, RockLevel.COAL);
-            }
-            else if (canMineSilverSafely())
-            {
-                randomOptions = miningLevel >= RockLevel.GOLD.getRequiredMiningLevel()
-                        ? Arrays.asList(RockLevel.SILVER, RockLevel.COAL, RockLevel.GOLD)
-                        : Arrays.asList(RockLevel.SILVER, RockLevel.COAL);
-            }
-            else
-            {
-                randomOptions = miningLevel >= RockLevel.GOLD.getRequiredMiningLevel()
-                        ? Arrays.asList(RockLevel.COAL, RockLevel.GOLD)
-                        : Arrays.asList(RockLevel.COAL);
-            }
-
+            List<RockLevel> randomOptions = getRandomRockOptions(miningLevel);
             randomMidTierRock = randomOptions.get(ThreadLocalRandom.current().nextInt(randomOptions.size()));
-
-            debug("Selected starting mining ore {} for mining level {}", randomMidTierRock.getDisplayName(), miningLevel);
+            debug("Selected mining ore {} from level {} band options {}", randomMidTierRock.getDisplayName(), miningLevel, randomOptions);
         }
         else
         {
@@ -1023,14 +995,33 @@ public class MiningScript extends Script
         initializedSelectionBand = selectionBand;
     }
 
-    private int getSelectionBand(int miningLevel)
+    private List<RockLevel> getRandomRockOptions(int miningLevel)
     {
-        if (!shouldRandomizeMidTierRock(miningLevel))
+        if (miningLevel >= RockLevel.ADAMANT.getRequiredMiningLevel())
         {
-            return 0;
+            return Arrays.asList(RockLevel.IRON, RockLevel.SILVER, RockLevel.COAL, RockLevel.GOLD, RockLevel.MITHRIL, RockLevel.ADAMANT);
         }
 
-        return miningLevel >= RockLevel.GOLD.getRequiredMiningLevel() ? 2 : 1;
+        if (miningLevel >= RockLevel.MITHRIL.getRequiredMiningLevel())
+        {
+            return Arrays.asList(RockLevel.IRON, RockLevel.SILVER, RockLevel.COAL, RockLevel.GOLD, RockLevel.MITHRIL);
+        }
+
+        if (miningLevel >= RockLevel.GOLD.getRequiredMiningLevel())
+        {
+            return Arrays.asList(RockLevel.IRON, RockLevel.SILVER, RockLevel.COAL, RockLevel.GOLD);
+        }
+
+        return Arrays.asList(RockLevel.IRON, RockLevel.SILVER, RockLevel.COAL);
+    }
+
+    private int getSelectionBand(int miningLevel)
+    {
+        if (miningLevel >= RockLevel.ADAMANT.getRequiredMiningLevel()) return 4;
+        if (miningLevel >= RockLevel.MITHRIL.getRequiredMiningLevel()) return 3;
+        if (miningLevel >= RockLevel.GOLD.getRequiredMiningLevel()) return 2;
+        if (miningLevel >= RockLevel.COAL.getRequiredMiningLevel()) return 1;
+        return 0;
     }
 
     private boolean canMineSilverSafely()
