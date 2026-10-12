@@ -1,0 +1,95 @@
+name: Patch Romeo dialogue release
+
+on:
+  push:
+    branches:
+      - fix/romeo-dialogue-release
+    paths:
+      - '.github/workflows/patch-romeo-dialogue-release.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/romeo-dialogue-release
+      - name: Patch stale post-start Romeo dialogue
+        shell: python
+        run: |
+          from pathlib import Path
+          p = Path('kspaccountbuilder/tasks/questing/romeoandjuliet/romeoscript/RomeoScript.java')
+          s = p.read_text(encoding='utf-8')
+          old = '''        if (!Rs2Dialogue.hasSelectAnOption()) return true;
+
+        // Apothecary quest branch must beat his normal potion menu.
+'''
+          new = '''        if (!Rs2Dialogue.hasSelectAnOption()) return true;
+
+        // Once the quest has started, Romeo can leave his informational menu open
+        // after the quest stage has already advanced. That stale menu blocks walking.
+        // Dismiss only that known post-start Romeo menu, then let the next tick resume
+        // the stage movement logic. Later Juliet/Lawrence/Apothecary quest dialogue
+        // still flows through the normal handlers below.
+        if (stage > STAGE_NOT_STARTED && isStaleRomeoInfoMenu())
+        {
+            if (clickOptionPartial("Ok, thanks"))
+            {
+                status = "Closing finished Romeo dialogue";
+                return true;
+            }
+        }
+
+        // Apothecary quest branch must beat his normal potion menu.
+'''
+          if old not in s:
+              raise SystemExit('Target dialogue insertion point not found')
+          s = s.replace(old, new, 1)
+
+          old2 = '''    private boolean clickOption(String option)
+    {
+        if (!Rs2Dialogue.hasDialogueOption(option, true)) return false;
+        Rs2Dialogue.clickOption(option, true);
+        lastActionAtMs = System.currentTimeMillis();
+        return true;
+    }
+'''
+          new2 = '''    private boolean clickOption(String option)
+    {
+        if (!Rs2Dialogue.hasDialogueOption(option, true)) return false;
+        Rs2Dialogue.clickOption(option, true);
+        lastActionAtMs = System.currentTimeMillis();
+        return true;
+    }
+
+    private boolean clickOptionPartial(String option)
+    {
+        if (!Rs2Dialogue.hasDialogueOption(option, false)) return false;
+        Rs2Dialogue.clickOption(option, false);
+        lastActionAtMs = System.currentTimeMillis();
+        return true;
+    }
+
+    private boolean isStaleRomeoInfoMenu()
+    {
+        return Rs2Dialogue.hasDialogueOption("Where can I find Juliet", false)
+                || Rs2Dialogue.hasDialogueOption("anything else you can tell me about Juliet", false);
+    }
+'''
+          if old2 not in s:
+              raise SystemExit('Target clickOption block not found')
+          p.write_text(s.replace(old2, new2, 1), encoding='utf-8')
+      - name: Commit patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'KSP CI'
+          git config user.email 'actions@users.noreply.github.com'
+          git add kspaccountbuilder/tasks/questing/romeoandjuliet/romeoscript/RomeoScript.java
+          git diff --cached --quiet && exit 0
+          git commit -m 'Fix Romeo post-start dialogue blocking walker'
+          git push origin HEAD:fix/romeo-dialogue-release
