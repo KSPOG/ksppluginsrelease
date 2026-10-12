@@ -51,7 +51,7 @@ public class MiningScript extends Script
     private static final long BANK_INVENTORY_ACTION_TIMEOUT_MS = 1_500L;
     private static final int ROCK_SEARCH_PADDING_TILES = 8;
     private static final int OUT_OF_AREA_ROCK_FALLBACK_RADIUS = 4;
-    private static final int MID_TIER_RANDOM_MAX_LEVEL = 60;
+    private static final int MID_TIER_RANDOM_MAX_LEVEL = 55;
     private static final String BANK_WALK_KEY = "Mining:bank";
     private static final String DEPOSIT_BOX_WALK_KEY = "Mining:port-sarim-deposit-box";
     private static final int MUGGER_COMBAT_LEVEL = 6;
@@ -100,6 +100,10 @@ public class MiningScript extends Script
     private Areas targetArea = Areas.TIN_COPPER_VARROCK_EAST;
     private Areas selectedTinCopperArea = Areas.TIN_COPPER_VARROCK_EAST;
     private Areas selectedIronArea = Areas.IRON_VARROCK_EAST;
+    private Areas selectedCoalArea = Areas.COAL_BARBARIAN_VILLAGE;
+    private Areas selectedGoldArea = Areas.GOLD_RIMMINGTON;
+    private Areas selectedMithrilArea = Areas.MITHRIL_DWARVEN_MINE;
+    private Areas selectedAdamantArea = Areas.ADAMANT_DWARVEN_MINE;
 
     private boolean startingTargetRockInitialized;
     private int initializedSelectionBand = -1;
@@ -126,8 +130,18 @@ public class MiningScript extends Script
 
         this.selectedTinCopperArea = Areas.randomTinCopperArea();
         this.selectedIronArea = Areas.randomIronArea();
+        this.selectedCoalArea = Areas.randomCoalArea();
+        this.selectedGoldArea = Areas.randomGoldArea();
+        this.selectedMithrilArea = Areas.randomMithrilArea();
+        this.selectedAdamantArea = Areas.randomAdamantArea();
         this.targetArea = progressiveMining ? selectedTinCopperArea : area;
-        debug("Selected mining areas | tinCopper={} iron={}", selectedTinCopperArea.getDisplayName(), selectedIronArea.getDisplayName());
+        debug("Selected mining areas | tinCopper={} iron={} coal={} gold={} mithril={} adamant={}",
+                selectedTinCopperArea.getDisplayName(),
+                selectedIronArea.getDisplayName(),
+                selectedCoalArea.getDisplayName(),
+                selectedGoldArea.getDisplayName(),
+                selectedMithrilArea.getDisplayName(),
+                selectedAdamantArea.getDisplayName());
         this.startingTargetRockInitialized = false;
         this.randomMidTierRock = null;
 
@@ -845,6 +859,9 @@ public class MiningScript extends Script
             return GOLD_ROCK_IDS;
         }
 
+        // Mithril and Adamantite fall back to the object-name matcher below. This
+        // keeps the task compatible with cache revisions that expose different
+        // rock object IDs at the requested locations.
         return new int[0];
     }
 
@@ -878,14 +895,24 @@ public class MiningScript extends Script
     {
         RockLevel targetRock = resolveTargetRock(miningLevel);
 
-        if (targetRock == RockLevel.COAL)
+        if (targetRock == RockLevel.ADAMANT)
         {
-            return Areas.COAL_BARBARIAN_VILLAGE;
+            return selectedAdamantArea;
+        }
+
+        if (targetRock == RockLevel.MITHRIL)
+        {
+            return selectedMithrilArea;
         }
 
         if (targetRock == RockLevel.GOLD)
         {
-            return Areas.GOLD_RIMMINGTON;
+            return selectedGoldArea;
+        }
+
+        if (targetRock == RockLevel.COAL)
+        {
+            return selectedCoalArea;
         }
 
         if (targetRock == RockLevel.SILVER)
@@ -906,6 +933,16 @@ public class MiningScript extends Script
         if (startingTargetRockInitialized && randomMidTierRock != null)
         {
             return randomMidTierRock;
+        }
+
+        if (miningLevel >= RockLevel.ADAMANT.getRequiredMiningLevel())
+        {
+            return RockLevel.ADAMANT;
+        }
+
+        if (miningLevel >= RockLevel.MITHRIL.getRequiredMiningLevel())
+        {
+            return RockLevel.MITHRIL;
         }
 
         if (miningLevel >= RockLevel.COAL.getRequiredMiningLevel())
