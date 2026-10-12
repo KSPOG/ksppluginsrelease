@@ -1,0 +1,121 @@
+name: Temporary Crafting area patch
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/_tmp_patch_crafting.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/crafting-random-areas
+      - name: Patch CraftingScript
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('kspaccountbuilder/tasks/skilling/crafting/craftingscript/CraftingScript.java')
+          s = p.read_text()
+
+          s = s.replace(
+              '    private volatile CraftInventory targetRecipe = CraftInventory.LEATHER_GLOVES;\n',
+              '    private volatile CraftInventory targetRecipe = CraftInventory.LEATHER_GLOVES;\n    private volatile Areas selectedLeatherArea = Areas.EDGE_BANK;\n    private volatile Areas selectedFurnaceArea = Areas.EDGE_FURNACE;\n',
+              1)
+
+          s = s.replace(
+              '        targetRecipe = CraftInventory.valueOf(targetLevel.name());\n        state = CraftingState.CHECKING_RESOURCES;\n',
+              '        targetRecipe = CraftInventory.valueOf(targetLevel.name());\n        selectedLeatherArea = Areas.randomLeatherArea();\n        selectedFurnaceArea = Areas.randomFurnaceArea();\n        debug("Selected Crafting areas | leather={} furnace={}", selectedLeatherArea.getDisplayName(), selectedFurnaceArea.getDisplayName());\n        state = CraftingState.CHECKING_RESOURCES;\n',
+              1)
+
+          s = s.replace(
+              '                if (!ensureInArea(Areas.EDGE_FURNACE, FURNACE_WALK_KEY))\n',
+              '                if (!ensureInArea(selectedFurnaceArea, FURNACE_WALK_KEY))\n',
+              1)
+
+          old_nonfurnace = '''            if (!ensureInArea(Areas.EDGE_BANK, BANK_WALK_KEY))
+            {
+                state = CraftingState.WALKING_TO_BANK;
+                return;
+            }
+
+            state = targetRecipe.getRecipeType() == RecipeType.LEATHER
+                    ? CraftingState.CRAFTING_LEATHER
+                    : CraftingState.CUTTING_GEMS;
+'''
+          new_nonfurnace = '''            Areas inventoryCraftArea = targetRecipe.getRecipeType() == RecipeType.LEATHER
+                    ? selectedLeatherArea
+                    : Areas.EDGE_BANK;
+            if (!ensureInArea(inventoryCraftArea, BANK_WALK_KEY))
+            {
+                state = CraftingState.WALKING_TO_BANK;
+                return;
+            }
+
+            state = targetRecipe.getRecipeType() == RecipeType.LEATHER
+                    ? CraftingState.CRAFTING_LEATHER
+                    : CraftingState.CUTTING_GEMS;
+'''
+          if old_nonfurnace not in s:
+              raise SystemExit('non-furnace area block not found')
+          s = s.replace(old_nonfurnace, new_nonfurnace, 1)
+
+          old_bank = '''        if (!ensureInArea(Areas.EDGE_BANK, BANK_WALK_KEY))
+        {
+            state = CraftingState.WALKING_TO_BANK;
+            return;
+        }
+
+        if (!Rs2Bank.isOpen())
+        {
+            if (!isWorldActionPending("open-bank") && Rs2Bank.openBank()) markWorldAction("open-bank");
+            return;
+        }
+'''
+          new_bank = '''        if (!Rs2Bank.isOpen())
+        {
+            state = CraftingState.WALKING_TO_BANK;
+            Microbot.status = "Walking to nearest bank";
+            if (!Rs2Player.isMoving())
+            {
+                if (!isWorldActionPending("open-bank") && Rs2Bank.openBank())
+                {
+                    markWorldAction("open-bank");
+                }
+                else
+                {
+                    Rs2Bank.walkToBankAndUseBank();
+                }
+            }
+            return;
+        }
+'''
+          if old_bank not in s:
+              raise SystemExit('bank preparation block not found')
+          s = s.replace(old_bank, new_bank, 1)
+
+          s = s.replace(
+              '            Microbot.status = "Waiting for Edgeville furnace";\n',
+              '            Microbot.status = "Waiting for " + selectedFurnaceArea.getDisplayName();\n',
+              1)
+
+          s = s.replace(
+              '                        && Areas.EDGE_FURNACE.getArea().contains(object.getWorldLocation()))\n',
+              '                        && selectedFurnaceArea.getArea().contains(object.getWorldLocation()))\n',
+              1)
+
+          p.write_text(s)
+          PY
+      - name: Commit Crafting changes
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add kspaccountbuilder/tasks/skilling/crafting/craftingscript/CraftingScript.java
+          git commit -m "Randomize Crafting furnace and leather areas"
+          git push origin HEAD:feature/crafting-random-areas
