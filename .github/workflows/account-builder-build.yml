@@ -1,0 +1,80 @@
+name: Build KSP Account Builder
+
+on:
+  pull_request:
+    paths:
+      - 'kspaccountbuilder/**'
+      - '.github/workflows/account-builder-build.yml'
+  push:
+    branches:
+      - main
+    paths:
+      - 'kspaccountbuilder/**'
+      - '.github/workflows/account-builder-build.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: account-builder-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Compile KspAccountBuilderPlugin
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - name: Checkout KSP plugin sources
+        uses: actions/checkout@v4
+        with:
+          path: release
+
+      - name: Checkout latest Microbot Hub
+        uses: actions/checkout@v4
+        with:
+          repository: chsami/Microbot-Hub
+          ref: main
+          path: hub
+
+      - name: Set up Java 11
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '11'
+          cache: gradle
+          cache-dependency-path: hub/**/*.gradle*
+
+      - name: Install KSP Account Builder sources into Hub
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT='hub/src/main/java/net/runelite/client/plugins/microbot'
+          rm -rf "$ROOT/kspaccountbuilder"
+          cp -R release/kspaccountbuilder "$ROOT/kspaccountbuilder"
+
+      - name: Make Gradle wrapper executable
+        run: chmod +x hub/gradlew
+
+      - name: Build KSP Account Builder
+        working-directory: hub
+        run: ./gradlew clean build -PpluginList=KspAccountBuilderPlugin --stacktrace --no-daemon
+
+      - name: Show produced JAR
+        if: success()
+        shell: bash
+        run: |
+          set -euo pipefail
+          ls -lh hub/build/libs/
+          test -n "$(find hub/build/libs -maxdepth 1 -type f -name 'KspAccountBuilderPlugin-*.jar' -print -quit)"
+
+      - name: Upload Account Builder JAR
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: KspAccountBuilderPlugin-${{ github.sha }}
+          path: hub/build/libs/KspAccountBuilderPlugin-*.jar
+          if-no-files-found: error
+          retention-days: 7
