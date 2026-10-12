@@ -1,6 +1,10 @@
 name: Temporary Cadava patch
 on:
-  workflow_dispatch:
+  push:
+    branches:
+      - fix/romeo-cadava-bank-check
+    paths:
+      - .github/workflows/_tmp_patch_cadava.yml
 permissions:
   contents: write
 jobs:
