@@ -1,12 +1,15 @@
 name: Temporary Cadava patch
+
 on:
   push:
     branches:
-      - fix/romeo-cadava-bank-check
+      - 'fix/romeo-cadava-bank-check'
     paths:
-      - .github/workflows/_tmp_patch_cadava.yml
+      - '.github/workflows/_tmp_patch_cadava.yml'
+
 permissions:
   contents: write
+
 jobs:
   patch:
     runs-on: ubuntu-latest
@@ -16,8 +19,8 @@ jobs:
           ref: fix/romeo-cadava-bank-check
           token: ${{ secrets.GITHUB_TOKEN }}
       - name: Patch Romeo Cadava handoff
-        shell: python
         run: |
+          python - <<'PY'
           from pathlib import Path
           p = Path('kspaccountbuilder/tasks/questing/romeoandjuliet/romeoscript/RomeoScript.java')
           s = p.read_text()
@@ -74,6 +77,7 @@ jobs:
           if old not in s:
               raise SystemExit('target block not found')
           p.write_text(s.replace(old, new))
+          PY
       - name: Commit patch
         run: |
           git config user.name github-actions[bot]
