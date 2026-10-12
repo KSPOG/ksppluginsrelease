@@ -135,11 +135,24 @@ public class RomeoScript extends Script
         WorldPoint player = Rs2Player.getWorldLocation();
         if (player == null) return;
 
-        // Task handoffs can start this quest while a previous bank interface is
-        // still open. Close it before any quest movement so the walker is never
-        // blocked by the bank widget.
+        // A previous task may hand Romeo & Juliet an already-open bank. Before
+        // closing it, resolve Cadava berries once. More importantly, when
+        // ensureCadavaBerries() opens a bank itself, the Cadava preparation owns
+        // that bank until the lookup/withdrawal has completed; otherwise the
+        // generic handoff cleanup closes it again on the next tick and loops.
         if (stage > STAGE_NOT_STARTED && Rs2Bank.isOpen())
         {
+            boolean mayStillNeedCadava = stage <= STAGE_JULIET_POTION
+                    && !cadavaBankChecked
+                    && !has(Inv.CADAVA_BERRIES)
+                    && !has(Inv.CADAVA_POTION);
+
+            if (mayStillNeedCadava)
+            {
+                ensureCadavaBerries();
+                return;
+            }
+
             state = RomeoState.PREPARING;
             status = "Closing bank before quest route";
             KspWalkerGuard.clear(WALK_JULIET);
