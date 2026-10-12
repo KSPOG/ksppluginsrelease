@@ -226,6 +226,19 @@ public class RomeoScript extends Script
 
         if (!Rs2Dialogue.hasSelectAnOption()) return true;
 
+        // Romeo can leave his informational menu open after the quest has already
+        // advanced from stage 0. That stale menu blocks movement. Dismiss only
+        // this known post-start Romeo menu; later quest dialogue still uses the
+        // normal handlers below.
+        if (stage > STAGE_NOT_STARTED && isStaleRomeoInfoMenu())
+        {
+            if (clickOptionPartial("Ok, thanks"))
+            {
+                status = "Closing finished Romeo dialogue";
+                return true;
+            }
+        }
+
         // Apothecary quest branch must beat his normal potion menu.
         if (clickOption("Talk about something else.")) return true;
         if (clickOption("Talk about Romeo & Juliet.")) return true;
@@ -258,6 +271,20 @@ public class RomeoScript extends Script
         Rs2Dialogue.clickOption(option, true);
         lastActionAtMs = System.currentTimeMillis();
         return true;
+    }
+
+    private boolean clickOptionPartial(String option)
+    {
+        if (!Rs2Dialogue.hasDialogueOption(option, false)) return false;
+        Rs2Dialogue.clickOption(option, false);
+        lastActionAtMs = System.currentTimeMillis();
+        return true;
+    }
+
+    private boolean isStaleRomeoInfoMenu()
+    {
+        return Rs2Dialogue.hasDialogueOption("Where can I find Juliet", false)
+                || Rs2Dialogue.hasDialogueOption("anything else you can tell me about Juliet", false);
     }
 
     private boolean ensureCadavaBerries()
