@@ -27,7 +27,6 @@ import net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.min
 import net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.mining.rocklevel.RockLevel;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.selling.buyscript.Buy;
 import net.runelite.client.plugins.microbot.util.bank.Rs2Bank;
-import net.runelite.client.plugins.microbot.util.bank.enums.BankLocation;
 import net.runelite.client.plugins.microbot.util.depositbox.Rs2DepositBox;
 import net.runelite.client.plugins.microbot.util.equipment.Rs2Equipment;
 import net.runelite.client.plugins.microbot.util.inventory.Rs2Inventory;
@@ -99,6 +98,8 @@ public class MiningScript extends Script
     private static final List<String> PICKAXE_NAMES = Buy.PICKAXE_NAME_LIST;
 
     private Areas targetArea = Areas.TIN_COPPER_VARROCK_EAST;
+    private Areas selectedTinCopperArea = Areas.TIN_COPPER_VARROCK_EAST;
+    private Areas selectedIronArea = Areas.IRON_VARROCK_EAST;
 
     private boolean startingTargetRockInitialized;
     private int initializedSelectionBand = -1;
@@ -123,7 +124,10 @@ public class MiningScript extends Script
     {
         shutdown();
 
-        this.targetArea = area;
+        this.selectedTinCopperArea = Areas.randomTinCopperArea();
+        this.selectedIronArea = Areas.randomIronArea();
+        this.targetArea = progressiveMining ? selectedTinCopperArea : area;
+        debug("Selected mining areas | tinCopper={} iron={}", selectedTinCopperArea.getDisplayName(), selectedIronArea.getDisplayName());
         this.startingTargetRockInitialized = false;
         this.randomMidTierRock = null;
 
@@ -147,7 +151,7 @@ public class MiningScript extends Script
                 debug("Switching mining area to {} for mining level {}", targetArea.getDisplayName(), miningLevel);
             }
 
-            RockLevel targetRock = targetArea == Areas.TIN_COPPER_VARROCK_EAST
+            RockLevel targetRock = targetArea.isTinCopperArea()
                     ? getStarterRockToMine()
                     : resolveTargetRock(miningLevel);
             KspTaskDebug.throttled(log, debugLogging, "Mining", "loop", 5_000L,
@@ -456,31 +460,14 @@ public class MiningScript extends Script
     {
         if (!ensureInventoryTabOpenFast()) return;
 
-        BankLocation bank = resolveBankLocation();
-        WorldPoint bankPoint = bank.getWorldPoint();
-        WorldPoint player = Rs2Player.getWorldLocation();
-        if (player == null) return;
-
-        if (!Rs2Bank.isNearBank(bank, 8))
-        {
-            Microbot.status = "Walking to " + bank;
-            KspWalkerGuard.walkToDestination(
-                    BANK_WALK_KEY,
-                    bank::getWorldPoint,
-                    point -> point != null && point.distanceTo(bankPoint) <= 8,
-                    6,
-                    WEB_WALK_COOLDOWN_MS);
-            return;
-        }
-
-        KspWalkerGuard.clearReachedDestination(BANK_WALK_KEY, "ksp_account_builder_mining_reached_bank");
-
         if (!Rs2Bank.isOpen())
         {
-            if (bankActionReady() && Rs2Bank.openBank()) markBankAction();
+            Microbot.status = "Walking to nearest bank";
+            if (bankActionReady() && (Rs2Bank.openBank() || Rs2Bank.walkToBankAndUseBank())) markBankAction();
             return;
         }
 
+        KspWalkerGuard.clear(BANK_WALK_KEY);
         if (KspBankWidgetHelper.closeBankTutorialOverlayIfOpen()) return;
         if (!bankActionReady() || bankInventoryActionPending()) return;
 
@@ -489,21 +476,6 @@ public class MiningScript extends Script
         boolean deposited = keep != null ? Rs2Bank.depositAllExcept(keep) : Rs2Bank.depositAll();
         if (deposited) markBankInventoryAction(before);
         markBankAction();
-    }
-
-    private BankLocation resolveBankLocation()
-    {
-        if (targetArea == Areas.TIN_COPPER_VARROCK_EAST || targetArea == Areas.IRON_VARROCK_EAST)
-        {
-            return BankLocation.VARROCK_EAST;
-        }
-
-        if (targetArea == Areas.CLAY_VARROCK_WEST || targetArea == Areas.SILVER_VARROCK_WEST)
-        {
-            return BankLocation.VARROCK_WEST;
-        }
-
-        return BankLocation.EDGEVILLE;
     }
 
     private void depositGoldOresAtPortSarim(int miningLevel)
@@ -705,7 +677,7 @@ public class MiningScript extends Script
             return null;
         }
 
-        RockLevel targetRock = targetArea == Areas.TIN_COPPER_VARROCK_EAST
+        RockLevel targetRock = targetArea.isTinCopperArea()
                 ? getStarterRockToMine()
                 : resolveTargetRock(miningLevel);
 
@@ -923,10 +895,10 @@ public class MiningScript extends Script
 
         if (targetRock == RockLevel.IRON)
         {
-            return Areas.IRON_VARROCK_EAST;
+            return selectedIronArea;
         }
 
-        return Areas.TIN_COPPER_VARROCK_EAST;
+        return selectedTinCopperArea;
     }
 
     private RockLevel resolveTargetRock(int miningLevel)
@@ -948,12 +920,12 @@ public class MiningScript extends Script
                 return RockLevel.SILVER;
             }
 
-            return canMineIronSafely() ? RockLevel.IRON : null;
+            return canMineSelectedIronSafely() ? RockLevel.IRON : null;
         }
 
         if (miningLevel >= RockLevel.IRON.getRequiredMiningLevel())
         {
-            return canMineIronSafely() ? RockLevel.IRON : null;
+            return canMineSelectedIronSafely() ? RockLevel.IRON : null;
         }
 
         return null;
@@ -976,13 +948,13 @@ public class MiningScript extends Script
         if (shouldRandomizeMidTierRock(miningLevel))
         {
             List<RockLevel> randomOptions;
-            if (canMineIronSafely() && canMineSilverSafely())
+            if (canMineSelectedIronSafely() && canMineSilverSafely())
             {
                 randomOptions = miningLevel >= RockLevel.GOLD.getRequiredMiningLevel()
                         ? Arrays.asList(RockLevel.IRON, RockLevel.SILVER, RockLevel.COAL, RockLevel.GOLD)
                         : Arrays.asList(RockLevel.IRON, RockLevel.SILVER, RockLevel.COAL);
             }
-            else if (canMineIronSafely())
+            else if (canMineSelectedIronSafely())
             {
                 randomOptions = miningLevel >= RockLevel.GOLD.getRequiredMiningLevel()
                         ? Arrays.asList(RockLevel.IRON, RockLevel.COAL, RockLevel.GOLD)
@@ -1039,6 +1011,11 @@ public class MiningScript extends Script
         }
 
         return safe;
+    }
+
+    private boolean canMineSelectedIronSafely()
+    {
+        return selectedIronArea != Areas.IRON_VARROCK_EAST || canMineIronSafely();
     }
 
     private boolean canMineIronSafely()
