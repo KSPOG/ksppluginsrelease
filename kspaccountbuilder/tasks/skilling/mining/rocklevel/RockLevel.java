@@ -11,7 +11,9 @@ public enum RockLevel {
     IRON("Iron", 15),
     SILVER("Silver", 20),
     COAL("Coal", 30),
-    GOLD("Gold", 40);
+    GOLD("Gold", 40),
+    MITHRIL("Mithril", 55),
+    ADAMANT("Adamantite", 70);
 
     private final String displayName;
     private final int requiredMiningLevel;
