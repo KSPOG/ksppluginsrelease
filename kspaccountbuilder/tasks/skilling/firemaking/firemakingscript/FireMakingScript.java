@@ -93,13 +93,17 @@ public class FireMakingScript extends Script
             }
 
             int targetLogId = getTargetLogId(targetLogName);
-            if (activeFireInteractionLocation != null
-                    && !isBurnInterfaceOpen(targetLogName, targetLogId))
+            if (activeFireInteractionLocation != null)
             {
                 Rs2TileObjectModel activeFire = findFireObjectAtLocation(activeFireInteractionLocation);
                 if (activeFire == null || activeFire.getId() != activeFireInteractionId)
                 {
+                    boolean burnInterfaceOpen = isBurnInterfaceOpen(targetLogName, targetLogId);
                     resetFireInteractionState("interacted fire disappeared");
+                    if (burnInterfaceOpen)
+                    {
+                        Rs2Keyboard.keyPress(KeyEvent.VK_ESCAPE);
+                    }
                 }
             }
 
@@ -130,10 +134,6 @@ public class FireMakingScript extends Script
                 resetFireInteractionState("active fire disappeared");
             }
 
-            // Do not block the Firemaking loop waiting several seconds for a *future*
-            // XP drop. The first log can already have produced its XP before the next
-            // scheduler pass, which previously made waitForXpDrop(...) sit for the
-            // full timeout while a usable fire was already on the ground.
             if (expectingFiremakingXpDrop
                     && fireLocation == null
                     && Rs2Player.isAnimating())
@@ -156,34 +156,18 @@ public class FireMakingScript extends Script
                     isBurnInterfaceOpen(targetLogName, targetLogId),
                     awaitingFireStartAtMs != 0L);
 
-            if (handleBurnPrompt(targetLogName, targetLogId))
-            {
-                return;
-            }
-
-            if (!ensureSupplies(targetLogName, fireLocation != null))
-            {
-                return;
-            }
+            if (handleBurnPrompt(targetLogName, targetLogId)) return;
+            if (!ensureSupplies(targetLogName, fireLocation != null)) return;
 
             fireLocation = findUsableFireLocation();
-
             if (fireLocation != null)
             {
                 useCampfire(targetLogId, fireLocation);
                 return;
             }
 
-            if (!ensureInTargetArea())
-            {
-                return;
-            }
-
-            if (!isIdleInTargetArea())
-            {
-                return;
-            }
-
+            if (!ensureInTargetArea()) return;
+            if (!isIdleInTargetArea()) return;
             buildFire(targetLogName);
 
         }, 0L, LOOP_DELAY_MS, TimeUnit.MILLISECONDS);
@@ -195,47 +179,21 @@ public class FireMakingScript extends Script
     {
         int firemakingLevel = Microbot.getClient().getRealSkillLevel(Skill.FIREMAKING);
         LogsLvl bestMatch = null;
-
         for (LogsLvl logsLvl : LogsLvl.values())
         {
-            if (firemakingLevel >= logsLvl.getRequiredLevel())
-            {
-                bestMatch = logsLvl;
-            }
+            if (firemakingLevel >= logsLvl.getRequiredLevel()) bestMatch = logsLvl;
         }
-
-        if (bestMatch == null)
-        {
-            return null;
-        }
-
-        if (hasLogsAvailable(bestMatch.getDisplayName()))
-        {
-            return bestMatch.getDisplayName();
-        }
+        if (bestMatch == null) return null;
+        if (hasLogsAvailable(bestMatch.getDisplayName())) return bestMatch.getDisplayName();
 
         for (int i = bestMatch.ordinal() - 1; i >= 0; i--)
         {
             LogsLvl fallbackLogs = LogsLvl.values()[i];
-            if (firemakingLevel >= LogsLvl.WILLOW_LOGS.getRequiredLevel())
-            {
-                continue;
-            }
-
-            if (firemakingLevel >= LogsLvl.OAK_LOGS.getRequiredLevel()
-                    && fallbackLogs == LogsLvl.LOGS)
-            {
-                continue;
-            }
-
+            if (firemakingLevel >= LogsLvl.WILLOW_LOGS.getRequiredLevel()) continue;
+            if (firemakingLevel >= LogsLvl.OAK_LOGS.getRequiredLevel() && fallbackLogs == LogsLvl.LOGS) continue;
             String fallbackLogName = fallbackLogs.getDisplayName();
-
-            if (hasLogsAvailable(fallbackLogName))
-            {
-                return fallbackLogName;
-            }
+            if (hasLogsAvailable(fallbackLogName)) return fallbackLogName;
         }
-
         return bestMatch.getDisplayName();
     }
 
@@ -255,15 +213,8 @@ public class FireMakingScript extends Script
         awaitingFireStartAtMs = 0L;
         expectingFiremakingXpDrop = false;
 
-        if (Rs2Bank.isOpen())
-        {
-            return prepareSuppliesFromBank(targetLogName, hasActiveFire);
-        }
-
-        if (Rs2Bank.walkToBankAndUseBank() || Rs2Bank.openBank())
-        {
-            return false;
-        }
+        if (Rs2Bank.isOpen()) return prepareSuppliesFromBank(targetLogName, hasActiveFire);
+        if (Rs2Bank.walkToBankAndUseBank() || Rs2Bank.openBank()) return false;
 
         Microbot.status = "Walking to nearest bank";
         Rs2Bank.walkToBankAndUseBank();
@@ -274,12 +225,10 @@ public class FireMakingScript extends Script
     {
         if (!Rs2Bank.isOpen()) return false;
         if (KspBankWidgetHelper.closeBankTutorialOverlayIfOpen()) return false;
-
         if (isBankActionPending()) return false;
 
         boolean hasItemsToDeposit = Rs2Inventory.all().stream()
-                .anyMatch(item -> item != null
-                        && item.getName() != null
+                .anyMatch(item -> item != null && item.getName() != null
                         && !TINDERBOX_NAME.equalsIgnoreCase(item.getName()));
         if (hasItemsToDeposit)
         {
@@ -313,7 +262,8 @@ public class FireMakingScript extends Script
     private boolean isBankActionPending()
     {
         if (pendingBankActionAtMs == 0L) return false;
-        if (Rs2Inventory.emptySlotCount() != pendingBankEmptySlots) {
+        if (Rs2Inventory.emptySlotCount() != pendingBankEmptySlots)
+        {
             pendingBankActionAtMs = 0L;
             pendingBankEmptySlots = -1;
             return false;
@@ -330,21 +280,23 @@ public class FireMakingScript extends Script
         pendingBankActionAtMs = System.currentTimeMillis();
     }
 
-    private boolean hasLogsForCurrentTarget(String targetLogName) { return Rs2Inventory.hasItem(getTargetLogId(targetLogName)); }
+    private boolean hasLogsForCurrentTarget(String targetLogName)
+    {
+        return Rs2Inventory.hasItem(getTargetLogId(targetLogName));
+    }
 
-    private boolean hasLogsAvailable(String targetLogName) { return Rs2Inventory.hasItem(getTargetLogId(targetLogName)) || Rs2Bank.count(getTargetLogId(targetLogName)) > 0; }
+    private boolean hasLogsAvailable(String targetLogName)
+    {
+        return Rs2Inventory.hasItem(getTargetLogId(targetLogName))
+                || Rs2Bank.count(getTargetLogId(targetLogName)) > 0;
+    }
 
     private boolean ensureInTargetArea()
     {
         WorldPoint playerLocation = Rs2Player.getWorldLocation();
-
-        if (playerLocation == null)
-        {
-            return false;
-        }
+        if (playerLocation == null) return false;
 
         WorldArea area = targetArea.toWorldArea();
-
         if (area.contains(playerLocation))
         {
             clearTargetAreaWalkIfNeeded();
@@ -352,7 +304,6 @@ public class FireMakingScript extends Script
         }
 
         Microbot.status = "Walking to firemaking area";
-
         if (KspWalkerGuard.walkToDestination(
                 "Firemaking:target-area",
                 targetArea::getRandomPoint,
@@ -363,21 +314,14 @@ public class FireMakingScript extends Script
             lastWebWalkAtMs = System.currentTimeMillis();
             walkingToTargetArea = true;
             debug("Requested firemaking area walk | player={} walkerTarget={} area={}",
-                    playerLocation,
-                    Rs2Walker.getCurrentTarget(),
-                    targetArea.getDisplayName());
+                    playerLocation, Rs2Walker.getCurrentTarget(), targetArea.getDisplayName());
         }
-
         return false;
     }
 
     private void clearTargetAreaWalkIfNeeded()
     {
-        if (!walkingToTargetArea)
-        {
-            return;
-        }
-
+        if (!walkingToTargetArea) return;
         KspWalkerGuard.clearActiveWalker("ksp_account_builder_firemaking_reached_area");
         KspWalkerGuard.clear("Firemaking:target-area");
         walkingToTargetArea = false;
@@ -409,9 +353,7 @@ public class FireMakingScript extends Script
             return;
         }
 
-        // A visible fire is the authoritative completion signal for the build step.
         awaitingFireStartAtMs = 0L;
-
         if (!isIdleNearCampfire(fireLocation)) return;
 
         long now = System.currentTimeMillis();
@@ -428,7 +370,6 @@ public class FireMakingScript extends Script
             tendingForestersCampfire = false;
             interacted = Rs2Inventory.useItemOnObject(targetLogId, fire.getId());
         }
-
         if (!interacted) return;
 
         lastFireInteractAtMs = now;
@@ -458,10 +399,8 @@ public class FireMakingScript extends Script
         }
 
         if (Rs2Player.isAnimating()) return;
-
         long now = System.currentTimeMillis();
         if (now - lastFireInteractAtMs < FIRE_INTERACT_COOLDOWN_MS) return;
-
         if (!canBurnLog(getTargetLogId(targetLogName))) return;
         if (!Rs2Inventory.combine(590, getTargetLogId(targetLogName))) return;
 
@@ -479,7 +418,6 @@ public class FireMakingScript extends Script
             lastBurnPromptActionAtMs = 0L;
             return false;
         }
-
         if (isBurnPromptActionCoolingDown()) return true;
 
         Rs2Keyboard.keyPress(KeyEvent.VK_SPACE);
@@ -500,112 +438,65 @@ public class FireMakingScript extends Script
         return Microbot.getClientThread().runOnClientThreadOptional(() ->
         {
             Widget productionRoot = Rs2Widget.getWidget(270, 0);
-
-            if (productionRoot == null)
-            {
-                return null;
-            }
-
+            if (productionRoot == null) return null;
             return findChildWidgetByItemId(productionRoot, itemId);
         }).orElse(null);
     }
 
     private Widget findChildWidgetByItemId(Widget widget, int itemId)
     {
-        if (widget == null)
-        {
-            return null;
-        }
-
-        if (!widget.isHidden() && widget.getItemId() == itemId)
-        {
-            return widget;
-        }
+        if (widget == null) return null;
+        if (!widget.isHidden() && widget.getItemId() == itemId) return widget;
 
         Widget found = findChildWidgetByItemId(widget.getDynamicChildren(), itemId);
-        if (found != null)
-        {
-            return found;
-        }
-
+        if (found != null) return found;
         found = findChildWidgetByItemId(widget.getStaticChildren(), itemId);
-        if (found != null)
-        {
-            return found;
-        }
-
+        if (found != null) return found;
         return findChildWidgetByItemId(widget.getNestedChildren(), itemId);
     }
 
     private Widget findChildWidgetByItemId(Widget[] widgets, int itemId)
     {
-        if (widgets == null)
-        {
-            return null;
-        }
-
+        if (widgets == null) return null;
         for (Widget widget : widgets)
         {
             Widget found = findChildWidgetByItemId(widget, itemId);
-            if (found != null)
-            {
-                return found;
-            }
+            if (found != null) return found;
         }
-
         return null;
     }
 
     private boolean isBurnInterfaceOpen(String targetLogName, int targetLogId)
     {
-        // Robust: search all widgets for the prompt text (case-insensitive, partial match)
         if (Rs2Widget.findWidget(BURN_QUANTITY_PROMPT_TEXT, null, false) != null
                 || Rs2Widget.findWidget(BURN_PRODUCT_PROMPT_TEXT, null, false) != null)
         {
             return true;
         }
 
-        // Fallback: search all visible widgets for the prompt text
-        if (Rs2Widget.hasWidgetText("What would you like to burn?", 270, false)) {
-            return true;
-        }
-
-        // Fallback: look for the quantity buttons (1, 5, 10, X, All) in group 270
-        for (int child = 0; child <= 10; child++) {
+        if (Rs2Widget.hasWidgetText("What would you like to burn?", 270, false)) return true;
+        for (int child = 0; child <= 10; child++)
+        {
             String txt = Rs2Widget.getChildWidgetText(270, child);
-            if (txt != null && (txt.equals("1") || txt.equals("5") || txt.equals("10") || txt.equals("X") || txt.equals("All"))) {
+            if (txt != null && (txt.equals("1") || txt.equals("5") || txt.equals("10") || txt.equals("X") || txt.equals("All")))
+            {
                 return true;
             }
         }
 
         Widget productWidget = findProductionWidgetByItemId(targetLogId);
-        if (productWidget != null)
-        {
-            return true;
-        }
-
-        if (targetLogName != null && findProductionWidgetByText(targetLogName) != null)
-        {
-            return true;
-        }
+        if (productWidget != null) return true;
+        if (targetLogName != null && findProductionWidgetByText(targetLogName) != null) return true;
 
         Widget productionTitle = Rs2Widget.getWidget(PRODUCTION_WIDGET_GROUP, PRODUCTION_TITLE_CHILD);
-        if (isBurnPromptTitle(productionTitle))
-        {
-            return true;
-        }
-
+        if (isBurnPromptTitle(productionTitle)) return true;
         Widget productionRoot = Rs2Widget.getWidget(PRODUCTION_WIDGET_GROUP, 0);
         return findBurnPromptTitle(productionRoot) != null;
     }
 
     private Widget findProductionWidgetByText(String text)
     {
-        if (text == null || text.isEmpty())
-        {
-            return null;
-        }
-
+        if (text == null || text.isEmpty()) return null;
         return Microbot.getClientThread().runOnClientThreadOptional(() ->
         {
             Widget productionRoot = Rs2Widget.getWidget(PRODUCTION_WIDGET_GROUP, 0);
@@ -615,103 +506,53 @@ public class FireMakingScript extends Script
 
     private Widget findChildWidgetByText(Widget widget, String text)
     {
-        if (widget == null)
-        {
-            return null;
-        }
-
-        if (!widget.isHidden() && widget.getText() != null && widget.getText().toLowerCase().contains(text.toLowerCase()))
-        {
-            return widget;
-        }
+        if (widget == null) return null;
+        if (!widget.isHidden() && widget.getText() != null && widget.getText().toLowerCase().contains(text.toLowerCase())) return widget;
 
         Widget found = findChildWidgetByText(widget.getDynamicChildren(), text);
-        if (found != null)
-        {
-            return found;
-        }
-
+        if (found != null) return found;
         found = findChildWidgetByText(widget.getStaticChildren(), text);
-        if (found != null)
-        {
-            return found;
-        }
-
+        if (found != null) return found;
         return findChildWidgetByText(widget.getNestedChildren(), text);
     }
 
     private Widget findChildWidgetByText(Widget[] widgets, String text)
     {
-        if (widgets == null)
-        {
-            return null;
-        }
-
+        if (widgets == null) return null;
         for (Widget widget : widgets)
         {
             Widget found = findChildWidgetByText(widget, text);
-            if (found != null)
-            {
-                return found;
-            }
+            if (found != null) return found;
         }
-
         return null;
     }
 
     private Widget findBurnPromptTitle(Widget widget)
     {
-        if (widget == null)
-        {
-            return null;
-        }
-
-        if (isBurnPromptTitle(widget))
-        {
-            return widget;
-        }
+        if (widget == null) return null;
+        if (isBurnPromptTitle(widget)) return widget;
 
         Widget found = findBurnPromptTitle(widget.getDynamicChildren());
-        if (found != null)
-        {
-            return found;
-        }
-
+        if (found != null) return found;
         found = findBurnPromptTitle(widget.getStaticChildren());
-        if (found != null)
-        {
-            return found;
-        }
-
+        if (found != null) return found;
         return findBurnPromptTitle(widget.getNestedChildren());
     }
 
     private Widget findBurnPromptTitle(Widget[] widgets)
     {
-        if (widgets == null)
-        {
-            return null;
-        }
-
+        if (widgets == null) return null;
         for (Widget widget : widgets)
         {
             Widget found = findBurnPromptTitle(widget);
-            if (found != null)
-            {
-                return found;
-            }
+            if (found != null) return found;
         }
-
         return null;
     }
 
     private boolean isBurnPromptTitle(Widget widget)
     {
-        if (widget == null || widget.isHidden() || widget.getText() == null)
-        {
-            return false;
-        }
-
+        if (widget == null || widget.isHidden() || widget.getText() == null) return false;
         String titleText = widget.getText().toLowerCase();
         return titleText.contains("what would you like to burn")
                 || titleText.contains("how many would you like to burn");
@@ -719,23 +560,11 @@ public class FireMakingScript extends Script
 
     private boolean isWaitingForFireStart()
     {
-        if (awaitingFireStartAtMs == 0L)
-        {
-            return false;
-        }
-
-        if (Rs2Player.isAnimating())
-        {
-            return true;
-        }
+        if (awaitingFireStartAtMs == 0L) return false;
+        if (Rs2Player.isAnimating()) return true;
 
         long elapsed = System.currentTimeMillis() - awaitingFireStartAtMs;
-
-        if (elapsed < FIRE_START_GRACE_MS)
-        {
-            return true;
-        }
-
+        if (elapsed < FIRE_START_GRACE_MS) return true;
         awaitingFireStartAtMs = 0L;
         return false;
     }
@@ -755,7 +584,8 @@ public class FireMakingScript extends Script
     private void handleForesterCampfireDialogue()
     {
         if (!Rs2Dialogue.isInDialogue()) return;
-        if (Rs2Dialogue.hasContinue()) {
+        if (Rs2Dialogue.hasContinue())
+        {
             Rs2Dialogue.clickContinue();
             return;
         }
@@ -765,9 +595,7 @@ public class FireMakingScript extends Script
     private boolean isIdleInTargetArea()
     {
         WorldPoint player = Rs2Player.getWorldLocation();
-        return player != null
-                && targetArea.toWorldArea().contains(player)
-                && !Rs2Player.isAnimating();
+        return player != null && targetArea.toWorldArea().contains(player) && !Rs2Player.isAnimating();
     }
 
     private boolean isIdleNearCampfire(WorldPoint fireLocation)
@@ -783,25 +611,10 @@ public class FireMakingScript extends Script
     private WorldPoint findUsableFireLocation()
     {
         Rs2TileObjectModel nearbyForestersCampfire = findNearestFireObjectNearPlayer(true);
-        if (nearbyForestersCampfire != null)
-        {
-            debug("Found nearby Forester campfire | loc={} player={} distance={}",
-                    nearbyForestersCampfire.getWorldLocation(),
-                    Rs2Player.getWorldLocation(),
-                    Rs2Player.distanceTo(nearbyForestersCampfire.getWorldLocation()));
-            return nearbyForestersCampfire.getWorldLocation();
-        }
+        if (nearbyForestersCampfire != null) return nearbyForestersCampfire.getWorldLocation();
 
         Rs2TileObjectModel nearbyFire = findNearestFireObjectNearPlayer(false);
-        if (nearbyFire != null)
-        {
-            debug("Found nearby fire | id={} loc={} player={} distance={}",
-                    nearbyFire.getId(),
-                    nearbyFire.getWorldLocation(),
-                    Rs2Player.getWorldLocation(),
-                    Rs2Player.distanceTo(nearbyFire.getWorldLocation()));
-            return nearbyFire.getWorldLocation();
-        }
+        if (nearbyFire != null) return nearbyFire.getWorldLocation();
 
         Rs2TileObjectModel areaFire = findNearestFireObjectInTargetArea();
         return areaFire != null ? areaFire.getWorldLocation() : null;
@@ -810,11 +623,7 @@ public class FireMakingScript extends Script
     private Rs2TileObjectModel findNearestFireObjectNearPlayer(boolean forestersOnly)
     {
         WorldPoint playerLocation = Rs2Player.getWorldLocation();
-
-        if (playerLocation == null)
-        {
-            return null;
-        }
+        if (playerLocation == null) return null;
 
         return Microbot.getClientThread().invoke(() -> Microbot.getRs2TileObjectCache().query()
                 .fromWorldView()
@@ -850,11 +659,7 @@ public class FireMakingScript extends Script
 
     private Rs2TileObjectModel findFireObjectAtLocation(WorldPoint location)
     {
-        if (location == null)
-        {
-            return null;
-        }
-
+        if (location == null) return null;
         return Microbot.getClientThread().invoke(() -> Microbot.getRs2TileObjectCache().query()
                 .fromWorldView()
                 .where(object -> object.getWorldLocation() != null
@@ -864,17 +669,21 @@ public class FireMakingScript extends Script
                 .first());
     }
 
-    private boolean isInTargetArea(WorldPoint point) { return point != null && targetArea.toWorldArea().contains(point); }
+    private boolean isInTargetArea(WorldPoint point)
+    {
+        return point != null && targetArea.toWorldArea().contains(point);
+    }
 
-    private boolean isValidFireId(int objectId) { return objectId == NORMAL_FIRE_ID || objectId == FORESTERS_CAMPFIRE_ID; }
+    private boolean isValidFireId(int objectId)
+    {
+        return objectId == NORMAL_FIRE_ID || objectId == FORESTERS_CAMPFIRE_ID;
+    }
 
     private WorldPoint getAreaCenter()
     {
         int centerX = (targetArea.getSouthWest().getX() + targetArea.getNorthEast().getX()) / 2;
         int centerY = (targetArea.getSouthWest().getY() + targetArea.getNorthEast().getY()) / 2;
-        int plane = targetArea.getSouthWest().getPlane();
-
-        return new WorldPoint(centerX, centerY, plane);
+        return new WorldPoint(centerX, centerY, targetArea.getSouthWest().getPlane());
     }
 
     private int getAreaSearchRadius()
@@ -886,10 +695,7 @@ public class FireMakingScript extends Script
 
     private void debug(String message, Object... args)
     {
-        if (debugLogging)
-        {
-            KspTaskDebug.info(log, true, "Firemaking", message, args);
-        }
+        if (debugLogging) KspTaskDebug.info(log, true, "Firemaking", message, args);
     }
 
     private boolean canBurnLog(int logId)
@@ -907,16 +713,8 @@ public class FireMakingScript extends Script
 
     private int getTargetLogId(String targetLogName)
     {
-        if (LogsLvl.OAK_LOGS.getDisplayName().equalsIgnoreCase(targetLogName))
-        {
-            return 1521;
-        }
-
-        if (LogsLvl.WILLOW_LOGS.getDisplayName().equalsIgnoreCase(targetLogName))
-        {
-            return 1519;
-        }
-
+        if (LogsLvl.OAK_LOGS.getDisplayName().equalsIgnoreCase(targetLogName)) return 1521;
+        if (LogsLvl.WILLOW_LOGS.getDisplayName().equalsIgnoreCase(targetLogName)) return 1519;
         return 1511;
     }
 
@@ -936,7 +734,6 @@ public class FireMakingScript extends Script
         walkingToTargetArea = false;
         KspWalkerGuard.clear("Firemaking:target-area");
         KspWalkerGuard.clear("Firemaking:campfire");
-
         super.shutdown();
     }
 
