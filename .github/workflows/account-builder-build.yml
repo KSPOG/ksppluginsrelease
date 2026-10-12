@@ -4,12 +4,14 @@ on:
   pull_request:
     paths:
       - 'kspaccountbuilder/**'
+      - 'kspsupport/**'
       - '.github/workflows/account-builder-build.yml'
   push:
     branches:
       - main
     paths:
       - 'kspaccountbuilder/**'
+      - 'kspsupport/**'
       - '.github/workflows/account-builder-build.yml'
   workflow_dispatch:
 
@@ -52,8 +54,25 @@ jobs:
         run: |
           set -euo pipefail
           ROOT='hub/src/main/java/net/runelite/client/plugins/microbot'
-          rm -rf "$ROOT/kspaccountbuilder"
+          rm -rf "$ROOT/kspaccountbuilder" "$ROOT/kspsupport"
           cp -R release/kspaccountbuilder "$ROOT/kspaccountbuilder"
+          cp -R release/kspsupport "$ROOT/kspsupport"
+
+      - name: Include shared KSP support in Account Builder source set
+        shell: python
+        run: |
+          from pathlib import Path
+
+          path = Path('hub/gradle/plugin-utils.gradle')
+          text = path.read_text(encoding='utf-8')
+          needle = 'include "${project.ext.getPluginsIncludePath()}/${plugin.dir.name}/**"'
+          replacement = '''include "${project.ext.getPluginsIncludePath()}/${plugin.dir.name}/**"
+                    if (plugin.name == "KspAccountBuilderPlugin") {
+                        include "${project.ext.getPluginsIncludePath()}/kspsupport/**"
+                    }'''
+          if needle not in text:
+              raise SystemExit('Could not locate Microbot-Hub source include rule')
+          path.write_text(text.replace(needle, replacement, 1), encoding='utf-8')
 
       - name: Make Gradle wrapper executable
         run: chmod +x hub/gradlew
