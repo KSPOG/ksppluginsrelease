@@ -9,6 +9,7 @@ on:
   push:
     branches:
       - main
+      - feature/mining-random-copper-tin-iron-areas
     paths:
       - 'kspaccountbuilder/**'
       - 'kspsupport/**'
@@ -16,13 +17,180 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: account-builder-build-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
+  patch-mining:
+    if: github.ref == 'refs/heads/feature/mining-random-copper-tin-iron-areas'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch MiningScript
+        shell: python
+        run: |
+          from pathlib import Path
+
+          path = Path('kspaccountbuilder/tasks/skilling/mining/miningscript/MiningScript.java')
+          text = path.read_text(encoding='utf-8')
+
+          if 'private Areas selectedTinCopperArea' not in text:
+              text = text.replace(
+                  '    private Areas targetArea = Areas.TIN_COPPER_VARROCK_EAST;\n',
+                  '    private Areas targetArea = Areas.TIN_COPPER_VARROCK_EAST;\n'
+                  '    private Areas selectedTinCopperArea = Areas.TIN_COPPER_VARROCK_EAST;\n'
+                  '    private Areas selectedIronArea = Areas.IRON_VARROCK_EAST;\n',
+                  1)
+
+          if 'Selected mining areas | tinCopper=' not in text:
+              text = text.replace(
+                  '        this.targetArea = area;\n        this.startingTargetRockInitialized = false;\n',
+                  '        this.selectedTinCopperArea = Areas.randomTinCopperArea();\n'
+                  '        this.selectedIronArea = Areas.randomIronArea();\n'
+                  '        this.targetArea = progressiveMining\n'
+                  '                ? selectedTinCopperArea\n'
+                  '                : area;\n'
+                  '        debug("Selected mining areas | tinCopper={} iron={}",\n'
+                  '                selectedTinCopperArea.getDisplayName(), selectedIronArea.getDisplayName());\n'
+                  '        this.startingTargetRockInitialized = false;\n',
+                  1)
+
+          text = text.replace(
+              '            RockLevel targetRock = targetArea == Areas.TIN_COPPER_VARROCK_EAST\n'
+              '                    ? getStarterRockToMine()\n'
+              '                    : resolveTargetRock(miningLevel);\n',
+              '            RockLevel targetRock = targetArea.isTinCopperArea()\n'
+              '                    ? getStarterRockToMine()\n'
+              '                    : resolveTargetRock(miningLevel);\n')
+
+          text = text.replace(
+              '        RockLevel targetRock = targetArea == Areas.TIN_COPPER_VARROCK_EAST\n'
+              '                ? getStarterRockToMine()\n'
+              '                : resolveTargetRock(miningLevel);\n',
+              '        RockLevel targetRock = targetArea.isTinCopperArea()\n'
+              '                ? getStarterRockToMine()\n'
+              '                : resolveTargetRock(miningLevel);\n')
+
+          old_bank = '''    private void bankOresOnly(int miningLevel)
+    {
+        if (!ensureInventoryTabOpenFast()) return;
+
+        BankLocation bank = resolveBankLocation();
+        WorldPoint bankPoint = bank.getWorldPoint();
+        WorldPoint player = Rs2Player.getWorldLocation();
+        if (player == null) return;
+
+        if (!Rs2Bank.isNearBank(bank, 8))
+        {
+            Microbot.status = "Walking to " + bank;
+            KspWalkerGuard.walkToDestination(
+                    BANK_WALK_KEY,
+                    bank::getWorldPoint,
+                    point -> point != null && point.distanceTo(bankPoint) <= 8,
+                    6,
+                    WEB_WALK_COOLDOWN_MS);
+            return;
+        }
+
+        KspWalkerGuard.clearReachedDestination(BANK_WALK_KEY, "ksp_account_builder_mining_reached_bank");
+
+        if (!Rs2Bank.isOpen())
+        {
+            if (bankActionReady() && Rs2Bank.openBank()) markBankAction();
+            return;
+        }
+
+        if (KspBankWidgetHelper.closeBankTutorialOverlayIfOpen()) return;
+        if (!bankActionReady() || bankInventoryActionPending()) return;
+
+        String keep = resolveInventoryPickaxeToKeep(miningLevel);
+        int before = Rs2Inventory.emptySlotCount();
+        boolean deposited = keep != null ? Rs2Bank.depositAllExcept(keep) : Rs2Bank.depositAll();
+        if (deposited) markBankInventoryAction(before);
+        markBankAction();
+    }
+
+    private BankLocation resolveBankLocation()
+    {
+        if (targetArea == Areas.TIN_COPPER_VARROCK_EAST || targetArea == Areas.IRON_VARROCK_EAST)
+        {
+            return BankLocation.VARROCK_EAST;
+        }
+
+        if (targetArea == Areas.CLAY_VARROCK_WEST || targetArea == Areas.SILVER_VARROCK_WEST)
+        {
+            return BankLocation.VARROCK_WEST;
+        }
+
+        return BankLocation.EDGEVILLE;
+    }
+'''
+          new_bank = '''    private void bankOresOnly(int miningLevel)
+    {
+        if (!ensureInventoryTabOpenFast()) return;
+
+        if (!Rs2Bank.isOpen())
+        {
+            Microbot.status = "Walking to nearest bank";
+            if (bankActionReady() && (Rs2Bank.openBank() || Rs2Bank.walkToBankAndUseBank()))
+            {
+                markBankAction();
+            }
+            return;
+        }
+
+        KspWalkerGuard.clear(BANK_WALK_KEY);
+        if (KspBankWidgetHelper.closeBankTutorialOverlayIfOpen()) return;
+        if (!bankActionReady() || bankInventoryActionPending()) return;
+
+        String keep = resolveInventoryPickaxeToKeep(miningLevel);
+        int before = Rs2Inventory.emptySlotCount();
+        boolean deposited = keep != null ? Rs2Bank.depositAllExcept(keep) : Rs2Bank.depositAll();
+        if (deposited) markBankInventoryAction(before);
+        markBankAction();
+    }
+'''
+          if old_bank in text:
+              text = text.replace(old_bank, new_bank, 1)
+
+          text = text.replace('import net.runelite.client.plugins.microbot.util.bank.enums.BankLocation;\n', '')
+
+          text = text.replace(
+              '        if (targetRock == RockLevel.IRON)\n        {\n            return Areas.IRON_VARROCK_EAST;\n        }\n\n        return Areas.TIN_COPPER_VARROCK_EAST;\n',
+              '        if (targetRock == RockLevel.IRON)\n        {\n            return selectedIronArea;\n        }\n\n        return selectedTinCopperArea;\n',
+              1)
+
+          text = text.replace('return canMineIronSafely() ? RockLevel.IRON : null;', 'return canMineSelectedIronSafely() ? RockLevel.IRON : null;')
+          text = text.replace('return canMineIronSafely() ? RockLevel.IRON : null;', 'return canMineSelectedIronSafely() ? RockLevel.IRON : null;')
+          text = text.replace('if (canMineIronSafely() && canMineSilverSafely())', 'if (canMineSelectedIronSafely() && canMineSilverSafely())')
+          text = text.replace('else if (canMineIronSafely())', 'else if (canMineSelectedIronSafely())')
+
+          if 'private boolean canMineSelectedIronSafely()' not in text:
+              marker = '    private boolean canMineIronSafely()\n'
+              insert = '''    private boolean canMineSelectedIronSafely()
+    {
+        return selectedIronArea != Areas.IRON_VARROCK_EAST || canMineIronSafely();
+    }
+
+'''
+              text = text.replace(marker, insert + marker, 1)
+
+          path.write_text(text, encoding='utf-8')
+      - name: Commit patched MiningScript
+        shell: bash
+        run: |
+          if git diff --quiet -- kspaccountbuilder/tasks/skilling/mining/miningscript/MiningScript.java; then
+            exit 0
+          fi
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add kspaccountbuilder/tasks/skilling/mining/miningscript/MiningScript.java
+          git commit -m "Randomize Copper Tin and Iron mining areas"
+          git push origin HEAD:feature/mining-random-copper-tin-iron-areas
+
   build:
     name: Compile KspAccountBuilderPlugin
     runs-on: ubuntu-latest
