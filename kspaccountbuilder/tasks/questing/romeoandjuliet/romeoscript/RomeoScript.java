@@ -43,7 +43,6 @@ public class RomeoScript extends Script
     private static final int STAGE_JULIET_POTION = 50;
     private static final int STAGE_FINISH = 60;
 
-    // Matches Quest Helper's Romeo & Juliet route/object locations.
     private static final WorldPoint JULIET_STAIR_ORIGIN = new WorldPoint(3157, 3436, 0);
     private static final WorldPoint JULIET_TOP_STAIR = new WorldPoint(3156, 3435, 1);
     private static final WorldPoint JULIET_POSITION = new WorldPoint(3158, 3427, 1);
@@ -135,14 +134,33 @@ public class RomeoScript extends Script
         WorldPoint player = Rs2Player.getWorldLocation();
         if (player == null) return;
 
-        // Task handoffs can start this quest while a previous bank interface is
-        // still open. Close it before any quest movement so the walker is never
-        // blocked by the bank widget.
         if (stage > STAGE_NOT_STARTED && Rs2Bank.isOpen())
         {
             state = RomeoState.PREPARING;
-            status = "Closing bank before quest route";
             KspWalkerGuard.clear(WALK_JULIET);
+
+            boolean mayStillNeedCadava = stage <= STAGE_JULIET_POTION
+                    && !has(Inv.CADAVA_BERRIES)
+                    && !has(Inv.CADAVA_POTION);
+            if (mayStillNeedCadava && Rs2Bank.count(Inv.CADAVA_BERRIES.getItemId()) > 0)
+            {
+                status = "Withdrawing existing Cadava berries";
+                if (System.currentTimeMillis() - lastBankActionAtMs >= BANK_ACTION_COOLDOWN_MS)
+                {
+                    int before = Rs2Inventory.itemQuantity(Inv.CADAVA_BERRIES.getItemId());
+                    if (Rs2Bank.withdrawOne(Inv.CADAVA_BERRIES.getItemId()))
+                    {
+                        lastBankActionAtMs = System.currentTimeMillis();
+                        if (Rs2Inventory.itemQuantity(Inv.CADAVA_BERRIES.getItemId()) > before)
+                        {
+                            cadavaBankChecked = true;
+                        }
+                    }
+                }
+                return;
+            }
+
+            status = "Closing bank before quest route";
             if (System.currentTimeMillis() - lastBankActionAtMs >= BANK_ACTION_COOLDOWN_MS)
             {
                 Rs2Bank.closeBank();
@@ -174,35 +192,26 @@ public class RomeoScript extends Script
                 talkToNpc("Romeo", ROMEO_POSITION, WALK_ROMEO,
                         RomeoState.WALKING_TO_ROMEO, RomeoState.TALKING_TO_ROMEO);
                 break;
-
             case STAGE_JULIET:
                 talkToJuliet(false);
                 break;
-
             case STAGE_ROMEO_MESSAGE:
                 if (has(Inv.MESSAGE))
                     talkToNpc("Romeo", ROMEO_POSITION, WALK_ROMEO,
                             RomeoState.RETURNING_MESSAGE_TO_ROMEO, RomeoState.TALKING_TO_ROMEO);
-                else
-                    talkToJuliet(false);
+                else talkToJuliet(false);
                 break;
-
             case STAGE_LAWRENCE:
                 talkToNpc("Father Lawrence", FATHER_LAWRENCE_POSITION, WALK_LAWRENCE,
                         RomeoState.WALKING_TO_FATHER_LAWRENCE, RomeoState.TALKING_TO_FATHER_LAWRENCE);
                 break;
-
             case STAGE_APOTHECARY:
                 if (!ensureCadavaBerries()) return;
                 talkToNpc("Apothecary", APOTHECARY_POSITION, WALK_APOTHECARY,
                         RomeoState.WALKING_TO_APOTHECARY, RomeoState.TALKING_TO_APOTHECARY);
                 break;
-
             case STAGE_JULIET_POTION:
-                if (has(Inv.CADAVA_POTION))
-                {
-                    talkToJuliet(true);
-                }
+                if (has(Inv.CADAVA_POTION)) talkToJuliet(true);
                 else
                 {
                     if (!has(Inv.CADAVA_BERRIES) && !ensureCadavaBerries()) return;
@@ -210,7 +219,6 @@ public class RomeoScript extends Script
                             RomeoState.WALKING_TO_APOTHECARY, RomeoState.TALKING_TO_APOTHECARY);
                 }
                 break;
-
             default:
                 if (stage >= STAGE_FINISH)
                 {
@@ -222,14 +230,9 @@ public class RomeoScript extends Script
         }
     }
 
-    /**
-     * Quest Helper-backed dialogue routing. Never presses option 1 blindly.
-     */
     private boolean handleDialogue(int stage)
     {
-        if (!Rs2Dialogue.isInDialogue()
-                && !Rs2Dialogue.hasContinue()
-                && !Rs2Dialogue.hasSelectAnOption()) return false;
+        if (!Rs2Dialogue.isInDialogue() && !Rs2Dialogue.hasContinue() && !Rs2Dialogue.hasSelectAnOption()) return false;
 
         KspWalkerGuard.clearActiveWalker("ksp_romeo_dialogue");
         clearPendingInteraction();
@@ -239,13 +242,8 @@ public class RomeoScript extends Script
             Rs2Dialogue.clickContinue();
             return true;
         }
-
         if (!Rs2Dialogue.hasSelectAnOption()) return true;
 
-        // Romeo can leave his informational menu open after the quest has already
-        // advanced from stage 0. That stale menu blocks movement. Dismiss only
-        // this known post-start Romeo menu; later quest dialogue still uses the
-        // normal handlers below.
         if (stage > STAGE_NOT_STARTED && isStaleRomeoInfoMenu())
         {
             if (clickOptionPartial("Ok, thanks"))
@@ -255,11 +253,9 @@ public class RomeoScript extends Script
             }
         }
 
-        // Apothecary quest branch must beat his normal potion menu.
         if (clickOption("Talk about something else.")) return true;
         if (clickOption("Talk about Romeo & Juliet.")) return true;
 
-        // Exact Quest Helper start sequence.
         if (stage == STAGE_NOT_STARTED)
         {
             if (clickOption("Yes, I have seen her actually!")) return true;
@@ -268,15 +264,9 @@ public class RomeoScript extends Script
             if (clickOption("Yes.")) return true;
         }
 
-        // If Juliet's father intercepts us, take the non-hostile route.
         if (clickOption("I've just come to have a chat with Juliet.")) return true;
-
-        // Quest Helper uses this to leave stale Romeo/Father Lawrence menus.
-        // This specifically prevents the repeating "How are you?" loop.
         if (clickOption("Ok, thanks.")) return true;
 
-        // Do not guess. A wrong generic option can keep the quest on the same
-        // stage forever; wait for a known quest option instead.
         status = "Waiting for Romeo & Juliet quest dialogue option";
         return true;
     }
@@ -363,9 +353,6 @@ public class RomeoScript extends Script
             return;
         }
 
-        // A task switch may finish at an upstairs bank such as Lumbridge (plane 2).
-        // Previously this method returned forever on every plane other than 0/1.
-        // Let the web walker descend to Juliet's ground-floor staircase first.
         if (player.getPlane() != 1)
         {
             state = potion ? RomeoState.RETURNING_POTION_TO_JULIET : RomeoState.WALKING_TO_JULIET_HALLWAY;
@@ -377,10 +364,7 @@ public class RomeoScript extends Script
         if (passJulietRoomDoor()) return;
 
         Rs2NpcModel juliet = findNpc("Juliet");
-        WorldPoint target = juliet != null && juliet.getWorldLocation() != null
-                ? juliet.getWorldLocation()
-                : JULIET_POSITION;
-
+        WorldPoint target = juliet != null && juliet.getWorldLocation() != null ? juliet.getWorldLocation() : JULIET_POSITION;
         if (player.distanceTo(target) > NPC_REACH_DISTANCE)
         {
             state = potion ? RomeoState.RETURNING_POTION_TO_JULIET : RomeoState.WALKING_TO_JULIET_HALLWAY;
@@ -435,10 +419,7 @@ public class RomeoScript extends Script
         if (!interactionReady()) return;
 
         status = "Climbing down from Juliet's house";
-        if (Rs2GameObject.interact(ObjectID.FAI_VARROCK_STAIRS_TOP, "Climb-down"))
-        {
-            markInteraction("stairs-down");
-        }
+        if (Rs2GameObject.interact(ObjectID.FAI_VARROCK_STAIRS_TOP, "Climb-down")) markInteraction("stairs-down");
     }
 
     private boolean passJulietRoomDoor()
@@ -470,10 +451,7 @@ public class RomeoScript extends Script
         WorldPoint player = Rs2Player.getWorldLocation();
         if (player == null) return;
 
-        WorldPoint target = npc != null && npc.getWorldLocation() != null
-                ? npc.getWorldLocation()
-                : destination;
-
+        WorldPoint target = npc != null && npc.getWorldLocation() != null ? npc.getWorldLocation() : destination;
         if (player.distanceTo(target) > NPC_REACH_DISTANCE)
         {
             state = walkingState;
@@ -519,10 +497,7 @@ public class RomeoScript extends Script
 
     private Rs2NpcModel findNpc(String name)
     {
-        return Microbot.getRs2NpcCache().query()
-                .fromWorldView()
-                .withName(name)
-                .nearestOnClientThread();
+        return Microbot.getRs2NpcCache().query().fromWorldView().withName(name).nearestOnClientThread();
     }
 
     private boolean interactionReady()
