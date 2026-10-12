@@ -1,0 +1,79 @@
+name: Temporary Cadava patch
+on:
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/romeo-cadava-bank-check
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Patch Romeo Cadava handoff
+        shell: python
+        run: |
+          from pathlib import Path
+          p = Path('kspaccountbuilder/tasks/questing/romeoandjuliet/romeoscript/RomeoScript.java')
+          s = p.read_text()
+          old = '''        // Task handoffs can start this quest while a previous bank interface is
+        // still open. Close it before any quest movement so the walker is never
+        // blocked by the bank widget.
+        if (stage > STAGE_NOT_STARTED && Rs2Bank.isOpen())
+        {
+            state = RomeoState.PREPARING;
+            status = "Closing bank before quest route";
+            KspWalkerGuard.clear(WALK_JULIET);
+            if (System.currentTimeMillis() - lastBankActionAtMs >= BANK_ACTION_COOLDOWN_MS)
+            {
+                Rs2Bank.closeBank();
+                lastBankActionAtMs = System.currentTimeMillis();
+            }
+            return;
+        }
+'''
+          new = '''        // Task handoffs can start this quest while a previous bank interface is
+        // still open. Use that opportunity to take an existing Cadava berry
+        // before closing the bank, so we do not later walk out to gather one
+        // that was already owned.
+        if (stage > STAGE_NOT_STARTED && Rs2Bank.isOpen())
+        {
+            state = RomeoState.PREPARING;
+            KspWalkerGuard.clear(WALK_JULIET);
+
+            boolean mayStillNeedCadava = stage <= STAGE_JULIET_POTION
+                    && !has(Inv.CADAVA_BERRIES)
+                    && !has(Inv.CADAVA_POTION);
+            if (mayStillNeedCadava && Rs2Bank.count(Inv.CADAVA_BERRIES.getItemId()) > 0)
+            {
+                status = "Withdrawing existing Cadava berries";
+                if (System.currentTimeMillis() - lastBankActionAtMs >= BANK_ACTION_COOLDOWN_MS)
+                {
+                    if (Rs2Bank.withdrawOne(Inv.CADAVA_BERRIES.getItemId()))
+                    {
+                        lastBankActionAtMs = System.currentTimeMillis();
+                    }
+                }
+                return;
+            }
+
+            status = "Closing bank before quest route";
+            if (System.currentTimeMillis() - lastBankActionAtMs >= BANK_ACTION_COOLDOWN_MS)
+            {
+                Rs2Bank.closeBank();
+                lastBankActionAtMs = System.currentTimeMillis();
+            }
+            return;
+        }
+'''
+          if old not in s:
+              raise SystemExit('target block not found')
+          p.write_text(s.replace(old, new))
+      - name: Commit patch
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add kspaccountbuilder/tasks/questing/romeoandjuliet/romeoscript/RomeoScript.java
+          git commit -m "Check bank for Cadava berries during Romeo handoff"
+          git push origin HEAD:fix/romeo-cadava-bank-check
