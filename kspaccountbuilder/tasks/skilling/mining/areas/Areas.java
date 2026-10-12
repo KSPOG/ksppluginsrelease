@@ -75,16 +75,61 @@ public enum Areas
             new WorldArea(3171, 3363, 10, 8, 0),
             AreaType.OTHER
     ),
+
     COAL_BARBARIAN_VILLAGE(
             "Barbarian Village Coal",
             new WorldArea(3079, 3418, 7, 5, 0),
-            AreaType.OTHER
+            AreaType.COAL
     ),
+    COAL_DWARVEN_SOUTH(
+            "Dwarven Mine South Coal",
+            new WorldArea(3035, 9759, 21, 8, 0),
+            AreaType.COAL
+    ),
+    COAL_DWARVEN_CENTRAL(
+            "Dwarven Mine Central Coal",
+            new WorldArea(3047, 9774, 7, 4, 0),
+            AreaType.COAL
+    ),
+    COAL_DWARVEN_NORTH(
+            "Dwarven Mine North Coal",
+            new WorldArea(3036, 9797, 5, 4, 0),
+            AreaType.COAL
+    ),
+    COAL_LUMBRIDGE_SWAMP(
+            "Lumbridge Swamp Coal",
+            new WorldArea(3143, 3147, 6, 7, 0),
+            AreaType.COAL
+    ),
+
     GOLD_RIMMINGTON(
             "Rimmington Gold Mine",
             new WorldArea(2973, 3231, 7, 5, 0),
-            AreaType.OTHER
+            AreaType.GOLD
     ),
+    GOLD_DWARVEN_MINE(
+            "Dwarven Mine Gold",
+            new WorldArea(3048, 9759, 4, 2, 0),
+            AreaType.GOLD
+    ),
+
+    MITHRIL_DWARVEN_MINE(
+            "Dwarven Mine Mithril",
+            new WorldArea(3033, 9770, 7, 4, 0),
+            AreaType.MITHRIL
+    ),
+    MITHRIL_LUMBRIDGE_SWAMP(
+            "Lumbridge Swamp Mithril",
+            new WorldArea(3141, 3143, 10, 5, 0),
+            AreaType.MITHRIL
+    ),
+
+    ADAMANT_DWARVEN_MINE(
+            "Dwarven Mine Adamantite",
+            new WorldArea(3034, 9763, 10, 13, 0),
+            AreaType.ADAMANT
+    ),
+
     PORT_SARIM_DEPOSIT_BOX(
             "Port Sarim Deposit Box",
             new WorldArea(3044, 3234, 9, 4, 0),
@@ -95,6 +140,10 @@ public enum Areas
     {
         TIN_COPPER,
         IRON,
+        COAL,
+        GOLD,
+        MITHRIL,
+        ADAMANT,
         OTHER
     }
 
@@ -119,6 +168,26 @@ public enum Areas
         return randomArea(AreaType.IRON);
     }
 
+    public static Areas randomCoalArea()
+    {
+        return randomArea(AreaType.COAL);
+    }
+
+    public static Areas randomGoldArea()
+    {
+        return randomArea(AreaType.GOLD);
+    }
+
+    public static Areas randomMithrilArea()
+    {
+        return randomArea(AreaType.MITHRIL);
+    }
+
+    public static Areas randomAdamantArea()
+    {
+        return randomArea(AreaType.ADAMANT);
+    }
+
     private static Areas randomArea(AreaType type)
     {
         Areas[] matching = Arrays.stream(values())
@@ -135,6 +204,26 @@ public enum Areas
     public boolean isIronArea()
     {
         return areaType == AreaType.IRON;
+    }
+
+    public boolean isCoalArea()
+    {
+        return areaType == AreaType.COAL;
+    }
+
+    public boolean isGoldArea()
+    {
+        return areaType == AreaType.GOLD;
+    }
+
+    public boolean isMithrilArea()
+    {
+        return areaType == AreaType.MITHRIL;
+    }
+
+    public boolean isAdamantArea()
+    {
+        return areaType == AreaType.ADAMANT;
     }
 
     public String getDisplayName() { return displayName; }
