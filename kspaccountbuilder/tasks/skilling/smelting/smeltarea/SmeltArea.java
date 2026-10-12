@@ -1,56 +1,59 @@
-/*
- * Decompiled with CFR 0.152.
- *
- * Could not load the following classes:
- *  net.runelite.api.coords.WorldArea
- *  net.runelite.api.coords.WorldPoint
- */
 package net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.smelting.smeltarea;
 
 import java.util.concurrent.ThreadLocalRandom;
 import net.runelite.api.coords.WorldArea;
 import net.runelite.api.coords.WorldPoint;
 
-public enum SmeltArea {
-    SMELT_AREA_EDGEVILLE_FURNACE("Edgeville Furnace", new WorldPoint(3105, 3501, 0), new WorldPoint(3110, 3496, 0));
+public enum SmeltArea
+{
+    SMELT_AREA_EDGEVILLE_FURNACE("Edgeville Furnace", new WorldArea(3105, 3496, 6, 6, 0)),
+    SMELT_AREA_AL_KHARID("Al Kharid Furnace", new WorldArea(3272, 3184, 8, 5, 0)),
+    SMELT_AREA_LUMBRIDGE("Lumbridge Furnace", new WorldArea(3222, 3252, 7, 6, 0)),
+    SMELT_AREA_FALADOR("Falador Furnace", new WorldArea(2970, 3368, 8, 6, 0));
 
     private final String displayName;
-    private final WorldPoint southWest;
-    private final WorldPoint northEast;
+    private final WorldArea worldArea;
 
-    private SmeltArea(String displayName, WorldPoint firstCorner, WorldPoint secondCorner) {
+    SmeltArea(String displayName, WorldArea worldArea)
+    {
         this.displayName = displayName;
-        int minX = Math.min(firstCorner.getX(), secondCorner.getX());
-        int minY = Math.min(firstCorner.getY(), secondCorner.getY());
-        int maxX = Math.max(firstCorner.getX(), secondCorner.getX());
-        int maxY = Math.max(firstCorner.getY(), secondCorner.getY());
-        this.southWest = new WorldPoint(minX, minY, firstCorner.getPlane());
-        this.northEast = new WorldPoint(maxX, maxY, firstCorner.getPlane());
+        this.worldArea = worldArea;
     }
 
-    public WorldArea toWorldArea() {
-        int width = this.northEast.getX() - this.southWest.getX() + 1;
-        int height = this.northEast.getY() - this.southWest.getY() + 1;
-        return new WorldArea(this.southWest.getX(), this.southWest.getY(), width, height, this.southWest.getPlane());
+    public static SmeltArea randomArea()
+    {
+        SmeltArea[] areas = values();
+        return areas[ThreadLocalRandom.current().nextInt(areas.length)];
     }
 
-    public WorldPoint getRandomPoint() {
+    public WorldArea toWorldArea()
+    {
+        return worldArea;
+    }
+
+    public WorldPoint getRandomPoint()
+    {
         ThreadLocalRandom random = ThreadLocalRandom.current();
-        int x = random.nextInt(this.southWest.getX(), this.northEast.getX() + 1);
-        int y = random.nextInt(this.southWest.getY(), this.northEast.getY() + 1);
-        return new WorldPoint(x, y, this.southWest.getPlane());
+        int x = random.nextInt(worldArea.getX(), worldArea.getX() + worldArea.getWidth());
+        int y = random.nextInt(worldArea.getY(), worldArea.getY() + worldArea.getHeight());
+        return new WorldPoint(x, y, worldArea.getPlane());
     }
 
-    public String getDisplayName() {
-        return this.displayName;
+    public String getDisplayName()
+    {
+        return displayName;
     }
 
-    public WorldPoint getSouthWest() {
-        return this.southWest;
+    public WorldPoint getSouthWest()
+    {
+        return new WorldPoint(worldArea.getX(), worldArea.getY(), worldArea.getPlane());
     }
 
-    public WorldPoint getNorthEast() {
-        return this.northEast;
+    public WorldPoint getNorthEast()
+    {
+        return new WorldPoint(
+                worldArea.getX() + worldArea.getWidth() - 1,
+                worldArea.getY() + worldArea.getHeight() - 1,
+                worldArea.getPlane());
     }
 }
-
