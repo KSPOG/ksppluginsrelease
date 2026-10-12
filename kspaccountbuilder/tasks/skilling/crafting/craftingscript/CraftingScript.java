@@ -29,8 +29,8 @@ import org.slf4j.LoggerFactory;
 public class CraftingScript extends Script
 {
     private static final Logger log = LoggerFactory.getLogger(CraftingScript.class);
-    private static final String BANK_WALK_KEY = "Crafting:edge-bank";
-    private static final String FURNACE_WALK_KEY = "Crafting:edge-furnace";
+    private static final String BANK_WALK_KEY = "Crafting:bank";
+    private static final String FURNACE_WALK_KEY = "Crafting:furnace";
     private static final int LOOP_DELAY_MS = 100;
     private static final int WALK_COOLDOWN_MS = 1_000;
     private static final int FURNACE_SEARCH_RADIUS = 12;
@@ -42,6 +42,8 @@ public class CraftingScript extends Script
     private volatile CraftingState state = CraftingState.WAITING;
     private volatile CraftingLevels targetLevel = CraftingLevels.LEATHER_GLOVES;
     private volatile CraftInventory targetRecipe = CraftInventory.LEATHER_GLOVES;
+    private volatile Areas selectedLeatherArea = Areas.EDGE_BANK;
+    private volatile Areas selectedFurnaceArea = Areas.EDGE_FURNACE;
     private boolean progressiveCrafting = true;
     private boolean debugLogging;
     private long lastActionAtMs;
@@ -68,6 +70,10 @@ public class CraftingScript extends Script
         this.progressiveCrafting = progressiveCrafting;
         targetLevel = selectedLevel == null ? CraftingLevels.LEATHER_GLOVES : selectedLevel;
         targetRecipe = CraftInventory.valueOf(targetLevel.name());
+        selectedLeatherArea = Areas.randomLeatherArea();
+        selectedFurnaceArea = Areas.randomFurnaceArea();
+        debug("Selected Crafting areas | leather={} furnace={}",
+                selectedLeatherArea.getDisplayName(), selectedFurnaceArea.getDisplayName());
         state = CraftingState.CHECKING_RESOURCES;
 
         mainScheduledFuture = scheduledExecutorService.scheduleWithFixedDelay(() ->
@@ -84,14 +90,16 @@ public class CraftingScript extends Script
                 selectTargetRecipe();
             }
             KspTaskDebug.throttled(log, debugLogging, "Crafting", "loop", 5_000L,
-                    "loop | state={} recipe={} player={} moving={} animating={} interacting={} bankOpen={}",
+                    "loop | state={} recipe={} player={} moving={} animating={} interacting={} bankOpen={} leatherArea={} furnaceArea={}",
                     state,
                     targetLevel.getDisplayName(),
                     Rs2Player.getWorldLocation(),
                     Rs2Player.isMoving(),
                     Rs2Player.isAnimating(),
                     Rs2Player.isInteracting(),
-                    Rs2Bank.isOpen());
+                    Rs2Bank.isOpen(),
+                    selectedLeatherArea.getDisplayName(),
+                    selectedFurnaceArea.getDisplayName());
 
             if (!hasRequiredInventory(targetRecipe))
             {
@@ -109,7 +117,7 @@ public class CraftingScript extends Script
 
             if (targetRecipe.requiresFurnace())
             {
-                if (!ensureInArea(Areas.EDGE_FURNACE, FURNACE_WALK_KEY))
+                if (!ensureInArea(selectedFurnaceArea, FURNACE_WALK_KEY))
                 {
                     state = CraftingState.WALKING_TO_FURNACE;
                     return;
@@ -120,7 +128,10 @@ public class CraftingScript extends Script
                 return;
             }
 
-            if (!ensureInArea(Areas.EDGE_BANK, BANK_WALK_KEY))
+            Areas inventoryCraftArea = targetRecipe.getRecipeType() == RecipeType.LEATHER
+                    ? selectedLeatherArea
+                    : Areas.EDGE_BANK;
+            if (!ensureInArea(inventoryCraftArea, BANK_WALK_KEY))
             {
                 state = CraftingState.WALKING_TO_BANK;
                 return;
@@ -202,15 +213,21 @@ public class CraftingScript extends Script
         expectingXpDrop = false;
         clearLeatherBatch();
 
-        if (!ensureInArea(Areas.EDGE_BANK, BANK_WALK_KEY))
-        {
-            state = CraftingState.WALKING_TO_BANK;
-            return;
-        }
-
         if (!Rs2Bank.isOpen())
         {
-            if (!isWorldActionPending("open-bank") && Rs2Bank.openBank()) markWorldAction("open-bank");
+            state = CraftingState.WALKING_TO_BANK;
+            Microbot.status = "Walking to nearest bank";
+            if (!Rs2Player.isMoving())
+            {
+                if (!isWorldActionPending("open-bank") && Rs2Bank.openBank())
+                {
+                    markWorldAction("open-bank");
+                }
+                else
+                {
+                    Rs2Bank.walkToBankAndUseBank();
+                }
+            }
             return;
         }
 
@@ -346,7 +363,7 @@ public class CraftingScript extends Script
         Rs2TileObjectModel furnace = findFurnace();
         if (furnace == null)
         {
-            Microbot.status = "Waiting for Edgeville furnace";
+            Microbot.status = "Waiting for " + selectedFurnaceArea.getDisplayName();
             return;
         }
 
@@ -553,7 +570,7 @@ public class CraftingScript extends Script
                 .withName("Furnace")
                 .within(playerLocation, FURNACE_SEARCH_RADIUS)
                 .where(object -> object.getWorldLocation() != null
-                        && Areas.EDGE_FURNACE.getArea().contains(object.getWorldLocation()))
+                        && selectedFurnaceArea.getArea().contains(object.getWorldLocation()))
                 .nearestReachable(FURNACE_SEARCH_RADIUS));
     }
 
