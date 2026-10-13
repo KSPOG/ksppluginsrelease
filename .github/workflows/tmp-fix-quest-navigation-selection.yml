@@ -1,0 +1,235 @@
+name: Temporary quest navigation and selection fix
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - '.github/workflows/tmp-fix-quest-navigation-selection.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/quest-navigation-and-selection-balance
+          fetch-depth: 0
+
+      - name: Patch quest navigation and selection
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          # 1) Quest selection should not dominate skilling.
+          p = Path('kspaccountbuilder/KspAccountBuilderScript.java')
+          s = p.read_text()
+          old = '''        TUTORIAL_ISLAND(0), COOKS_ASSISTANT(30), GOBLIN_DIPLOMACY(30), ROMEO_AND_JULIET(30),
+        RUNE_MYSTERIES(30), SHEEP_SHEARER(30), X_MARKS_THE_SPOT(30), THE_RESTLESS_GHOST(30),
+        IMP_CATCHER(30), STRONGHOLD_OF_SECURITY(30), RUNE_ESSENCE(7), MINING(7), WOODCUTTING(7),'''
+          new = '''        TUTORIAL_ISLAND(0), COOKS_ASSISTANT(5), GOBLIN_DIPLOMACY(5), ROMEO_AND_JULIET(5),
+        RUNE_MYSTERIES(5), SHEEP_SHEARER(5), X_MARKS_THE_SPOT(5), THE_RESTLESS_GHOST(5),
+        IMP_CATCHER(5), STRONGHOLD_OF_SECURITY(5), RUNE_ESSENCE(7), MINING(7), WOODCUTTING(7),'''
+          assert old in s, 'BuilderTask quest weight block not found'
+          p.write_text(s.replace(old, new, 1))
+
+          # 2) Shared quest NPC interaction: walk to the known quest area, then let
+          # the game/local interaction reach the NPC. Never keep re-webwalking to
+          # a roaming NPC's exact current tile.
+          p = Path('kspaccountbuilder/tasks/questing/shared/SimpleQuestScript.java')
+          s = p.read_text()
+          old = '''    protected void talkTo(String name, WorldPoint destination)
+    {
+        if (!walkTo(name, destination, 4)) return;
+        var npc = Microbot.getRs2NpcCache().query().fromWorldView().withName(name).nearestOnClientThread();
+        if (npc == null || npc.getWorldLocation() == null) { setStatus("Searching for " + name); return; }
+        if (!walkTo(name, npc.getWorldLocation(), 4) || Rs2Player.isMoving()) return;
+        state = QuestTaskState.INTERACTING;
+        setStatus("Talking to " + name);
+        if (npc.click("Talk-to")) actionSent();
+    }
+'''
+          new = '''    protected void talkTo(String name, WorldPoint destination)
+    {
+        // Use the stable quest location only. Once nearby, click the live NPC and
+        // let the client perform the short local approach instead of rebuilding a
+        // web path every time the NPC moves a tile.
+        if (!walkTo(name, destination, 6)) return;
+        var npc = Microbot.getRs2NpcCache().query().fromWorldView().withName(name).nearestOnClientThread();
+        if (npc == null || npc.getWorldLocation() == null) { setStatus("Searching for " + name); return; }
+        KspWalkerGuard.clear(questName + ":" + name);
+        if (Rs2Player.isMoving() || Rs2Player.isAnimating() || Rs2Player.isInteracting()) return;
+        state = QuestTaskState.INTERACTING;
+        setStatus("Talking to " + name);
+        if (npc.click("Talk-to")) actionSent();
+    }
+'''
+          assert old in s, 'SimpleQuestScript talkTo block not found'
+          p.write_text(s.replace(old, new, 1))
+
+          # 3) Rune Mysteries has its own NPC helper; apply the same stable-target rule.
+          p = Path('kspaccountbuilder/tasks/questing/runemyst/RuneMystScript.java')
+          s = p.read_text()
+          old = '''        if (npc == null || playerLocation == null || npc.getWorldLocation() == null
+                || playerLocation.distanceTo(npc.getWorldLocation()) > NPC_REACH_DISTANCE)
+        {
+            state = walkingState;
+            status = walkingStatus;
+            KspWalkerGuard.walkToPoint(walkKey, destination, NPC_REACH_DISTANCE, WALK_REFIRE_COOLDOWN_MS);
+            return;
+        }
+
+        state = talkingState;
+'''
+          new = '''        if (playerLocation == null || playerLocation.getPlane() != destination.getPlane()
+                || playerLocation.distanceTo(destination) > NPC_REACH_DISTANCE + 2)
+        {
+            state = walkingState;
+            status = walkingStatus;
+            KspWalkerGuard.walkToPoint(walkKey, destination, NPC_REACH_DISTANCE + 2, WALK_REFIRE_COOLDOWN_MS);
+            return;
+        }
+
+        if (npc == null || npc.getWorldLocation() == null)
+        {
+            state = walkingState;
+            status = "Searching for " + npcName;
+            return;
+        }
+
+        state = talkingState;
+'''
+          assert old in s, 'RuneMyst NPC approach block not found'
+          p.write_text(s.replace(old, new, 1))
+
+          # 4) Romeo & Juliet: stop exact-tile path churn, make staircase local once
+          # nearby, and release all known stale Romeo information menus.
+          p = Path('kspaccountbuilder/tasks/questing/romeoandjuliet/romeoscript/RomeoScript.java')
+          s = p.read_text()
+
+          s = s.replace('private static final int NPC_REACH_DISTANCE = 4;',
+                        'private static final int NPC_REACH_DISTANCE = 6;\n    private static final int STAIR_INTERACTION_DISTANCE = 5;', 1)
+
+          old = '''    private boolean isStaleRomeoInfoMenu()
+    {
+        return Rs2Dialogue.hasDialogueOption("Where can I find Juliet", false)
+                || Rs2Dialogue.hasDialogueOption("anything else you can tell me about Juliet", false);
+    }
+'''
+          new = '''    private boolean isStaleRomeoInfoMenu()
+    {
+        return Rs2Dialogue.hasDialogueOption("Where can I find Juliet", false)
+                || Rs2Dialogue.hasDialogueOption("anything else you can tell me about Juliet", false)
+                || Rs2Dialogue.hasDialogueOption("Where can I find Father Lawrence", false)
+                || Rs2Dialogue.hasDialogueOption("Have you heard anything from Juliet", false);
+    }
+'''
+          assert old in s, 'Romeo stale menu block not found'
+          s = s.replace(old, new, 1)
+
+          old = '''        Rs2NpcModel juliet = findNpc("Juliet");
+        WorldPoint target = juliet != null && juliet.getWorldLocation() != null
+                ? juliet.getWorldLocation()
+                : JULIET_POSITION;
+
+        if (player.distanceTo(target) > NPC_REACH_DISTANCE)
+        {
+            state = potion ? RomeoState.RETURNING_POTION_TO_JULIET : RomeoState.WALKING_TO_JULIET_HALLWAY;
+            status = "Walking to Juliet";
+            KspWalkerGuard.walkToPoint(WALK_JULIET, target, NPC_REACH_DISTANCE, WALK_REFIRE_COOLDOWN_MS);
+            return;
+        }
+
+        KspWalkerGuard.clear(WALK_JULIET);
+'''
+          new = '''        Rs2NpcModel juliet = findNpc("Juliet");
+
+        // Route to Juliet's stable room location, not her live NPC tile. Once in
+        // the room, clicking Juliet handles the final few local tiles.
+        if (player.distanceTo(JULIET_POSITION) > NPC_REACH_DISTANCE)
+        {
+            state = potion ? RomeoState.RETURNING_POTION_TO_JULIET : RomeoState.WALKING_TO_JULIET_HALLWAY;
+            status = "Walking to Juliet's room";
+            KspWalkerGuard.walkToPoint(WALK_JULIET, JULIET_POSITION, NPC_REACH_DISTANCE, WALK_REFIRE_COOLDOWN_MS);
+            return;
+        }
+
+        KspWalkerGuard.clear(WALK_JULIET);
+'''
+          assert old in s, 'Romeo Juliet dynamic target block not found'
+          s = s.replace(old, new, 1)
+
+          old = '''        if (player.distanceTo(JULIET_STAIR_ORIGIN) > 2)
+        {
+            status = "WebWalking to Juliet staircase";
+            KspWalkerGuard.walkToPoint(WALK_JULIET, JULIET_STAIR_ORIGIN, 2, WALK_REFIRE_COOLDOWN_MS);
+            return;
+        }
+'''
+          new = '''        if (player.distanceTo(JULIET_STAIR_ORIGIN) > STAIR_INTERACTION_DISTANCE)
+        {
+            status = "Walking near Juliet staircase";
+            KspWalkerGuard.walkToPoint(WALK_JULIET, JULIET_STAIR_ORIGIN, STAIR_INTERACTION_DISTANCE, WALK_REFIRE_COOLDOWN_MS);
+            return;
+        }
+'''
+          assert old in s, 'Romeo staircase approach block not found'
+          s = s.replace(old, new, 1)
+
+          old = '''        Rs2NpcModel npc = findNpc(name);
+        WorldPoint player = Rs2Player.getWorldLocation();
+        if (player == null) return;
+
+        WorldPoint target = npc != null && npc.getWorldLocation() != null
+                ? npc.getWorldLocation()
+                : destination;
+
+        if (player.distanceTo(target) > NPC_REACH_DISTANCE)
+        {
+            state = walkingState;
+            status = "WebWalking to " + name;
+            KspWalkerGuard.walkToPoint(walkKey, target, NPC_REACH_DISTANCE, WALK_REFIRE_COOLDOWN_MS);
+            return;
+        }
+
+        KspWalkerGuard.clear(walkKey);
+        if (npc == null || !interactionReady()) return;
+'''
+          new = '''        Rs2NpcModel npc = findNpc(name);
+        WorldPoint player = Rs2Player.getWorldLocation();
+        if (player == null) return;
+
+        // Use the stable quest destination. NPCs can wander; following their live
+        // tile with the web walker causes constant route rebuilding and door/path
+        // churn. Once near the known location, click the live NPC directly.
+        if (player.getPlane() != destination.getPlane() || player.distanceTo(destination) > NPC_REACH_DISTANCE)
+        {
+            state = walkingState;
+            status = "Walking near " + name;
+            KspWalkerGuard.walkToPoint(walkKey, destination, NPC_REACH_DISTANCE, WALK_REFIRE_COOLDOWN_MS);
+            return;
+        }
+
+        KspWalkerGuard.clear(walkKey);
+        if (npc == null || !interactionReady()) return;
+'''
+          assert old in s, 'Romeo talkToNpc dynamic target block not found'
+          s = s.replace(old, new, 1)
+
+          p.write_text(s)
+          PY
+
+      - name: Commit changes
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add kspaccountbuilder/KspAccountBuilderScript.java \
+                  kspaccountbuilder/tasks/questing/shared/SimpleQuestScript.java \
+                  kspaccountbuilder/tasks/questing/runemyst/RuneMystScript.java \
+                  kspaccountbuilder/tasks/questing/romeoandjuliet/romeoscript/RomeoScript.java
+          git commit -m "Fix quest navigation churn and rebalance task selection"
+          git push origin HEAD:fix/quest-navigation-and-selection-balance
