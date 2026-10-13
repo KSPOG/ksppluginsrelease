@@ -75,8 +75,8 @@ public class KspAioFighterScript extends KspBreakAwareScript
 	private static final long WALK_RETRY_MS = 1_800L;
 	private static final long GEAR_BANK_RETRY_MS = 60_000L;
 	private static final int ATTACK_AREA_WALK_DISTANCE = 0;
-	private static final long POST_KILL_LOOT_WINDOW_MS = 350L;
-	private static final long LOOT_CLICK_COOLDOWN_MS = 650L;
+	private static final long LOOT_PICKUP_RECOVERY_MS = 900L;
+	private static final long BONE_BURY_RECOVERY_MS = 1_200L;
 	private static final int START_CAMERA_PITCH = 280;
 	private static final int START_CAMERA_ZOOM = 377;
 
@@ -102,13 +102,14 @@ public class KspAioFighterScript extends KspBreakAwareScript
 	private boolean lootCollectedSinceBank = false;
 	private static volatile long overlayStartedAtMs = 0L;
 	private long startedAtMs = 0L;
-	private boolean wasInCombatOrInteracting = false;
-	private long postKillLootUntilMs = 0L;
 	private int pendingLootId = -1;
 	private int pendingLootSceneX = -1;
 	private int pendingLootSceneY = -1;
 	private int pendingLootWorldViewId = -1;
 	private long pendingLootUntilMs = 0L;
+	private int pendingBuryBoneId = -1;
+	private int pendingBuryBoneCount = -1;
+	private long pendingBuryAtMs = 0L;
 	private long lastPaintRefreshMs = 0L;
 	private boolean goalCompletionHandled = false;
 	private boolean startCameraConfigured = false;
@@ -142,10 +143,12 @@ public class KspAioFighterScript extends KspBreakAwareScript
 		lootCollectedSinceBank = false;
 		lastGearBankAttemptMs = 0L;
 		attackAreaReturnTarget = null;
+		clearPendingLoot();
+		clearPendingBury();
 		lastGearBankSkill = null;
 		unavailableGearThisRun.clear();
 		missingGearDialogShown.set(false);
-		mainScheduledFuture = scheduledExecutorService.scheduleWithFixedDelay(() -> loop(generation), 0, 250, TimeUnit.MILLISECONDS);
+		mainScheduledFuture = scheduledExecutorService.scheduleWithFixedDelay(() -> loop(generation), 0, 100, TimeUnit.MILLISECONDS);
 		return true;
 	}
 
@@ -182,7 +185,6 @@ public class KspAioFighterScript extends KspBreakAwareScript
 				return;
 			}
 
-			updatePostKillLootState();
 			refreshPaintState();
 
 			Optional<Skill> selectedSkill = selectTrainingSkill();
@@ -204,11 +206,6 @@ public class KspAioFighterScript extends KspBreakAwareScript
 				return;
 			}
 
-			if (buryBonesFromInventory())
-			{
-				return;
-			}
-
 			if (shouldBankForSupplies())
 			{
 				bankForSupplies();
@@ -218,9 +215,16 @@ public class KspAioFighterScript extends KspBreakAwareScript
 			healIfNeeded();
 			boolean looted = loot();
 
-			if (looted || shouldBlockAttackForLoot() || shouldPrioritizePostKillLoot())
+			if (looted || shouldBlockAttackForLoot())
 			{
 				setStatus(looted ? "looting drop" : "checking drops");
+				return;
+			}
+
+			// Fresh owned ground loot is time-sensitive. Bury inventory bones only after
+			// the ground is clear, matching Account Builder MeleeScript.
+			if (buryBonesFromInventory())
+			{
 				return;
 			}
 
@@ -617,7 +621,7 @@ public class KspAioFighterScript extends KspBreakAwareScript
 		setStatus(Rs2Inventory.isFull() ? "inventory full - banking" : "banking for supplies");
 		lastFoodRestockCount = 0;
 		clearPendingLoot();
-		postKillLootUntilMs = 0L;
+		clearPendingBury();
 
 		if (!Rs2Bank.walkToBankAndUseBank())
 		{
@@ -1914,23 +1918,6 @@ public class KspAioFighterScript extends KspBreakAwareScript
 				.nearestOnClientThread(config.attackRadius() * 2) != null;
 	}
 
-	private void updatePostKillLootState()
-	{
-		boolean currentlyInCombatOrInteracting = isActivelyFightingForLoot();
-		if (currentlyInCombatOrInteracting)
-		{
-			wasInCombatOrInteracting = true;
-			return;
-		}
-
-		if (wasInCombatOrInteracting && isLootingEnabled())
-		{
-			postKillLootUntilMs = System.currentTimeMillis() + POST_KILL_LOOT_WINDOW_MS;
-		}
-
-		wasInCombatOrInteracting = false;
-	}
-
 	private boolean shouldBlockAttackForLoot()
 	{
 		if (!isLootingEnabled() || Rs2Inventory.isFull() || isActivelyFightingForLoot())
@@ -1955,43 +1942,62 @@ public class KspAioFighterScript extends KspBreakAwareScript
 		return true;
 	}
 
-	private boolean shouldPrioritizePostKillLoot()
-	{
-		return isLootingEnabled()
-				&& !Rs2Inventory.isFull()
-				&& !Rs2Player.isInCombat()
-				&& System.currentTimeMillis() < postKillLootUntilMs;
-	}
-
 	private boolean isLootingEnabled() { return config.lootItems() || config.buryBones(); }
 
 	private boolean buryBonesFromInventory()
 	{
-		if (!config.buryBones() || Rs2Bank.isOpen() || Rs2Player.isMoving() || isActivelyFightingForLoot())
+		if (!config.buryBones() || Rs2Bank.isOpen() || isActivelyFightingForLoot())
 		{
+			clearPendingBury();
 			return false;
 		}
 
+		if (isBoneBuryPending()) return true;
+		if (Rs2Player.isMoving()) return false;
+
 		Rs2ItemModel bone = getBuryableInventoryBone();
-		if (bone == null)
-		{
-			return false;
-		}
+		if (bone == null) return false;
 
 		int before = Rs2Inventory.count(bone.getId());
 		String boneName = bone.getName() == null || bone.getName().isBlank() ? "bones" : bone.getName();
 		setStatus("burying " + boneName);
 
-		boolean clicked = Rs2Inventory.interact(boneName, "Bury", true);
-		if (!clicked)
+		if (!Rs2Inventory.interact(boneName, "Bury", true))
 		{
 			lastError = "failed to bury " + boneName;
 			lastErrorMs = System.currentTimeMillis();
 			return false;
 		}
 
-		sleepUntil(() -> Rs2Inventory.count(bone.getId()) < before || Rs2Player.isAnimating(), 1_200);
+		pendingBuryBoneId = bone.getId();
+		pendingBuryBoneCount = before;
+		pendingBuryAtMs = System.currentTimeMillis();
 		return true;
+	}
+
+	private boolean isBoneBuryPending()
+	{
+		if (pendingBuryBoneId < 0 || pendingBuryAtMs <= 0L) return false;
+
+		int currentCount = Rs2Inventory.count(pendingBuryBoneId);
+		if (currentCount < pendingBuryBoneCount)
+		{
+			clearPendingBury();
+			return Rs2Player.isAnimating();
+		}
+
+		if (Rs2Player.isAnimating()) return true;
+		if (System.currentTimeMillis() - pendingBuryAtMs < BONE_BURY_RECOVERY_MS) return true;
+
+		clearPendingBury();
+		return false;
+	}
+
+	private void clearPendingBury()
+	{
+		pendingBuryBoneId = -1;
+		pendingBuryBoneCount = -1;
+		pendingBuryAtMs = 0L;
 	}
 
 	private Rs2ItemModel getBuryableInventoryBone()
@@ -2030,7 +2036,7 @@ public class KspAioFighterScript extends KspBreakAwareScript
 	{
 		// Do not block looting only because the player is still flagged as interacting.
 		// After an NPC dies that flag can linger for a few ticks, which caused the visible loot delay.
-		if (!isLootingEnabled() || Rs2Inventory.isFull() || Rs2Player.isMoving() || isActivelyFightingForLoot())
+		if (!isLootingEnabled() || Rs2Inventory.isFull() || isActivelyFightingForLoot())
 		{
 			if (Rs2Inventory.isFull() || isActivelyFightingForLoot())
 			{
@@ -2060,12 +2066,9 @@ public class KspAioFighterScript extends KspBreakAwareScript
 		{
 			lootCollectedSinceBank = true;
 			markLootPickupPending(loot);
-			postKillLootUntilMs = Math.max(postKillLootUntilMs, System.currentTimeMillis() + 350L);
-			sleepUntil(() -> Rs2Player.isMoving() || Rs2Player.isInteracting() || findNextLoot() == null, 450);
 		}
 		else
 		{
-			pendingLootUntilMs = System.currentTimeMillis() + 250L;
 			setStatus("loot click unavailable");
 		}
 		return clicked;
@@ -2073,18 +2076,10 @@ public class KspAioFighterScript extends KspBreakAwareScript
 
 	private boolean isLootPickupPending()
 	{
-		if (pendingLootUntilMs <= 0L)
-		{
-			return false;
-		}
-
-		if (System.currentTimeMillis() >= pendingLootUntilMs)
-		{
-			clearPendingLoot();
-			return false;
-		}
+		if (pendingLootUntilMs <= 0L) return false;
 
 		boolean stillOnGround = Microbot.getRs2TileItemCache().query()
+				.fromWorldView()
 				.where(item -> item != null)
 				.where(item -> item.getId() == pendingLootId)
 				.where(item -> {
@@ -2102,7 +2097,15 @@ public class KspAioFighterScript extends KspBreakAwareScript
 			return false;
 		}
 
-		setStatus("waiting for loot pickup");
+		if (System.currentTimeMillis() >= pendingLootUntilMs)
+		{
+			// Click did not start or movement stalled. Release the pending state so the
+			// next 100 ms loop can retry the still-owned ground item immediately.
+			clearPendingLoot();
+			return false;
+		}
+
+		setStatus(Rs2Player.isMoving() ? "moving to loot pickup" : "waiting for loot pickup");
 		return true;
 	}
 
@@ -2119,7 +2122,7 @@ public class KspAioFighterScript extends KspBreakAwareScript
 		pendingLootSceneX = localPoint.getSceneX();
 		pendingLootSceneY = localPoint.getSceneY();
 		pendingLootWorldViewId = localPoint.getWorldView();
-		pendingLootUntilMs = System.currentTimeMillis() + LOOT_CLICK_COOLDOWN_MS;
+		pendingLootUntilMs = System.currentTimeMillis() + LOOT_PICKUP_RECOVERY_MS;
 	}
 
 	private void clearPendingLoot()
