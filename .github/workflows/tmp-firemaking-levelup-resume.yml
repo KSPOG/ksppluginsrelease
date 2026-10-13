@@ -128,9 +128,6 @@ jobs:
             return false;
         }
 
-        // The action was attempted first. If a generic Continue interface is still
-        // blocking it, dismiss the modal with Escape rather than treating the level-up
-        // as a separate dialogue workflow. The Firemaking action is retried next tick.
         if (Rs2Dialogue.hasContinue() && !Rs2Dialogue.hasSelectAnOption())
         {
             Rs2Keyboard.keyPress(KeyEvent.VK_ESCAPE);
