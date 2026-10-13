@@ -8,6 +8,7 @@ import net.runelite.api.Skill;
 import net.runelite.api.coords.WorldArea;
 import net.runelite.api.coords.WorldPoint;
 import net.runelite.api.widgets.Widget;
+import net.runelite.api.widgets.WidgetID;
 import net.runelite.client.plugins.microbot.Microbot;
 import net.runelite.client.plugins.microbot.Script;
 import net.runelite.client.plugins.microbot.api.tileobject.models.Rs2TileObjectModel;
@@ -156,6 +157,7 @@ public class FireMakingScript extends Script
                     isBurnInterfaceOpen(targetLogName, targetLogId),
                     awaitingFireStartAtMs != 0L);
 
+            if (dismissLevelUpInterface()) return;
             if (handleBurnPrompt(targetLogName, targetLogId)) return;
             if (!ensureSupplies(targetLogName, fireLocation != null)) return;
 
@@ -330,7 +332,9 @@ public class FireMakingScript extends Script
     private void useCampfire(int targetLogId, WorldPoint fireLocation)
     {
         if (!canBurnLog(targetLogId)) return;
-        if (fireLocation == null || !isInTargetArea(fireLocation)) return;
+        if (fireLocation == null) return;
+        WorldPoint player = Rs2Player.getWorldLocation();
+        if (player == null || (!isInTargetArea(fireLocation) && player.distanceTo(fireLocation) > CAMPFIRE_DISTANCE)) return;
         if (isBurnInterfaceOpen(null, targetLogId)) return;
 
         // Only the Forester campfire's actual option picker should block the next action.
@@ -411,6 +415,24 @@ public class FireMakingScript extends Script
         awaitingFireStartAtMs = now;
         expectingFiremakingXpDrop = true;
         tendingForestersCampfire = false;
+    }
+
+    private boolean dismissLevelUpInterface()
+    {
+        Widget levelUp = Rs2Widget.getWidget(WidgetID.LEVEL_UP_GROUP_ID, 0);
+        if (levelUp == null || levelUp.isHidden())
+        {
+            return false;
+        }
+
+        // Use the dedicated RuneLite level-up group instead of treating every
+        // Continue dialogue as equivalent. Escape closes only the blocking level-up
+        // overlay and lets the normal Firemaking action resume next loop tick.
+        Rs2Keyboard.keyPress(KeyEvent.VK_ESCAPE);
+        awaitingFireStartAtMs = 0L;
+        expectingFiremakingXpDrop = false;
+        Microbot.status = "Resuming Firemaking after level-up";
+        return true;
     }
 
     private boolean handleBurnPrompt(String targetLogName, int targetLogId)
@@ -622,7 +644,6 @@ public class FireMakingScript extends Script
                 .within(playerLocation, NEARBY_CAMPFIRE_SCAN_RADIUS)
                 .where(object -> object.getWorldLocation() != null
                         && isValidFireId(object.getId())
-                        && isInTargetArea(object.getWorldLocation())
                         && (!forestersOnly || object.getId() == FORESTERS_CAMPFIRE_ID))
                 .nearest(playerLocation, NEARBY_CAMPFIRE_SCAN_RADIUS));
     }
