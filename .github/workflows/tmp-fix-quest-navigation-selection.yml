@@ -18,8 +18,144 @@ jobs:
           ref: fix/quest-navigation-and-selection-balance
           fetch-depth: 0
       - name: Apply patch
-        run: python -c "import base64,gzip; exec(gzip.decompress(base64.b64decode('H4sIAFXuzWoC/+VZ/3PaNhT/nb9CYXcdvjHYStfeNZf1KHESt4CZ7Szr3e58wlaCG8fyJBnKtf3f9yTZxIAhkDRrt+WHNgjpvafP+7wveqldMnqDUiwmcTRG0U1KmUAj+FirfYd+NlBMZ4ShvzLCBeIkJoGIaIJmJLqaCI7U4SBjjCQCvUCCog7iFPHrKI6j5AqF9CZKsCC8VUvRkZLbqF/zFAcBzRIxzqI4JKz9lqddvfJar7gBi1LReo+nuG7UOBxNW4zg0Bfkg2gYNRqHsFav11H+4517tmN1+77l9rvD48ZPRhP1bPut63dd13K97tBrvIC1U/t13xr6x9aobw+6vXdq0bEHpu3DMf/Ned8y1c5aIdk5H5r+4J3rmY5lumq/e2aaIx/+7Tqmo1b+8AddB5R5Z6bvjmytS35wTNfrm67rn57Z7rJgazDye12vd5bLcD3HHsK2/rFvn/iu2Tt3LC83UNoAUsxhz1QLA2toDU/Vrxe2fdw797z8M2BSS8hsf3Q6Veh0qtDpbEans4ZOpwqdTjU6nQ3odDaj09kfHcw5AY5LCkUJ4k1Uz0nnYX6dM13zG41jGlyjhAp0CeQM67W0NWORIJqGHCiZxjggDZDVRIB6EyLGkIHz1EB8ghkJc3nDUQ+UCcKwip+XiAs8jgkSmF0RsCWJ5yCAIvIBNqA4mhJ1RESwZ0bGMxxfb48gAbbztlIGcdfWytsuxHNMfpOre0VUyqiASAfzpzQKwcr42qMNVzAZ0wm+IQAsZXE4onApFCqlWF7MUP77uPBidIkaBzN9XJ8rbW6iZ4aBGBEZSw4XR6aYoSQNwJhBFDA6pqIFEDn86TANejiYkIbRgnuyOfwv048y5PeIzODzLBKTIahRuoxWQgAFLuykF0eQoLyJvHDDOFwyT+k6QkkWx+jTJ6la6lNS+zRQhjaMYoeBPkIWFK7AIuONugsKgokE5ZIyVEc/KHCMw+JS6PMWJKo1SVCkHXDhUYznhLUiPqBT0NGoAAtoJAhApVws+SstIy1rCPHY7UnWl/be2u2BHdJqyNe3Rq+i0griKLjWm38UtA7qNXtdwLJA8XNtLeF8MfK02+gCDqvokKaKCSniRkdVnKPWQnYSECTdPYY4Unar3UUglUXiJEQxxJz8PlC8QClh4L8brWAiC6CUHCOcwl2Aci10QmMohPICGMESFLWrskxQ8T3Pg1fHLBARXZCxsj/AGScczCNhTDgHARk4jREVu1AZdwyW5/+fYIF+QCJH2GmGWQhEhKMN5XNpMJysv9zA26qwWQ2nbhLdYFH5lVXk6G863NYr2Fqiz8Pu/hWsYyAnSwgazDlAEgF/g4wL6PZkXZqQGGIGqpj0Rh6SJa6iMZngaUTZXjWLgbob0NaWeqXavZvACoamyrMFN3fn7sI7xc+arFYYwc0h78horZRloF8lWtDldHtn0FTJPqtnGgvRH5eUFNyaabIoZh2u7cj48paML+9ZiRydTVSmbcjf35L5SlZZNxDSc7f/FhZPLMf0oU3sH9sXQ3/gGsuqVoPjc20tTsTSXSpbU+mzzU5agRwwhlBNIKuhg6PyPUrf7Oe5cvmpdBfE69Nv3mXSyC/gtv0z/MOBqSoLaSDT/M5mV1aLHDrjcAdSrufTIgWpbFe0AfdPptDSOfSGUPQEvcmgvIKA6MNdj+LV9CgFQPPyXgnQH7nKkG0l+65sWaRL3aJFUwmGhCQKwJgEuh3ZjVVQ6wg9O/wzWUTu/sefw/Gtp2Cn5fiLImoPy6d/UcorPKTwlO6BS4JvAprIoBZl90gQqr1SW33vaNPGlAJ5EhRxYEdMlA4ruaQDkmSN1fZUM1K2D8cRjulVRloTzIvf7VSFSv1iQhg0miDUklcOcwLUm+gSx5xUpqs7ROJkLlTAEBCA5jRT4gWBiIVyjMfQXq5q2dKs/8dvfg8ta4afQIQShvp4xgiUjYfIPsNTbfgEklSIFhdSg7QtTtsUAFx6Cy6fZOvZaWf6q0GOejMMaEhipFMMfC9vD6uNem5ZKZuWnnD5EOOoOHeQl48nT/KVqgpysKHPerX5zNrel0hPpPyR7VoycRwu1zJd9svlXpt6v8Yspao7eaVTue78HdM7d+SwCUxQmcuz8ykZGFfaJ0uz3LX42j/r9vsX3XebquLF7ZMhx37npkG1AVpLM/fNI7V5lYW3pN7Y0PPtyrXyE9tRj+YFHPDczt8djELkFJOApuK/DNZiKF2M0Vp3MGOFSf9GinzPFRj3ZMoKAF+XMpvSXd49hXN4Q0MPkWeeh2W+rXzQvYntWKeW4sTWt0DuFz32WXKN/DpiAebkYd4pm9N8SM9/x1tsByQ2d207QJTjI2dOj4rQZiMfBt2WcqwvseXRcO+yrAd9RZ5cmSKV6rF2IWy9nWytF9PDinx4O7grbr213Et7SrV+w1Nxc6GvPlBR5Uuv30et8Ls8V5ejuxjn7f+i/+cL8/qLuOK9f1D6K5UDr8d5eQx6ZzH/mgyFHkFP6df/TrA0PZGRKHfkY/y12X1lo7DL4Ol20LTXgOmLkLKcT+/PyccfDD4iMTelZD0IBz4+qGtYnvQYtb8B/I6EPTchAAA=')))"
+        shell: bash
+        run: |
+          python <<'PY'
+          from pathlib import Path
+
+          # Balance one-time quests below normal skilling weights.
+          p = Path('kspaccountbuilder/KspAccountBuilderScript.java')
+          s = p.read_text()
+          for task in (
+              'COOKS_ASSISTANT', 'GOBLIN_DIPLOMACY', 'ROMEO_AND_JULIET',
+              'RUNE_MYSTERIES', 'SHEEP_SHEARER', 'X_MARKS_THE_SPOT',
+              'THE_RESTLESS_GHOST', 'IMP_CATCHER', 'STRONGHOLD_OF_SECURITY'
+          ):
+              s = s.replace(task + '(7)', task + '(3)', 1)
+          p.write_text(s)
+
+          # Shared simple quests: keep web-walking anchored to the stable quest
+          # destination instead of the NPC's current roaming tile.
+          p = Path('kspaccountbuilder/tasks/questing/shared/SimpleQuestScript.java')
+          s = p.read_text()
+          old = '''        WorldPoint target = npc != null && npc.getWorldLocation() != null
+                ? npc.getWorldLocation()
+                : destination;
+        if (!walkTo(name, target, 4)) return;
+'''
+          new = '''        // Fall back to the stable quest location, never a moving NPC tile.
+        if (!walkTo(name, destination, 6)) return;
+'''
+          assert old in s, 'SimpleQuestScript dynamic fallback not found'
+          p.write_text(s.replace(old, new, 1))
+
+          # Rune Mysteries: proximity is based on its known quest destination,
+          # then the visible NPC is clicked locally.
+          p = Path('kspaccountbuilder/tasks/questing/runemyst/RuneMystScript.java')
+          s = p.read_text()
+          old = '''        if (npc == null || playerLocation == null || npc.getWorldLocation() == null
+                || playerLocation.distanceTo(npc.getWorldLocation()) > NPC_REACH_DISTANCE)
+        {
+            state = walkingState;
+            status = walkingStatus;
+            KspWalkerGuard.walkToPoint(walkKey, destination, NPC_REACH_DISTANCE, WALK_REFIRE_COOLDOWN_MS);
+            return;
+        }
+
+        state = talkingState;
+'''
+          new = '''        if (playerLocation == null || playerLocation.getPlane() != destination.getPlane()
+                || playerLocation.distanceTo(destination) > NPC_REACH_DISTANCE + 2)
+        {
+            state = walkingState;
+            status = walkingStatus;
+            KspWalkerGuard.walkToPoint(walkKey, destination, NPC_REACH_DISTANCE + 2, WALK_REFIRE_COOLDOWN_MS);
+            return;
+        }
+
+        if (npc == null || npc.getWorldLocation() == null)
+        {
+            state = walkingState;
+            status = "Searching for " + npcName;
+            KspWalkerGuard.clear(walkKey);
+            return;
+        }
+
+        state = talkingState;
+'''
+          assert old in s, 'RuneMyst NPC approach block not found'
+          p.write_text(s.replace(old, new, 1))
+
+          # Romeo & Juliet already has local reachable-NPC fast paths on this
+          # branch. Remove the remaining exact-live-tile fallbacks and relax the
+          # final staircase approach so the object interaction takes ownership.
+          p = Path('kspaccountbuilder/tasks/questing/romeoandjuliet/romeoscript/RomeoScript.java')
+          s = p.read_text()
+          s = s.replace('private static final int NPC_REACH_DISTANCE = 4;',
+                        'private static final int NPC_REACH_DISTANCE = 6;', 1)
+
+          old = '''        WorldPoint target = juliet != null && juliet.getWorldLocation() != null
+                ? juliet.getWorldLocation()
+                : JULIET_POSITION;
+
+        if (player.distanceTo(target) > NPC_REACH_DISTANCE)
+        {
+            state = potion ? RomeoState.RETURNING_POTION_TO_JULIET : RomeoState.WALKING_TO_JULIET_HALLWAY;
+            status = "Walking to Juliet";
+            KspWalkerGuard.walkToPoint(WALK_JULIET, target, NPC_REACH_DISTANCE, WALK_REFIRE_COOLDOWN_MS);
+            return;
+        }
+'''
+          new = '''        if (player.distanceTo(JULIET_POSITION) > NPC_REACH_DISTANCE)
+        {
+            state = potion ? RomeoState.RETURNING_POTION_TO_JULIET : RomeoState.WALKING_TO_JULIET_HALLWAY;
+            status = "Walking to Juliet's room";
+            KspWalkerGuard.walkToPoint(WALK_JULIET, JULIET_POSITION, NPC_REACH_DISTANCE, WALK_REFIRE_COOLDOWN_MS);
+            return;
+        }
+'''
+          assert old in s, 'Romeo Juliet live-target fallback not found'
+          s = s.replace(old, new, 1)
+
+          s = s.replace('if (player.distanceTo(JULIET_STAIR_APPROACH) > 1)',
+                        'if (player.distanceTo(JULIET_STAIR_APPROACH) > 3)', 1)
+          s = s.replace('KspWalkerGuard.walkToPoint(WALK_JULIET, JULIET_STAIR_APPROACH, 1, WALK_REFIRE_COOLDOWN_MS);',
+                        'KspWalkerGuard.walkToPoint(WALK_JULIET, JULIET_STAIR_APPROACH, 3, WALK_REFIRE_COOLDOWN_MS);', 1)
+
+          old = '''        WorldPoint target = npc != null && npc.getWorldLocation() != null
+                ? npc.getWorldLocation()
+                : destination;
+
+        if (npc == null || !npc.isReachable() || player.distanceTo(target) > NPC_REACH_DISTANCE)
+        {
+            state = walkingState;
+            status = "WebWalking to " + name;
+            KspWalkerGuard.walkToPoint(walkKey, target, NPC_REACH_DISTANCE, WALK_REFIRE_COOLDOWN_MS);
+            return;
+        }
+'''
+          new = '''        if (player.getPlane() != destination.getPlane()
+                || player.distanceTo(destination) > NPC_REACH_DISTANCE)
+        {
+            state = walkingState;
+            status = "Walking near " + name;
+            KspWalkerGuard.walkToPoint(walkKey, destination, NPC_REACH_DISTANCE, WALK_REFIRE_COOLDOWN_MS);
+            return;
+        }
+
+        if (npc == null || npc.getWorldLocation() == null)
+        {
+            KspWalkerGuard.clear(walkKey);
+            status = "Searching for " + name;
+            return;
+        }
+'''
+          assert old in s, 'Romeo dynamic NPC fallback not found'
+          s = s.replace(old, new, 1)
+          p.write_text(s)
+          PY
       - name: Commit changes
+        shell: bash
         run: |
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
