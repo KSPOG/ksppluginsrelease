@@ -8,7 +8,6 @@ import net.runelite.client.plugins.PluginDescriptor;
 import net.runelite.client.plugins.microbot.Microbot;
 import net.runelite.client.plugins.microbot.PluginConstants;
 import net.runelite.client.plugins.microbot.breakhandler.BreakHandlerPlugin;
-import net.runelite.client.plugins.microbot.kspaccountbuilder.ksputil.KspLevelUpDialogueEvent;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.ksputil.randomevents.KspRandomEventSolver;
 import net.runelite.client.ui.overlay.OverlayManager;
 
@@ -28,7 +27,7 @@ import javax.inject.Inject;
 @SuppressWarnings("unused")
 public class KspAccountBuilderPlugin extends Plugin
 {
-    public static final String VERSION = "1.9.11";
+    public static final String VERSION = "1.9.12";
 
     @Inject
     private KspAccountBuilderScript script;
@@ -46,7 +45,6 @@ public class KspAccountBuilderPlugin extends Plugin
     private OverlayManager overlayManager;
 
     private KspRandomEventSolver randomEventSolver;
-    private KspLevelUpDialogueEvent levelUpDialogueEvent;
     private boolean runtimeActive;
 
     @Provides
@@ -76,8 +74,10 @@ public class KspAccountBuilderPlugin extends Plugin
         randomEventSolver = new KspRandomEventSolver();
         Microbot.getBlockingEventManager().add(randomEventSolver);
 
-        levelUpDialogueEvent = new KspLevelUpDialogueEvent();
-        Microbot.getBlockingEventManager().add(levelUpDialogueEvent);
+        // Level-up Continue interfaces are intentionally not registered as a
+        // blocking event. The next skilling interaction normally dismisses the
+        // interface itself, so keep task execution running and let that action
+        // advance immediately instead of spending a tick clicking Continue.
 
         runtimeActive = true;
         script.run(config);
@@ -120,7 +120,7 @@ public class KspAccountBuilderPlugin extends Plugin
 
     private void cleanupRuntime(String reason)
     {
-        if (!runtimeActive && randomEventSolver == null && levelUpDialogueEvent == null)
+        if (!runtimeActive && randomEventSolver == null)
         {
             // Still stop the script in case Source Loader calls hot-unload before
             // the normal plugin lifecycle flag was established.
@@ -146,12 +146,6 @@ public class KspAccountBuilderPlugin extends Plugin
         {
             Microbot.getBlockingEventManager().remove(randomEventSolver);
             randomEventSolver = null;
-        }
-
-        if (levelUpDialogueEvent != null)
-        {
-            Microbot.getBlockingEventManager().remove(levelUpDialogueEvent);
-            levelUpDialogueEvent = null;
         }
 
         if (overlayManager != null && overlay != null)
