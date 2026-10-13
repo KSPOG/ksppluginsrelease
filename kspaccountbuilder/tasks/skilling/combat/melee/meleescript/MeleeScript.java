@@ -31,7 +31,6 @@ import net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.com
 import net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.combat.melee.loot.cowloot.CowLoot;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.combat.melee.loot.hillgiantloot.HillGiantLoot;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.combat.melee.loot.mossgiantloot.MossGiantLoot;
-import net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.combat.melee.meleescript.CombatState;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.combat.melee.npc.NPC;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.selling.buyscript.Buy;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.selling.sell.SellList;
@@ -47,8 +46,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 @Singleton
-public class MeleeScript
-        extends Script {
+public class MeleeScript extends Script {
     private static final Logger log = LoggerFactory.getLogger(MeleeScript.class);
     private static final int LOOP_DELAY_MS = 100;
     private static final int WEB_WALK_COOLDOWN_MS = 1_000;
@@ -57,9 +55,8 @@ public class MeleeScript
     private static final int LOOT_RADIUS = 12;
     private static final long NO_FOOD_CONFIRMATION_MS = 2_500L;
     private static final long ACTION_DISPATCH_TIMEOUT_MS = 1_500L;
-    private static final long POST_KILL_LOOT_WINDOW_MS = 350L;
-    private static final long LOOT_CLICK_COOLDOWN_MS = 650L;
-    private static final int BONE_BURY_CONFIRM_TIMEOUT_MS = 1_200;
+    private static final long LOOT_PICKUP_RECOVERY_MS = 900L;
+    private static final long BONE_BURY_RECOVERY_MS = 1_200L;
     private static final WorldPoint CHICKEN_WALK_TARGET = new WorldPoint(3177, 3298, 0);
     private static final WorldPoint CHICKEN_GATE_EAST = new WorldPoint(3262, 3321, 0);
     private static final WorldPoint CHICKEN_GATE_WEST = new WorldPoint(3261, 3321, 0);
@@ -75,6 +72,7 @@ public class MeleeScript
     private static final int EDGEVILLE_TRAPDOOR_OPEN_ID = 1581;
     private static final int EDGEVILLE_TRAPDOOR_INTERACTION_DISTANCE = 4;
     private static final WorldPoint HILL_GIANT_WALK_TARGET = new WorldPoint(3112, 9847, 0);
+
     private String status = "Idle";
     private CombatState state = CombatState.PREPARING;
     private boolean debugLogging;
@@ -88,13 +86,14 @@ public class MeleeScript
     private String pendingWorldAction;
     private long pendingBankActionAtMs;
     private int pendingBankInventoryCount = -1;
-    private boolean wasInCombatOrInteracting;
-    private long postKillLootUntilMs;
     private int pendingLootId = -1;
     private int pendingLootSceneX = -1;
     private int pendingLootSceneY = -1;
     private int pendingLootWorldViewId = -1;
     private long pendingLootUntilMs;
+    private int pendingBuryBoneId = -1;
+    private int pendingBuryBoneCount = -1;
+    private long pendingBuryAtMs;
     private volatile boolean pendingSellHandoff;
     private volatile long runGeneration;
 
@@ -120,8 +119,8 @@ public class MeleeScript
                 if (generation != this.runGeneration || !super.run() || !Microbot.isLoggedIn()) {
                     return;
                 }
+
                 TrainingStage stage = this.resolveTrainingStage();
-                this.updatePostKillLootState(stage);
                 KspTaskDebug.throttled(log, this.debugLogging, "Melee", "loop", 5_000L,
                         "loop | state={} status={} area={} npc={} player={} moving={} animating={} interacting={} inCombat={} hp={}/{} bankOpen={}",
                         this.state,
@@ -136,6 +135,7 @@ public class MeleeScript
                         Microbot.getClient().getBoostedSkillLevel(Skill.HITPOINTS),
                         Microbot.getClient().getRealSkillLevel(Skill.HITPOINTS),
                         Rs2Bank.isOpen());
+
                 if (this.needsWarriorFoodRestock(stage)) {
                     this.state = CombatState.BANKING;
                     this.handleBanking(stage);
@@ -145,14 +145,18 @@ public class MeleeScript
                     this.state = CombatState.PREPARING;
                     return;
                 }
-                if (this.buryBonesInInventory(stage)) {
-                    this.state = CombatState.PREPARING;
-                    return;
-                }
+
+                // Ground loot is time-sensitive. Pick owned drops before inventory cleanup so
+                // burying a previous bone can never delay a fresh owned drop.
                 boolean looted = this.lootOwnDrops(stage);
-                if (looted || this.shouldBlockAttackForLoot(stage) || this.shouldPrioritizePostKillLoot(stage)) {
+                if (looted || this.shouldBlockAttackForLoot(stage)) {
                     this.state = CombatState.LOOTING;
                     if (!looted) this.setStatus("Checking drops");
+                    return;
+                }
+
+                if (this.buryBonesInInventory(stage)) {
+                    this.state = CombatState.PREPARING;
                     return;
                 }
                 if (this.shouldBank(stage)) {
@@ -177,7 +181,10 @@ public class MeleeScript
                     this.state = CombatState.WALKING_TO_AREA;
                     return;
                 }
-                if (this.hasLootNearby(stage) || this.shouldPrioritizePostKillLoot(stage)) {
+
+                // Recheck immediately after the walker is released. A drop can become visible
+                // while walking into the area and should beat target acquisition.
+                if (this.hasLootNearby(stage)) {
                     this.state = CombatState.LOOTING;
                     this.lootOwnDrops(stage);
                     return;
@@ -195,6 +202,7 @@ public class MeleeScript
                     this.state = CombatState.PREPARING;
                     return;
                 }
+
                 this.state = CombatState.FIGHTING;
                 this.attackTarget(stage);
             }
@@ -238,12 +246,15 @@ public class MeleeScript
             return new TrainingStage(CombatAreas.CHICKENS, NPC.CHICKEN, null, CHICKEN_LOOT_NAMES);
         }
         if (attackLevel < 30 || strengthLevel < 30 || defenceLevel < 30) {
-            return new TrainingStage(CombatAreas.AL_KHARID_WARRIOR, NPC.AL_KHARID_WARRIOR, null, (String[])Arrays.stream(WarriorLoot.values()).map(WarriorLoot::getDisplayName).toArray(String[]::new));
+            return new TrainingStage(CombatAreas.AL_KHARID_WARRIOR, NPC.AL_KHARID_WARRIOR, null,
+                    Arrays.stream(WarriorLoot.values()).map(WarriorLoot::getDisplayName).toArray(String[]::new));
         }
         if (attackLevel < 40 || strengthLevel < 40 || defenceLevel < 40) {
-            return new TrainingStage(CombatAreas.HILL_GIANTS, NPC.HILL_GIANT, null, (String[])Arrays.stream(HillGiantLoot.values()).map(HillGiantLoot::getDisplayName).toArray(String[]::new));
+            return new TrainingStage(CombatAreas.HILL_GIANTS, NPC.HILL_GIANT, null,
+                    Arrays.stream(HillGiantLoot.values()).map(HillGiantLoot::getDisplayName).toArray(String[]::new));
         }
-        return new TrainingStage(CombatAreas.MOSS_GIANTS, NPC.MOSS_GIANT, null, (String[])Arrays.stream(MossGiantLoot.values()).map(MossGiantLoot::getDisplayName).toArray(String[]::new));
+        return new TrainingStage(CombatAreas.MOSS_GIANTS, NPC.MOSS_GIANT, null,
+                Arrays.stream(MossGiantLoot.values()).map(MossGiantLoot::getDisplayName).toArray(String[]::new));
     }
 
     private boolean handleHealing() {
@@ -259,7 +270,13 @@ public class MeleeScript
     }
 
     private boolean buryBonesInInventory(TrainingStage stage) {
-        if (Rs2Bank.isOpen() || Rs2Player.isMoving() || isActivelyFighting(stage)) return false;
+        if (Rs2Bank.isOpen() || isActivelyFighting(stage)) {
+            clearPendingBury();
+            return false;
+        }
+
+        if (isBoneBuryPending()) return true;
+        if (Rs2Player.isMoving()) return false;
 
         Rs2ItemModel bone = getBuryableInventoryBone();
         if (bone == null) return false;
@@ -270,9 +287,34 @@ public class MeleeScript
 
         if (!Rs2Inventory.interact(boneName, "Bury", true)) return false;
 
-        sleepUntil(() -> Rs2Inventory.count(bone.getId()) < before || Rs2Player.isAnimating(),
-                BONE_BURY_CONFIRM_TIMEOUT_MS);
+        pendingBuryBoneId = bone.getId();
+        pendingBuryBoneCount = before;
+        pendingBuryAtMs = System.currentTimeMillis();
         return true;
+    }
+
+    private boolean isBoneBuryPending() {
+        if (pendingBuryBoneId < 0 || pendingBuryAtMs <= 0L) return false;
+
+        int currentCount = Rs2Inventory.count(pendingBuryBoneId);
+        if (currentCount < pendingBuryBoneCount) {
+            clearPendingBury();
+            return Rs2Player.isAnimating();
+        }
+
+        // Animation is the immediate acknowledgement that the bury interaction was accepted.
+        if (Rs2Player.isAnimating()) return true;
+
+        if (System.currentTimeMillis() - pendingBuryAtMs < BONE_BURY_RECOVERY_MS) return true;
+
+        clearPendingBury();
+        return false;
+    }
+
+    private void clearPendingBury() {
+        pendingBuryBoneId = -1;
+        pendingBuryBoneCount = -1;
+        pendingBuryAtMs = 0L;
     }
 
     private Rs2ItemModel getBuryableInventoryBone() {
@@ -420,8 +462,8 @@ public class MeleeScript
     }
 
     private boolean lootOwnDrops(TrainingStage stage) {
-        if (Rs2Inventory.isFull() || Rs2Player.isMoving() || isActivelyFighting(stage)) {
-            if (Rs2Inventory.isFull() || isActivelyFighting(stage)) clearPendingLoot();
+        if (Rs2Inventory.isFull() || isActivelyFighting(stage)) {
+            clearPendingLoot();
             return false;
         }
 
@@ -437,10 +479,6 @@ public class MeleeScript
         boolean clicked = MeleeLootingHelper.take(loot, log, debugLogging);
         if (clicked) {
             markLootPickupPending(loot);
-            postKillLootUntilMs = Math.max(postKillLootUntilMs, System.currentTimeMillis() + POST_KILL_LOOT_WINDOW_MS);
-            sleepUntil(() -> Rs2Player.isMoving() || Rs2Player.isInteracting() || findNearestLoot(stage) == null, 450);
-        } else {
-            pendingLootUntilMs = System.currentTimeMillis() + 250L;
         }
         return clicked;
     }
@@ -454,34 +492,11 @@ public class MeleeScript
         return isLootPickupPending() || findNearestLoot(stage) != null;
     }
 
-    private boolean shouldPrioritizePostKillLoot(TrainingStage stage) {
-        return !Rs2Inventory.isFull()
-                && !Rs2Player.isInCombat()
-                && !isActivelyFighting(stage)
-                && System.currentTimeMillis() < postKillLootUntilMs;
-    }
-
-    private void updatePostKillLootState(TrainingStage stage) {
-        boolean fighting = isActivelyFighting(stage);
-        if (fighting) {
-            wasInCombatOrInteracting = true;
-            return;
-        }
-
-        if (wasInCombatOrInteracting) {
-            postKillLootUntilMs = System.currentTimeMillis() + POST_KILL_LOOT_WINDOW_MS;
-        }
-        wasInCombatOrInteracting = false;
-    }
-
     private boolean isLootPickupPending() {
         if (pendingLootUntilMs <= 0L) return false;
-        if (System.currentTimeMillis() >= pendingLootUntilMs) {
-            clearPendingLoot();
-            return false;
-        }
 
         boolean stillOnGround = Microbot.getRs2TileItemCache().query()
+                .fromWorldView()
                 .where(item -> item != null)
                 .where(item -> item.getId() == pendingLootId)
                 .where(item -> {
@@ -498,7 +513,14 @@ public class MeleeScript
             return false;
         }
 
-        setStatus("Waiting for loot pickup");
+        if (System.currentTimeMillis() >= pendingLootUntilMs) {
+            // The click was not accepted or movement stalled. Release immediately so the next
+            // 100 ms loop can retry the still-owned item instead of idling for seconds.
+            clearPendingLoot();
+            return false;
+        }
+
+        setStatus(Rs2Player.isMoving() ? "Moving to owned loot" : "Waiting for loot pickup");
         return true;
     }
 
@@ -513,7 +535,7 @@ public class MeleeScript
         pendingLootSceneX = localPoint.getSceneX();
         pendingLootSceneY = localPoint.getSceneY();
         pendingLootWorldViewId = localPoint.getWorldView();
-        pendingLootUntilMs = System.currentTimeMillis() + LOOT_CLICK_COOLDOWN_MS;
+        pendingLootUntilMs = System.currentTimeMillis() + LOOT_PICKUP_RECOVERY_MS;
     }
 
     private void clearPendingLoot() {
@@ -535,8 +557,6 @@ public class MeleeScript
                 .where(item -> !item.isDespawned())
                 .where(Rs2TileItemModel::isLootAble)
                 .where(Rs2TileItemModel::isOwned)
-                // Owned drops may land just outside the configured combat area.
-                // Keep combat targets area-bound, but allow nearby owned loot within LOOT_RADIUS.
                 .where(this::canStoreLoot)
                 .where(item -> this.matchesConfiguredLootName(stage.lootNames, item.getName()))
                 .within(LOOT_RADIUS)
@@ -562,6 +582,10 @@ public class MeleeScript
     private boolean ensureInTargetArea(CombatAreas targetArea) {
         WorldPoint playerLocation = Rs2Player.getWorldLocation();
         if (isPlayerInsideCombatArea(playerLocation, targetArea)) {
+            // Release the core route as soon as the attack area is reached. Leaving the old
+            // route alive was visible in the log and delayed target acquisition while the
+            // player kept following the final route clicks.
+            KspWalkerGuard.clearActiveWalker("ksp_account_builder_melee_reached_area");
             KspWalkerGuard.clear("Melee:target-area");
             KspWalkerGuard.clear("Melee:hill-giants-entry");
             return true;
@@ -712,9 +736,13 @@ public class MeleeScript
 
         String primaryName = stage.primaryNpc.getDisplayName();
         String secondaryName = stage.secondaryNpc == null ? null : stage.secondaryNpc.getDisplayName();
-        List<Rs2NpcModel> candidates = Microbot.getRs2NpcCache().query()
+
+        // Filter directly in the NPC cache and ask it for the nearest usable target. The old
+        // path materialized every matching NPC on the client thread and then manually ranked
+        // the list, which added avoidable latency on every reacquisition.
+        Rs2NpcModel target = Microbot.getRs2NpcCache().query()
                 .fromWorldView()
-                .where(npc -> npc.getCombatLevel() > 0 && !npc.isDead())
+                .where(npc -> npc != null && npc.getCombatLevel() > 0 && !npc.isDead())
                 .where(npc -> {
                     String name = npc.getName();
                     return name != null
@@ -722,24 +750,8 @@ public class MeleeScript
                             || (secondaryName != null && name.equalsIgnoreCase(secondaryName)));
                 })
                 .where(npc -> this.isNpcInTargetArea(npc, stage))
-                .toListOnClientThread();
-
-        Rs2NpcModel target = null;
-        int bestBusyRank = Integer.MAX_VALUE;
-        int bestDistance = Integer.MAX_VALUE;
-        for (Rs2NpcModel npc : candidates) {
-            if (!this.canAttackNpc(npc, localPlayer) || npc.getWorldLocation() == null) {
-                continue;
-            }
-
-            int busyRank = npc.getInteracting() == null ? 0 : 1;
-            int distance = npc.getWorldLocation().distanceTo(playerLocation);
-            if (busyRank < bestBusyRank || (busyRank == bestBusyRank && distance < bestDistance)) {
-                target = npc;
-                bestBusyRank = busyRank;
-                bestDistance = distance;
-            }
-        }
+                .where(npc -> this.canAttackNpc(npc, localPlayer))
+                .nearestOnClientThread();
 
         if (target == null) {
             this.setStatus("Waiting for " + primaryName);
@@ -795,7 +807,6 @@ public class MeleeScript
             pendingAttackAtMs = System.currentTimeMillis();
             pendingAttackNpcIndex = target.getIndex();
         }
-
     }
 
     private boolean isAttackDispatchPending() {
@@ -916,7 +927,7 @@ public class MeleeScript
             return null;
         }
 
-        List<Rs2NpcModel> attackers = Microbot.getRs2NpcCache().query()
+        return Microbot.getRs2NpcCache().query()
                 .fromWorldView()
                 .where(npc -> npc != null
                         && !npc.isDead()
@@ -926,22 +937,7 @@ public class MeleeScript
                         && (Rs2Player.isInteracting()
                             || npc.getWorldLocation().distanceTo(playerLocation) <= PASSIVE_ATTACKER_MAX_DISTANCE)
                         && Objects.equals(npc.getInteracting(), localPlayer))
-                .toListOnClientThread();
-
-        Rs2NpcModel nearest = null;
-        int nearestDistance = Integer.MAX_VALUE;
-        for (Rs2NpcModel npc : attackers) {
-            WorldPoint location = npc.getWorldLocation();
-            if (location == null) {
-                continue;
-            }
-            int distance = location.distanceTo(playerLocation);
-            if (distance < nearestDistance) {
-                nearest = npc;
-                nearestDistance = distance;
-            }
-        }
-        return nearest;
+                .nearestOnClientThread();
     }
 
     private boolean isIgnoredCombatNpc(String npcName) {
@@ -1022,15 +1018,17 @@ public class MeleeScript
     }
 
     private boolean isDragonSlayerCompleted() {
-        return Rs2Player.getQuestState((Quest)Quest.DRAGON_SLAYER_I) == QuestState.FINISHED;
+        return Rs2Player.getQuestState(Quest.DRAGON_SLAYER_I) == QuestState.FINISHED;
     }
 
     private boolean hasInventoryEquipmentToEquip() {
-        return this.buildGearPlan().desiredItems.stream().anyMatch(item -> item != null && Rs2Inventory.hasItem((String[])new String[]{item}) && !Rs2Equipment.isWearing((String[])new String[]{item}));
+        return this.buildGearPlan().desiredItems.stream()
+                .anyMatch(item -> item != null && Rs2Inventory.hasItem(item) && !Rs2Equipment.isWearing(item));
     }
 
     private boolean hasMeleeSetupItemsInInventory(GearPlan gearPlan) {
-        if (gearPlan != null && gearPlan.desiredItems.stream().anyMatch(item -> item != null && Rs2Inventory.hasItem((String[]) new String[]{item}))) {
+        if (gearPlan != null && gearPlan.desiredItems.stream()
+                .anyMatch(item -> item != null && Rs2Inventory.hasItem(item))) {
             return true;
         }
 
@@ -1052,7 +1050,10 @@ public class MeleeScript
     }
 
     private boolean hasItemAnywhere(String itemName) {
-        return itemName != null && (Rs2Equipment.isWearing(itemName) || Rs2Inventory.hasItem(itemName) || Rs2Inventory.hasItem((String)itemName, (boolean)true) || Rs2Bank.count((String)itemName) > 0);
+        return itemName != null && (Rs2Equipment.isWearing(itemName)
+                || Rs2Inventory.hasItem(itemName)
+                || Rs2Inventory.hasItem(itemName, true)
+                || Rs2Bank.count(itemName) > 0);
     }
 
     private Food getBestFoodInInventory() {
@@ -1125,9 +1126,8 @@ public class MeleeScript
         this.pendingWorldAction = null;
         this.pendingBankActionAtMs = 0L;
         this.pendingBankInventoryCount = -1;
-        this.wasInCombatOrInteracting = false;
-        this.postKillLootUntilMs = 0L;
         this.clearPendingLoot();
+        this.clearPendingBury();
         KspWalkerGuard.clear("Melee:target-area");
         KspWalkerGuard.clear("Melee:hill-giants-entry");
         this.state = CombatState.PREPARING;
