@@ -186,9 +186,9 @@ public class MiningScript extends Script
                         Rs2Player.getWorldLocation(),
                         targetArea.getDisplayName(),
                         resolveInventoryPickaxeToKeep(miningLevel));
-                if (targetArea == Areas.GOLD_RIMMINGTON)
+                if (targetArea.isRimmingtonArea())
                 {
-                    depositGoldOresAtPortSarim(miningLevel);
+                    depositRimmingtonOresAtPortSarim(miningLevel);
                 }
                 else
                 {
@@ -414,6 +414,12 @@ public class MiningScript extends Script
             return true;
         }
 
+        if (isMiningInteractionPending())
+        {
+            Microbot.status = Rs2Player.isAnimating() ? "Mining" : "Moving to mining rock";
+            return true;
+        }
+
         Microbot.status = "Walking to " + targetArea.getDisplayName();
 
         if (KspWalkerGuard.walkToDestination(
@@ -491,7 +497,7 @@ public class MiningScript extends Script
         markBankAction();
     }
 
-    private void depositGoldOresAtPortSarim(int miningLevel)
+    private void depositRimmingtonOresAtPortSarim(int miningLevel)
     {
         if (!ensureInventoryTabOpenFast()) return;
 
@@ -645,6 +651,18 @@ public class MiningScript extends Script
     private void markBankAction()
     {
         lastBankActionAtMs = System.currentTimeMillis();
+    }
+
+    private boolean isMiningInteractionPending()
+    {
+        if (pendingObjectInteractionAtMs <= 0L) return false;
+        long age = System.currentTimeMillis() - pendingObjectInteractionAtMs;
+        if (age >= OBJECT_INTERACTION_START_TIMEOUT_MS)
+        {
+            pendingObjectInteractionAtMs = 0L;
+            return false;
+        }
+        return Rs2Player.isMoving() || Rs2Player.isAnimating() || Rs2Player.isInteracting();
     }
 
     private boolean canStartMiningInTargetArea(long now)
