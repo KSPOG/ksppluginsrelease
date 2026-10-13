@@ -7,7 +7,9 @@ import javax.inject.Singleton;
 import net.runelite.api.Skill;
 import net.runelite.api.coords.WorldArea;
 import net.runelite.api.coords.WorldPoint;
+import net.runelite.api.gameval.ObjectID;
 import net.runelite.api.widgets.Widget;
+import net.runelite.api.widgets.WidgetID;
 import net.runelite.client.plugins.microbot.Microbot;
 import net.runelite.client.plugins.microbot.Script;
 import net.runelite.client.plugins.microbot.api.tileobject.models.Rs2TileObjectModel;
@@ -43,7 +45,7 @@ public class FireMakingScript extends Script
     private static final int CAMPFIRE_DISTANCE = 6;
     private static final int NEARBY_CAMPFIRE_SCAN_RADIUS = 12;
 
-    private static final int NORMAL_FIRE_ID = 26185;
+    private static final int NORMAL_FIRE_ID = ObjectID.FIRE;
     private static final int FORESTERS_CAMPFIRE_ID = 49927;
 
     private static final String TINDERBOX_NAME = Buy.TINDERBOX_NAME;
@@ -156,6 +158,7 @@ public class FireMakingScript extends Script
                     isBurnInterfaceOpen(targetLogName, targetLogId),
                     awaitingFireStartAtMs != 0L);
 
+            if (dismissLevelUpInterface()) return;
             if (handleBurnPrompt(targetLogName, targetLogId)) return;
             if (!ensureSupplies(targetLogName, fireLocation != null)) return;
 
@@ -330,7 +333,9 @@ public class FireMakingScript extends Script
     private void useCampfire(int targetLogId, WorldPoint fireLocation)
     {
         if (!canBurnLog(targetLogId)) return;
-        if (fireLocation == null || !isInTargetArea(fireLocation)) return;
+        if (fireLocation == null) return;
+        WorldPoint player = Rs2Player.getWorldLocation();
+        if (player == null || (!isInTargetArea(fireLocation) && player.distanceTo(fireLocation) > CAMPFIRE_DISTANCE)) return;
         if (isBurnInterfaceOpen(null, targetLogId)) return;
 
         // Only the Forester campfire's actual option picker should block the next action.
@@ -411,6 +416,25 @@ public class FireMakingScript extends Script
         awaitingFireStartAtMs = now;
         expectingFiremakingXpDrop = true;
         tendingForestersCampfire = false;
+    }
+
+    private boolean dismissLevelUpInterface()
+    {
+        Widget levelUp = Rs2Widget.getWidget(WidgetID.LEVEL_UP_GROUP_ID, 0);
+        if (levelUp == null || levelUp.isHidden())
+        {
+            return false;
+        }
+
+        // RuneLite/Microbot exposes the dedicated level-up interface group. Do not
+        // treat every Continue dialogue as a level-up; only dismiss this exact widget.
+        // Escape removes the modal without driving dialogue state, then the normal
+        // Firemaking action retries on the next 100 ms loop.
+        Rs2Keyboard.keyPress(KeyEvent.VK_ESCAPE);
+        awaitingFireStartAtMs = 0L;
+        expectingFiremakingXpDrop = false;
+        Microbot.status = "Resuming Firemaking after level-up";
+        return true;
     }
 
     private boolean handleBurnPrompt(String targetLogName, int targetLogId)
@@ -595,7 +619,6 @@ public class FireMakingScript extends Script
         WorldPoint player = Rs2Player.getWorldLocation();
         return player != null
                 && fireLocation != null
-                && isInTargetArea(fireLocation)
                 && Rs2Player.distanceTo(fireLocation) <= CAMPFIRE_DISTANCE
                 && !Rs2Player.isAnimating();
     }
@@ -622,7 +645,6 @@ public class FireMakingScript extends Script
                 .within(playerLocation, NEARBY_CAMPFIRE_SCAN_RADIUS)
                 .where(object -> object.getWorldLocation() != null
                         && isValidFireId(object.getId())
-                        && isInTargetArea(object.getWorldLocation())
                         && (!forestersOnly || object.getId() == FORESTERS_CAMPFIRE_ID))
                 .nearest(playerLocation, NEARBY_CAMPFIRE_SCAN_RADIUS));
     }
@@ -656,7 +678,6 @@ public class FireMakingScript extends Script
                 .fromWorldView()
                 .where(object -> object.getWorldLocation() != null
                         && location.equals(object.getWorldLocation())
-                        && isInTargetArea(object.getWorldLocation())
                         && isValidFireId(object.getId()))
                 .first());
     }
