@@ -310,10 +310,45 @@ public abstract class SimpleQuestScript extends Script
 
     protected void talkTo(String name, WorldPoint destination)
     {
-        if (!walkTo(name, destination, 4)) return;
+        String key = questName + ":" + name;
         var npc = Microbot.getRs2NpcCache().query().fromWorldView().withName(name).nearestOnClientThread();
-        if (npc == null || npc.getWorldLocation() == null) { setStatus("Searching for " + name); return; }
-        if (!walkTo(name, npc.getWorldLocation(), 4) || Rs2Player.isMoving()) return;
+        WorldPoint player = Rs2Player.getWorldLocation();
+
+        // If the NPC is already in the nearby reachable scene, do not keep
+        // rendering/replacing a web-walk route to a moving target. Release the
+        // walker and interact with the NPC directly.
+        if (npc != null && npc.getWorldLocation() != null && player != null
+                && player.getPlane() == npc.getWorldLocation().getPlane()
+                && player.distanceTo(npc.getWorldLocation()) <= 8
+                && npc.isReachable())
+        {
+            KspWalkerGuard.clear(key);
+            KspWalkerGuard.clearActiveWalker(questName + ":reachable-npc:" + name);
+            if (!Rs2Player.isMoving())
+            {
+                state = QuestTaskState.INTERACTING;
+                setStatus("Talking to " + name);
+                if (npc.click("Talk-to"))
+                {
+                    actionSent();
+                    return;
+                }
+            }
+        }
+
+        WorldPoint target = npc != null && npc.getWorldLocation() != null
+                ? npc.getWorldLocation()
+                : destination;
+        if (!walkTo(name, target, 4)) return;
+
+        npc = Microbot.getRs2NpcCache().query().fromWorldView().withName(name).nearestOnClientThread();
+        if (npc == null || npc.getWorldLocation() == null)
+        {
+            setStatus("Searching for " + name);
+            return;
+        }
+        if (Rs2Player.isMoving() || !npc.isReachable()) return;
+        KspWalkerGuard.clear(key);
         state = QuestTaskState.INTERACTING;
         setStatus("Talking to " + name);
         if (npc.click("Talk-to")) actionSent();
