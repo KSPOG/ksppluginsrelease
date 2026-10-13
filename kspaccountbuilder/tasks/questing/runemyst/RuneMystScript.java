@@ -246,12 +246,20 @@ public class RuneMystScript extends Script
                 .nearestOnClientThread();
         WorldPoint playerLocation = Rs2Player.getWorldLocation();
 
-        if (npc == null || playerLocation == null || npc.getWorldLocation() == null
-                || playerLocation.distanceTo(npc.getWorldLocation()) > NPC_REACH_DISTANCE)
+        if (playerLocation == null || playerLocation.getPlane() != destination.getPlane()
+                || playerLocation.distanceTo(destination) > NPC_REACH_DISTANCE + 2)
         {
             state = walkingState;
             status = walkingStatus;
-            KspWalkerGuard.walkToPoint(walkKey, destination, NPC_REACH_DISTANCE, WALK_REFIRE_COOLDOWN_MS);
+            KspWalkerGuard.walkToPoint(walkKey, destination, NPC_REACH_DISTANCE + 2, WALK_REFIRE_COOLDOWN_MS);
+            return;
+        }
+
+        if (npc == null || npc.getWorldLocation() == null)
+        {
+            state = walkingState;
+            status = "Searching for " + npcName;
+            KspWalkerGuard.clear(walkKey);
             return;
         }
 
