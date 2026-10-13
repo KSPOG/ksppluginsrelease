@@ -7,6 +7,7 @@ import javax.inject.Singleton;
 import net.runelite.api.Skill;
 import net.runelite.api.coords.WorldArea;
 import net.runelite.api.coords.WorldPoint;
+import net.runelite.api.gameval.ObjectID;
 import net.runelite.api.widgets.Widget;
 import net.runelite.api.widgets.WidgetID;
 import net.runelite.client.plugins.microbot.Microbot;
@@ -44,7 +45,7 @@ public class FireMakingScript extends Script
     private static final int CAMPFIRE_DISTANCE = 6;
     private static final int NEARBY_CAMPFIRE_SCAN_RADIUS = 12;
 
-    private static final int NORMAL_FIRE_ID = 26185;
+    private static final int NORMAL_FIRE_ID = ObjectID.FIRE;
     private static final int FORESTERS_CAMPFIRE_ID = 49927;
 
     private static final String TINDERBOX_NAME = Buy.TINDERBOX_NAME;
@@ -425,9 +426,10 @@ public class FireMakingScript extends Script
             return false;
         }
 
-        // Use the dedicated RuneLite level-up group instead of treating every
-        // Continue dialogue as equivalent. Escape closes only the blocking level-up
-        // overlay and lets the normal Firemaking action resume next loop tick.
+        // RuneLite/Microbot exposes the dedicated level-up interface group. Do not
+        // treat every Continue dialogue as a level-up; only dismiss this exact widget.
+        // Escape removes the modal without driving dialogue state, then the normal
+        // Firemaking action retries on the next 100 ms loop.
         Rs2Keyboard.keyPress(KeyEvent.VK_ESCAPE);
         awaitingFireStartAtMs = 0L;
         expectingFiremakingXpDrop = false;
@@ -617,7 +619,6 @@ public class FireMakingScript extends Script
         WorldPoint player = Rs2Player.getWorldLocation();
         return player != null
                 && fireLocation != null
-                && isInTargetArea(fireLocation)
                 && Rs2Player.distanceTo(fireLocation) <= CAMPFIRE_DISTANCE
                 && !Rs2Player.isAnimating();
     }
@@ -677,7 +678,6 @@ public class FireMakingScript extends Script
                 .fromWorldView()
                 .where(object -> object.getWorldLocation() != null
                         && location.equals(object.getWorldLocation())
-                        && isInTargetArea(object.getWorldLocation())
                         && isValidFireId(object.getId()))
                 .first());
     }
