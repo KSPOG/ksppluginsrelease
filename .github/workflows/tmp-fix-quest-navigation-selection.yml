@@ -1,4 +1,4 @@
-name: Temporary quest navigation and selection fix
+name: Temporary quest navigation patch
 
 on:
   push:
@@ -15,150 +15,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: fix/quest-navigation-and-selection-balance
+          ref: fix/quest-navigation-stable-targets-v2
           fetch-depth: 0
       - name: Apply patch
-        shell: bash
+        run: python maintenance_patch_quest_navigation.py
+      - name: Commit patch
         run: |
-          python <<'PY'
-          from pathlib import Path
-
-          # Balance one-time quests below normal skilling weights.
-          p = Path('kspaccountbuilder/KspAccountBuilderScript.java')
-          s = p.read_text()
-          for task in (
-              'COOKS_ASSISTANT', 'GOBLIN_DIPLOMACY', 'ROMEO_AND_JULIET',
-              'RUNE_MYSTERIES', 'SHEEP_SHEARER', 'X_MARKS_THE_SPOT',
-              'THE_RESTLESS_GHOST', 'IMP_CATCHER', 'STRONGHOLD_OF_SECURITY'
-          ):
-              s = s.replace(task + '(7)', task + '(3)', 1)
-          p.write_text(s)
-
-          # Shared simple quests: keep web-walking anchored to the stable quest
-          # destination instead of the NPC's current roaming tile.
-          p = Path('kspaccountbuilder/tasks/questing/shared/SimpleQuestScript.java')
-          s = p.read_text()
-          old = '''        WorldPoint target = npc != null && npc.getWorldLocation() != null
-                ? npc.getWorldLocation()
-                : destination;
-        if (!walkTo(name, target, 4)) return;
-'''
-          new = '''        // Fall back to the stable quest location, never a moving NPC tile.
-        if (!walkTo(name, destination, 6)) return;
-'''
-          assert old in s, 'SimpleQuestScript dynamic fallback not found'
-          p.write_text(s.replace(old, new, 1))
-
-          # Rune Mysteries: proximity is based on its known quest destination,
-          # then the visible NPC is clicked locally.
-          p = Path('kspaccountbuilder/tasks/questing/runemyst/RuneMystScript.java')
-          s = p.read_text()
-          old = '''        if (npc == null || playerLocation == null || npc.getWorldLocation() == null
-                || playerLocation.distanceTo(npc.getWorldLocation()) > NPC_REACH_DISTANCE)
-        {
-            state = walkingState;
-            status = walkingStatus;
-            KspWalkerGuard.walkToPoint(walkKey, destination, NPC_REACH_DISTANCE, WALK_REFIRE_COOLDOWN_MS);
-            return;
-        }
-
-        state = talkingState;
-'''
-          new = '''        if (playerLocation == null || playerLocation.getPlane() != destination.getPlane()
-                || playerLocation.distanceTo(destination) > NPC_REACH_DISTANCE + 2)
-        {
-            state = walkingState;
-            status = walkingStatus;
-            KspWalkerGuard.walkToPoint(walkKey, destination, NPC_REACH_DISTANCE + 2, WALK_REFIRE_COOLDOWN_MS);
-            return;
-        }
-
-        if (npc == null || npc.getWorldLocation() == null)
-        {
-            state = walkingState;
-            status = "Searching for " + npcName;
-            KspWalkerGuard.clear(walkKey);
-            return;
-        }
-
-        state = talkingState;
-'''
-          assert old in s, 'RuneMyst NPC approach block not found'
-          p.write_text(s.replace(old, new, 1))
-
-          # Romeo & Juliet already has local reachable-NPC fast paths on this
-          # branch. Remove the remaining exact-live-tile fallbacks and relax the
-          # final staircase approach so the object interaction takes ownership.
-          p = Path('kspaccountbuilder/tasks/questing/romeoandjuliet/romeoscript/RomeoScript.java')
-          s = p.read_text()
-          s = s.replace('private static final int NPC_REACH_DISTANCE = 4;',
-                        'private static final int NPC_REACH_DISTANCE = 6;', 1)
-
-          old = '''        WorldPoint target = juliet != null && juliet.getWorldLocation() != null
-                ? juliet.getWorldLocation()
-                : JULIET_POSITION;
-
-        if (player.distanceTo(target) > NPC_REACH_DISTANCE)
-        {
-            state = potion ? RomeoState.RETURNING_POTION_TO_JULIET : RomeoState.WALKING_TO_JULIET_HALLWAY;
-            status = "Walking to Juliet";
-            KspWalkerGuard.walkToPoint(WALK_JULIET, target, NPC_REACH_DISTANCE, WALK_REFIRE_COOLDOWN_MS);
-            return;
-        }
-'''
-          new = '''        if (player.distanceTo(JULIET_POSITION) > NPC_REACH_DISTANCE)
-        {
-            state = potion ? RomeoState.RETURNING_POTION_TO_JULIET : RomeoState.WALKING_TO_JULIET_HALLWAY;
-            status = "Walking to Juliet's room";
-            KspWalkerGuard.walkToPoint(WALK_JULIET, JULIET_POSITION, NPC_REACH_DISTANCE, WALK_REFIRE_COOLDOWN_MS);
-            return;
-        }
-'''
-          assert old in s, 'Romeo Juliet live-target fallback not found'
-          s = s.replace(old, new, 1)
-
-          s = s.replace('if (player.distanceTo(JULIET_STAIR_APPROACH) > 1)',
-                        'if (player.distanceTo(JULIET_STAIR_APPROACH) > 3)', 1)
-          s = s.replace('KspWalkerGuard.walkToPoint(WALK_JULIET, JULIET_STAIR_APPROACH, 1, WALK_REFIRE_COOLDOWN_MS);',
-                        'KspWalkerGuard.walkToPoint(WALK_JULIET, JULIET_STAIR_APPROACH, 3, WALK_REFIRE_COOLDOWN_MS);', 1)
-
-          old = '''        WorldPoint target = npc != null && npc.getWorldLocation() != null
-                ? npc.getWorldLocation()
-                : destination;
-
-        if (npc == null || !npc.isReachable() || player.distanceTo(target) > NPC_REACH_DISTANCE)
-        {
-            state = walkingState;
-            status = "WebWalking to " + name;
-            KspWalkerGuard.walkToPoint(walkKey, target, NPC_REACH_DISTANCE, WALK_REFIRE_COOLDOWN_MS);
-            return;
-        }
-'''
-          new = '''        if (player.getPlane() != destination.getPlane()
-                || player.distanceTo(destination) > NPC_REACH_DISTANCE)
-        {
-            state = walkingState;
-            status = "Walking near " + name;
-            KspWalkerGuard.walkToPoint(walkKey, destination, NPC_REACH_DISTANCE, WALK_REFIRE_COOLDOWN_MS);
-            return;
-        }
-
-        if (npc == null || npc.getWorldLocation() == null)
-        {
-            KspWalkerGuard.clear(walkKey);
-            status = "Searching for " + name;
-            return;
-        }
-'''
-          assert old in s, 'Romeo dynamic NPC fallback not found'
-          s = s.replace(old, new, 1)
-          p.write_text(s)
-          PY
-      - name: Commit changes
-        shell: bash
-        run: |
+          rm maintenance_patch_quest_navigation.py
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add kspaccountbuilder
-          git commit -m "Fix quest navigation churn and rebalance task selection"
-          git push origin HEAD:fix/quest-navigation-and-selection-balance
+          git add -A
+          git commit -m "Stabilize quest navigation and rebalance selection"
+          git push origin HEAD:fix/quest-navigation-stable-targets-v2
