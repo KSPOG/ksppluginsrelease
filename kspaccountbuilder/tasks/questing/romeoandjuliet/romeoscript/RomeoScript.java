@@ -45,6 +45,10 @@ public class RomeoScript extends Script
 
     // Matches Quest Helper's Romeo & Juliet route/object locations.
     private static final WorldPoint JULIET_STAIR_ORIGIN = new WorldPoint(3157, 3436, 0);
+    // Reachable tile just east of the staircase. Stop the web walker here and
+    // interact with the stairs directly instead of letting the walker own the
+    // final 2-3 tiles inside Juliet's house.
+    private static final WorldPoint JULIET_STAIR_APPROACH = new WorldPoint(3159, 3436, 0);
     private static final WorldPoint JULIET_TOP_STAIR = new WorldPoint(3156, 3435, 1);
     private static final WorldPoint JULIET_POSITION = new WorldPoint(3158, 3427, 1);
     private static final WorldPoint ROMEO_POSITION = new WorldPoint(3211, 3422, 0);
@@ -284,9 +288,10 @@ public class RomeoScript extends Script
         // If Juliet's father intercepts us, take the non-hostile route.
         if (clickOption("I've just come to have a chat with Juliet.")) return true;
 
-        // Quest Helper uses this to leave stale Romeo/Father Lawrence menus.
-        // This specifically prevents the repeating "How are you?" loop.
-        if (clickOption("Ok, thanks.")) return true;
+        // Once the quest has progressed, informational Romeo/Lawrence menus can
+        // remain open even though movement should continue. Use a partial match
+        // so punctuation/cache text differences cannot trap the route.
+        if (stage > STAGE_NOT_STARTED && clickOptionPartial("Ok, thanks")) return true;
 
         // Do not guess. A wrong generic option can keep the quest on the same
         // stage forever; wait for a known quest option instead.
@@ -312,8 +317,14 @@ public class RomeoScript extends Script
 
     private boolean isStaleRomeoInfoMenu()
     {
+        // Romeo keeps offering informational menus after the quest var has
+        // already advanced. Those menus must not retain tick ownership because
+        // they block the next route (Juliet/Father Lawrence).
         return Rs2Dialogue.hasDialogueOption("Where can I find Juliet", false)
-                || Rs2Dialogue.hasDialogueOption("anything else you can tell me about Juliet", false);
+                || Rs2Dialogue.hasDialogueOption("anything else you can tell me about Juliet", false)
+                || Rs2Dialogue.hasDialogueOption("Where can I find Father Lawrence", false)
+                || Rs2Dialogue.hasDialogueOption("Have you heard anything from Juliet", false)
+                || Rs2Dialogue.hasDialogueOption("How are you", false);
     }
 
     private boolean ensureCadavaBerries()
@@ -387,9 +398,28 @@ public class RomeoScript extends Script
             return;
         }
 
+        Rs2NpcModel juliet = findNpc("Juliet");
+        if (juliet != null && juliet.getWorldLocation() != null
+                && player.getPlane() == juliet.getWorldLocation().getPlane()
+                && player.distanceTo(juliet.getWorldLocation()) <= 8
+                && juliet.isReachable())
+        {
+            KspWalkerGuard.clear(WALK_JULIET);
+            KspWalkerGuard.clearActiveWalker("ksp_romeo_reachable_juliet");
+            if (!Rs2Player.isMoving() && interactionReady())
+            {
+                state = RomeoState.TALKING_TO_JULIET;
+                status = potion ? "Giving potion to Juliet" : "Talking to Juliet";
+                if (juliet.click("Talk-to"))
+                {
+                    markInteraction("npc-juliet");
+                    return;
+                }
+            }
+        }
+
         if (passJulietRoomDoor()) return;
 
-        Rs2NpcModel juliet = findNpc("Juliet");
         WorldPoint target = juliet != null && juliet.getWorldLocation() != null
                 ? juliet.getWorldLocation()
                 : JULIET_POSITION;
@@ -413,20 +443,28 @@ public class RomeoScript extends Script
     private void climbToJuliet(WorldPoint player)
     {
         state = RomeoState.CLIMBING_TO_JULIET;
-        if (player.distanceTo(JULIET_STAIR_ORIGIN) > 2)
+
+        // Let the web walker handle the outside route and house door, but do not
+        // make the staircase object itself its destination. The core walker can
+        // otherwise keep a tiny final route alive at 3159,3436 and repeatedly
+        // re-run door/path checks instead of yielding to the stair interaction.
+        if (player.distanceTo(JULIET_STAIR_APPROACH) > 1)
         {
             status = "WebWalking to Juliet staircase";
-            KspWalkerGuard.walkToPoint(WALK_JULIET, JULIET_STAIR_ORIGIN, 2, WALK_REFIRE_COOLDOWN_MS);
+            KspWalkerGuard.walkToPoint(WALK_JULIET, JULIET_STAIR_APPROACH, 1, WALK_REFIRE_COOLDOWN_MS);
             return;
         }
 
+        // We are at the known reachable approach tile. Release walker ownership
+        // immediately and let the quest object interaction take over.
         KspWalkerGuard.clear(WALK_JULIET);
+        KspWalkerGuard.clearActiveWalker("ksp_romeo_at_juliet_staircase");
+        if (Rs2Player.isMoving()) return;
         if (!interactionReady()) return;
 
         status = "Climbing staircase to Juliet";
         if (Rs2GameObject.interact(ObjectID.FAI_VARROCK_STAIRS_TALLER, "Climb-up"))
         {
-            KspWalkerGuard.clearActiveWalker("ksp_romeo_using_juliet_staircase");
             markInteraction("stairs-up");
         }
     }
@@ -483,11 +521,34 @@ public class RomeoScript extends Script
         WorldPoint player = Rs2Player.getWorldLocation();
         if (player == null) return;
 
+        // A visible/reachable quest NPC takes priority over the walker. This is
+        // especially important for Father Lawrence and Romeo because their live
+        // NPC tile can move while the web walker is still targeting the previous
+        // location. Do not rebuild that route when a direct click is possible.
+        if (npc != null && npc.getWorldLocation() != null
+                && player.getPlane() == npc.getWorldLocation().getPlane()
+                && player.distanceTo(npc.getWorldLocation()) <= 8
+                && npc.isReachable())
+        {
+            KspWalkerGuard.clear(walkKey);
+            KspWalkerGuard.clearActiveWalker("ksp_romeo_reachable_npc_" + name);
+            if (!Rs2Player.isMoving() && interactionReady())
+            {
+                state = talkingState;
+                status = "Talking to " + name;
+                if (npc.click("Talk-to"))
+                {
+                    markInteraction("npc-" + name);
+                    return;
+                }
+            }
+        }
+
         WorldPoint target = npc != null && npc.getWorldLocation() != null
                 ? npc.getWorldLocation()
                 : destination;
 
-        if (player.distanceTo(target) > NPC_REACH_DISTANCE)
+        if (npc == null || !npc.isReachable() || player.distanceTo(target) > NPC_REACH_DISTANCE)
         {
             state = walkingState;
             status = "WebWalking to " + name;
@@ -496,7 +557,7 @@ public class RomeoScript extends Script
         }
 
         KspWalkerGuard.clear(walkKey);
-        if (npc == null || !interactionReady()) return;
+        if (!interactionReady()) return;
 
         state = talkingState;
         status = "Talking to " + name;
