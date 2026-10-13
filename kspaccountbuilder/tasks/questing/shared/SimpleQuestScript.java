@@ -336,10 +336,10 @@ public abstract class SimpleQuestScript extends Script
             }
         }
 
-        WorldPoint target = npc != null && npc.getWorldLocation() != null
-                ? npc.getWorldLocation()
-                : destination;
-        if (!walkTo(name, target, 4)) return;
+        // Never rebuild WebWalk to a roaming NPC's exact tile. The stable
+        // quest destination gets us into the interaction area; the NPC click
+        // handles the final local approach.
+        if (!walkTo(name, destination, 6)) return;
 
         npc = Microbot.getRs2NpcCache().query().fromWorldView().withName(name).nearestOnClientThread();
         if (npc == null || npc.getWorldLocation() == null)

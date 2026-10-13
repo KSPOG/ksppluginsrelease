@@ -29,7 +29,7 @@ public class RomeoScript extends Script
     private static final Logger log = LoggerFactory.getLogger(RomeoScript.class);
 
     private static final int LOOP_DELAY_MS = 80;
-    private static final int NPC_REACH_DISTANCE = 4;
+    private static final int NPC_REACH_DISTANCE = 6;
     private static final long WALK_REFIRE_COOLDOWN_MS = 900L;
     private static final long ACTION_COOLDOWN_MS = 200L;
     private static final long INTERACTION_TIMEOUT_MS = 2_500L;
@@ -420,15 +420,11 @@ public class RomeoScript extends Script
 
         if (passJulietRoomDoor()) return;
 
-        WorldPoint target = juliet != null && juliet.getWorldLocation() != null
-                ? juliet.getWorldLocation()
-                : JULIET_POSITION;
-
-        if (player.distanceTo(target) > NPC_REACH_DISTANCE)
+        if (player.distanceTo(JULIET_POSITION) > NPC_REACH_DISTANCE)
         {
             state = potion ? RomeoState.RETURNING_POTION_TO_JULIET : RomeoState.WALKING_TO_JULIET_HALLWAY;
-            status = "Walking to Juliet";
-            KspWalkerGuard.walkToPoint(WALK_JULIET, target, NPC_REACH_DISTANCE, WALK_REFIRE_COOLDOWN_MS);
+            status = "Walking to Juliet's room";
+            KspWalkerGuard.walkToPoint(WALK_JULIET, JULIET_POSITION, NPC_REACH_DISTANCE, WALK_REFIRE_COOLDOWN_MS);
             return;
         }
 
@@ -448,10 +444,10 @@ public class RomeoScript extends Script
         // make the staircase object itself its destination. The core walker can
         // otherwise keep a tiny final route alive at 3159,3436 and repeatedly
         // re-run door/path checks instead of yielding to the stair interaction.
-        if (player.distanceTo(JULIET_STAIR_APPROACH) > 1)
+        if (player.distanceTo(JULIET_STAIR_APPROACH) > 3)
         {
             status = "WebWalking to Juliet staircase";
-            KspWalkerGuard.walkToPoint(WALK_JULIET, JULIET_STAIR_APPROACH, 1, WALK_REFIRE_COOLDOWN_MS);
+            KspWalkerGuard.walkToPoint(WALK_JULIET, JULIET_STAIR_APPROACH, 3, WALK_REFIRE_COOLDOWN_MS);
             return;
         }
 
@@ -544,15 +540,19 @@ public class RomeoScript extends Script
             }
         }
 
-        WorldPoint target = npc != null && npc.getWorldLocation() != null
-                ? npc.getWorldLocation()
-                : destination;
-
-        if (npc == null || !npc.isReachable() || player.distanceTo(target) > NPC_REACH_DISTANCE)
+        if (player.getPlane() != destination.getPlane()
+                || player.distanceTo(destination) > NPC_REACH_DISTANCE)
         {
             state = walkingState;
-            status = "WebWalking to " + name;
-            KspWalkerGuard.walkToPoint(walkKey, target, NPC_REACH_DISTANCE, WALK_REFIRE_COOLDOWN_MS);
+            status = "Walking near " + name;
+            KspWalkerGuard.walkToPoint(walkKey, destination, NPC_REACH_DISTANCE, WALK_REFIRE_COOLDOWN_MS);
+            return;
+        }
+
+        if (npc == null || npc.getWorldLocation() == null)
+        {
+            KspWalkerGuard.clear(walkKey);
+            status = "Searching for " + name;
             return;
         }
 
