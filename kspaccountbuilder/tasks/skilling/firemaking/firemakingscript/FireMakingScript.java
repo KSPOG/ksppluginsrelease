@@ -232,11 +232,12 @@ public class FireMakingScript extends Script
 
         boolean hasItemsToDeposit = Rs2Inventory.all().stream()
                 .anyMatch(item -> item != null && item.getName() != null
-                        && !TINDERBOX_NAME.equalsIgnoreCase(item.getName()));
+                        && !TINDERBOX_NAME.equalsIgnoreCase(item.getName())
+                        && !targetLogName.equalsIgnoreCase(item.getName()));
         if (hasItemsToDeposit)
         {
             int beforeDeposit = Rs2Inventory.emptySlotCount();
-            if (Rs2Bank.depositAllExcept(TINDERBOX_NAME)) markBankAction(beforeDeposit);
+            if (Rs2Bank.depositAllExcept(TINDERBOX_NAME, targetLogName)) markBankAction(beforeDeposit);
             return false;
         }
 

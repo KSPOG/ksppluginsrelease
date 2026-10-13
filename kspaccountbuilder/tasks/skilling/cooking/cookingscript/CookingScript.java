@@ -200,10 +200,13 @@ public class CookingScript extends Script
 
         if (isBankInventoryActionPending()) return;
 
-        if (!Rs2Inventory.isEmpty())
+        boolean hasNonTaskItems = Rs2Inventory.all().stream()
+                .anyMatch(item -> item != null && item.getName() != null
+                        && !fish.getRawItemName().equalsIgnoreCase(item.getName()));
+        if (hasNonTaskItems)
         {
             int before = Rs2Inventory.emptySlotCount();
-            if (Rs2Bank.depositAll()) markBankInventoryAction(before);
+            if (Rs2Bank.depositAllExcept(fish.getRawItemName())) markBankInventoryAction(before);
             return;
         }
 
