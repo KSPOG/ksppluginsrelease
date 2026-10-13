@@ -1,0 +1,52 @@
+name: Temporary Romeo navigation patch
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - '.github/workflows/tmp-romeo-navigation-patch.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/romeo-navigation-stale-dialogue
+          fetch-depth: 0
+      - name: Patch RomeoScript
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('kspaccountbuilder/tasks/questing/romeoandjuliet/romeoscript/RomeoScript.java')
+          s = p.read_text()
+
+          old = '''    private static final WorldPoint JULIET_STAIR_ORIGIN = new WorldPoint(3157, 3436, 0);\n    private static final WorldPoint JULIET_TOP_STAIR = new WorldPoint(3156, 3435, 1);'''
+          new = '''    private static final WorldPoint JULIET_STAIR_ORIGIN = new WorldPoint(3157, 3436, 0);\n    // Reachable tile just east of the staircase. Stop the web walker here and\n    // interact with the stairs directly instead of letting the walker own the\n    // final 2-3 tiles inside Juliet's house.\n    private static final WorldPoint JULIET_STAIR_APPROACH = new WorldPoint(3159, 3436, 0);\n    private static final WorldPoint JULIET_TOP_STAIR = new WorldPoint(3156, 3435, 1);'''
+          assert old in s, 'stair constants block not found'
+          s = s.replace(old, new, 1)
+
+          old = '''    private boolean isStaleRomeoInfoMenu()\n    {\n        return Rs2Dialogue.hasDialogueOption(\"Where can I find Juliet\", false)\n                || Rs2Dialogue.hasDialogueOption(\"anything else you can tell me about Juliet\", false);\n    }'''
+          new = '''    private boolean isStaleRomeoInfoMenu()\n    {\n        // Romeo keeps offering informational menus after the quest var has\n        // already advanced. Those menus must not retain tick ownership because\n        // they block the next route (Juliet/Father Lawrence).\n        return Rs2Dialogue.hasDialogueOption(\"Where can I find Juliet\", false)\n                || Rs2Dialogue.hasDialogueOption(\"anything else you can tell me about Juliet\", false)\n                || Rs2Dialogue.hasDialogueOption(\"Where can I find Father Lawrence\", false)\n                || Rs2Dialogue.hasDialogueOption(\"Have you heard anything from Juliet\", false)\n                || Rs2Dialogue.hasDialogueOption(\"How are you\", false);\n    }'''
+          assert old in s, 'stale Romeo menu method not found'
+          s = s.replace(old, new, 1)
+
+          old = '''    private void climbToJuliet(WorldPoint player)\n    {\n        state = RomeoState.CLIMBING_TO_JULIET;\n        if (player.distanceTo(JULIET_STAIR_ORIGIN) > 2)\n        {\n            status = \"WebWalking to Juliet staircase\";\n            KspWalkerGuard.walkToPoint(WALK_JULIET, JULIET_STAIR_ORIGIN, 2, WALK_REFIRE_COOLDOWN_MS);\n            return;\n        }\n\n        KspWalkerGuard.clear(WALK_JULIET);\n        if (!interactionReady()) return;\n\n        status = \"Climbing staircase to Juliet\";\n        if (Rs2GameObject.interact(ObjectID.FAI_VARROCK_STAIRS_TALLER, \"Climb-up\"))\n        {\n            KspWalkerGuard.clearActiveWalker(\"ksp_romeo_using_juliet_staircase\");\n            markInteraction(\"stairs-up\");\n        }\n    }'''
+          new = '''    private void climbToJuliet(WorldPoint player)\n    {\n        state = RomeoState.CLIMBING_TO_JULIET;\n\n        // Let the web walker handle the outside route and house door, but do not\n        // make the staircase object itself its destination. The core walker can\n        // otherwise keep a tiny final route alive at 3159,3436 and repeatedly\n        // re-run door/path checks instead of yielding to the stair interaction.\n        if (player.distanceTo(JULIET_STAIR_APPROACH) > 1)\n        {\n            status = \"WebWalking to Juliet staircase\";\n            KspWalkerGuard.walkToPoint(WALK_JULIET, JULIET_STAIR_APPROACH, 1, WALK_REFIRE_COOLDOWN_MS);\n            return;\n        }\n\n        // We are at the known reachable approach tile. Release walker ownership\n        // immediately and let the quest object interaction take over.\n        KspWalkerGuard.clear(WALK_JULIET);\n        KspWalkerGuard.clearActiveWalker(\"ksp_romeo_at_juliet_staircase\");\n        if (Rs2Player.isMoving()) return;\n        if (!interactionReady()) return;\n\n        status = \"Climbing staircase to Juliet\";\n        if (Rs2GameObject.interact(ObjectID.FAI_VARROCK_STAIRS_TALLER, \"Climb-up\"))\n        {\n            markInteraction(\"stairs-up\");\n        }\n    }'''
+          assert old in s, 'climbToJuliet method not found'
+          s = s.replace(old, new, 1)
+
+          p.write_text(s)
+          PY
+      - name: Commit patch
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add kspaccountbuilder/tasks/questing/romeoandjuliet/romeoscript/RomeoScript.java
+          git commit -m "Fix Romeo dialogue handoff and Juliet stair navigation"
+          git push origin HEAD:fix/romeo-navigation-stale-dialogue
