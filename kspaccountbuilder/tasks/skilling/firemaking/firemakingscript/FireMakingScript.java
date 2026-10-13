@@ -333,9 +333,12 @@ public class FireMakingScript extends Script
         if (fireLocation == null || !isInTargetArea(fireLocation)) return;
         if (isBurnInterfaceOpen(null, targetLogId)) return;
 
-        if (Rs2Dialogue.isInDialogue())
+        // Only the Forester campfire's actual option picker should block the next action.
+        // Generic Continue dialogues (including level-up messages) are deliberately ignored:
+        // the next Tend-to/use action dismisses them naturally and keeps Firemaking moving.
+        if (Rs2Dialogue.hasSelectAnOption())
         {
-            handleForesterCampfireDialogue();
+            Rs2Dialogue.keyPressForDialogueOption(1);
             return;
         }
 
@@ -579,17 +582,6 @@ public class FireMakingScript extends Script
         activeFireInteractionLocation = null;
         activeFireInteractionId = -1;
         KspWalkerGuard.clear("Firemaking:campfire");
-    }
-
-    private void handleForesterCampfireDialogue()
-    {
-        if (!Rs2Dialogue.isInDialogue()) return;
-        if (Rs2Dialogue.hasContinue())
-        {
-            Rs2Dialogue.clickContinue();
-            return;
-        }
-        if (Rs2Dialogue.hasSelectAnOption()) Rs2Dialogue.keyPressForDialogueOption(1);
     }
 
     private boolean isIdleInTargetArea()
