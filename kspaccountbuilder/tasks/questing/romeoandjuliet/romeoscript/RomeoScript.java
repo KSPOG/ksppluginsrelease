@@ -45,6 +45,10 @@ public class RomeoScript extends Script
 
     // Matches Quest Helper's Romeo & Juliet route/object locations.
     private static final WorldPoint JULIET_STAIR_ORIGIN = new WorldPoint(3157, 3436, 0);
+    // Reachable tile just east of the staircase. Stop the web walker here and
+    // interact with the stairs directly instead of letting the walker own the
+    // final 2-3 tiles inside Juliet's house.
+    private static final WorldPoint JULIET_STAIR_APPROACH = new WorldPoint(3159, 3436, 0);
     private static final WorldPoint JULIET_TOP_STAIR = new WorldPoint(3156, 3435, 1);
     private static final WorldPoint JULIET_POSITION = new WorldPoint(3158, 3427, 1);
     private static final WorldPoint ROMEO_POSITION = new WorldPoint(3211, 3422, 0);
@@ -312,8 +316,14 @@ public class RomeoScript extends Script
 
     private boolean isStaleRomeoInfoMenu()
     {
+        // Romeo keeps offering informational menus after the quest var has
+        // already advanced. Those menus must not retain tick ownership because
+        // they block the next route (Juliet/Father Lawrence).
         return Rs2Dialogue.hasDialogueOption("Where can I find Juliet", false)
-                || Rs2Dialogue.hasDialogueOption("anything else you can tell me about Juliet", false);
+                || Rs2Dialogue.hasDialogueOption("anything else you can tell me about Juliet", false)
+                || Rs2Dialogue.hasDialogueOption("Where can I find Father Lawrence", false)
+                || Rs2Dialogue.hasDialogueOption("Have you heard anything from Juliet", false)
+                || Rs2Dialogue.hasDialogueOption("How are you", false);
     }
 
     private boolean ensureCadavaBerries()
@@ -413,20 +423,28 @@ public class RomeoScript extends Script
     private void climbToJuliet(WorldPoint player)
     {
         state = RomeoState.CLIMBING_TO_JULIET;
-        if (player.distanceTo(JULIET_STAIR_ORIGIN) > 2)
+
+        // Let the web walker handle the outside route and house door, but do not
+        // make the staircase object itself its destination. The core walker can
+        // otherwise keep a tiny final route alive at 3159,3436 and repeatedly
+        // re-run door/path checks instead of yielding to the stair interaction.
+        if (player.distanceTo(JULIET_STAIR_APPROACH) > 1)
         {
             status = "WebWalking to Juliet staircase";
-            KspWalkerGuard.walkToPoint(WALK_JULIET, JULIET_STAIR_ORIGIN, 2, WALK_REFIRE_COOLDOWN_MS);
+            KspWalkerGuard.walkToPoint(WALK_JULIET, JULIET_STAIR_APPROACH, 1, WALK_REFIRE_COOLDOWN_MS);
             return;
         }
 
+        // We are at the known reachable approach tile. Release walker ownership
+        // immediately and let the quest object interaction take over.
         KspWalkerGuard.clear(WALK_JULIET);
+        KspWalkerGuard.clearActiveWalker("ksp_romeo_at_juliet_staircase");
+        if (Rs2Player.isMoving()) return;
         if (!interactionReady()) return;
 
         status = "Climbing staircase to Juliet";
         if (Rs2GameObject.interact(ObjectID.FAI_VARROCK_STAIRS_TALLER, "Climb-up"))
         {
-            KspWalkerGuard.clearActiveWalker("ksp_romeo_using_juliet_staircase");
             markInteraction("stairs-up");
         }
     }
