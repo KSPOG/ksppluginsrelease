@@ -286,30 +286,50 @@ public class EssenceMining extends Script
         status = "Leaving rune essence mine";
         if (Rs2Player.isAnimating() || Rs2Player.isInteracting() || isWorldActionPending("portal") || !canAct()) return;
 
+        WorldPoint player = Rs2Player.getWorldLocation();
+        WorldPoint portalLocation = getNearestPortalLocation();
+
         var portal = Microbot.getRs2TileObjectCache().query()
+                .fromWorldView()
                 .withId(ESSENCE_MINE_PORTAL_ID)
                 .nearestOnClientThread();
-        if (portal == null) {
+        if (portal == null)
+        {
             portal = Microbot.getRs2TileObjectCache().query()
+                    .fromWorldView()
                     .withName("Portal")
                     .nearestOnClientThread();
         }
 
         if (portal == null)
         {
+            if (player != null && player.distanceTo(portalLocation) <= PORTAL_APPROACH_DISTANCE)
+            {
+                KspWalkerGuard.clear(WALK_KEY_PORTAL);
+                status = "Waiting for rune essence portal";
+                return;
+            }
+
             status = "Walking to rune essence portal";
             KspWalkerGuard.walkFastCanvasToPoint(
                     WALK_KEY_PORTAL,
-                    getNearestPortalLocation(),
+                    portalLocation,
                     PORTAL_APPROACH_DISTANCE,
                     WALK_REFIRE_COOLDOWN_MS);
             return;
         }
 
         KspWalkerGuard.clear(WALK_KEY_PORTAL);
-        if (portal.click()) {
+        boolean clicked = portal.click("Exit");
+        if (!clicked)
+        {
+            clicked = portal.click();
+        }
+        if (clicked)
+        {
             lastActionAtMs = System.currentTimeMillis();
             markWorldAction("portal");
+            status = "Exiting rune essence mine";
         }
     }
 
