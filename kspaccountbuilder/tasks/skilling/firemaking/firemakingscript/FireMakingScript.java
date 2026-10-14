@@ -158,7 +158,7 @@ public class FireMakingScript extends Script
                     isBurnInterfaceOpen(targetLogName, targetLogId),
                     awaitingFireStartAtMs != 0L);
 
-            handleLevelUpInterface();
+            if (handleLevelUpInterface()) return;
             if (handleBurnPrompt(targetLogName, targetLogId)) return;
             if (!ensureSupplies(targetLogName, fireLocation != null)) return;
 
@@ -187,15 +187,26 @@ public class FireMakingScript extends Script
             if (firemakingLevel >= logsLvl.getRequiredLevel()) bestMatch = logsLvl;
         }
         if (bestMatch == null) return null;
-        if (hasLogsAvailable(bestMatch.getDisplayName())) return bestMatch.getDisplayName();
 
-        for (int i = bestMatch.ordinal() - 1; i >= 0; i--)
+        // Never switch log tiers halfway through an inventory. If a lower tier was
+        // already withdrawn before a level-up, finish it first and upgrade on the
+        // next banking cycle.
+        for (LogsLvl logsLvl : LogsLvl.values())
         {
-            LogsLvl fallbackLogs = LogsLvl.values()[i];
-            if (firemakingLevel >= LogsLvl.WILLOW_LOGS.getRequiredLevel()) continue;
-            if (firemakingLevel >= LogsLvl.OAK_LOGS.getRequiredLevel() && fallbackLogs == LogsLvl.LOGS) continue;
-            String fallbackLogName = fallbackLogs.getDisplayName();
-            if (hasLogsAvailable(fallbackLogName)) return fallbackLogName;
+            if (firemakingLevel >= logsLvl.getRequiredLevel()
+                    && Rs2Inventory.hasItem(getTargetLogId(logsLvl.getDisplayName())))
+            {
+                return logsLvl.getDisplayName();
+            }
+        }
+
+        // Otherwise prefer the highest unlocked tier that is actually available.
+        // If none are available, return the best unlocked tier so the surrounding
+        // account-builder supply flow can acquire it as before.
+        for (int i = bestMatch.ordinal(); i >= 0; i--)
+        {
+            LogsLvl candidate = LogsLvl.values()[i];
+            if (hasLogsAvailable(candidate.getDisplayName())) return candidate.getDisplayName();
         }
         return bestMatch.getDisplayName();
     }
@@ -336,12 +347,9 @@ public class FireMakingScript extends Script
         if (!canBurnLog(targetLogId)) return;
         if (fireLocation == null) return;
         WorldPoint player = Rs2Player.getWorldLocation();
-        if (player == null || (!isInTargetArea(fireLocation) && player.distanceTo(fireLocation) > CAMPFIRE_DISTANCE)) return;
+        if (player == null || !isInTargetArea(player) || !isInTargetArea(fireLocation)) return;
         if (isBurnInterfaceOpen(null, targetLogId)) return;
 
-        // Only the Forester campfire's actual option picker should block the next action.
-        // Generic Continue dialogues (including level-up messages) are deliberately ignored:
-        // the next Tend-to/use action dismisses them naturally and keeps Firemaking moving.
         if (Rs2Dialogue.hasSelectAnOption())
         {
             Rs2Dialogue.keyPressForDialogueOption(1);
@@ -419,22 +427,28 @@ public class FireMakingScript extends Script
         tendingForestersCampfire = false;
     }
 
-    private void handleLevelUpInterface()
+    private boolean handleLevelUpInterface()
     {
         Widget levelUp = Rs2Widget.getWidget(WidgetID.LEVEL_UP_GROUP_ID, 0);
         if (levelUp == null || levelUp.isHidden())
         {
-            return;
+            return false;
         }
 
-        // A level-up dialogue must not become a Firemaking state of its own. Clear
-        // stale action tracking, then continue this same loop into the real task
-        // interaction. Tend-to / use-log-on-fire / tinderbox+log will dismiss the
-        // modal naturally when the game accepts the next action.
         awaitingFireStartAtMs = 0L;
         expectingFiremakingXpDrop = false;
         lastBurnPromptActionAtMs = 0L;
-        Microbot.status = "Continuing Firemaking through level-up";
+        Microbot.status = "Handling Firemaking level-up";
+
+        if (Rs2Dialogue.hasContinue())
+        {
+            Rs2Dialogue.clickContinue();
+        }
+        else
+        {
+            Rs2Keyboard.keyPress(KeyEvent.VK_SPACE);
+        }
+        return true;
     }
 
     private boolean handleBurnPrompt(String targetLogName, int targetLogId)
@@ -625,6 +639,9 @@ public class FireMakingScript extends Script
 
     private WorldPoint findUsableFireLocation()
     {
+        WorldPoint playerLocation = Rs2Player.getWorldLocation();
+        if (playerLocation == null || !isInTargetArea(playerLocation)) return null;
+
         Rs2TileObjectModel nearbyForestersCampfire = findNearestFireObjectNearPlayer(true);
         if (nearbyForestersCampfire != null) return nearbyForestersCampfire.getWorldLocation();
 
@@ -644,6 +661,7 @@ public class FireMakingScript extends Script
                 .fromWorldView()
                 .within(playerLocation, NEARBY_CAMPFIRE_SCAN_RADIUS)
                 .where(object -> object.getWorldLocation() != null
+                        && isInTargetArea(object.getWorldLocation())
                         && isValidFireId(object.getId())
                         && (!forestersOnly || object.getId() == FORESTERS_CAMPFIRE_ID))
                 .nearest(playerLocation, NEARBY_CAMPFIRE_SCAN_RADIUS));
