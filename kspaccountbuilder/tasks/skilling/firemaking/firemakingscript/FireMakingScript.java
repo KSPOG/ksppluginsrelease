@@ -158,7 +158,7 @@ public class FireMakingScript extends Script
                     isBurnInterfaceOpen(targetLogName, targetLogId),
                     awaitingFireStartAtMs != 0L);
 
-            if (dismissLevelUpInterface()) return;
+            handleLevelUpInterface();
             if (handleBurnPrompt(targetLogName, targetLogId)) return;
             if (!ensureSupplies(targetLogName, fireLocation != null)) return;
 
@@ -419,23 +419,22 @@ public class FireMakingScript extends Script
         tendingForestersCampfire = false;
     }
 
-    private boolean dismissLevelUpInterface()
+    private void handleLevelUpInterface()
     {
         Widget levelUp = Rs2Widget.getWidget(WidgetID.LEVEL_UP_GROUP_ID, 0);
         if (levelUp == null || levelUp.isHidden())
         {
-            return false;
+            return;
         }
 
-        // RuneLite/Microbot exposes the dedicated level-up interface group. Do not
-        // treat every Continue dialogue as a level-up; only dismiss this exact widget.
-        // Escape removes the modal without driving dialogue state, then the normal
-        // Firemaking action retries on the next 100 ms loop.
-        Rs2Keyboard.keyPress(KeyEvent.VK_ESCAPE);
+        // A level-up dialogue must not become a Firemaking state of its own. Clear
+        // stale action tracking, then continue this same loop into the real task
+        // interaction. Tend-to / use-log-on-fire / tinderbox+log will dismiss the
+        // modal naturally when the game accepts the next action.
         awaitingFireStartAtMs = 0L;
         expectingFiremakingXpDrop = false;
-        Microbot.status = "Resuming Firemaking after level-up";
-        return true;
+        lastBurnPromptActionAtMs = 0L;
+        Microbot.status = "Continuing Firemaking through level-up";
     }
 
     private boolean handleBurnPrompt(String targetLogName, int targetLogId)
