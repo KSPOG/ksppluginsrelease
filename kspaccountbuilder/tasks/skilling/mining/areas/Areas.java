@@ -60,17 +60,47 @@ public enum Areas
 
     public static Areas randomTinCopperArea()
     {
-        Areas[] matching = Arrays.stream(values())
-                .filter(area -> area.supportsRock(RockLevel.TIN) && area.supportsRock(RockLevel.COPPER))
-                .toArray(Areas[]::new);
-        return randomFrom(matching);
+        return randomSurfaceAreaForRocks(RockLevel.TIN, RockLevel.COPPER);
     }
 
-    public static Areas randomIronArea() { return randomAreaForRock(RockLevel.IRON); }
-    public static Areas randomCoalArea() { return randomAreaForRock(RockLevel.COAL); }
-    public static Areas randomGoldArea() { return randomAreaForRock(RockLevel.GOLD); }
-    public static Areas randomMithrilArea() { return randomAreaForRock(RockLevel.MITHRIL); }
+    public static Areas randomIronArea() { return randomSurfaceAreaForRock(RockLevel.IRON); }
+    public static Areas randomCoalArea() { return randomSurfaceAreaForRock(RockLevel.COAL); }
+    public static Areas randomGoldArea() { return randomSurfaceAreaForRock(RockLevel.GOLD); }
+    public static Areas randomMithrilArea() { return randomSurfaceAreaForRock(RockLevel.MITHRIL); }
     public static Areas randomAdamantArea() { return randomAreaForRock(RockLevel.ADAMANT); }
+
+    private static Areas randomSurfaceAreaForRocks(RockLevel... rocks)
+    {
+        Areas[] matching = Arrays.stream(values())
+                .filter(area -> !area.isUnderground())
+                .filter(area -> Arrays.stream(rocks).allMatch(area::supportsRock))
+                .toArray(Areas[]::new);
+
+        if (matching.length > 0)
+        {
+            return randomFrom(matching);
+        }
+
+        Areas[] fallback = Arrays.stream(values())
+                .filter(area -> Arrays.stream(rocks).allMatch(area::supportsRock))
+                .toArray(Areas[]::new);
+        return randomFrom(fallback);
+    }
+
+    private static Areas randomSurfaceAreaForRock(RockLevel rock)
+    {
+        Areas[] matching = Arrays.stream(values())
+                .filter(area -> !area.isUnderground())
+                .filter(area -> area.supportsRock(rock))
+                .toArray(Areas[]::new);
+
+        if (matching.length > 0)
+        {
+            return randomFrom(matching);
+        }
+
+        return randomAreaForRock(rock);
+    }
 
     private static Areas randomAreaForRock(RockLevel rock)
     {
@@ -96,6 +126,17 @@ public enum Areas
     public boolean isGoldArea() { return supportsRock(RockLevel.GOLD); }
     public boolean isMithrilArea() { return supportsRock(RockLevel.MITHRIL); }
     public boolean isAdamantArea() { return supportsRock(RockLevel.ADAMANT); }
+
+    /**
+     * Underground OSRS map regions use the 9xxx Y-coordinate range. The generic
+     * account-builder walker cannot directly path from a surface tile into those
+     * regions without an explicit entrance/transport step, so progressive random
+     * area selection must prefer surface alternatives when they exist.
+     */
+    public boolean isUnderground()
+    {
+        return worldArea.getY() >= 9_000;
+    }
 
     public boolean isRimmingtonArea()
     {
