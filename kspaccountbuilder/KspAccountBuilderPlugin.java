@@ -11,9 +11,7 @@ import net.runelite.client.plugins.microbot.Microbot;
 import net.runelite.client.plugins.microbot.PluginConstants;
 import net.runelite.client.plugins.microbot.breakhandler.BreakHandlerPlugin;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.ksputil.randomevents.KspRandomEventSolver;
-import net.runelite.client.plugins.microbot.util.antiban.Rs2Antiban;
 import net.runelite.client.plugins.microbot.util.antiban.Rs2AntibanSettings;
-import net.runelite.client.plugins.microbot.util.player.Rs2Player;
 import net.runelite.client.ui.overlay.OverlayManager;
 
 import javax.inject.Inject;
@@ -35,10 +33,6 @@ public class KspAccountBuilderPlugin extends Plugin
 {
     public static final String VERSION = "1.9.14";
 
-    private static final long SKILLING_MOUSE_ANTIBAN_MIN_DELAY_MS = 12_000L;
-    private static final long SKILLING_MOUSE_ANTIBAN_MAX_DELAY_MS = 35_000L;
-    private static final int SKILLING_MOUSE_OFFSCREEN_CHANCE_PERCENT = 40;
-
     @Inject
     private KspAccountBuilderScript script;
 
@@ -55,10 +49,10 @@ public class KspAccountBuilderPlugin extends Plugin
     private OverlayManager overlayManager;
 
     private KspRandomEventSolver randomEventSolver;
+    private final KspAccountBuilderSkillingAntiban skillingAntiban = new KspAccountBuilderSkillingAntiban();
     private boolean runtimeActive;
     private String antibanDecisionKey;
     private boolean antibanEnabledForCurrentTask;
-    private long nextSkillingMouseAntibanAtMillis;
 
     @Provides
     KspAccountBuilderConfig provideConfig(ConfigManager configManager)
@@ -130,7 +124,7 @@ public class KspAccountBuilderPlugin extends Plugin
         {
             antibanDecisionKey = decisionKey;
             antibanEnabledForCurrentTask = rollAntibanForTask(taskName, useAntiban, chance);
-            nextSkillingMouseAntibanAtMillis = 0L;
+            skillingAntiban.reset();
             log.info("Account Builder antiban decision | task={} enabled={} chance={}%%",
                     taskName, antibanEnabledForCurrentTask, chance);
         }
@@ -140,7 +134,12 @@ public class KspAccountBuilderPlugin extends Plugin
         // decision for the complete task and prevents a skipped roll from becoming
         // active merely because the task-specific template was reapplied.
         Rs2AntibanSettings.antibanEnabled = antibanEnabledForCurrentTask;
-        handleSkillingMouseAntiban(taskName);
+
+        // Custom skilling humanization follows the event/state-aware pattern used
+        // by the other KSP antiban controllers: it reacts to a new skilling action
+        // and safe long-running idle windows instead of moving the mouse on a fixed
+        // timer regardless of what the task script is doing.
+        skillingAntiban.tick(taskName, antibanEnabledForCurrentTask);
     }
 
     private boolean rollAntibanForTask(String taskName, boolean useAntiban, int chance)
@@ -156,94 +155,11 @@ public class KspAccountBuilderPlugin extends Plugin
         return ThreadLocalRandom.current().nextInt(100) < chance;
     }
 
-    private void handleSkillingMouseAntiban(String taskName)
-    {
-        if (!antibanEnabledForCurrentTask || !isSkillingTask(taskName) || !Microbot.isLoggedIn())
-        {
-            nextSkillingMouseAntibanAtMillis = 0L;
-            return;
-        }
-
-        long now = System.currentTimeMillis();
-        if (nextSkillingMouseAntibanAtMillis <= 0L)
-        {
-            scheduleNextSkillingMouseAntiban(now);
-            return;
-        }
-        if (now < nextSkillingMouseAntibanAtMillis)
-        {
-            return;
-        }
-
-        // Only move the mouse while the player is already occupied with a skill
-        // action. This avoids stealing the cursor while a new interaction or walk
-        // is about to be issued by the task script.
-        if (Rs2Player.isMoving() || (!Rs2Player.isAnimating() && !Rs2Player.isInteracting()))
-        {
-            return;
-        }
-
-        try
-        {
-            int roll = ThreadLocalRandom.current().nextInt(100);
-            if (roll < SKILLING_MOUSE_OFFSCREEN_CHANCE_PERCENT)
-            {
-                Rs2Antiban.moveMouseOffScreen();
-                log.debug("Account Builder skilling antiban moved mouse off-screen | task={}", taskName);
-            }
-            else
-            {
-                Rs2Antiban.moveMouseRandomly();
-                log.debug("Account Builder skilling antiban moved mouse randomly | task={}", taskName);
-            }
-        }
-        catch (Exception ex)
-        {
-            log.debug("Account Builder skilling mouse antiban skipped | task={} reason={}", taskName, ex.getMessage());
-        }
-        finally
-        {
-            scheduleNextSkillingMouseAntiban(now);
-        }
-    }
-
-    private void scheduleNextSkillingMouseAntiban(long now)
-    {
-        long delay = ThreadLocalRandom.current().nextLong(
-                SKILLING_MOUSE_ANTIBAN_MIN_DELAY_MS,
-                SKILLING_MOUSE_ANTIBAN_MAX_DELAY_MS + 1L);
-        nextSkillingMouseAntibanAtMillis = now + delay;
-    }
-
-    private boolean isSkillingTask(String taskName)
-    {
-        if (taskName == null)
-        {
-            return false;
-        }
-        switch (taskName)
-        {
-            case "RUNE_ESSENCE":
-            case "MINING":
-            case "WOODCUTTING":
-            case "FIREMAKING":
-            case "FISHING":
-            case "COOKING":
-            case "CRAFTING":
-            case "MELEE":
-            case "SMITHING":
-            case "SMELTING":
-                return true;
-            default:
-                return false;
-        }
-    }
-
     private void resetAntibanChanceDecision()
     {
         antibanDecisionKey = null;
         antibanEnabledForCurrentTask = false;
-        nextSkillingMouseAntibanAtMillis = 0L;
+        skillingAntiban.reset();
         Rs2AntibanSettings.antibanEnabled = false;
     }
 
