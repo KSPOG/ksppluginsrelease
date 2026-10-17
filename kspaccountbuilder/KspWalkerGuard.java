@@ -47,10 +47,24 @@ public final class KspWalkerGuard
             KEY_TARGETS.put(walkKey, target);
         }
 
-        if (!mayDispatch(walkKey, target, arriveDistance)) return false;
+        int effectiveArriveDistance = Math.max(0, arriveDistance);
+        // A destination matcher can be stricter than the walker's arrival radius.
+        // If the player is already within that radius but the matcher still says
+        // the destination has not been reached, force an exact walk. Otherwise the
+        // core walker can immediately consider the route complete while callers
+        // keep retrying forever (for example Firemaking stepping one tile outside
+        // its configured area after lighting a fire).
+        if (player != null
+                && !destinationMatcher.test(player)
+                && isSameDestination(player, target, effectiveArriveDistance))
+        {
+            effectiveArriveDistance = 0;
+        }
+
+        if (!mayDispatch(walkKey, target, effectiveArriveDistance)) return false;
 
         activeWalkerKey = walkKey;
-        Rs2Walker.walkTo(target, arriveDistance);
+        Rs2Walker.walkTo(target, effectiveArriveDistance);
         return true;
     }
 
