@@ -76,7 +76,7 @@ public interface KspAccountBuilderConfig extends Config
     @ConfigItem(
             keyName = "antibanChancePercent",
             name = "Antiban Chance (%)",
-            description = "Chance that antiban is active for each newly selected task. 0% disables activation; 100% always activates it.",
+            description = "Chance that each eligible custom antiban action triggers. Antiban stays enabled while Use Antiban is checked.",
             position = 1,
             section = antibanSection
     )

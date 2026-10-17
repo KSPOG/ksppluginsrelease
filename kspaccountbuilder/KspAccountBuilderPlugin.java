@@ -15,7 +15,6 @@ import net.runelite.client.plugins.microbot.util.antiban.Rs2AntibanSettings;
 import net.runelite.client.ui.overlay.OverlayManager;
 
 import javax.inject.Inject;
-import java.util.concurrent.ThreadLocalRandom;
 
 @PluginDescriptor(
         name = PluginConstants.KSP + "Account Builder",
@@ -31,7 +30,7 @@ import java.util.concurrent.ThreadLocalRandom;
 @SuppressWarnings("unused")
 public class KspAccountBuilderPlugin extends Plugin
 {
-    public static final String VERSION = "1.9.15";
+    public static final String VERSION = "1.9.16";
 
     @Inject
     private KspAccountBuilderScript script;
@@ -51,8 +50,7 @@ public class KspAccountBuilderPlugin extends Plugin
     private KspRandomEventSolver randomEventSolver;
     private final KspAccountBuilderSkillingAntiban skillingAntiban = new KspAccountBuilderSkillingAntiban();
     private boolean runtimeActive;
-    private String antibanDecisionKey;
-    private boolean antibanEnabledForCurrentTask;
+    private String antibanStateKey;
 
     @Provides
     KspAccountBuilderConfig provideConfig(ConfigManager configManager)
@@ -74,7 +72,7 @@ public class KspAccountBuilderPlugin extends Plugin
         Microbot.getBlockingEventManager().add(randomEventSolver);
 
         runtimeActive = true;
-        resetAntibanChanceDecision();
+        resetAntibanState();
         script.run(config);
     }
 
@@ -96,7 +94,7 @@ public class KspAccountBuilderPlugin extends Plugin
 
     public boolean isAntibanEnabledForCurrentTask()
     {
-        return antibanEnabledForCurrentTask;
+        return config != null && config.useAntiban();
     }
 
     public int getAntibanChancePercent()
@@ -115,10 +113,6 @@ public class KspAccountBuilderPlugin extends Plugin
         {
             return "Disabled";
         }
-        if (!antibanEnabledForCurrentTask)
-        {
-            return "Skipped by chance roll";
-        }
         return skillingAntiban.getActivity();
     }
 
@@ -133,38 +127,26 @@ public class KspAccountBuilderPlugin extends Plugin
         String taskName = script.getCurrentTaskName();
         boolean useAntiban = config.useAntiban();
         int chance = Math.max(0, Math.min(100, config.antibanChancePercent()));
-        String decisionKey = taskName + '|' + useAntiban + '|' + chance;
+        String stateKey = taskName + '|' + useAntiban + '|' + chance;
 
-        if (!decisionKey.equals(antibanDecisionKey))
+        if (!stateKey.equals(antibanStateKey))
         {
-            antibanDecisionKey = decisionKey;
-            antibanEnabledForCurrentTask = rollAntibanForTask(taskName, useAntiban, chance);
+            antibanStateKey = stateKey;
             skillingAntiban.reset();
-            log.info("Account Builder antiban decision | task={} enabled={} chance={}%%",
-                    taskName, antibanEnabledForCurrentTask, chance);
+            log.info("Account Builder antiban state | task={} enabled={} actionChance={}%%",
+                    taskName, useAntiban, chance);
         }
 
-        Rs2AntibanSettings.antibanEnabled = antibanEnabledForCurrentTask;
-        skillingAntiban.tick(taskName, antibanEnabledForCurrentTask);
+        // The master toggle controls whether antiban is active. The percentage is
+        // intentionally applied to each eligible custom antiban opportunity rather
+        // than rolling once and disabling antiban for an entire task.
+        Rs2AntibanSettings.antibanEnabled = useAntiban;
+        skillingAntiban.tick(taskName, useAntiban, chance);
     }
 
-    private boolean rollAntibanForTask(String taskName, boolean useAntiban, int chance)
+    private void resetAntibanState()
     {
-        if (!useAntiban || chance <= 0 || taskName == null || "IDLE".equals(taskName))
-        {
-            return false;
-        }
-        if (chance >= 100)
-        {
-            return true;
-        }
-        return ThreadLocalRandom.current().nextInt(100) < chance;
-    }
-
-    private void resetAntibanChanceDecision()
-    {
-        antibanDecisionKey = null;
-        antibanEnabledForCurrentTask = false;
+        antibanStateKey = null;
         skillingAntiban.reset();
         Rs2AntibanSettings.antibanEnabled = false;
     }
@@ -196,7 +178,7 @@ public class KspAccountBuilderPlugin extends Plugin
             {
                 script.shutdown();
             }
-            resetAntibanChanceDecision();
+            resetAntibanState();
             return;
         }
 
@@ -208,7 +190,7 @@ public class KspAccountBuilderPlugin extends Plugin
             script.shutdown();
         }
 
-        resetAntibanChanceDecision();
+        resetAntibanState();
         KspWalkerGuard.clearActiveWalker("ksp_account_builder_" + reason);
         KspWalkerGuard.clear("Woodcutting:target-area");
 
