@@ -2,16 +2,20 @@ package net.runelite.client.plugins.microbot.kspaccountbuilder;
 
 import com.google.inject.Provides;
 import lombok.extern.slf4j.Slf4j;
+import net.runelite.api.events.GameTick;
 import net.runelite.client.config.ConfigManager;
+import net.runelite.client.eventbus.Subscribe;
 import net.runelite.client.plugins.Plugin;
 import net.runelite.client.plugins.PluginDescriptor;
 import net.runelite.client.plugins.microbot.Microbot;
 import net.runelite.client.plugins.microbot.PluginConstants;
 import net.runelite.client.plugins.microbot.breakhandler.BreakHandlerPlugin;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.ksputil.randomevents.KspRandomEventSolver;
+import net.runelite.client.plugins.microbot.util.antiban.Rs2AntibanSettings;
 import net.runelite.client.ui.overlay.OverlayManager;
 
 import javax.inject.Inject;
+import java.util.concurrent.ThreadLocalRandom;
 
 @PluginDescriptor(
         name = PluginConstants.KSP + "Account Builder",
@@ -27,7 +31,7 @@ import javax.inject.Inject;
 @SuppressWarnings("unused")
 public class KspAccountBuilderPlugin extends Plugin
 {
-    public static final String VERSION = "1.9.12";
+    public static final String VERSION = "1.9.13";
 
     @Inject
     private KspAccountBuilderScript script;
@@ -46,6 +50,8 @@ public class KspAccountBuilderPlugin extends Plugin
 
     private KspRandomEventSolver randomEventSolver;
     private boolean runtimeActive;
+    private String antibanDecisionKey;
+    private boolean antibanEnabledForCurrentTask;
 
     @Provides
     KspAccountBuilderConfig provideConfig(ConfigManager configManager)
@@ -80,6 +86,7 @@ public class KspAccountBuilderPlugin extends Plugin
         // advance immediately instead of spending a tick clicking Continue.
 
         runtimeActive = true;
+        resetAntibanChanceDecision();
         script.run(config);
     }
 
@@ -97,6 +104,54 @@ public class KspAccountBuilderPlugin extends Plugin
     public void afterHotReload()
     {
         log.info("KSP Account Builder hot reload completed | version={}", VERSION);
+    }
+
+    @Subscribe
+    public void onGameTick(GameTick event)
+    {
+        if (!runtimeActive || script == null || config == null)
+        {
+            return;
+        }
+
+        String taskName = script.getCurrentTaskName();
+        boolean useAntiban = config.useAntiban();
+        int chance = Math.max(0, Math.min(100, config.antibanChancePercent()));
+        String decisionKey = taskName + '|' + useAntiban + '|' + chance;
+
+        if (!decisionKey.equals(antibanDecisionKey))
+        {
+            antibanDecisionKey = decisionKey;
+            antibanEnabledForCurrentTask = rollAntibanForTask(taskName, useAntiban, chance);
+            log.info("Account Builder antiban decision | task={} enabled={} chance={}%%",
+                    taskName, antibanEnabledForCurrentTask, chance);
+        }
+
+        // KspAccountBuilderScript applies the activity-specific antiban template
+        // whenever a task starts. This master flag enforces the user's percentage
+        // decision for the complete task and prevents a skipped roll from becoming
+        // active merely because the task-specific template was reapplied.
+        Rs2AntibanSettings.antibanEnabled = antibanEnabledForCurrentTask;
+    }
+
+    private boolean rollAntibanForTask(String taskName, boolean useAntiban, int chance)
+    {
+        if (!useAntiban || chance <= 0 || taskName == null || "IDLE".equals(taskName))
+        {
+            return false;
+        }
+        if (chance >= 100)
+        {
+            return true;
+        }
+        return ThreadLocalRandom.current().nextInt(100) < chance;
+    }
+
+    private void resetAntibanChanceDecision()
+    {
+        antibanDecisionKey = null;
+        antibanEnabledForCurrentTask = false;
+        Rs2AntibanSettings.antibanEnabled = false;
     }
 
     private void stopStandaloneBreakHandler()
@@ -128,6 +183,7 @@ public class KspAccountBuilderPlugin extends Plugin
             {
                 script.shutdown();
             }
+            resetAntibanChanceDecision();
             return;
         }
 
@@ -139,6 +195,7 @@ public class KspAccountBuilderPlugin extends Plugin
             script.shutdown();
         }
 
+        resetAntibanChanceDecision();
         KspWalkerGuard.clearActiveWalker("ksp_account_builder_" + reason);
         KspWalkerGuard.clear("Woodcutting:target-area");
 
