@@ -497,6 +497,11 @@ public class KspAccountBuilderScript extends Script
         if (currentTask == BuilderTask.FISHING) fishingScript.stopWalkerIfInsideTargetArea();
         BuilderTask forcedTask = resolveSingleSkillTask();
         refreshSingleSkillTargetIfChanged(forcedTask);
+        if (forcedTask == null && !isAllowedInSkillOnlyMode(currentTask))
+        {
+            if (!switchToRandomTaskAfterBank(currentTask)) taskStarted = false;
+            return;
+        }
         if (handleForcedTaskBlockers(forcedTask)) return;
         boolean recovering = handleSingleSkillResourceRecovery(forcedTask);
         if (recovering)
@@ -1286,6 +1291,7 @@ public class KspAccountBuilderScript extends Script
         for (BuilderTask task : BuilderTask.values())
         {
             if (task == excluded || task == BuilderTask.TUTORIAL_ISLAND) continue;
+            if (!isAllowedInSkillOnlyMode(task)) continue;
             if (!includeUnavailable && (isTaskTemporarilyDisabled(task) || isOneTimeTaskCompleted(task))) continue;
             if (requireResources && !hasResourcesForTaskSelection(task)) continue;
             int weight = getTaskSelectionWeight(task);
@@ -1406,9 +1412,34 @@ public class KspAccountBuilderScript extends Script
     private boolean isTaskCandidate(BuilderTask task, BuilderTask excluded, boolean requireResources, boolean includeSupport, boolean includeUnavailable)
     {
         if (task == excluded || task == BuilderTask.TUTORIAL_ISLAND) return false;
+        if (!isAllowedInSkillOnlyMode(task)) return false;
         if (!includeUnavailable && (isTaskTemporarilyDisabled(task) || isOneTimeTaskCompleted(task))) return false;
         if (!includeSupport && isSupportTask(task)) return false;
         return !requireResources || hasResourcesForTaskSelection(task);
+    }
+
+    private boolean isAllowedInSkillOnlyMode(BuilderTask task)
+    {
+        if (config == null || !config.skipQuests() || config.runSingleQuest()) return true;
+        if (task == null) return false;
+        switch (task)
+        {
+            case RUNE_ESSENCE: return isRuneMysteriesComplete();
+            case MINING:
+            case WOODCUTTING:
+            case FIREMAKING:
+            case FISHING:
+            case COOKING:
+            case CRAFTING:
+            case MELEE:
+            case GE_SELL:
+            case GE_BUY:
+            case SMITHING:
+            case SMELTING:
+                return true;
+            default:
+                return false;
+        }
     }
 
     private int getTaskSelectionWeight(BuilderTask task)

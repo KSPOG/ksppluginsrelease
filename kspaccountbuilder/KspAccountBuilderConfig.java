@@ -40,16 +40,23 @@ public interface KspAccountBuilderConfig extends Config
     String activitySwitchSection = "activitySwitch";
 
     @ConfigSection(
+            name = "Task Selection",
+            description = "Controls which activities the automatic account builder may select",
+            position = 3
+    )
+    String taskSelectionSection = "taskSelection";
+
+    @ConfigSection(
             name = "Train Single Skill",
             description = "Train one selected skill instead of randomly switching activities",
-            position = 3
+            position = 4
     )
     String trainSingleSkillSection = "trainSingleSkill";
 
     @ConfigSection(
             name = "Run Single Quest",
             description = "Run one selected quest instead of training skills or switching activities",
-            position = 4
+            position = 5
     )
     String runSingleQuestSection = "runSingleQuest";
 
@@ -178,6 +185,18 @@ public interface KspAccountBuilderConfig extends Config
     default int activitySwitchMaxMinutes()
     {
         return 45;
+    }
+
+    @ConfigItem(
+            keyName = "skipQuests",
+            name = "Skip Quests",
+            description = "Exclude quests from automatic task selection and focus on skilling. Run Single Quest still overrides this setting.",
+            position = 0,
+            section = taskSelectionSection
+    )
+    default boolean skipQuests()
+    {
+        return false;
     }
 
     @ConfigItem(
