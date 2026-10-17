@@ -31,7 +31,7 @@ import java.util.concurrent.ThreadLocalRandom;
 @SuppressWarnings("unused")
 public class KspAccountBuilderPlugin extends Plugin
 {
-    public static final String VERSION = "1.9.14";
+    public static final String VERSION = "1.9.15";
 
     @Inject
     private KspAccountBuilderScript script;
@@ -66,25 +66,12 @@ public class KspAccountBuilderPlugin extends Plugin
         cleanupRuntime("restart-before-start");
         log.info("Starting KSP Account Builder plugin");
 
-        // Account Builder owns its own break schedule. The shared Microbot Break
-        // Handler keeps its state in static fields and can remain BREAK_REQUESTED /
-        // INGAME_BREAK_ACTIVE across hot reloads. KspAccountBuilderScript treats
-        // that state as a hard pre-task gate, which can leave currentTask=null and
-        // the overlay on IDLE forever even though the player is fully logged in.
-        // Stop the standalone handler before starting the builder so its shutdown
-        // resets/resumes the shared state and cannot block Account Builder startup.
         stopStandaloneBreakHandler();
-
         migrateSingleSkillTargetDefaults();
         overlayManager.add(overlay);
 
         randomEventSolver = new KspRandomEventSolver();
         Microbot.getBlockingEventManager().add(randomEventSolver);
-
-        // Level-up Continue interfaces are intentionally not registered as a
-        // blocking event. The next skilling interaction normally dismisses the
-        // interface itself, so keep task execution running and let that action
-        // advance immediately instead of spending a tick clicking Continue.
 
         runtimeActive = true;
         resetAntibanChanceDecision();
@@ -105,6 +92,34 @@ public class KspAccountBuilderPlugin extends Plugin
     public void afterHotReload()
     {
         log.info("KSP Account Builder hot reload completed | version={}", VERSION);
+    }
+
+    public boolean isAntibanEnabledForCurrentTask()
+    {
+        return antibanEnabledForCurrentTask;
+    }
+
+    public int getAntibanChancePercent()
+    {
+        return config == null ? 0 : Math.max(0, Math.min(100, config.antibanChancePercent()));
+    }
+
+    public long getAntibanTimeUntilNextActionSeconds()
+    {
+        return skillingAntiban.getTimeUntilNextActionSeconds();
+    }
+
+    public String getAntibanActivity()
+    {
+        if (config == null || !config.useAntiban())
+        {
+            return "Disabled";
+        }
+        if (!antibanEnabledForCurrentTask)
+        {
+            return "Skipped by chance roll";
+        }
+        return skillingAntiban.getActivity();
     }
 
     @Subscribe
@@ -129,16 +144,7 @@ public class KspAccountBuilderPlugin extends Plugin
                     taskName, antibanEnabledForCurrentTask, chance);
         }
 
-        // KspAccountBuilderScript applies the activity-specific antiban template
-        // whenever a task starts. This master flag enforces the user's percentage
-        // decision for the complete task and prevents a skipped roll from becoming
-        // active merely because the task-specific template was reapplied.
         Rs2AntibanSettings.antibanEnabled = antibanEnabledForCurrentTask;
-
-        // Custom skilling humanization follows the event/state-aware pattern used
-        // by the other KSP antiban controllers: it reacts to a new skilling action
-        // and safe long-running idle windows instead of moving the mouse on a fixed
-        // timer regardless of what the task script is doing.
         skillingAntiban.tick(taskName, antibanEnabledForCurrentTask);
     }
 
@@ -186,8 +192,6 @@ public class KspAccountBuilderPlugin extends Plugin
     {
         if (!runtimeActive && randomEventSolver == null)
         {
-            // Still stop the script in case Source Loader calls hot-unload before
-            // the normal plugin lifecycle flag was established.
             if (script != null)
             {
                 script.shutdown();
