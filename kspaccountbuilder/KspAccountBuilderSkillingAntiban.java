@@ -10,18 +10,17 @@ import java.util.concurrent.ThreadLocalRandom;
 /**
  * Account-Builder-specific skilling humanization.
  *
- * <p>This follows the same pattern used by the existing KSP custom antiban
- * controllers: act only in safe activity windows, use probabilistic mouse
- * variation, and schedule longer-spaced idle mouse-away actions instead of
- * moving the cursor on a fixed loop.</p>
+ * <p>The configured antiban percentage is a per-opportunity trigger chance.
+ * Enabling antiban therefore keeps the controller active for the whole task;
+ * individual safe antiban opportunities decide whether to perform an action.</p>
  */
 @Slf4j
 final class KspAccountBuilderSkillingAntiban
 {
-    // Balanced values intentionally mirror the general intensity used by the
-    // Jewelry Crafter / Smart Smelter custom antiban profiles.
-    private static final double ACTION_MOUSE_MOVE_CHANCE = 0.18;
-    private static final double ACTION_MOUSE_OFFSCREEN_CHANCE = 0.32;
+    // Existing KSP balanced profiles use roughly 18% random movement versus 32%
+    // mouse-away behavior. Normalizing those values gives this action mix after
+    // the user's master chance roll succeeds.
+    private static final double RANDOM_MOUSE_WEIGHT = 0.36;
     private static final long IDLE_MOUSE_MIN_MS = 60_000L;
     private static final long IDLE_MOUSE_MAX_MS = 130_000L;
     private static final long ACTIVITY_DISPLAY_MS = 3_000L;
@@ -41,7 +40,7 @@ final class KspAccountBuilderSkillingAntiban
         activity = "Waiting for skilling";
     }
 
-    void tick(String taskName, boolean enabled)
+    void tick(String taskName, boolean enabled, int chancePercent)
     {
         if (!enabled)
         {
@@ -87,20 +86,21 @@ final class KspAccountBuilderSkillingAntiban
 
         boolean busy = !moving && (animating || interacting);
         long now = System.currentTimeMillis();
+        int chance = Math.max(0, Math.min(100, chancePercent));
 
-        // Equivalent to the production-start hooks used by Jewelry Crafter and
-        // Smart Smelter: only roll when a new skilling action actually begins.
+        // Roll once when a real skilling action begins. A failed roll only skips
+        // this opportunity; it never disables antiban for the whole task.
         if (busy && !wasBusy)
         {
-            onSkillingActionStarted(taskName, now);
+            tryActionStartAntiban(taskName, now, chance);
             scheduleIdleMouse(now);
         }
 
-        // If a long-running action remains active, occasionally move the mouse
-        // away just like the waiting-idle handling in the other KSP controllers.
+        // Long-running actions get another independent chance at a safe mouse-away
+        // action, matching the waiting/production idle style of existing KSP antiban.
         if (busy && nextIdleMouseAt > 0L && now >= nextIdleMouseAt)
         {
-            moveMouseAway(taskName, "long skilling action", now);
+            tryLongActionAntiban(taskName, now, chance);
             scheduleIdleMouse(now);
         }
 
@@ -114,7 +114,7 @@ final class KspAccountBuilderSkillingAntiban
         }
         else if (now >= activityUntil)
         {
-            activity = "Monitoring skilling";
+            activity = chance <= 0 ? "Monitoring (0% chance)" : "Monitoring skilling";
         }
 
         wasBusy = busy;
@@ -134,27 +134,38 @@ final class KspAccountBuilderSkillingAntiban
         return Math.max(0L, (nextIdleMouseAt - System.currentTimeMillis() + 999L) / 1_000L);
     }
 
-    private void onSkillingActionStarted(String taskName, long now)
+    private void tryActionStartAntiban(String taskName, long now, int chancePercent)
     {
-        ThreadLocalRandom random = ThreadLocalRandom.current();
-        boolean moved = false;
+        if (!rollPercent(chancePercent))
+        {
+            showChanceMiss(now);
+            return;
+        }
 
-        if (random.nextDouble() < ACTION_MOUSE_MOVE_CHANCE)
+        if (ThreadLocalRandom.current().nextDouble() < RANDOM_MOUSE_WEIGHT)
         {
             moveMouseRandomly(taskName, "skilling action", now);
-            moved = true;
         }
-
-        if (random.nextDouble() < ACTION_MOUSE_OFFSCREEN_CHANCE)
+        else
         {
             moveMouseAway(taskName, "skilling action", now);
-            moved = true;
         }
+    }
 
-        if (!moved)
+    private void tryLongActionAntiban(String taskName, long now, int chancePercent)
+    {
+        if (!rollPercent(chancePercent))
         {
-            activity = "Monitoring skilling";
+            showChanceMiss(now);
+            return;
         }
+        moveMouseAway(taskName, "long skilling action", now);
+    }
+
+    private void showChanceMiss(long now)
+    {
+        activity = "Chance roll skipped";
+        activityUntil = now + ACTIVITY_DISPLAY_MS;
     }
 
     private void moveMouseRandomly(String taskName, String reason, long now)
@@ -191,6 +202,20 @@ final class KspAccountBuilderSkillingAntiban
     {
         long delay = ThreadLocalRandom.current().nextLong(IDLE_MOUSE_MIN_MS, IDLE_MOUSE_MAX_MS + 1L);
         nextIdleMouseAt = now + delay;
+    }
+
+    private static boolean rollPercent(int chancePercent)
+    {
+        int chance = Math.max(0, Math.min(100, chancePercent));
+        if (chance <= 0)
+        {
+            return false;
+        }
+        if (chance >= 100)
+        {
+            return true;
+        }
+        return ThreadLocalRandom.current().nextInt(100) < chance;
     }
 
     static boolean isSkillingTask(String taskName)
