@@ -14,6 +14,7 @@ import java.util.concurrent.TimeUnit;
 
 public class KSPAccountBuilderOverlay extends OverlayPanel
 {
+    private final KspAccountBuilderPlugin plugin;
     private final KspAccountBuilderScript script;
     private final KspAccountBuilderConfig config;
 
@@ -21,6 +22,7 @@ public class KSPAccountBuilderOverlay extends OverlayPanel
     public KSPAccountBuilderOverlay(KspAccountBuilderPlugin plugin, KspAccountBuilderScript script, KspAccountBuilderConfig config)
     {
         super(plugin);
+        this.plugin = plugin;
         this.script = script;
         this.config = config;
 
@@ -31,7 +33,7 @@ public class KSPAccountBuilderOverlay extends OverlayPanel
     public Dimension render(Graphics2D graphics)
     {
         panelComponent.getChildren().clear();
-        panelComponent.setPreferredSize(new Dimension(260, 0));
+        panelComponent.setPreferredSize(new Dimension(280, 0));
         String displayStatus = normalizeStatus(Microbot.status);
 
         String title = "KSP Account Builder V" + KspAccountBuilderPlugin.VERSION;
@@ -66,6 +68,23 @@ public class KSPAccountBuilderOverlay extends OverlayPanel
                 .left("Account Play Time:")
                 .right(formatDuration(script.getAccountPlayTimeSeconds()))
                 .build());
+
+        if (config.useAntiban())
+        {
+            String antibanState = plugin.isAntibanEnabledForCurrentTask() ? "ON" : "OFF";
+            String antibanTime = formatDuration(plugin.getAntibanTimeUntilNextActionSeconds());
+            String antibanSummary = antibanState + " | " + plugin.getAntibanChancePercent() + "% | " + antibanTime;
+
+            panelComponent.getChildren().add(LineComponent.builder()
+                    .left("Antiban:")
+                    .right(antibanSummary)
+                    .build());
+
+            panelComponent.getChildren().add(LineComponent.builder()
+                    .left("Antiban Activity:")
+                    .right(plugin.getAntibanActivity())
+                    .build());
+        }
 
         if (config.doBreaks())
         {
