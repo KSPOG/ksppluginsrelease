@@ -24,23 +24,41 @@ final class KspAccountBuilderSkillingAntiban
     private static final double ACTION_MOUSE_OFFSCREEN_CHANCE = 0.32;
     private static final long IDLE_MOUSE_MIN_MS = 60_000L;
     private static final long IDLE_MOUSE_MAX_MS = 130_000L;
+    private static final long ACTIVITY_DISPLAY_MS = 3_000L;
 
     private String activeTask;
     private boolean wasBusy;
     private long nextIdleMouseAt;
+    private long activityUntil;
+    private String activity = "Waiting for skilling";
 
     void reset()
     {
         activeTask = null;
         wasBusy = false;
         nextIdleMouseAt = 0L;
+        activityUntil = 0L;
+        activity = "Waiting for skilling";
     }
 
     void tick(String taskName, boolean enabled)
     {
-        if (!enabled || !isSkillingTask(taskName) || !Microbot.isLoggedIn())
+        if (!enabled)
         {
             reset();
+            activity = "Disabled";
+            return;
+        }
+
+        if (!isSkillingTask(taskName) || !Microbot.isLoggedIn())
+        {
+            activeTask = null;
+            wasBusy = false;
+            nextIdleMouseAt = 0L;
+            if (System.currentTimeMillis() >= activityUntil)
+            {
+                activity = "Waiting for skilling";
+            }
             return;
         }
 
@@ -49,6 +67,8 @@ final class KspAccountBuilderSkillingAntiban
             activeTask = taskName;
             wasBusy = false;
             nextIdleMouseAt = 0L;
+            activityUntil = 0L;
+            activity = "Waiting for action";
         }
 
         boolean moving;
@@ -72,7 +92,7 @@ final class KspAccountBuilderSkillingAntiban
         // Smart Smelter: only roll when a new skilling action actually begins.
         if (busy && !wasBusy)
         {
-            onSkillingActionStarted(taskName);
+            onSkillingActionStarted(taskName, now);
             scheduleIdleMouse(now);
         }
 
@@ -80,38 +100,70 @@ final class KspAccountBuilderSkillingAntiban
         // away just like the waiting-idle handling in the other KSP controllers.
         if (busy && nextIdleMouseAt > 0L && now >= nextIdleMouseAt)
         {
-            moveMouseAway(taskName, "long skilling action");
+            moveMouseAway(taskName, "long skilling action", now);
             scheduleIdleMouse(now);
         }
 
         if (!busy)
         {
             nextIdleMouseAt = 0L;
+            if (now >= activityUntil)
+            {
+                activity = moving ? "Walking" : "Waiting for action";
+            }
+        }
+        else if (now >= activityUntil)
+        {
+            activity = "Monitoring skilling";
         }
 
         wasBusy = busy;
     }
 
-    private void onSkillingActionStarted(String taskName)
+    String getActivity()
+    {
+        return activity == null || activity.isEmpty() ? "Idle" : activity;
+    }
+
+    long getTimeUntilNextActionSeconds()
+    {
+        if (nextIdleMouseAt <= 0L)
+        {
+            return -1L;
+        }
+        return Math.max(0L, (nextIdleMouseAt - System.currentTimeMillis() + 999L) / 1_000L);
+    }
+
+    private void onSkillingActionStarted(String taskName, long now)
     {
         ThreadLocalRandom random = ThreadLocalRandom.current();
+        boolean moved = false;
 
         if (random.nextDouble() < ACTION_MOUSE_MOVE_CHANCE)
         {
-            moveMouseRandomly(taskName, "skilling action");
+            moveMouseRandomly(taskName, "skilling action", now);
+            moved = true;
         }
 
         if (random.nextDouble() < ACTION_MOUSE_OFFSCREEN_CHANCE)
         {
-            moveMouseAway(taskName, "skilling action");
+            moveMouseAway(taskName, "skilling action", now);
+            moved = true;
+        }
+
+        if (!moved)
+        {
+            activity = "Monitoring skilling";
         }
     }
 
-    private void moveMouseRandomly(String taskName, String reason)
+    private void moveMouseRandomly(String taskName, String reason, long now)
     {
         try
         {
             Rs2Antiban.moveMouseRandomly();
+            activity = "Random mouse";
+            activityUntil = now + ACTIVITY_DISPLAY_MS;
             log.debug("Account Builder custom antiban random mouse | task={} reason={}", taskName, reason);
         }
         catch (Exception ex)
@@ -120,11 +172,13 @@ final class KspAccountBuilderSkillingAntiban
         }
     }
 
-    private void moveMouseAway(String taskName, String reason)
+    private void moveMouseAway(String taskName, String reason, long now)
     {
         try
         {
             Rs2Antiban.moveMouseOffScreen();
+            activity = "Mouse off-screen";
+            activityUntil = now + ACTIVITY_DISPLAY_MS;
             log.debug("Account Builder custom antiban mouse off-screen | task={} reason={}", taskName, reason);
         }
         catch (Exception ex)
