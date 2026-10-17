@@ -11,22 +11,22 @@ import java.util.concurrent.ThreadLocalRandom;
  * Account-Builder-specific skilling humanization.
  *
  * <p>The configured antiban percentage is a per-opportunity trigger chance.
- * Enabling antiban therefore keeps the controller active for the whole task;
- * individual safe antiban opportunities decide whether to perform an action.</p>
+ * Mouse movement is deliberately limited to stable, already-running skilling
+ * actions so it cannot race the task's own click/input startup sequence.</p>
  */
 @Slf4j
 final class KspAccountBuilderSkillingAntiban
 {
-    // Existing KSP balanced profiles use roughly 18% random movement versus 32%
-    // mouse-away behavior. Normalizing those values gives this action mix after
-    // the user's master chance roll succeeds.
-    private static final double RANDOM_MOUSE_WEIGHT = 0.36;
+    private static final long SAFE_ACTION_GRACE_MS = 3_000L;
+    private static final long FIRST_MOUSE_MIN_MS = 4_000L;
+    private static final long FIRST_MOUSE_MAX_MS = 10_000L;
     private static final long IDLE_MOUSE_MIN_MS = 60_000L;
     private static final long IDLE_MOUSE_MAX_MS = 130_000L;
     private static final long ACTIVITY_DISPLAY_MS = 3_000L;
 
     private String activeTask;
     private boolean wasBusy;
+    private long busyStartedAt;
     private long nextIdleMouseAt;
     private long activityUntil;
     private String activity = "Waiting for skilling";
@@ -35,6 +35,7 @@ final class KspAccountBuilderSkillingAntiban
     {
         activeTask = null;
         wasBusy = false;
+        busyStartedAt = 0L;
         nextIdleMouseAt = 0L;
         activityUntil = 0L;
         activity = "Waiting for skilling";
@@ -53,6 +54,7 @@ final class KspAccountBuilderSkillingAntiban
         {
             activeTask = null;
             wasBusy = false;
+            busyStartedAt = 0L;
             nextIdleMouseAt = 0L;
             if (System.currentTimeMillis() >= activityUntil)
             {
@@ -65,6 +67,7 @@ final class KspAccountBuilderSkillingAntiban
         {
             activeTask = taskName;
             wasBusy = false;
+            busyStartedAt = 0L;
             nextIdleMouseAt = 0L;
             activityUntil = 0L;
             activity = "Waiting for action";
@@ -84,28 +87,36 @@ final class KspAccountBuilderSkillingAntiban
             return;
         }
 
+        // Only an already-running, stationary skilling action is eligible. Never
+        // move the mouse at the action transition itself: that can overlap the
+        // child script's click/menu/inventory input and steal its input window.
         boolean busy = !moving && (animating || interacting);
         long now = System.currentTimeMillis();
         int chance = Math.max(0, Math.min(100, chancePercent));
 
-        // Roll once when a real skilling action begins. A failed roll only skips
-        // this opportunity; it never disables antiban for the whole task.
         if (busy && !wasBusy)
         {
-            tryActionStartAntiban(taskName, now, chance);
-            scheduleIdleMouse(now);
+            busyStartedAt = now;
+            scheduleFirstSafeMouse(now);
+            if (now >= activityUntil)
+            {
+                activity = "Action grace period";
+            }
         }
 
-        // Long-running actions get another independent chance at a safe mouse-away
-        // action, matching the waiting/production idle style of existing KSP antiban.
-        if (busy && nextIdleMouseAt > 0L && now >= nextIdleMouseAt)
+        if (busy
+                && busyStartedAt > 0L
+                && now - busyStartedAt >= SAFE_ACTION_GRACE_MS
+                && nextIdleMouseAt > 0L
+                && now >= nextIdleMouseAt)
         {
-            tryLongActionAntiban(taskName, now, chance);
+            trySafeMouseAway(taskName, now, chance);
             scheduleIdleMouse(now);
         }
 
         if (!busy)
         {
+            busyStartedAt = 0L;
             nextIdleMouseAt = 0L;
             if (now >= activityUntil)
             {
@@ -114,7 +125,14 @@ final class KspAccountBuilderSkillingAntiban
         }
         else if (now >= activityUntil)
         {
-            activity = chance <= 0 ? "Monitoring (0% chance)" : "Monitoring skilling";
+            if (now - busyStartedAt < SAFE_ACTION_GRACE_MS)
+            {
+                activity = "Action grace period";
+            }
+            else
+            {
+                activity = chance <= 0 ? "Monitoring (0% chance)" : "Monitoring skilling";
+            }
         }
 
         wasBusy = busy;
@@ -134,7 +152,7 @@ final class KspAccountBuilderSkillingAntiban
         return Math.max(0L, (nextIdleMouseAt - System.currentTimeMillis() + 999L) / 1_000L);
     }
 
-    private void tryActionStartAntiban(String taskName, long now, int chancePercent)
+    private void trySafeMouseAway(String taskName, long now, int chancePercent)
     {
         if (!rollPercent(chancePercent))
         {
@@ -142,24 +160,21 @@ final class KspAccountBuilderSkillingAntiban
             return;
         }
 
-        if (ThreadLocalRandom.current().nextDouble() < RANDOM_MOUSE_WEIGHT)
+        // Deliberately do not use moveMouseRandomly() here. Random canvas movement
+        // can contend with the active skilling script's input. Moving off-screen
+        // after a stable-action grace period is much less invasive while preserving
+        // the intended custom antiban behavior.
+        try
         {
-            moveMouseRandomly(taskName, "skilling action", now);
+            Rs2Antiban.moveMouseOffScreen();
+            activity = "Mouse off-screen";
+            activityUntil = now + ACTIVITY_DISPLAY_MS;
+            log.debug("Account Builder safe antiban mouse off-screen | task={}", taskName);
         }
-        else
+        catch (Exception ex)
         {
-            moveMouseAway(taskName, "skilling action", now);
+            log.debug("Account Builder mouse off-screen skipped | task={} reason={}", taskName, ex.getMessage());
         }
-    }
-
-    private void tryLongActionAntiban(String taskName, long now, int chancePercent)
-    {
-        if (!rollPercent(chancePercent))
-        {
-            showChanceMiss(now);
-            return;
-        }
-        moveMouseAway(taskName, "long skilling action", now);
     }
 
     private void showChanceMiss(long now)
@@ -168,34 +183,10 @@ final class KspAccountBuilderSkillingAntiban
         activityUntil = now + ACTIVITY_DISPLAY_MS;
     }
 
-    private void moveMouseRandomly(String taskName, String reason, long now)
+    private void scheduleFirstSafeMouse(long now)
     {
-        try
-        {
-            Rs2Antiban.moveMouseRandomly();
-            activity = "Random mouse";
-            activityUntil = now + ACTIVITY_DISPLAY_MS;
-            log.debug("Account Builder custom antiban random mouse | task={} reason={}", taskName, reason);
-        }
-        catch (Exception ex)
-        {
-            log.debug("Account Builder random mouse skipped | task={} reason={}", taskName, ex.getMessage());
-        }
-    }
-
-    private void moveMouseAway(String taskName, String reason, long now)
-    {
-        try
-        {
-            Rs2Antiban.moveMouseOffScreen();
-            activity = "Mouse off-screen";
-            activityUntil = now + ACTIVITY_DISPLAY_MS;
-            log.debug("Account Builder custom antiban mouse off-screen | task={} reason={}", taskName, reason);
-        }
-        catch (Exception ex)
-        {
-            log.debug("Account Builder mouse off-screen skipped | task={} reason={}", taskName, ex.getMessage());
-        }
+        long delay = ThreadLocalRandom.current().nextLong(FIRST_MOUSE_MIN_MS, FIRST_MOUSE_MAX_MS + 1L);
+        nextIdleMouseAt = now + Math.max(SAFE_ACTION_GRACE_MS, delay);
     }
 
     private void scheduleIdleMouse(long now)
