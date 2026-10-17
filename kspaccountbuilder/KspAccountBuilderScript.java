@@ -620,6 +620,7 @@ public class KspAccountBuilderScript extends Script
     private boolean startTask(BuilderTask task)
     {
         if (task == null) return false;
+        applyAntibanForTask(task);
         stopAllTaskScriptsExcept(task);
         if (task == BuilderTask.TUTORIAL_ISLAND || task == BuilderTask.ROMEO_AND_JULIET || task == BuilderTask.RUNE_MYSTERIES
                 || newQuestScript(task) != null || task == BuilderTask.STRONGHOLD_OF_SECURITY) clearActivitySwitchTimerState();
@@ -1732,6 +1733,51 @@ public class KspAccountBuilderScript extends Script
     {
         int safeMin = Math.min(min, max), safeMax = Math.max(min, max);
         return ThreadLocalRandom.current().nextInt(safeMin, safeMax + 1);
+    }
+
+    private void applyAntibanForTask(BuilderTask task)
+    {
+        if (task == null || config == null || !config.useAntiban()) return;
+
+        // Microbot exposes dedicated antiban templates per training activity.
+        // Apply the template when a task starts so activity-specific behavior follows
+        // the skill being trained instead of keeping one universal profile forever.
+        switch (task)
+        {
+            case RUNE_ESSENCE:
+            case MINING:
+                Rs2Antiban.antibanSetupTemplates.applyMiningSetup();
+                break;
+            case WOODCUTTING:
+                Rs2Antiban.antibanSetupTemplates.applyWoodcuttingSetup();
+                break;
+            case FIREMAKING:
+                Rs2Antiban.antibanSetupTemplates.applyFiremakingSetup();
+                break;
+            case FISHING:
+                Rs2Antiban.antibanSetupTemplates.applyFishingSetup();
+                break;
+            case COOKING:
+                Rs2Antiban.antibanSetupTemplates.applyCookingSetup();
+                break;
+            case CRAFTING:
+                Rs2Antiban.antibanSetupTemplates.applyCraftingSetup();
+                break;
+            case MELEE:
+            case STRONGHOLD_OF_SECURITY:
+                Rs2Antiban.antibanSetupTemplates.applyCombatSetup();
+                break;
+            case SMITHING:
+            case SMELTING:
+                Rs2Antiban.antibanSetupTemplates.applySmithingSetup();
+                break;
+            default:
+                // Tutorial Island, quests and GE tasks are mixed/general activities.
+                Rs2Antiban.antibanSetupTemplates.applyUniversalAntibanSetup();
+                break;
+        }
+
+        debug("Applied task-specific antiban profile | task={}", task);
     }
 
     private void applyAntibanSettings()
