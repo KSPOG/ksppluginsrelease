@@ -62,6 +62,7 @@ public class FireMakingScript extends Script
     private long lastBurnPromptActionAtMs;
     private long pendingBankActionAtMs;
     private int pendingBankEmptySlots = -1;
+    private int firemakingXpBeforeAction = -1;
     private WorldPoint activeFireInteractionLocation;
     private int activeFireInteractionId = -1;
 
@@ -95,6 +96,8 @@ public class FireMakingScript extends Script
             }
 
             int targetLogId = getTargetLogId(targetLogName);
+            consumeFiremakingXpDrop();
+
             if (activeFireInteractionLocation != null)
             {
                 Rs2TileObjectModel activeFire = findFireObjectAtLocation(activeFireInteractionLocation);
@@ -226,6 +229,7 @@ public class FireMakingScript extends Script
 
         awaitingFireStartAtMs = 0L;
         expectingFiremakingXpDrop = false;
+        firemakingXpBeforeAction = -1;
 
         if (Rs2Bank.isOpen()) return prepareSuppliesFromBank(targetLogName, hasActiveFire);
         if (Rs2Bank.walkToBankAndUseBank() || Rs2Bank.openBank()) return false;
@@ -393,7 +397,7 @@ public class FireMakingScript extends Script
         awaitingFireStartAtMs = now;
         activeFireInteractionLocation = fire.getWorldLocation();
         activeFireInteractionId = fire.getId();
-        expectingFiremakingXpDrop = true;
+        armFiremakingXpCheck();
     }
 
     private void buildFire(String targetLogName)
@@ -423,7 +427,7 @@ public class FireMakingScript extends Script
 
         lastFireInteractAtMs = now;
         awaitingFireStartAtMs = now;
-        expectingFiremakingXpDrop = true;
+        armFiremakingXpCheck();
         tendingForestersCampfire = false;
     }
 
@@ -437,6 +441,7 @@ public class FireMakingScript extends Script
 
         awaitingFireStartAtMs = 0L;
         expectingFiremakingXpDrop = false;
+        firemakingXpBeforeAction = -1;
         lastBurnPromptActionAtMs = 0L;
         Microbot.status = "Handling Firemaking level-up";
 
@@ -464,7 +469,7 @@ public class FireMakingScript extends Script
         Rs2Keyboard.keyPress(KeyEvent.VK_SPACE);
         lastBurnPromptActionAtMs = System.currentTimeMillis();
         awaitingFireStartAtMs = lastBurnPromptActionAtMs;
-        expectingFiremakingXpDrop = true;
+        armFiremakingXpCheck();
         return true;
     }
 
@@ -599,6 +604,32 @@ public class FireMakingScript extends Script
                 || titleText.contains("how many would you like to burn");
     }
 
+    private void armFiremakingXpCheck()
+    {
+        firemakingXpBeforeAction = getFiremakingXp();
+        expectingFiremakingXpDrop = true;
+    }
+
+    private void consumeFiremakingXpDrop()
+    {
+        if (!expectingFiremakingXpDrop || firemakingXpBeforeAction < 0) return;
+
+        int currentXp = getFiremakingXp();
+        if (currentXp < 0 || currentXp <= firemakingXpBeforeAction) return;
+
+        debug("Firemaking XP drop confirmed action | beforeXp={} currentXp={} gained={}",
+                firemakingXpBeforeAction, currentXp, currentXp - firemakingXpBeforeAction);
+        firemakingXpBeforeAction = currentXp;
+        awaitingFireStartAtMs = 0L;
+        expectingFiremakingXpDrop = false;
+    }
+
+    private int getFiremakingXp()
+    {
+        return Microbot.getClientThread().runOnClientThreadOptional(() ->
+                Microbot.getClient() == null ? -1 : Microbot.getClient().getSkillExperience(Skill.FIREMAKING)).orElse(-1);
+    }
+
     private boolean isWaitingForFireStart()
     {
         if (awaitingFireStartAtMs == 0L) return false;
@@ -615,6 +646,7 @@ public class FireMakingScript extends Script
         debug("Resetting fire interaction state | reason={} player={}", reason, Rs2Player.getWorldLocation());
         awaitingFireStartAtMs = 0L;
         expectingFiremakingXpDrop = false;
+        firemakingXpBeforeAction = -1;
         tendingForestersCampfire = false;
         lastBurnPromptActionAtMs = 0L;
         activeFireInteractionLocation = null;
@@ -759,6 +791,7 @@ public class FireMakingScript extends Script
         awaitingFireStartAtMs = 0L;
         lastBurnPromptActionAtMs = 0L;
         expectingFiremakingXpDrop = false;
+        firemakingXpBeforeAction = -1;
         tendingForestersCampfire = false;
         activeFireInteractionLocation = null;
         activeFireInteractionId = -1;
