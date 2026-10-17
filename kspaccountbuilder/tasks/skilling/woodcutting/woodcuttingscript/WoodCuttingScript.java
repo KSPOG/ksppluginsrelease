@@ -42,6 +42,7 @@ public class WoodCuttingScript extends Script {
     private static final int OBJECT_INTERACTION_START_TIMEOUT_MS = 2_500;
     private static final long BANK_ACTION_COOLDOWN_MS = 500L;
     private static final long BANK_INVENTORY_ACTION_TIMEOUT_MS = 1_500L;
+    private static final long LOOP_FAILURE_LOG_COOLDOWN_MS = 5_000L;
     private static final int TREE_SEARCH_PADDING_TILES = 8;
     private static final int OUT_OF_AREA_TREE_FALLBACK_RADIUS = 4;
     private static final int MID_TIER_RANDOM_MAX_LEVEL = 60;
@@ -74,6 +75,8 @@ public class WoodCuttingScript extends Script {
     private long lastBankActionAtMs;
     private long pendingBankInventoryActionAtMs;
     private int pendingBankInventoryEmptySlots = -1;
+    private long lastLoopFailureLogAtMs;
+    private long lastForestryFailureLogAtMs;
     private final AccountBuilderForestryHandler forestryHandler = new AccountBuilderForestryHandler();
 
     public void setDebugLogging(boolean debugLogging) { this.debugLogging = debugLogging; }
@@ -87,45 +90,85 @@ public class WoodCuttingScript extends Script {
         this.randomOakArea = null;
 
         this.mainScheduledFuture = this.scheduledExecutorService.scheduleWithFixedDelay(() -> {
-            if (!super.run() || !Microbot.isLoggedIn()) return;
-
-            int woodcuttingLevel = Microbot.getClient().getRealSkillLevel(Skill.WOODCUTTING);
-            int attackLevel = Microbot.getClient().getRealSkillLevel(Skill.ATTACK);
-            this.initializeStartingTargetTree(woodcuttingLevel);
-
-            TreeAreas desiredArea = this.progressiveWoodcutting ? this.resolveTargetArea(woodcuttingLevel) : this.targetArea;
-            if (desiredArea != this.targetArea) {
-                this.targetArea = desiredArea;
-                this.clearTargetAreaWalkIfNeeded();
-                this.debug("Switching woodcutting area to {} for woodcutting level {}", this.targetArea.getDisplayName(), woodcuttingLevel);
+            try {
+                runLoopTick();
+            } catch (Throwable ex) {
+                recoverFromLoopFailure(ex);
             }
-
-            TreeLevel targetTree = this.getTargetTreeLevel(woodcuttingLevel);
-            KspTaskDebug.throttled(log, this.debugLogging, "Woodcutting", "loop", 5_000L,
-                    "loop | level={} attack={} area={} targetTree={} player={} moving={} animating={} interacting={} invFull={} bankOpen={} walkerTarget={}",
-                    woodcuttingLevel, attackLevel, this.targetArea.getDisplayName(),
-                    targetTree != null ? targetTree.getDisplayName() : "none", Rs2Player.getWorldLocation(),
-                    Rs2Player.isMoving(), Rs2Player.isAnimating(), Rs2Player.isInteracting(),
-                    Rs2Inventory.isFull(), Rs2Bank.isOpen(), Rs2Walker.getCurrentTarget());
-
-            if (targetTree != null && this.forestryHandler.runIfNeeded(targetTree)) {
-                this.pendingObjectInteractionAtMs = 0L;
-                this.walkingToTargetArea = false;
-                KspWalkerGuard.clearActiveWalker("ksp_account_builder_woodcutting_forestry");
-                KspWalkerGuard.clear("Woodcutting:target-area");
-                return;
-            }
-
-            if (Rs2Inventory.isFull()) {
-                this.bankLogsOnly(woodcuttingLevel);
-                return;
-            }
-            if (!this.upgradeAxe(woodcuttingLevel, attackLevel)) return;
-            if (!this.hasAnyAxeEquippedOrInInventory()) return;
-            if (!this.ensureInTargetArea()) return;
-            this.chopForCurrentLevel(woodcuttingLevel);
         }, 0L, LOOP_DELAY_MS, TimeUnit.MILLISECONDS);
         return true;
+    }
+
+    private void runLoopTick() {
+        if (!super.run() || !Microbot.isLoggedIn()) return;
+
+        int woodcuttingLevel = Microbot.getClient().getRealSkillLevel(Skill.WOODCUTTING);
+        int attackLevel = Microbot.getClient().getRealSkillLevel(Skill.ATTACK);
+        this.initializeStartingTargetTree(woodcuttingLevel);
+
+        TreeAreas desiredArea = this.progressiveWoodcutting ? this.resolveTargetArea(woodcuttingLevel) : this.targetArea;
+        if (desiredArea != this.targetArea) {
+            this.targetArea = desiredArea;
+            this.clearTargetAreaWalkIfNeeded();
+            this.debug("Switching woodcutting area to {} for woodcutting level {}", this.targetArea.getDisplayName(), woodcuttingLevel);
+        }
+
+        TreeLevel targetTree = this.getTargetTreeLevel(woodcuttingLevel);
+        KspTaskDebug.throttled(log, this.debugLogging, "Woodcutting", "loop", 5_000L,
+                "loop | level={} attack={} area={} targetTree={} player={} moving={} animating={} interacting={} invFull={} bankOpen={} walkerTarget={}",
+                woodcuttingLevel, attackLevel, this.targetArea.getDisplayName(),
+                targetTree != null ? targetTree.getDisplayName() : "none", Rs2Player.getWorldLocation(),
+                Rs2Player.isMoving(), Rs2Player.isAnimating(), Rs2Player.isInteracting(),
+                Rs2Inventory.isFull(), Rs2Bank.isOpen(), Rs2Walker.getCurrentTarget());
+
+        if (targetTree != null && runForestrySafely(targetTree)) {
+            this.pendingObjectInteractionAtMs = 0L;
+            this.walkingToTargetArea = false;
+            KspWalkerGuard.clearActiveWalker("ksp_account_builder_woodcutting_forestry");
+            KspWalkerGuard.clear("Woodcutting:target-area");
+            return;
+        }
+
+        if (Rs2Inventory.isFull()) {
+            this.bankLogsOnly(woodcuttingLevel);
+            return;
+        }
+        if (!this.upgradeAxe(woodcuttingLevel, attackLevel)) return;
+        if (!this.hasAnyAxeEquippedOrInInventory()) return;
+        if (!this.ensureInTargetArea()) return;
+        this.chopForCurrentLevel(woodcuttingLevel);
+    }
+
+    private boolean runForestrySafely(TreeLevel targetTree) {
+        try {
+            return this.forestryHandler.runIfNeeded(targetTree);
+        } catch (Throwable ex) {
+            long now = System.currentTimeMillis();
+            if (now - lastForestryFailureLogAtMs >= LOOP_FAILURE_LOG_COOLDOWN_MS) {
+                lastForestryFailureLogAtMs = now;
+                log.warn("[KSP Woodcutting] Forestry handler failed; falling back to normal chopping | tree={} player={}",
+                        targetTree, Rs2Player.getWorldLocation(), ex);
+            }
+            this.forestryHandler.reset();
+            this.pendingObjectInteractionAtMs = 0L;
+            return false;
+        }
+    }
+
+    private void recoverFromLoopFailure(Throwable ex) {
+        long now = System.currentTimeMillis();
+        if (now - lastLoopFailureLogAtMs >= LOOP_FAILURE_LOG_COOLDOWN_MS) {
+            lastLoopFailureLogAtMs = now;
+            log.warn("[KSP Woodcutting] loop tick failed; recovering on next tick | area={} player={} status={}",
+                    targetArea != null ? targetArea.getDisplayName() : "none",
+                    Rs2Player.getWorldLocation(), Microbot.status, ex);
+        }
+
+        // scheduleWithFixedDelay permanently stops after an uncaught exception.
+        // Keep failures inside the runnable and clear transient interaction state so
+        // the following tick can resume normal chopping/banking immediately.
+        this.pendingObjectInteractionAtMs = 0L;
+        this.lastObjectInteractionAtMs = 0L;
     }
 
     private boolean upgradeAxe(int woodcuttingLevel, int attackLevel) {
@@ -241,9 +284,6 @@ public class WoodCuttingScript extends Script {
         WorldPoint playerLocation = Rs2Player.getWorldLocation();
         if (playerLocation == null) return false;
 
-        // Tree selection already allows targets up to four tiles outside the strict
-        // rectangle. Treat that same fallback band as part of the active area so
-        // chopping a valid edge tree cannot continuously restart the web walker.
         if (isInsideActiveWoodcuttingArea(playerLocation)) {
             clearTargetAreaWalkIfNeeded();
             Microbot.status = "Inside woodcutting area";
@@ -501,6 +541,8 @@ public class WoodCuttingScript extends Script {
         lastBankActionAtMs = 0L;
         pendingBankInventoryActionAtMs = 0L;
         pendingBankInventoryEmptySlots = -1;
+        lastLoopFailureLogAtMs = 0L;
+        lastForestryFailureLogAtMs = 0L;
         startingTargetTreeInitialized = false;
         randomMidTierTree = null;
         randomOakArea = null;
