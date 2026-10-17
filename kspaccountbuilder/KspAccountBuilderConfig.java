@@ -72,12 +72,24 @@ public interface KspAccountBuilderConfig extends Config
         return true;
     }
 
+    @Range(min = 0, max = 100)
+    @ConfigItem(
+            keyName = "antibanChancePercent",
+            name = "Antiban Chance (%)",
+            description = "Chance that antiban is active for each newly selected task. 0% disables activation; 100% always activates it.",
+            position = 1,
+            section = antibanSection
+    )
+    default int antibanChancePercent()
+    {
+        return 100;
+    }
 
     @ConfigItem(
             keyName = "debugLogging",
             name = "Debug Logging",
             description = "Show debug messages in chat/logs",
-            position = 1,
+            position = 2,
             section = antibanSection
     )
     default boolean debugLogging()
