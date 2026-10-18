@@ -30,7 +30,7 @@ import javax.inject.Inject;
 @SuppressWarnings("unused")
 public class KspAccountBuilderPlugin extends Plugin
 {
-    public static final String VERSION = "1.9.21";
+    public static final String VERSION = "1.9.22";
 
     @Inject
     private KspAccountBuilderScript script;
@@ -173,37 +173,49 @@ public class KspAccountBuilderPlugin extends Plugin
 
     private void cleanupRuntime(String reason)
     {
-        if (!runtimeActive && randomEventSolver == null)
+        // Disable callbacks first, even if child shutdown fails.
+        boolean wasActive = runtimeActive;
+        runtimeActive = false;
+        if (wasActive || randomEventSolver != null)
+        {
+            log.info("Stopping KSP Account Builder runtime | reason={}", reason);
+        }
+
+        try
         {
             if (script != null)
             {
                 script.shutdown();
             }
-            resetAntibanState();
-            return;
         }
-
-        log.info("Stopping KSP Account Builder runtime | reason={}", reason);
-        runtimeActive = false;
-
-        if (script != null)
+        catch (Exception ex)
         {
-            script.shutdown();
+            log.error("Account Builder script shutdown failed | reason={}", reason, ex);
         }
-
-        resetAntibanState();
-        KspWalkerGuard.clearActiveWalker("ksp_account_builder_" + reason);
-        KspWalkerGuard.clear("Woodcutting:target-area");
-
-        if (randomEventSolver != null)
+        finally
         {
-            Microbot.getBlockingEventManager().remove(randomEventSolver);
+            try { resetAntibanState(); }
+            catch (Exception ex) { log.warn("Unable to reset antiban during shutdown", ex); }
+
+            try
+            {
+                KspWalkerGuard.clearActiveWalker("ksp_account_builder_" + reason);
+                KspWalkerGuard.clear("Woodcutting:target-area");
+            }
+            catch (Exception ex) { log.warn("Unable to clear walker during shutdown", ex); }
+
+            KspRandomEventSolver solver = randomEventSolver;
             randomEventSolver = null;
-        }
-
-        if (overlayManager != null && overlay != null)
-        {
-            overlayManager.remove(overlay);
+            if (solver != null)
+            {
+                try { Microbot.getBlockingEventManager().remove(solver); }
+                catch (Exception ex) { log.warn("Unable to remove random event solver", ex); }
+            }
+            if (overlayManager != null && overlay != null)
+            {
+                try { overlayManager.remove(overlay); }
+                catch (Exception ex) { log.warn("Unable to remove Account Builder overlay", ex); }
+            }
         }
     }
 
