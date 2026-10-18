@@ -97,6 +97,7 @@ public class MeleeScript extends Script {
     private volatile boolean pendingSellHandoff;
     // One bank gear inspection per melee run; missing gear is optional.
     private boolean gearCheckedAtBank;
+    private boolean bankingInventoryPrepared;
     private volatile long runGeneration;
 
     public void setDebugLogging(boolean debugLogging) {
@@ -112,6 +113,7 @@ public class MeleeScript extends Script {
         long generation = ++this.runGeneration;
         this.pendingSellHandoff = false;
         this.gearCheckedAtBank = false;
+        this.bankingInventoryPrepared = false;
         this.forcedCombatArea = forcedCombatArea;
         this.lastConfirmedFoodAtMs = System.currentTimeMillis();
         this.setStatus("Starting melee training");
@@ -399,14 +401,24 @@ public class MeleeScript extends Script {
 
         GearPlan gearPlan = buildGearPlan();
 
-        if (!Rs2Inventory.isEmpty() && !hasMeleeSetupItemsInInventory(gearPlan)) {
-            boolean hadSellableLoot = hasSellListItemInInventory();
-            if (!isBankInventoryActionPending()) {
-                int before = Rs2Inventory.emptySlotCount();
-                if (Rs2Bank.depositAll()) markBankInventoryAction(before);
+        // Clear the previous combat/loot inventory once per bank visit.
+        // Keeping any setup item used to bypass cleanup entirely, leaving a
+        // full inventory of raw chicken and immediately triggering re-banking.
+        // Re-withdraw the chosen equipment and food after the inventory is clear.
+        if (!bankingInventoryPrepared) {
+            if (!Rs2Inventory.isEmpty()) {
+                boolean hadSellableLoot = hasSellListItemInInventory();
+                if (!isBankInventoryActionPending()) {
+                    int before = Rs2Inventory.emptySlotCount();
+                    if (Rs2Bank.depositAll()) {
+                        markBankInventoryAction(before);
+                        if (hadSellableLoot) pendingSellHandoff = true;
+                    }
+                }
+                return;
             }
-            if (hadSellableLoot) pendingSellHandoff = true;
-            return;
+            bankingInventoryPrepared = true;
+            debug("Melee bank inventory prepared; withdrawing available gear and food");
         }
 
         for (String desiredItem : gearPlan.desiredItems) {
@@ -440,6 +452,7 @@ public class MeleeScript extends Script {
         }
 
         gearCheckedAtBank = true;
+        bankingInventoryPrepared = false;
         Rs2Bank.closeBank();
     }
 
@@ -1128,6 +1141,7 @@ public class MeleeScript extends Script {
         this.pendingBankActionAtMs = 0L;
         this.pendingBankInventoryCount = -1;
         this.gearCheckedAtBank = false;
+        this.bankingInventoryPrepared = false;
         this.clearPendingLoot();
         this.clearPendingBury();
         KspWalkerGuard.clear("Melee:target-area");
