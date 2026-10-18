@@ -1975,6 +1975,15 @@ public class KspAccountBuilderScript extends Script
             accountPlayTimeCache.sample(Microbot.isLoggedIn(), currentAccountHashSnapshot);
             accountPlayTimeCache.endSession();
         }
+        // Stop all child loops before clearing their shared state. Their pending
+        // callbacks must not be allowed to submit new GE/bank/walker actions
+        // while the parent task is being torn down.
+        try { stopAllTaskScriptsExcept(null); }
+        catch (Exception ex) { log.error("Account Builder child task shutdown failed", ex); }
+        try { if (autoLoginScript != null) autoLoginScript.shutdown(); }
+        catch (Exception ex) { log.warn("Account Builder auto-login shutdown failed", ex); }
+        try { if (experienceLampScript != null) experienceLampScript.shutdown(); }
+        catch (Exception ex) { log.warn("Account Builder experience lamp shutdown failed", ex); }
         super.shutdown();
         taskStarted = false;
         breakActive = false;
@@ -2002,10 +2011,11 @@ public class KspAccountBuilderScript extends Script
         lastBreakLoginAttemptAt = 0L;
         invalidateTaskSelectionResourceCache();
         updateWindowTitle();
-        stopAllTaskScriptsExcept(null);
-        if (autoLoginScript != null) autoLoginScript.shutdown();
-        if (experienceLampScript != null) experienceLampScript.shutdown();
-        Rs2Antiban.resetAntibanSettings(true);
+        preselectedHandoffTask = null;
+        currentTask = null;
+        try { Rs2Antiban.resetAntibanSettings(true); }
+        catch (Exception ex) { log.warn("Account Builder antiban reset failed during shutdown", ex); }
+        KspWalkerGuard.clearActiveWalker("ksp_account_builder_shutdown");
     }
 
     private void refreshAccountIdentity()
