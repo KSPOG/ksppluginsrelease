@@ -386,6 +386,14 @@ public class SellScript extends Script
             if (quantity > 0) return dispatchWithdrawal(name, quantity);
         }
 
+        // Outdated combat equipment may be sold even when buy requirements
+        // are not affordable; this sale can be what funds the next purchase.
+        for (String name : getOutdatedMeleeGearNames())
+        {
+            int count = Rs2Bank.count(name, true);
+            if (count > 0 && !isWithdrawalSkipped(name))
+                return dispatchWithdrawal(name, count);
+        }
         if (!canAffordGeBuyRequirements()) return false;
 
         String desiredPickaxe = resolveDesiredPickaxeName();
@@ -401,12 +409,6 @@ public class SellScript extends Script
         {
             int count = Rs2Bank.count(name, true);
             if (!name.equalsIgnoreCase(desiredAxe) && count > 0 && !isWithdrawalSkipped(name))
-                return dispatchWithdrawal(name, count);
-        }
-        for (String name : getOutdatedMeleeGearNames())
-        {
-            int count = Rs2Bank.count(name, true);
-            if (count > 0 && !isWithdrawalSkipped(name))
                 return dispatchWithdrawal(name, count);
         }
         return false;
@@ -776,18 +778,18 @@ public class SellScript extends Script
             if (getSellableInventoryQuantity(item.getName(), item.getQuantity()) <= 0) continue;
             if (isAllowedSellItemName(item.getName())) return item;
         }
-        if (!canAffordGeBuyRequirements()) return null;
-        String desiredPickaxe = resolveDesiredPickaxeName();
-        String desiredAxe = resolveDesiredAxeName();
-        for (Rs2ItemModel item : items)
-            if (item != null && item.getName() != null && !isBlocked(item.getName())
-                    && Buy.isOutdatedToolName(item.getName(), desiredPickaxe, desiredAxe)) return item;
         Set<String> outdatedMeleeGear = getOutdatedMeleeGearNames();
         for (Rs2ItemModel item : items)
             if (item != null && item.getName() != null && !isBlocked(item.getName())
                     && outdatedMeleeGear.contains(item.getName())
                     && getSellableInventoryQuantity(item.getName(), item.getQuantity()) > 0)
                 return item;
+        if (!canAffordGeBuyRequirements()) return null;
+        String desiredPickaxe = resolveDesiredPickaxeName();
+        String desiredAxe = resolveDesiredAxeName();
+        for (Rs2ItemModel item : items)
+            if (item != null && item.getName() != null && !isBlocked(item.getName())
+                    && Buy.isOutdatedToolName(item.getName(), desiredPickaxe, desiredAxe)) return item;
         return null;
     }
 
