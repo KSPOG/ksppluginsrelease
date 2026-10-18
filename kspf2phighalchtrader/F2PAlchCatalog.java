@@ -52,6 +52,12 @@ final class F2PAlchCatalog {
         discoveredMembers = Collections.unmodifiableSet(new LinkedHashSet<>(members));
     }
 
+    static Set<Integer> discoveredIds() {
+        Set<Integer> ids = new LinkedHashSet<>(discoveredF2p);
+        ids.addAll(discoveredMembers);
+        return ids;
+    }
+
     private static final Set<Integer> RESOLVED_MEMBERS_BUILT_INS = ConcurrentHashMap.newKeySet();
 
     static Set<Integer> buildCandidateSet(KspF2PHighAlchTraderConfig config, boolean allowMembers) {
