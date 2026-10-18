@@ -88,6 +88,7 @@ public class SellScript extends Script
     private final Map<String, Integer> failedBankWithdrawals = new HashMap<>();
     private final Set<String> skippedBankWithdrawals = new HashSet<>();
     private static final int MAX_WITHDRAW_FAILURES = 3;
+    private Set<String> outdatedMeleeGearCache;
 
     private GEArea targetArea = GEArea.GRAND_EXCHANGE;
     private SellState state = SellState.GOING_TO_GE;
@@ -146,6 +147,9 @@ public class SellScript extends Script
 
     private void tick()
     {
+        // Gear ranking is shared by bank checks, inventory checks and the
+        // SellList filter; only compute it once per scheduler tick.
+        outdatedMeleeGearCache = null;
         if (!KspWorldMapGuard.isSceneReady())
         {
             Microbot.status = "Waiting for game scene";
@@ -857,6 +861,7 @@ public class SellScript extends Script
      */
     private Set<String> getOutdatedMeleeGearNames()
     {
+        if (outdatedMeleeGearCache != null) return outdatedMeleeGearCache;
         Set<String> outdated = new HashSet<>();
         int attack = Microbot.getClient().getRealSkillLevel(Skill.ATTACK);
         int defence = Microbot.getClient().getRealSkillLevel(Skill.DEFENCE);
@@ -883,6 +888,7 @@ public class SellScript extends Script
                     && hasOwnedArmourUpgrade(name, armour.getRequiredDefenceLevel(), defence))
                 outdated.add(name);
         }
+        outdatedMeleeGearCache = outdated;
         return outdated;
     }
 
@@ -1024,6 +1030,7 @@ public class SellScript extends Script
         blockedSellItems.clear();
         failedBankWithdrawals.clear();
         skippedBankWithdrawals.clear();
+        outdatedMeleeGearCache = null;
         tradeRestrictionUnlockedCache = null;
         lastTradeRestrictionCheckAtMs = 0L;
         lastBuyAffordabilityCheckAtMs = 0L;
