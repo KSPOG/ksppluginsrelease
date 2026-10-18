@@ -30,7 +30,7 @@ import javax.inject.Inject;
 @SuppressWarnings("unused")
 public class KspAccountBuilderPlugin extends Plugin
 {
-    public static final String VERSION = "1.9.20";
+    public static final String VERSION = "1.9.21";
 
     @Inject
     private KspAccountBuilderScript script;
@@ -104,7 +104,7 @@ public class KspAccountBuilderPlugin extends Plugin
 
     public long getAntibanTimeUntilNextActionSeconds()
     {
-        return skillingAntiban.getTimeUntilNextActionSeconds();
+        return -1L;
     }
 
     public String getAntibanActivity()
@@ -113,7 +113,7 @@ public class KspAccountBuilderPlugin extends Plugin
         {
             return "Disabled";
         }
-        return skillingAntiban.getActivity();
+        return "Custom mouse paused (input safety)";
     }
 
     @Subscribe
@@ -137,11 +137,12 @@ public class KspAccountBuilderPlugin extends Plugin
                     taskName, useAntiban, chance);
         }
 
-        // The master toggle controls whether antiban is active. The percentage is
-        // intentionally applied to each eligible custom antiban opportunity rather
-        // than rolling once and disabling antiban for an entire task.
-        Rs2AntibanSettings.antibanEnabled = useAntiban;
-        skillingAntiban.tick(taskName, useAntiban, chance);
+        // The extra GameTick mouse controller has been suspended because it
+        // races banking/GE/skilling input. The builder's native antiban profiles
+        // and break handling remain configured by KspAccountBuilderScript.
+        // Never override global Rs2AntibanSettings on every GameTick:
+        // that fights script-specific state changes during task handoffs.
+        skillingAntiban.reset();
     }
 
     private void resetAntibanState()
