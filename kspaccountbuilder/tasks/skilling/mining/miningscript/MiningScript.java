@@ -408,8 +408,14 @@ public class MiningScript extends Script
 
         WorldArea area = targetArea.toWorldArea();
 
-        if (area.contains(playerLocation))
+        if (area.contains(playerLocation)
+                || (targetArea == Areas.SILVER_VARROCK_WEST
+                    && isAdjacentToMiningArea(playerLocation, targetArea)))
         {
+            // At Varrock West Silver, rock collision can occupy the chosen
+            // exact in-area destination. Mining from the adjacent reachable
+            // tile is valid; insisting on exact arrival creates an endless
+            // target-not-walkable loop after banking.
             clearTargetAreaWalkIfNeeded(area);
             return true;
         }
@@ -438,6 +444,16 @@ public class MiningScript extends Script
         }
 
         return false;
+    }
+
+    private boolean isAdjacentToMiningArea(WorldPoint player, Areas miningArea)
+    {
+        WorldPoint sw = miningArea.getSouthWest();
+        WorldPoint ne = miningArea.getNorthEast();
+        if (player.getPlane() != sw.getPlane()) return false;
+        int dx = Math.max(0, Math.max(sw.getX() - player.getX(), player.getX() - ne.getX()));
+        int dy = Math.max(0, Math.max(sw.getY() - player.getY(), player.getY() - ne.getY()));
+        return Math.max(dx, dy) <= 1;
     }
 
     private void clearTargetAreaWalkIfNeeded(WorldArea area)
