@@ -757,7 +757,7 @@ public class SellScript extends Script
     {
         for (SellList entry : SELL_ENTRIES)
             if (shouldSellEntry(entry) && !isBlocked(entry.getDisplayName())
-                    && getSellableBankQuantity(entry.getDisplayName()) > 0) return true;
+                    && !isWithdrawalSkipped(entry.getDisplayName()) && getSellableBankQuantity(entry.getDisplayName()) > 0) return true;
         return hasOutdatedToolInBank() || hasOutdatedMeleeGearInBank();
     }
 
@@ -782,9 +782,10 @@ public class SellScript extends Script
         for (Rs2ItemModel item : items)
             if (item != null && item.getName() != null && !isBlocked(item.getName())
                     && Buy.isOutdatedToolName(item.getName(), desiredPickaxe, desiredAxe)) return item;
+        Set<String> outdatedMeleeGear = getOutdatedMeleeGearNames();
         for (Rs2ItemModel item : items)
             if (item != null && item.getName() != null && !isBlocked(item.getName())
-                    && getOutdatedMeleeGearNames().contains(item.getName())
+                    && outdatedMeleeGear.contains(item.getName())
                     && getSellableInventoryQuantity(item.getName(), item.getQuantity()) > 0)
                 return item;
         return null;
@@ -927,9 +928,9 @@ public class SellScript extends Script
         String desiredPickaxe = resolveDesiredPickaxeName();
         String desiredAxe = resolveDesiredAxeName();
         for (String name : PICKAXE_NAMES)
-            if (!name.equalsIgnoreCase(desiredPickaxe) && Rs2Bank.count(name) > 0) return true;
+            if (!name.equalsIgnoreCase(desiredPickaxe) && !isWithdrawalSkipped(name) && Rs2Bank.count(name, true) > 0) return true;
         for (String name : AXE_NAMES)
-            if (!name.equalsIgnoreCase(desiredAxe) && Rs2Bank.count(name) > 0) return true;
+            if (!name.equalsIgnoreCase(desiredAxe) && !isWithdrawalSkipped(name) && Rs2Bank.count(name, true) > 0) return true;
         return false;
     }
 
