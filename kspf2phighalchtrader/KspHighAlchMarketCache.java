@@ -34,6 +34,9 @@ import java.util.concurrent.atomic.AtomicBoolean;
 @Slf4j
 final class KspHighAlchMarketCache implements AutoCloseable
 {
+    private static final String MAPPING_URL = "https://prices.runescape.wiki/api/v1/osrs/mapping";
+    private static final long MAPPING_REFRESH_MS = TimeUnit.HOURS.toMillis(6);
+    private static final String USER_AGENT = "KSP-High-Alch-Trader/0.3.7 (github.com/KSPOG/ksppluginsrelease)";
     private static final String LATEST_URL = "https://prices.runescape.wiki/api/v1/osrs/latest";
     private static final long REFRESH_SECONDS = 45L;
     private static final long MAX_STALE_LIVE_MS = TimeUnit.MINUTES.toMillis(15);
@@ -59,6 +62,8 @@ final class KspHighAlchMarketCache implements AutoCloseable
     private volatile Set<Integer> trackedItemIds = Set.of(NATURE_RUNE_ID, FIRE_RUNE_ID);
     private volatile Map<Integer, PricePoint> lastLiveSnapshot = Collections.emptyMap();
     private volatile long lastLiveAt;
+    private long nextMappingAttemptAt;
+    private boolean mappingFailureLogged;
     private volatile boolean closed;
     private volatile boolean outageLogged;
     private KspF2PHighAlchTraderConfig config;
@@ -108,6 +113,7 @@ final class KspHighAlchMarketCache implements AutoCloseable
 
         try
         {
+            refreshCatalogIfDue();
             Map<Integer, PricePoint> live = fetchBulkLatest();
             if (live.isEmpty())
             {
@@ -149,11 +155,104 @@ final class KspHighAlchMarketCache implements AutoCloseable
         }
     }
 
+    /**
+     * Refresh the complete tradeable-item catalog off the client thread.
+     * The Wiki mapping is the source of truth for candidate IDs; profitability,
+     * account membership, liquidity, and GE limits are still validated by the
+     * existing scan logic before an item can be purchased.
+     */
+    private void refreshCatalogIfDue()
+    {
+        long now = System.currentTimeMillis();
+        if (now < nextMappingAttemptAt || closed) return;
+        nextMappingAttemptAt = now + TimeUnit.MINUTES.toMillis(5);
+        try
+        {
+            HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(MAPPING_URL))
+                .header("User-Agent", USER_AGENT)
+                .timeout(Duration.ofSeconds(15))
+                .GET().build();
+            HttpResponse<java.io.InputStream> response =
+                httpClient.send(request, HttpResponse.BodyHandlers.ofInputStream());
+            if (response.statusCode() < 200 || response.statusCode() >= 300)
+            {
+                response.body().close();
+                throw new IllegalStateException("mapping HTTP " + response.statusCode());
+            }
+            Set<Integer> f2p = new HashSet<>();
+            Set<Integer> members = new HashSet<>();
+            try (InputStreamReader input = new InputStreamReader(response.body(), StandardCharsets.UTF_8);
+                 JsonReader json = new JsonReader(input))
+            {
+                json.beginArray();
+                while (json.hasNext())
+                {
+                    int id = 0;
+                    int highAlch = 0;
+                    boolean isMembers = false;
+                    json.beginObject();
+                    while (json.hasNext())
+                    {
+                        String key = json.nextName();
+                        if ("id".equals(key)) id = readJsonInt(json);
+                        else if ("highalch".equals(key)) highAlch = readJsonInt(json);
+                        else if ("members".equals(key))
+                        {
+                            if (json.peek() == JsonToken.BOOLEAN) isMembers = json.nextBoolean();
+                            else { json.skipValue(); }
+                        }
+                        else json.skipValue();
+                    }
+                    json.endObject();
+                    // A cast must at least return positive coins; actual net
+                    // profitability is checked separately against live prices.
+                    if (id > 0 && highAlch > 0)
+                    {
+                        (isMembers ? members : f2p).add(id);
+                    }
+                }
+                json.endArray();
+            }
+            if (f2p.isEmpty()) throw new IllegalStateException("empty high-alch mapping");
+            F2PAlchCatalog.updateDiscoveredCandidates(f2p, members);
+            // This network worker must not resolve member item names through
+            // Microbot's client-thread-only item manager.
+            Set<Integer> tracked = new HashSet<>(trackedItemIds);
+            tracked.addAll(F2PAlchCatalog.discoveredIds());
+            Set<Integer> excluded = new HashSet<>();
+            if (config != null && config.excludedCandidateIds() != null)
+            {
+                for (String token : config.excludedCandidateIds().split(","))
+                {
+                    try { excluded.add(Integer.parseInt(token.trim())); }
+                    catch (NumberFormatException ignored) { }
+                }
+            }
+            tracked.removeAll(excluded);
+            tracked.add(NATURE_RUNE_ID);
+            tracked.add(FIRE_RUNE_ID);
+            trackedItemIds = Collections.unmodifiableSet(tracked);
+            nextMappingAttemptAt = System.currentTimeMillis() + MAPPING_REFRESH_MS;
+            mappingFailureLogged = false;
+            log.info("KSP High Alch Trader catalog expanded: {} F2P, {} members candidates (deduplicated with built-ins)",
+                f2p.size(), members.size());
+        }
+        catch (Exception ex)
+        {
+            if (!mappingFailureLogged)
+            {
+                mappingFailureLogged = true;
+                log.warn("KSP High Alch Trader mapping catalog unavailable; retaining existing candidates: {}", ex.getMessage());
+            }
+        }
+    }
+
     private Map<Integer, PricePoint> fetchBulkLatest() throws Exception
     {
         HttpRequest request = HttpRequest.newBuilder()
             .uri(URI.create(LATEST_URL))
-            .header("User-Agent", "KSP-High-Alch-Trader/0.2.9 (github.com/KSPOG/ksppluginsrelease)")
+            .header("User-Agent", USER_AGENT)
             .timeout(Duration.ofSeconds(8))
             .GET()
             .build();

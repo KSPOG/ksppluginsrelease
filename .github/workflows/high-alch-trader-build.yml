@@ -1,0 +1,71 @@
+name: Build KSP High Alch Trader
+
+on:
+  pull_request:
+    paths:
+      - 'kspf2phighalchtrader/**'
+      - 'kspsupport/**'
+      - 'kspbank/**'
+      - '.github/workflows/high-alch-trader-build.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'kspf2phighalchtrader/**'
+      - 'kspsupport/**'
+      - 'kspbank/**'
+      - '.github/workflows/high-alch-trader-build.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Compile KspF2PHighAlchTraderPlugin
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout KSP plugin sources
+        uses: actions/checkout@v4
+        with:
+          path: release
+      - name: Checkout latest Microbot Hub
+        uses: actions/checkout@v4
+        with:
+          repository: chsami/Microbot-Hub
+          ref: main
+          path: hub
+      - name: Set up Java 11
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '11'
+      - name: Install plugin and shared KSP sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT='hub/src/main/java/net/runelite/client/plugins/microbot'
+          for component in kspf2phighalchtrader kspsupport kspbank; do
+            rm -rf "$ROOT/$component"
+            cp -R "release/$component" "$ROOT/$component"
+          done
+      - name: Include shared source directories
+        shell: python
+        run: |
+          from pathlib import Path
+          path = Path('hub/gradle/plugin-utils.gradle')
+          text = path.read_text(encoding='utf-8')
+          needle = 'include "${project.ext.getPluginsIncludePath()}/${plugin.dir.name}/**"'
+          replacement = needle + """
+                    if (plugin.name == "KspF2PHighAlchTraderPlugin") {
+                        include "${project.ext.getPluginsIncludePath()}/kspsupport/**"
+                        include "${project.ext.getPluginsIncludePath()}/kspbank/**"
+                    }"""
+          if needle not in text:
+              raise SystemExit('Could not locate source include rule')
+          path.write_text(text.replace(needle, replacement, 1), encoding='utf-8')
+      - name: Compile High Alch Trader
+        working-directory: hub
+        run: |
+          chmod +x gradlew
+          ./gradlew clean build -PpluginList=KspF2PHighAlchTraderPlugin --stacktrace --no-daemon
