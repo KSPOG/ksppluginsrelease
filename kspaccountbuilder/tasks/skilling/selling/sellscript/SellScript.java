@@ -1,6 +1,8 @@
 package net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.selling.sellscript;
 
 import java.util.EnumSet;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
@@ -29,6 +31,9 @@ import net.runelite.client.plugins.microbot.kspaccountbuilder.ksputil.KspBankWid
 import net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.questing.cooksassistant.reqs.Items;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.questing.goblindip.reqs.GobReqs;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.selling.buyscript.Buy;
+import net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.combat.melee.equipment.armour.Armour;
+import net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.combat.melee.equipment.weapon.Weapons;
+import net.runelite.client.plugins.microbot.util.equipment.Rs2Equipment;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.selling.buyscript.BuyScript;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.selling.gearea.GEArea;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.selling.sell.SellList;
@@ -78,6 +83,11 @@ public class SellScript extends Script
     @Inject private BuyScript buyScript;
 
     private final Set<String> blockedSellItems = new HashSet<>();
+    // Avoid infinite bank loops if a particular item's withdrawal cannot be
+    // confirmed. Other eligible items should still be processed.
+    private final Map<String, Integer> failedBankWithdrawals = new HashMap<>();
+    private final Set<String> skippedBankWithdrawals = new HashSet<>();
+    private static final int MAX_WITHDRAW_FAILURES = 3;
 
     private GEArea targetArea = GEArea.GRAND_EXCHANGE;
     private SellState state = SellState.GOING_TO_GE;
@@ -296,7 +306,10 @@ public class SellScript extends Script
         if (completeNow)
         {
             BankAction finished = bankAction;
+            String finishedItem = pendingWithdrawName;
             clearBankAction();
+            if (finished == BankAction.WITHDRAW && finishedItem != null)
+                failedBankWithdrawals.remove(finishedItem.toLowerCase(Locale.ROOT));
             if (finished == BankAction.CLOSE)
             {
                 bankInventoryPrepared = false;
@@ -319,6 +332,8 @@ public class SellScript extends Script
         if (bankActionExpired())
         {
             debug("Bank action recovery | action={} item={}", bankAction, pendingWithdrawName);
+            if (bankAction == BankAction.WITHDRAW && pendingWithdrawName != null)
+                recordFailedWithdrawal(pendingWithdrawName);
             clearBankAction();
             return false;
         }
@@ -337,6 +352,19 @@ public class SellScript extends Script
                 && System.nanoTime() - bankActionStartedNs >= BANK_ACTION_TIMEOUT_NS;
     }
 
+    private void recordFailedWithdrawal(String name)
+    {
+        String key = name.toLowerCase(Locale.ROOT);
+        int failures = failedBankWithdrawals.merge(key, 1, Integer::sum);
+        if (failures >= MAX_WITHDRAW_FAILURES && skippedBankWithdrawals.add(key))
+            log.warn("[KSP GE Sell] Skipping bank withdrawal for {} after {} failed attempts this run", name, failures);
+    }
+
+    private boolean isWithdrawalSkipped(String name)
+    {
+        return name != null && skippedBankWithdrawals.contains(name.toLowerCase(Locale.ROOT));
+    }
+
     private void clearBankAction()
     {
         bankAction = BankAction.NONE;
@@ -353,7 +381,7 @@ public class SellScript extends Script
         for (SellList entry : SELL_ENTRIES)
         {
             String name = entry.getDisplayName();
-            if (!shouldSellEntry(entry) || isBlocked(name)) continue;
+            if (!shouldSellEntry(entry) || isBlocked(name) || isWithdrawalSkipped(name)) continue;
             int quantity = getSellableBankQuantity(name);
             if (quantity > 0) return dispatchWithdrawal(name, quantity);
         }
@@ -364,7 +392,7 @@ public class SellScript extends Script
         for (String name : PICKAXE_NAMES)
         {
             int count = Rs2Bank.count(name, true);
-            if (!name.equalsIgnoreCase(desiredPickaxe) && count > 0)
+            if (!name.equalsIgnoreCase(desiredPickaxe) && count > 0 && !isWithdrawalSkipped(name))
                 return dispatchWithdrawal(name, count);
         }
 
@@ -372,7 +400,13 @@ public class SellScript extends Script
         for (String name : AXE_NAMES)
         {
             int count = Rs2Bank.count(name, true);
-            if (!name.equalsIgnoreCase(desiredAxe) && count > 0)
+            if (!name.equalsIgnoreCase(desiredAxe) && count > 0 && !isWithdrawalSkipped(name))
+                return dispatchWithdrawal(name, count);
+        }
+        for (String name : getOutdatedMeleeGearNames())
+        {
+            int count = Rs2Bank.count(name, true);
+            if (count > 0 && !isWithdrawalSkipped(name))
                 return dispatchWithdrawal(name, count);
         }
         return false;
@@ -380,7 +414,7 @@ public class SellScript extends Script
 
     private boolean dispatchWithdrawal(String itemName, int quantity)
     {
-        if (itemName == null || quantity <= 0 || Rs2Inventory.emptySlotCount() <= 0) return false;
+        if (itemName == null || quantity <= 0 || Rs2Inventory.emptySlotCount() <= 0 || isWithdrawalSkipped(itemName)) return false;
 
         int bankBefore = Rs2Bank.count(itemName, true);
         int amount = Math.min(quantity, bankBefore);
@@ -390,7 +424,11 @@ public class SellScript extends Script
         boolean sent = amount >= bankBefore
                 ? Rs2Bank.withdrawAll(itemName, true)
                 : Rs2Bank.withdrawX(itemName, amount, true);
-        if (!sent) return false;
+        if (!sent)
+        {
+            recordFailedWithdrawal(itemName);
+            return true; // Yield until the next tick; do not close the bank mid-batch.
+        }
 
         Microbot.status = "Batch withdrawing " + itemName;
         pendingWithdrawName = itemName;
@@ -700,6 +738,8 @@ public class SellScript extends Script
     private boolean shouldSellEntry(SellList entry)
     {
         if (entry.isTradeRestricted() && !hasUnlockedTradeRestrictedItems()) return false;
+        if (isSupportedMeleeEquipment(entry.getDisplayName())
+                && !getOutdatedMeleeGearNames().contains(entry.getDisplayName())) return false;
         if (PROTECTED_SKILL_RESOURCES.contains(entry) && !canAffordGeBuyRequirements()) return false;
         int firemakingLevel = Microbot.getClient().getRealSkillLevel(Skill.FIREMAKING);
         if (entry == SellList.LOGS) return firemakingLevel >= 15;
@@ -718,7 +758,7 @@ public class SellScript extends Script
         for (SellList entry : SELL_ENTRIES)
             if (shouldSellEntry(entry) && !isBlocked(entry.getDisplayName())
                     && getSellableBankQuantity(entry.getDisplayName()) > 0) return true;
-        return hasOutdatedToolInBank();
+        return hasOutdatedToolInBank() || hasOutdatedMeleeGearInBank();
     }
 
     public boolean hasSellListItemsAvailable()
@@ -742,6 +782,11 @@ public class SellScript extends Script
         for (Rs2ItemModel item : items)
             if (item != null && item.getName() != null && !isBlocked(item.getName())
                     && Buy.isOutdatedToolName(item.getName(), desiredPickaxe, desiredAxe)) return item;
+        for (Rs2ItemModel item : items)
+            if (item != null && item.getName() != null && !isBlocked(item.getName())
+                    && getOutdatedMeleeGearNames().contains(item.getName())
+                    && getSellableInventoryQuantity(item.getName(), item.getQuantity()) > 0)
+                return item;
         return null;
     }
 
@@ -787,6 +832,94 @@ public class SellScript extends Script
     }
 
     private boolean isQuestIncomplete(Quest quest) { return Rs2Player.getQuestState(quest) != QuestState.FINISHED; }
+
+    private boolean hasOutdatedMeleeGearInBank()
+    {
+        for (String name : getOutdatedMeleeGearNames())
+            if (!isWithdrawalSkipped(name) && Rs2Bank.count(name, true) > 0) return true;
+        return false;
+    }
+
+    private boolean isSupportedMeleeEquipment(String name)
+    {
+        for (Weapons weapon : Weapons.values())
+            if (weapon.getDisplayName().equalsIgnoreCase(name)) return true;
+        for (Armour armour : Armour.values())
+            if (armour.getDisplayName().equalsIgnoreCase(name)) return true;
+        return false;
+    }
+
+    /** Only sell an equipped-tier weapon or armour piece if a better piece
+     * for the same equipment slot is already owned. Future-level gear is kept.
+     */
+    private Set<String> getOutdatedMeleeGearNames()
+    {
+        Set<String> outdated = new HashSet<>();
+        int attack = Microbot.getClient().getRealSkillLevel(Skill.ATTACK);
+        int defence = Microbot.getClient().getRealSkillLevel(Skill.DEFENCE);
+        Set<String> protectedGear = new HashSet<>();
+        Buy.MeleeGearPlan plan = Buy.buildMeleeGearPlan(attack, defence,
+                Rs2Player.getQuestState(Quest.DRAGON_SLAYER_I) == QuestState.FINISHED,
+                this::hasGearAnywhere);
+        for (String name : plan.getDesiredItems())
+            if (name != null) protectedGear.add(name.toLowerCase(Locale.ROOT));
+
+        for (Weapons weapon : Weapons.values())
+        {
+            String name = weapon.getDisplayName();
+            if (weapon.getRequiredAttackLevel() <= attack && hasGearAnywhere(name)
+                    && !protectedGear.contains(name.toLowerCase(Locale.ROOT))
+                    && hasOwnedWeaponUpgrade(name, attack))
+                outdated.add(name);
+        }
+        for (Armour armour : Armour.values())
+        {
+            String name = armour.getDisplayName();
+            if (armour.getRequiredDefenceLevel() <= defence && hasGearAnywhere(name)
+                    && !protectedGear.contains(name.toLowerCase(Locale.ROOT))
+                    && hasOwnedArmourUpgrade(name, armour.getRequiredDefenceLevel(), defence))
+                outdated.add(name);
+        }
+        return outdated;
+    }
+
+    private boolean hasOwnedWeaponUpgrade(String current, int attack)
+    {
+        for (Weapons weapon : Weapons.values())
+            if (weapon.getRequiredAttackLevel() <= attack
+                    && !weapon.getDisplayName().equalsIgnoreCase(current)
+                    && hasGearAnywhere(weapon.getDisplayName()))
+                return true;
+        return false;
+    }
+
+    private boolean hasOwnedArmourUpgrade(String current, int currentLevel, int defence)
+    {
+        String slot = meleeArmourSlot(current);
+        for (Armour armour : Armour.values())
+            if (armour.getRequiredDefenceLevel() <= defence
+                    && armour.getRequiredDefenceLevel() >= currentLevel
+                    && !armour.getDisplayName().equalsIgnoreCase(current)
+                    && meleeArmourSlot(armour.getDisplayName()).equals(slot)
+                    && hasGearAnywhere(armour.getDisplayName()))
+                return true;
+        return false;
+    }
+
+    private String meleeArmourSlot(String name)
+    {
+        String lower = name.toLowerCase(Locale.ROOT);
+        if (lower.contains("helm")) return "head";
+        if (lower.contains("shield")) return "shield";
+        if (lower.contains("legs")) return "legs";
+        return "body";
+    }
+
+    private boolean hasGearAnywhere(String name)
+    {
+        return Rs2Equipment.isWearing(name) || Rs2Inventory.hasItem(name)
+                || Rs2Inventory.hasItem(name, true) || Rs2Bank.count(name, true) > 0;
+    }
 
     private boolean hasOutdatedToolInBank()
     {
@@ -886,6 +1019,8 @@ public class SellScript extends Script
         clearBankAction();
         clearPendingOffer();
         blockedSellItems.clear();
+        failedBankWithdrawals.clear();
+        skippedBankWithdrawals.clear();
         tradeRestrictionUnlockedCache = null;
         lastTradeRestrictionCheckAtMs = 0L;
         lastBuyAffordabilityCheckAtMs = 0L;
