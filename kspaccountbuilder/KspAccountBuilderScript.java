@@ -522,6 +522,12 @@ public class KspAccountBuilderScript extends Script
         if (postTutorialBankCameraPending && currentTask != BuilderTask.TUTORIAL_ISLAND)
             postTutorialBankCameraPending = !setPostTutorialBankCamera();
         if (handlePendingMeleeSellHandoff()) return;
+        // A resource-driven handoff is multi-tick (GE/Bank widgets must settle).
+        // Do not restart the outgoing task while its bank handoff is pending.
+        if (preselectedHandoffTask != null && !isSingleSkillTaskForced())
+        {
+            if (!switchToTaskWithResources()) return;
+        }
         if (!isSingleSkillTaskForced() && !hasResourcesForTask(currentTask) && !switchToTaskWithResources())
         {
             taskStarted = false;
@@ -1331,7 +1337,9 @@ public class KspAccountBuilderScript extends Script
     private boolean stopCurrentTaskForHandoff(BuilderTask nextTask)
     {
         BuilderTask outgoing = currentTask;
-        stopCurrentTaskScript();
+        // Shutting down an already-stopped child on every handoff tick can
+        // repeatedly reset shared banking/GE state and prevent completion.
+        if (isTaskScriptRunning(outgoing)) stopCurrentTaskScript();
         taskStarted = false;
         if (!isTaskScriptRunning(outgoing)) return true;
         debug("Waiting for outgoing task to stop before handoff | currentTask={} nextTask={}", outgoing, nextTask);
