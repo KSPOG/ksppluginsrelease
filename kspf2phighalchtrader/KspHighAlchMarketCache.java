@@ -216,7 +216,20 @@ final class KspHighAlchMarketCache implements AutoCloseable
             }
             if (f2p.isEmpty()) throw new IllegalStateException("empty high-alch mapping");
             F2PAlchCatalog.updateDiscoveredCandidates(f2p, members);
-            Set<Integer> tracked = new HashSet<>(F2PAlchCatalog.buildCandidateSet(config, true));
+            // This network worker must not resolve member item names through
+            // Microbot's client-thread-only item manager.
+            Set<Integer> tracked = new HashSet<>(trackedItemIds);
+            tracked.addAll(F2PAlchCatalog.discoveredIds());
+            Set<Integer> excluded = new HashSet<>();
+            if (config != null && config.excludedCandidateIds() != null)
+            {
+                for (String token : config.excludedCandidateIds().split(","))
+                {
+                    try { excluded.add(Integer.parseInt(token.trim())); }
+                    catch (NumberFormatException ignored) { }
+                }
+            }
+            tracked.removeAll(excluded);
             tracked.add(NATURE_RUNE_ID);
             tracked.add(FIRE_RUNE_ID);
             trackedItemIds = Collections.unmodifiableSet(tracked);
