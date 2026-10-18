@@ -99,6 +99,8 @@ public class MeleeScript extends Script {
     private boolean gearCheckedAtBank;
     private boolean bankingInventoryPrepared;
     private volatile long runGeneration;
+    private long lastWarriorCombatXpAtMs;
+    private int lastWarriorCombatXp = -1;
 
     public void setDebugLogging(boolean debugLogging) {
         this.debugLogging = debugLogging;
@@ -114,6 +116,8 @@ public class MeleeScript extends Script {
         this.pendingSellHandoff = false;
         this.gearCheckedAtBank = false;
         this.bankingInventoryPrepared = false;
+        this.lastWarriorCombatXpAtMs = 0L;
+        this.lastWarriorCombatXp = -1;
         this.forcedCombatArea = forcedCombatArea;
         this.lastConfirmedFoodAtMs = System.currentTimeMillis();
         this.setStatus("Starting melee training");
@@ -126,6 +130,7 @@ public class MeleeScript extends Script {
                 }
 
                 TrainingStage stage = this.resolveTrainingStage();
+                updateWarriorCombatXp(stage);
                 KspTaskDebug.throttled(log, this.debugLogging, "Melee", "loop", 5_000L,
                         "loop | state={} status={} area={} npc={} player={} moving={} animating={} interacting={} inCombat={} hp={}/{} bankOpen={}",
                         this.state,
@@ -727,7 +732,7 @@ public class MeleeScript extends Script {
             return;
         }
 
-        if (isAttackDispatchPending()) return;
+        if (isAttackDispatchPending() || hasRecentWarriorCombatXp(stage)) return;
 
         Rs2NpcModel currentAttacker = findNpcAttackingPlayer(localPlayer, playerLocation, stage);
         if (currentAttacker != null) {
@@ -901,7 +906,37 @@ public class MeleeScript extends Script {
         return isActivelyFighting(resolveTrainingStage());
     }
 
+    private void updateWarriorCombatXp(TrainingStage stage) {
+        if (stage == null || stage.primaryNpc != NPC.AL_KHARID_WARRIOR) {
+            lastWarriorCombatXp = -1;
+            lastWarriorCombatXpAtMs = 0L;
+            return;
+        }
+        // These skills cover all melee attack styles and Constitution XP.
+        // Experience is an additional signal, never a replacement for NPC,
+        // animation, interaction or combat-state checks.
+        int totalXp = Microbot.getClient().getSkillExperience(Skill.ATTACK)
+                + Microbot.getClient().getSkillExperience(Skill.STRENGTH)
+                + Microbot.getClient().getSkillExperience(Skill.DEFENCE)
+                + Microbot.getClient().getSkillExperience(Skill.HITPOINTS);
+        if (lastWarriorCombatXp >= 0 && totalXp > lastWarriorCombatXp) {
+            lastWarriorCombatXpAtMs = System.currentTimeMillis();
+            KspTaskDebug.throttled(log, debugLogging, "Melee", "warrior-xp", 2_000L,
+                    "Al Kharid warrior combat XP confirmed | delta={} previous={} current={}",
+                    totalXp - lastWarriorCombatXp, lastWarriorCombatXp, totalXp);
+        }
+        lastWarriorCombatXp = totalXp;
+    }
+
+    private boolean hasRecentWarriorCombatXp(TrainingStage stage) {
+        return stage != null && stage.primaryNpc == NPC.AL_KHARID_WARRIOR
+                && lastWarriorCombatXpAtMs > 0L
+                && System.currentTimeMillis() - lastWarriorCombatXpAtMs < 3_000L
+                && isPlayerInsideCombatArea(Rs2Player.getWorldLocation(), stage.area);
+    }
+
     private boolean isActivelyFighting(TrainingStage stage) {
+        if (hasRecentWarriorCombatXp(stage)) return true;
         WorldPoint playerLocation = Rs2Player.getWorldLocation();
         Actor interacting = Rs2Player.getInteracting();
         if (interacting != null
@@ -1142,6 +1177,8 @@ public class MeleeScript extends Script {
         this.pendingBankInventoryCount = -1;
         this.gearCheckedAtBank = false;
         this.bankingInventoryPrepared = false;
+        this.lastWarriorCombatXpAtMs = 0L;
+        this.lastWarriorCombatXp = -1;
         this.clearPendingLoot();
         this.clearPendingBury();
         KspWalkerGuard.clear("Melee:target-area");
