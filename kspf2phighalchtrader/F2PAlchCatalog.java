@@ -2,6 +2,7 @@ package net.runelite.client.plugins.microbot.kspf2phighalchtrader;
 
 import net.runelite.client.plugins.microbot.Microbot;
 
+import java.util.Collections;
 import java.util.LinkedHashSet;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -40,12 +41,27 @@ final class F2PAlchCatalog {
             "Saradomin plateskirt", "Ancient plateskirt", "Armadyl platebody"
     };
 
+    // The Wiki mapping endpoint covers all tradeable OSRS item IDs, rather than
+    // a permanently frozen selection of profitable-looking items. The original
+    // built-ins stay available when the remote catalog cannot be loaded.
+    private static volatile Set<Integer> discoveredF2p = Collections.emptySet();
+    private static volatile Set<Integer> discoveredMembers = Collections.emptySet();
+
+    static void updateDiscoveredCandidates(Set<Integer> f2p, Set<Integer> members) {
+        discoveredF2p = Collections.unmodifiableSet(new LinkedHashSet<>(f2p));
+        discoveredMembers = Collections.unmodifiableSet(new LinkedHashSet<>(members));
+    }
+
     private static final Set<Integer> RESOLVED_MEMBERS_BUILT_INS = ConcurrentHashMap.newKeySet();
 
     static Set<Integer> buildCandidateSet(KspF2PHighAlchTraderConfig config, boolean allowMembers) {
         Set<Integer> result = new LinkedHashSet<>();
         addAll(result, F2P_ALCH);
-        if (allowMembers) addResolvedNames(result, MEMBERS_ALCH);
+        result.addAll(discoveredF2p);
+        if (allowMembers) {
+            addResolvedNames(result, MEMBERS_ALCH);
+            result.addAll(discoveredMembers);
+        }
         addParsedIds(result, config.customCandidateIds());
 
         Set<Integer> excluded = new LinkedHashSet<>();
