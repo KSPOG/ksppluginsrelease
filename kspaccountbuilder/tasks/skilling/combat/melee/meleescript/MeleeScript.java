@@ -95,6 +95,8 @@ public class MeleeScript extends Script {
     private int pendingBuryBoneCount = -1;
     private long pendingBuryAtMs;
     private volatile boolean pendingSellHandoff;
+    // One bank gear inspection per melee run; missing gear is optional.
+    private boolean gearCheckedAtBank;
     private volatile long runGeneration;
 
     public void setDebugLogging(boolean debugLogging) {
@@ -109,6 +111,7 @@ public class MeleeScript extends Script {
         this.shutdown();
         long generation = ++this.runGeneration;
         this.pendingSellHandoff = false;
+        this.gearCheckedAtBank = false;
         this.forcedCombatArea = forcedCombatArea;
         this.lastConfirmedFoodAtMs = System.currentTimeMillis();
         this.setStatus("Starting melee training");
@@ -136,6 +139,11 @@ public class MeleeScript extends Script {
                         Microbot.getClient().getRealSkillLevel(Skill.HITPOINTS),
                         Rs2Bank.isOpen());
 
+                if (!this.gearCheckedAtBank && !this.isActivelyFighting(stage)) {
+                    this.state = CombatState.BANKING;
+                    this.handleBanking(stage);
+                    return;
+                }
                 if (this.needsWarriorFoodRestock(stage)) {
                     this.state = CombatState.BANKING;
                     this.handleBanking(stage);
@@ -168,11 +176,8 @@ public class MeleeScript extends Script {
                     this.state = CombatState.EQUIPPING;
                     return;
                 }
-                if (!this.hasCurrentTaskWeaponEquippedOrInInventory()) {
-                    this.state = CombatState.PREPARING;
-                    this.setStatus("Waiting for melee weapon");
-                    return;
-                }
+                // Missing weapons are not fatal. Continue unarmed when no
+                // supported weapon is owned, rather than polling the bank forever.
                 if (this.ensureBalancedAttackStyle()) {
                     this.state = CombatState.PREPARING;
                     return;
@@ -349,11 +354,6 @@ public class MeleeScript extends Script {
             return false;
         }
 
-        if (!this.hasCurrentTaskWeaponEquippedOrInInventory()) {
-            this.debug("Banking because required melee weapon is not equipped or in inventory");
-            return true;
-        }
-
         int foodCount = this.getFoodCountInInventory();
         if (foodCount > 0) {
             this.lastConfirmedFoodAtMs = System.currentTimeMillis();
@@ -439,6 +439,7 @@ public class MeleeScript extends Script {
             return;
         }
 
+        gearCheckedAtBank = true;
         Rs2Bank.closeBank();
     }
 
@@ -1126,6 +1127,7 @@ public class MeleeScript extends Script {
         this.pendingWorldAction = null;
         this.pendingBankActionAtMs = 0L;
         this.pendingBankInventoryCount = -1;
+        this.gearCheckedAtBank = false;
         this.clearPendingLoot();
         this.clearPendingBury();
         KspWalkerGuard.clear("Melee:target-area");
