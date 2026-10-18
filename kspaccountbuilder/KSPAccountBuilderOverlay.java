@@ -72,8 +72,9 @@ public class KSPAccountBuilderOverlay extends OverlayPanel
         if (config.useAntiban())
         {
             String antibanState = plugin.isAntibanEnabledForCurrentTask() ? "ON" : "OFF";
-            String antibanTime = formatDuration(plugin.getAntibanTimeUntilNextActionSeconds());
-            String antibanSummary = antibanState + " | " + plugin.getAntibanChancePercent() + "% | " + antibanTime;
+            // The custom mouse trigger (and its configured chance/countdown)
+            // is suspended, so do not present its percentage as an active rate.
+            String antibanSummary = antibanState + " | Task profile";
 
             panelComponent.getChildren().add(LineComponent.builder()
                     .left("Antiban:")
