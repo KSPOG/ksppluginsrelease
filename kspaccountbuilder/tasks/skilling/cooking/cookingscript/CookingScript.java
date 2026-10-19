@@ -14,6 +14,7 @@ import net.runelite.client.plugins.microbot.api.tileobject.models.Rs2TileObjectM
 import net.runelite.client.plugins.microbot.kspaccountbuilder.KspTaskDebug;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.KspWalkerGuard;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.ksputil.KspBankWidgetHelper;
+import net.runelite.client.plugins.microbot.kspaccountbuilder.ksputil.KspLiveScene;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.cooking.areas.Areas;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.cooking.levels.CookLevels;
 import net.runelite.client.plugins.microbot.util.bank.Rs2Bank;
@@ -251,7 +252,8 @@ public class CookingScript extends Script
                 .within(COOKING_EXIT_DOOR_POINT, 2)
                 .nearestOnClientThread();
 
-        if (door == null || !door.click("Open"))
+        if ((door == null || !door.click("Open"))
+                && !KspLiveScene.interact(COOKING_EXIT_DOOR_ID, COOKING_EXIT_DOOR_POINT, 2, "Open"))
         {
             walkThroughCookingAreaExit();
             return true;
