@@ -24,7 +24,7 @@ public class KspBonesToBananasPlugin extends Plugin
 {
     private final KspBreakService breaks = new KspBreakService();
 
-    public static final String VERSION = "0.0.3";
+    public static final String VERSION = "0.0.4";
 
     @Inject private KspBonesToBananasConfig config;
     @Inject private KspBonesToBananasScript script;

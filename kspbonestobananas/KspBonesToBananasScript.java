@@ -31,7 +31,7 @@ import static net.runelite.client.plugins.microbot.util.Global.sleepUntil;
 @Slf4j
 public class KspBonesToBananasScript extends KspBreakAwareScript
 {
-    private static final int LOOP_MS = 650;
+    private static final int LOOP_MS = 250;
     private static final int MAX_GE_RETRIES = 5;
 
     private KspBonesToBananasConfig config;
@@ -88,9 +88,19 @@ public class KspBonesToBananasScript extends KspBreakAwareScript
                     reportStartupGate("Paused: break or priority plugin");
                     return;
                 }
+                // STARTING only validates level and advances the local state;
+                // no movement, clicks, GE, or bank actions happen here.
+                // Microbot's blocking-event gate can remain false for a while,
+                // so run this safe initialization immediately instead of
+                // displaying "Starting" indefinitely.
+                if (state == KspBonesToBananasState.STARTING)
+                {
+                    start();
+                    if (state == KspBonesToBananasState.ERROR) return;
+                }
                 if (!super.run())
                 {
-                    reportStartupGate("Waiting for Microbot script permission");
+                    reportStartupGate("Waiting for Microbot blocking event");
                     return;
                 }
                 tick();
