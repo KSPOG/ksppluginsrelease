@@ -11,6 +11,7 @@ import net.runelite.api.Skill;
 import net.runelite.api.gameval.ItemID;
 import net.runelite.client.plugins.microbot.Microbot;
 import net.runelite.client.plugins.microbot.kspsupport.KspBreakAwareScript;
+import net.runelite.client.plugins.microbot.kspsupport.KspBreakService;
 import net.runelite.client.plugins.microbot.util.bank.Rs2Bank;
 import net.runelite.client.plugins.microbot.util.equipment.Rs2Equipment;
 import net.runelite.client.plugins.microbot.util.grandexchange.GrandExchangeAction;
@@ -48,6 +49,7 @@ public class KspBonesToBananasScript extends KspBreakAwareScript
     private volatile int currentBatch, bankedBananas, spendableCoins;
     private int castFailures, buyRetryLevel, sellRetryLevel;
     private GeOrder geOrder;
+    private volatile long lastStartupGateLogAt;
 
     public boolean run(KspBonesToBananasConfig config)
     {
@@ -63,6 +65,7 @@ public class KspBonesToBananasScript extends KspBreakAwareScript
         currentBatch = bankedBananas = spendableCoins = castFailures = buyRetryLevel = sellRetryLevel = 0;
         buyQueue.clear();
         geOrder = null;
+        lastStartupGateLogAt = 0L;
 
         if (config.antiban()) antiban.reset(config.antibanProfile());
         else antiban.disable();
@@ -70,7 +73,25 @@ public class KspBonesToBananasScript extends KspBreakAwareScript
         mainScheduledFuture = scheduledExecutorService.scheduleWithFixedDelay(() -> {
             try
             {
-                if (super.run() && Microbot.isLoggedIn()) tick();
+                // Never leave the overlay silently frozen at "Starting":
+                // distinguish login, external priority pauses and RuneLite's
+                // normal Script.run() gate, without overriding any gate.
+                if (!Microbot.isLoggedIn())
+                {
+                    reportStartupGate("Waiting for login");
+                    return;
+                }
+                if (KspBreakService.shouldPause())
+                {
+                    reportStartupGate("Paused: break or priority plugin");
+                    return;
+                }
+                if (!super.run())
+                {
+                    reportStartupGate("Waiting for Microbot script permission");
+                    return;
+                }
+                tick();
             }
             catch (Exception ex)
             {
@@ -85,6 +106,22 @@ public class KspBonesToBananasScript extends KspBreakAwareScript
             }
         }, 0, LOOP_MS, TimeUnit.MILLISECONDS);
         return true;
+    }
+
+    private void reportStartupGate(String reason)
+    {
+        // Keep the state at STARTING so the original startup validations run
+        // normally when the external run gate becomes available.
+        if (state == KspBonesToBananasState.STARTING
+                || state == KspBonesToBananasState.SCANNING_MARKET)
+            status = reason;
+        long now = System.currentTimeMillis();
+        if (now - lastStartupGateLogAt >= 5_000L)
+        {
+            lastStartupGateLogAt = now;
+            log.info("Bones to Bananas waiting | state={} gate={} loggedIn={} paused={}",
+                    state, reason, Microbot.isLoggedIn(), KspBreakService.shouldPause());
+        }
     }
 
     public void stopScript()
