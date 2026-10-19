@@ -575,12 +575,7 @@ public class KspBonesToBananasScript extends KspBreakAwareScript
 
         if (order.abortRequested)
         {
-            if (!orderSlotCleared(order))
-            {
-                status = "Waiting for aborted offer collection: " + order.itemName;
-                return;
-            }
-            replanAfterAbort(order);
+            recoverAbortedOrder(order);
             return;
         }
 
@@ -703,7 +698,55 @@ public class KspBonesToBananasScript extends KspBreakAwareScript
         // Microbot's abortOffer(..., true) only initiates Collect-to-bank. Do not
         // replan against stale bank quantities until the tracked GE slot is cleared.
         order.abortRequested = true;
-        status = "Waiting for aborted offer collection: " + order.itemName;
+        order.lastAbortRecoveryAt = 0L;
+        status = "Recovering aborted GE offer: " + order.itemName;
+    }
+
+    private void recoverAbortedOrder(GeOrder order)
+    {
+        if (orderSlotCleared(order))
+        {
+            replanAfterAbort(order);
+            return;
+        }
+
+        // An abort request alone does not guarantee that the offer is aborted
+        // or that its items/coins have been collected. Retry only the tracked
+        // offer and never place a replacement until its slot is empty.
+        long now = System.currentTimeMillis();
+        if (now - order.lastAbortRecoveryAt < 2_000L)
+        {
+            status = "Waiting for GE abort/collection: " + order.itemName;
+            return;
+        }
+        order.lastAbortRecoveryAt = now;
+
+        OfferSnapshot current = offer(order.slot);
+        if (current == null)
+        {
+            status = "Waiting for GE offer state: " + order.itemName;
+            return;
+        }
+        if (current.itemId != order.itemId)
+        {
+            replanAfterAbort(order);
+            return;
+        }
+
+        if (current.state == GrandExchangeOfferState.BUYING
+                || current.state == GrandExchangeOfferState.SELLING)
+        {
+            status = "Aborting stalled GE offer: " + order.itemName;
+            Rs2GrandExchange.abortOffer(order.itemName, true);
+            return;
+        }
+
+        status = "Collecting aborted GE offer: " + order.itemName;
+        Rs2GrandExchange.collectAllToBank();
+        if (orderSlotCleared(order))
+        {
+            replanAfterAbort(order);
+        }
     }
 
     private void replanAfterAbort(GeOrder order)
@@ -1059,7 +1102,7 @@ public class KspBonesToBananasScript extends KspBreakAwareScript
         final String itemName;
         GrandExchangeSlots slot;
         boolean placed, abortRequested;
-        long placedAt;
+        long placedAt, lastAbortRecoveryAt;
 
         GeOrder(GrandExchangeAction action, int itemId, String itemName, int quantity, int price)
         {
