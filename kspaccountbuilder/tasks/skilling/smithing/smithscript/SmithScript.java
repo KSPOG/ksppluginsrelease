@@ -29,6 +29,7 @@ import net.runelite.client.plugins.microbot.api.tileobject.models.Rs2TileObjectM
 import net.runelite.client.plugins.microbot.kspaccountbuilder.KspBankMode;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.KspTaskDebug;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.KspWalkerGuard;
+import net.runelite.client.plugins.microbot.kspaccountbuilder.ksputil.KspLiveScene;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.ksputil.KspBankWidgetHelper;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.smithing.recipes.SmithRecipe;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.smithing.smitharea.SmithArea;
@@ -403,7 +404,16 @@ extends Script {
         if (player == null || !targetArea.toWorldArea().contains(player)) return;
 
         Rs2TileObjectModel anvil = findNearbyAnvilInTargetArea();
-        if (anvil == null) return;
+        if (anvil == null) {
+            long now = System.currentTimeMillis();
+            if (!isWorldActionPending("anvil") && now - lastAnvilInteractAtMs >= ANVIL_INTERACT_COOLDOWN_MS
+                    && KspLiveScene.interact("Anvil", player, 12, "Smith")) {
+                lastAnvilInteractAtMs = now;
+                awaitingSmithStartAtMs = now;
+                markWorldAction("anvil");
+            }
+            return;
+        }
 
         if (player.distanceTo(anvil.getWorldLocation()) > ANVIL_APPROACH_DISTANCE) {
             KspWalkerGuard.walkFastCanvasToPoint(
