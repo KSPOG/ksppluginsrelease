@@ -11,6 +11,7 @@ import net.runelite.api.Skill;
 import net.runelite.api.gameval.ItemID;
 import net.runelite.client.plugins.microbot.Microbot;
 import net.runelite.client.plugins.microbot.kspsupport.KspBreakAwareScript;
+import net.runelite.client.plugins.microbot.kspsupport.KspBreakService;
 import net.runelite.client.plugins.microbot.util.bank.Rs2Bank;
 import net.runelite.client.plugins.microbot.util.equipment.Rs2Equipment;
 import net.runelite.client.plugins.microbot.util.grandexchange.GrandExchangeAction;
@@ -48,6 +49,8 @@ public class KspBonesToBananasScript extends KspBreakAwareScript
     private volatile int currentBatch, bankedBananas, spendableCoins;
     private int castFailures, buyRetryLevel, sellRetryLevel;
     private GeOrder geOrder;
+    private volatile long lastStartupGateLogAt;
+    private long lastRestockLogAt;
 
     public boolean run(KspBonesToBananasConfig config)
     {
@@ -63,6 +66,8 @@ public class KspBonesToBananasScript extends KspBreakAwareScript
         currentBatch = bankedBananas = spendableCoins = castFailures = buyRetryLevel = sellRetryLevel = 0;
         buyQueue.clear();
         geOrder = null;
+        lastStartupGateLogAt = 0L;
+        lastRestockLogAt = 0L;
 
         if (config.antiban()) antiban.reset(config.antibanProfile());
         else antiban.disable();
@@ -70,7 +75,25 @@ public class KspBonesToBananasScript extends KspBreakAwareScript
         mainScheduledFuture = scheduledExecutorService.scheduleWithFixedDelay(() -> {
             try
             {
-                if (super.run() && Microbot.isLoggedIn()) tick();
+                // Never leave the overlay silently frozen at "Starting":
+                // distinguish login, external priority pauses and RuneLite's
+                // normal Script.run() gate, without overriding any gate.
+                if (!Microbot.isLoggedIn())
+                {
+                    reportStartupGate("Waiting for login");
+                    return;
+                }
+                if (KspBreakService.shouldPause())
+                {
+                    reportStartupGate("Paused: break or priority plugin");
+                    return;
+                }
+                if (!super.run())
+                {
+                    reportStartupGate("Waiting for Microbot script permission");
+                    return;
+                }
+                tick();
             }
             catch (Exception ex)
             {
@@ -85,6 +108,22 @@ public class KspBonesToBananasScript extends KspBreakAwareScript
             }
         }, 0, LOOP_MS, TimeUnit.MILLISECONDS);
         return true;
+    }
+
+    private void reportStartupGate(String reason)
+    {
+        // Keep the state at STARTING so the original startup validations run
+        // normally when the external run gate becomes available.
+        if (state == KspBonesToBananasState.STARTING
+                || state == KspBonesToBananasState.SCANNING_MARKET)
+            status = reason;
+        long now = System.currentTimeMillis();
+        if (now - lastStartupGateLogAt >= 5_000L)
+        {
+            lastStartupGateLogAt = now;
+            log.info("Bones to Bananas waiting | state={} gate={} loggedIn={} paused={}",
+                    state, reason, Microbot.isLoggedIn(), KspBreakService.shouldPause());
+        }
     }
 
     public void stopScript()
@@ -344,7 +383,17 @@ public class KspBonesToBananasScript extends KspBreakAwareScript
             return;
         }
 
-        if (!ensureBank() || !bankMode(true)) return;
+        if (!ensureBank())
+        {
+            logRestockWait("bank-not-open");
+            return;
+        }
+        if (!bankMode(true))
+        {
+            logRestockWait("bank-withdraw-mode");
+            return;
+        }
+        status = "Checking bank inputs and cash";
         cleanInventoryForBatch();
         refreshBananaStock();
 
@@ -372,6 +421,17 @@ public class KspBonesToBananasScript extends KspBreakAwareScript
         long spendable = Math.max(0L, coins - config.cashReserve());
         spendableCoins = (int) Math.min(Integer.MAX_VALUE, spendable);
         long budget = spendable * config.maxSpendPercent() / 100L;
+        logRestockWait("bank-audited");
+
+        if (spendable <= 0L)
+        {
+            state = KspBonesToBananasState.WAITING_FOR_PROFIT;
+            status = "No spendable GP: " + coins + " total, " + config.cashReserve() + " reserved";
+            nextScanAt = System.currentTimeMillis() + 15_000L;
+            log.info("Bones to Bananas restock blocked by cash reserve | totalCoins={} reserve={} ownedBones={} runesReady={}",
+                    coins, config.cashReserve(), ownedBones, runesReady);
+            return;
+        }
 
         int minimumProfitableBones = minimumProfitableBones(activeQuote);
         if (minimumProfitableBones <= 0)
@@ -419,6 +479,18 @@ public class KspBonesToBananasScript extends KspBreakAwareScript
 
         status = "Buying " + buyQueue.size() + " profitable input(s)";
         tickBuyQueue();
+    }
+
+    private void logRestockWait(String phase)
+    {
+        long now = System.currentTimeMillis();
+        if (now - lastRestockLogAt < 5_000L) return;
+        lastRestockLogAt = now;
+        log.info("Bones to Bananas restock | phase={} state={} bankOpen={} geOpen={} player={} coinsInventory={} coinsBank={} queue={} offer={} status={}",
+                phase, state, Rs2Bank.isOpen(), Rs2GrandExchange.isOpen(), Rs2Player.getWorldLocation(),
+                Rs2Inventory.itemQuantity(ItemID.COINS),
+                Rs2Bank.isOpen() ? Rs2Bank.count(ItemID.COINS) : -1,
+                buyQueue.size(), geOrder == null ? "none" : geOrder.itemName, status);
     }
 
     private void sellOutput()
