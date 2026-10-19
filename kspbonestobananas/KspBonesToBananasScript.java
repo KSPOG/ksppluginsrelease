@@ -12,6 +12,7 @@ import net.runelite.api.gameval.ItemID;
 import net.runelite.client.plugins.microbot.Microbot;
 import net.runelite.client.plugins.microbot.kspsupport.KspBreakAwareScript;
 import net.runelite.client.plugins.microbot.kspsupport.KspBreakService;
+import net.runelite.client.plugins.microbot.util.input.InputArbiter;
 import net.runelite.client.plugins.microbot.util.bank.Rs2Bank;
 import net.runelite.client.plugins.microbot.util.equipment.Rs2Equipment;
 import net.runelite.client.plugins.microbot.util.grandexchange.GrandExchangeAction;
@@ -100,7 +101,7 @@ public class KspBonesToBananasScript extends KspBreakAwareScript
                 }
                 if (!super.run())
                 {
-                    reportStartupGate("Waiting for Microbot blocking event");
+                    reportStartupGate(diagnoseMicrobotGate());
                     return;
                 }
                 tick();
@@ -120,6 +121,19 @@ public class KspBonesToBananasScript extends KspBreakAwareScript
         return true;
     }
 
+    private String diagnoseMicrobotGate()
+    {
+        // Diagnostic only. Do not call shouldBlockAndProcess() a second
+        // time: it may execute blocking-event actions when queried.
+        if (Microbot.pauseAllScripts.get()) return "Microbot globally paused";
+        if (Thread.currentThread().isInterrupted()) return "Script scheduler interrupted";
+        if (InputArbiter.isHuman())
+            return "Manual input takeover (keys=" + InputArbiter.realKeysDown()
+                    + ", buttons=" + InputArbiter.realButtonsDown()
+                    + ", idleMs=" + InputArbiter.millisSinceRealActivity() + ")";
+        return "Microbot blocking event active";
+    }
+
     private void reportStartupGate(String reason)
     {
         // Keep the state at STARTING so the original startup validations run
@@ -131,8 +145,10 @@ public class KspBonesToBananasScript extends KspBreakAwareScript
         if (now - lastStartupGateLogAt >= 5_000L)
         {
             lastStartupGateLogAt = now;
-            log.info("Bones to Bananas waiting | state={} gate={} loggedIn={} paused={}",
-                    state, reason, Microbot.isLoggedIn(), KspBreakService.shouldPause());
+            log.info("Bones to Bananas waiting | state={} gate={} loggedIn={} paused={} globalPause={} manualInput={} keys={} buttons={}",
+                    state, reason, Microbot.isLoggedIn(), KspBreakService.shouldPause(),
+                    Microbot.pauseAllScripts.get(), InputArbiter.isHuman(),
+                    InputArbiter.realKeysDown(), InputArbiter.realButtonsDown());
         }
     }
 
