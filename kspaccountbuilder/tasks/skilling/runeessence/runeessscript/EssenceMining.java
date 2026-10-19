@@ -38,6 +38,7 @@ public class EssenceMining extends Script
     private static final long WALK_REFIRE_COOLDOWN_MS = 1_000L;
     private static final long ACTION_COOLDOWN_MS = 100L;
     private static final long ACTION_DISPATCH_TIMEOUT_MS = 1_500L;
+    private static final long AUBURY_TELEPORT_TIMEOUT_MS = 8_000L;
     private static final long MINING_PROGRESS_TIMEOUT_MS = 4_800L;
     private static final WorldPoint AUBURY_POSITION = new WorldPoint(3253, 3399, 0);
     private static final WorldPoint[] ESSENCE_MINE_PORTAL_LOCATIONS = {
@@ -115,6 +116,7 @@ public class EssenceMining extends Script
 
         if (isInEssenceMine())
         {
+            clearAuburyTeleportTransition();
             if (Rs2Inventory.isFull())
             {
                 exitMine();
@@ -207,6 +209,14 @@ public class EssenceMining extends Script
 
     private void walkToAndTeleportWithAubury()
     {
+        if (isAuburyTeleportPending())
+        {
+            state = EssenceState.TELEPORTING;
+            status = "Waiting for Aubury teleport";
+            KspWalkerGuard.clear(WALK_KEY_AUBURY);
+            return;
+        }
+
         WorldPoint player = Rs2Player.getWorldLocation();
         Rs2NpcModel aubury = Microbot.getRs2NpcCache().query()
                 .fromWorldView().withName("Aubury").nearestOnClientThread();
@@ -224,7 +234,7 @@ public class EssenceMining extends Script
         state = EssenceState.TELEPORTING;
         status = "Teleporting to rune essence mine";
         KspWalkerGuard.clear(WALK_KEY_AUBURY);
-        if (isWorldActionPending("aubury") || !canAct()) return;
+        if (!canAct()) return;
 
         if (aubury.click("Teleport")) {
             lastActionAtMs = System.currentTimeMillis();
@@ -509,6 +519,43 @@ public class EssenceMining extends Script
         return false;
     }
 
+    private boolean isAuburyTeleportPending()
+    {
+        if (!"aubury".equals(pendingWorldAction) || pendingWorldActionAtMs == 0L)
+        {
+            return false;
+        }
+
+        if (isInEssenceMine())
+        {
+            clearAuburyTeleportTransition();
+            return false;
+        }
+
+        long elapsed = System.currentTimeMillis() - pendingWorldActionAtMs;
+        if (elapsed < AUBURY_TELEPORT_TIMEOUT_MS)
+        {
+            return true;
+        }
+
+        KspTaskDebug.throttled(log, true, "Rune Essence", "aubury-teleport-timeout", 5_000L,
+                "Aubury teleport did not complete before timeout; allowing one retry | elapsedMs={} player={} region={}",
+                elapsed, Rs2Player.getWorldLocation(), getCurrentRegion());
+        pendingWorldActionAtMs = 0L;
+        pendingWorldAction = null;
+        return false;
+    }
+
+    private void clearAuburyTeleportTransition()
+    {
+        KspWalkerGuard.clear(WALK_KEY_AUBURY);
+        if ("aubury".equals(pendingWorldAction))
+        {
+            pendingWorldActionAtMs = 0L;
+            pendingWorldAction = null;
+        }
+    }
+
     private boolean isWorldActionPending(String action)
     {
         if (pendingWorldActionAtMs == 0L || pendingWorldAction == null) return false;
@@ -575,7 +622,7 @@ public class EssenceMining extends Script
     {
         clearEssenceMiningAction();
         resetPortalSearch();
-        KspWalkerGuard.clear(WALK_KEY_AUBURY);
+        clearAuburyTeleportTransition();
         KspWalkerGuard.clear(WALK_KEY_BANK);
         KspWalkerGuard.clear(WALK_KEY_PORTAL);
         super.shutdown();
