@@ -483,7 +483,12 @@ public class KspBonesToBananasScript extends KspBreakAwareScript
 
         if (buyQueue.isEmpty())
         {
-            state = KspBonesToBananasState.PREPARING_BATCH;
+            // All missing supplies are outside observed GE purchase allowance
+            // or have no current quote. Do not bounce indefinitely between
+            // PREPARING_BATCH and RESTOCKING when no buy can be submitted.
+            state = KspBonesToBananasState.WAITING_FOR_PROFIT;
+            nextScanAt = System.currentTimeMillis() + Math.max(30, config.priceRefreshSeconds()) * 1000L;
+            status = "No eligible GE buys: limit or price unavailable";
             return;
         }
 
