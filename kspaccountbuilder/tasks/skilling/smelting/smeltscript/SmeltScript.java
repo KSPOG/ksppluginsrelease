@@ -17,6 +17,7 @@ import net.runelite.client.plugins.microbot.Script;
 import net.runelite.client.plugins.microbot.api.tileobject.models.Rs2TileObjectModel;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.KspTaskDebug;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.KspWalkerGuard;
+import net.runelite.client.plugins.microbot.kspaccountbuilder.ksputil.KspLiveScene;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.ksputil.KspBankWidgetHelper;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.smelting.barlevel.BarLevels;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.smelting.oresreq.ReqOres;
@@ -358,6 +359,8 @@ public class SmeltScript extends Script
         if (furnace == null)
         {
             Microbot.status = "Waiting for " + targetArea.getDisplayName();
+            if (KspLiveScene.interact("Furnace", Rs2Player.getWorldLocation(), 12, "Smelt"))
+                furnaceInteractionSentAt = now;
             return;
         }
 
