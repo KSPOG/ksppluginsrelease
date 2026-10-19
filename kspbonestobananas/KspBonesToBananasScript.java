@@ -50,6 +50,7 @@ public class KspBonesToBananasScript extends KspBreakAwareScript
     private int castFailures, buyRetryLevel, sellRetryLevel;
     private GeOrder geOrder;
     private volatile long lastStartupGateLogAt;
+    private long lastRestockLogAt;
 
     public boolean run(KspBonesToBananasConfig config)
     {
@@ -66,6 +67,7 @@ public class KspBonesToBananasScript extends KspBreakAwareScript
         buyQueue.clear();
         geOrder = null;
         lastStartupGateLogAt = 0L;
+        lastRestockLogAt = 0L;
 
         if (config.antiban()) antiban.reset(config.antibanProfile());
         else antiban.disable();
@@ -381,7 +383,17 @@ public class KspBonesToBananasScript extends KspBreakAwareScript
             return;
         }
 
-        if (!ensureBank() || !bankMode(true)) return;
+        if (!ensureBank())
+        {
+            logRestockWait("bank-not-open");
+            return;
+        }
+        if (!bankMode(true))
+        {
+            logRestockWait("bank-withdraw-mode");
+            return;
+        }
+        status = "Checking bank inputs and cash";
         cleanInventoryForBatch();
         refreshBananaStock();
 
@@ -409,6 +421,17 @@ public class KspBonesToBananasScript extends KspBreakAwareScript
         long spendable = Math.max(0L, coins - config.cashReserve());
         spendableCoins = (int) Math.min(Integer.MAX_VALUE, spendable);
         long budget = spendable * config.maxSpendPercent() / 100L;
+        logRestockWait("bank-audited");
+
+        if (spendable <= 0L)
+        {
+            state = KspBonesToBananasState.WAITING_FOR_PROFIT;
+            status = "No spendable GP: " + coins + " total, " + config.cashReserve() + " reserved";
+            nextScanAt = System.currentTimeMillis() + 15_000L;
+            log.info("Bones to Bananas restock blocked by cash reserve | totalCoins={} reserve={} ownedBones={} runesReady={}",
+                    coins, config.cashReserve(), ownedBones, runesReady);
+            return;
+        }
 
         int minimumProfitableBones = minimumProfitableBones(activeQuote);
         if (minimumProfitableBones <= 0)
@@ -456,6 +479,18 @@ public class KspBonesToBananasScript extends KspBreakAwareScript
 
         status = "Buying " + buyQueue.size() + " profitable input(s)";
         tickBuyQueue();
+    }
+
+    private void logRestockWait(String phase)
+    {
+        long now = System.currentTimeMillis();
+        if (now - lastRestockLogAt < 5_000L) return;
+        lastRestockLogAt = now;
+        log.info("Bones to Bananas restock | phase={} state={} bankOpen={} geOpen={} player={} coinsInventory={} coinsBank={} queue={} offer={} status={}",
+                phase, state, Rs2Bank.isOpen(), Rs2GrandExchange.isOpen(), Rs2Player.getWorldLocation(),
+                Rs2Inventory.itemQuantity(ItemID.COINS),
+                Rs2Bank.isOpen() ? Rs2Bank.count(ItemID.COINS) : -1,
+                buyQueue.size(), geOrder == null ? "none" : geOrder.itemName, status);
     }
 
     private void sellOutput()
