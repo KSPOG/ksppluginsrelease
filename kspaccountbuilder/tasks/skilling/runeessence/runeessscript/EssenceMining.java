@@ -30,7 +30,8 @@ public class EssenceMining extends Script
     private static final int ESSENCE_MINE_REGION = 11595;
     private static final int ESSENCE_MINE_PORTAL_ID = 3086;
     private static final int NPC_REACH_DISTANCE = 5;
-    private static final int PORTAL_APPROACH_DISTANCE = 6;
+    private static final int PORTAL_APPROACH_DISTANCE = 3;
+    private static final long PORTAL_SEARCH_TIMEOUT_MS = 10_000L;
     private static final long WALK_REFIRE_COOLDOWN_MS = 1_000L;
     private static final long ACTION_COOLDOWN_MS = 100L;
     private static final long ACTION_DISPATCH_TIMEOUT_MS = 1_500L;
@@ -55,6 +56,8 @@ public class EssenceMining extends Script
     private long lastMiningProgressAtMs;
     private long pendingBankActionAtMs;
     private int pendingBankEmptySlots = -1;
+    private long portalSearchStartedAtMs;
+    private int portalFallbackIndex = -1;
     private EssenceState state = EssenceState.PREPARING;
     private String status = "Idle";
 
@@ -67,6 +70,8 @@ public class EssenceMining extends Script
         pendingBankActionAtMs = 0L;
         pendingBankEmptySlots = -1;
         state = EssenceState.PREPARING;
+        portalSearchStartedAtMs = 0L;
+        portalFallbackIndex = -1;
         status = "Starting rune essence mining";
 
         mainScheduledFuture = scheduledExecutorService.scheduleWithFixedDelay(() ->
@@ -119,6 +124,7 @@ public class EssenceMining extends Script
         }
 
         clearEssenceMiningAction();
+        resetPortalSearch();
         if (Rs2Inventory.isFull() || !hasPickaxe())
         {
             bankInventory();
@@ -287,8 +293,6 @@ public class EssenceMining extends Script
         if (Rs2Player.isAnimating() || Rs2Player.isInteracting() || isWorldActionPending("portal") || !canAct()) return;
 
         WorldPoint player = Rs2Player.getWorldLocation();
-        WorldPoint portalLocation = getNearestPortalLocation();
-
         var portal = Microbot.getRs2TileObjectCache().query()
                 .fromWorldView()
                 .withId(ESSENCE_MINE_PORTAL_ID)
@@ -301,36 +305,92 @@ public class EssenceMining extends Script
                     .nearestOnClientThread();
         }
 
-        if (portal == null)
+        if (portal != null)
         {
-            if (player != null && player.distanceTo(portalLocation) <= PORTAL_APPROACH_DISTANCE)
+            resetPortalSearch();
+            KspWalkerGuard.clear(WALK_KEY_PORTAL);
+            try
             {
-                KspWalkerGuard.clear(WALK_KEY_PORTAL);
-                status = "Waiting for rune essence portal";
-                return;
+                boolean clicked = portal.click("Exit");
+                if (!clicked) clicked = portal.click();
+                if (clicked)
+                {
+                    lastActionAtMs = System.currentTimeMillis();
+                    markWorldAction("portal");
+                    status = "Exiting rune essence mine";
+                }
+                else
+                {
+                    status = "Retrying rune essence portal interaction";
+                }
             }
-
-            status = "Walking to rune essence portal";
-            KspWalkerGuard.walkFastCanvasToPoint(
-                    WALK_KEY_PORTAL,
-                    portalLocation,
-                    PORTAL_APPROACH_DISTANCE,
-                    WALK_REFIRE_COOLDOWN_MS);
+            catch (RuntimeException ex)
+            {
+                // World-view transitions can invalidate the portal clickbox
+                // between cache lookup and input dispatch. Recover next tick.
+                KspTaskDebug.throttled(log, true, "Rune Essence", "portal-click-exception", 5_000L,
+                        "Rune essence portal click failed; retrying discovery | player={} error={}",
+                        player, ex.toString());
+                status = "Retrying rune essence portal";
+                lastActionAtMs = System.currentTimeMillis();
+            }
             return;
         }
 
-        KspWalkerGuard.clear(WALK_KEY_PORTAL);
-        boolean clicked = portal.click("Exit");
-        if (!clicked)
+        // The portal can be missing from the tile-object cache immediately
+        // after a mine scene rebuild. Previously reaching the expected portal
+        // tile caused an infinite "Waiting for rune essence portal" state.
+        long now = System.currentTimeMillis();
+        if (portalFallbackIndex < 0)
         {
-            clicked = portal.click();
+            portalFallbackIndex = nearestPortalIndex(player);
+            portalSearchStartedAtMs = now;
         }
-        if (clicked)
+        if (now - portalSearchStartedAtMs >= PORTAL_SEARCH_TIMEOUT_MS)
         {
-            lastActionAtMs = System.currentTimeMillis();
-            markWorldAction("portal");
-            status = "Exiting rune essence mine";
+            portalFallbackIndex = (portalFallbackIndex + 1) % ESSENCE_MINE_PORTAL_LOCATIONS.length;
+            portalSearchStartedAtMs = now;
+            KspWalkerGuard.clear(WALK_KEY_PORTAL);
+            KspTaskDebug.throttled(log, true, "Rune Essence", "portal-fallback", 2_000L,
+                    "Portal not visible in cache; trying alternate exit | player={} target={} index={}",
+                    player, ESSENCE_MINE_PORTAL_LOCATIONS[portalFallbackIndex], portalFallbackIndex);
         }
+
+        WorldPoint portalLocation = ESSENCE_MINE_PORTAL_LOCATIONS[portalFallbackIndex];
+        if (player != null && player.distanceTo(portalLocation) <= PORTAL_APPROACH_DISTANCE)
+        {
+            KspWalkerGuard.clear(WALK_KEY_PORTAL);
+            status = "Searching for rune essence portal";
+            return;
+        }
+
+        status = "Walking to rune essence portal";
+        KspWalkerGuard.walkToPoint(
+                WALK_KEY_PORTAL,
+                portalLocation,
+                PORTAL_APPROACH_DISTANCE,
+                WALK_REFIRE_COOLDOWN_MS);
+    }
+
+    private int nearestPortalIndex(WorldPoint player)
+    {
+        int best = 0;
+        if (player == null) return best;
+        for (int i = 1; i < ESSENCE_MINE_PORTAL_LOCATIONS.length; i++)
+        {
+            if (player.distanceTo(ESSENCE_MINE_PORTAL_LOCATIONS[i])
+                    < player.distanceTo(ESSENCE_MINE_PORTAL_LOCATIONS[best]))
+            {
+                best = i;
+            }
+        }
+        return best;
+    }
+
+    private void resetPortalSearch()
+    {
+        portalSearchStartedAtMs = 0L;
+        portalFallbackIndex = -1;
     }
 
     public boolean recoverFromEssenceMine()
@@ -486,6 +546,7 @@ public class EssenceMining extends Script
     public void shutdown()
     {
         clearEssenceMiningAction();
+        resetPortalSearch();
         KspWalkerGuard.clear(WALK_KEY_AUBURY);
         KspWalkerGuard.clear(WALK_KEY_BANK);
         KspWalkerGuard.clear(WALK_KEY_PORTAL);
