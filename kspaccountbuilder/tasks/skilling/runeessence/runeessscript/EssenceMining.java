@@ -6,6 +6,9 @@ import javax.inject.Singleton;
 import net.runelite.api.Quest;
 import net.runelite.api.QuestState;
 import net.runelite.api.Skill;
+import net.runelite.api.Tile;
+import net.runelite.api.TileObject;
+import net.runelite.api.GameObject;
 import net.runelite.api.coords.WorldPoint;
 import net.runelite.client.plugins.microbot.Microbot;
 import net.runelite.client.plugins.microbot.Script;
@@ -19,6 +22,7 @@ import net.runelite.client.plugins.microbot.util.bank.enums.BankLocation;
 import net.runelite.client.plugins.microbot.util.equipment.Rs2Equipment;
 import net.runelite.client.plugins.microbot.util.inventory.Rs2Inventory;
 import net.runelite.client.plugins.microbot.util.player.Rs2Player;
+import net.runelite.client.plugins.microbot.util.gameobject.Rs2GameObject;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -293,6 +297,31 @@ public class EssenceMining extends Script
         if (Rs2Player.isAnimating() || Rs2Player.isInteracting() || isWorldActionPending("portal") || !canAct()) return;
 
         WorldPoint player = Rs2Player.getWorldLocation();
+        // Inspect the actual loaded scene first. Object-cache misses can occur
+        // after mine relocation/scene rebuild even when a portal is rendered.
+        TileObject livePortal = findPortalInLiveScene(player);
+        if (livePortal != null)
+        {
+            resetPortalSearch();
+            KspWalkerGuard.clear(WALK_KEY_PORTAL);
+            try
+            {
+                if (Rs2GameObject.interact(livePortal, "Exit"))
+                {
+                    lastActionAtMs = System.currentTimeMillis();
+                    markWorldAction("portal");
+                    status = "Exiting rune essence mine";
+                    return;
+                }
+            }
+            catch (RuntimeException ex)
+            {
+                KspTaskDebug.throttled(log, true, "Rune Essence", "live-portal-click-error", 5_000L,
+                        "Live scene portal interaction failed | player={} portal={} error={}",
+                        player, livePortal.getWorldLocation(), ex.toString());
+            }
+        }
+
         var portal = Microbot.getRs2TileObjectCache().query()
                 .fromWorldView()
                 .withId(ESSENCE_MINE_PORTAL_ID)
@@ -370,6 +399,44 @@ public class EssenceMining extends Script
                 portalLocation,
                 PORTAL_APPROACH_DISTANCE,
                 WALK_REFIRE_COOLDOWN_MS);
+    }
+
+    private TileObject findPortalInLiveScene(WorldPoint player)
+    {
+        return Microbot.getClientThread().runOnClientThreadOptional(() ->
+        {
+            Tile[][][] sceneTiles = Microbot.getClient().getScene().getTiles();
+            if (sceneTiles == null) return null;
+            TileObject best = null;
+            int bestDistance = Integer.MAX_VALUE;
+            for (Tile[][] planeTiles : sceneTiles)
+            {
+                if (planeTiles == null) continue;
+                for (Tile[] row : planeTiles)
+                {
+                    if (row == null) continue;
+                    for (Tile tile : row)
+                    {
+                        if (tile == null) continue;
+                        GameObject[] objects = tile.getGameObjects();
+                        if (objects == null) continue;
+                        for (GameObject candidate : objects)
+                        {
+                            if (candidate == null || candidate.getId() != ESSENCE_MINE_PORTAL_ID) continue;
+                            WorldPoint location = candidate.getWorldLocation();
+                            if (location == null) continue;
+                            int distance = player == null ? 0 : player.distanceTo(location);
+                            if (distance < bestDistance)
+                            {
+                                best = candidate;
+                                bestDistance = distance;
+                            }
+                        }
+                    }
+                }
+            }
+            return best;
+        }).orElse(null);
     }
 
     private int nearestPortalIndex(WorldPoint player)
