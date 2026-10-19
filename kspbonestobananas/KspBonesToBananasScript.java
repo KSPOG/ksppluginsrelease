@@ -546,13 +546,36 @@ public class KspBonesToBananasScript extends KspBreakAwareScript
         tickGeOrder();
     }
 
+    private String accountName()
+    {
+        try
+        {
+            return Microbot.getClientThread().runOnClientThreadOptional(() ->
+                    Microbot.getClient().getLocalPlayer() == null
+                            ? null : Microbot.getClient().getLocalPlayer().getName()).orElse(null);
+        }
+        catch (RuntimeException ignored)
+        {
+            return null;
+        }
+    }
+
     private void buildBuy(int itemId, String name, int target)
     {
         int owned = Math.max(0, Rs2Bank.count(itemId)) + Math.max(0, Rs2Inventory.itemQuantity(itemId));
         int need = Math.max(0, target - owned);
         if (need <= 0) return;
+        int remaining = BonesToBananasTradeLimits.remaining(accountName(), itemId);
+        if (remaining <= 0)
+        {
+            status = "GE 4h buy limit reached for " + name + " (observed client fills)";
+            log.info("Bones to Bananas GE buy limit reached | item={} itemId={} owned={} need={}",
+                    name, itemId, owned, need);
+            return;
+        }
+        int quantity = Math.min(need, remaining);
         int price = prices.buyOfferPrice(itemId, config.buyMarkupPercent(), buyRetryLevel);
-        if (price > 0) buyQueue.addLast(new GeOrder(GrandExchangeAction.BUY, itemId, name, need, price));
+        if (price > 0) buyQueue.addLast(new GeOrder(GrandExchangeAction.BUY, itemId, name, quantity, price));
     }
 
     private void tickBuyQueue()
@@ -606,6 +629,18 @@ public class KspBonesToBananasScript extends KspBreakAwareScript
             }
             order.slot = recovered;
             offer = offer(recovered);
+        }
+
+        if (order.action == GrandExchangeAction.BUY && offer != null)
+        {
+            // The market limit is consumed when units fill, not when an
+            // offer is placed, aborted, repriced, or sold.
+            int delta = Math.max(0, offer.filled - order.observedFilled);
+            if (delta > 0)
+            {
+                BonesToBananasTradeLimits.recordFill(accountName(), order.itemId, delta);
+                order.observedFilled = offer.filled;
+            }
         }
 
         boolean complete = offer != null
@@ -1103,6 +1138,7 @@ public class KspBonesToBananasScript extends KspBreakAwareScript
         GrandExchangeSlots slot;
         boolean placed, abortRequested;
         long placedAt, lastAbortRecoveryAt;
+        int observedFilled;
 
         GeOrder(GrandExchangeAction action, int itemId, String itemName, int quantity, int price)
         {
