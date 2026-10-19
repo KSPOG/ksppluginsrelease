@@ -212,7 +212,10 @@ public class KspBonesToBananasScript extends KspBreakAwareScript
             {
                 bestBanked = q;
             }
-            if (bestMarket == null || q.getProjectedGpHour() > bestMarket.getProjectedGpHour())
+            // Existing stock remains usable even after this item's buy limit.
+            // Do not reselect a depleted bone type with no GE allowance.
+            if (BonesToBananasTradeLimits.remaining(accountName(), bone.getItemId()) > 0
+                    && (bestMarket == null || q.getProjectedGpHour() > bestMarket.getProjectedGpHour()))
             {
                 bestMarket = q;
             }
@@ -248,6 +251,12 @@ public class KspBonesToBananasScript extends KspBreakAwareScript
         status = (bestBanked != null ? "Using profitable banked " : "Selected profitable ") + activeBone.getItemName();
     }
 
+    private boolean boneBuyLimitReached()
+    {
+        return activeBone != null
+                && BonesToBananasTradeLimits.remaining(accountName(), activeBone.getItemId()) <= 0;
+    }
+
     private void prepareBatch()
     {
         if (!activeReady()) return;
@@ -264,18 +273,34 @@ public class KspBonesToBananasScript extends KspBreakAwareScript
         cleanInventoryForBatch();
         refreshBananaStock();
 
-        if (bankedBananas >= config.sellThreshold())
+        int boneBank = Math.max(0, Rs2Bank.count(activeBone.getItemId()));
+        boolean boneLimitReached = boneBuyLimitReached();
+        if (boneBank <= 0)
+        {
+            if (boneLimitReached)
+            {
+                // Exhausted both the GE allowance and the bank's current bone
+                // stock: liquidate ALL bananas before selecting another bone.
+                state = bankedBananas > 0 ? KspBonesToBananasState.SELLING_OUTPUT
+                        : KspBonesToBananasState.SCANNING_MARKET;
+                status = bankedBananas > 0
+                        ? "Bone buy limit reached; selling Bananas before switching"
+                        : "Bone buy limit reached; selecting next profitable bone";
+            }
+            else
+            {
+                state = bankedBananas > 0 ? KspBonesToBananasState.SELLING_OUTPUT
+                        : KspBonesToBananasState.RESTOCKING;
+                status = bankedBananas > 0 ? "Selling finished output" : "Restocking profitable inputs";
+            }
+            return;
+        }
+        // When the bone's GE allowance is exhausted, prioritize consuming all
+        // already-owned bones over the ordinary Banana sell threshold.
+        if (!boneLimitReached && bankedBananas >= config.sellThreshold())
         {
             state = KspBonesToBananasState.SELLING_OUTPUT;
             status = "Banana sell threshold reached";
-            return;
-        }
-
-        int boneBank = Math.max(0, Rs2Bank.count(activeBone.getItemId()));
-        if (boneBank <= 0)
-        {
-            state = bankedBananas > 0 ? KspBonesToBananasState.SELLING_OUTPUT : KspBonesToBananasState.RESTOCKING;
-            status = bankedBananas > 0 ? "Selling finished output" : "Restocking profitable inputs";
             return;
         }
 
@@ -418,6 +443,20 @@ public class KspBonesToBananasScript extends KspBreakAwareScript
         {
             state = KspBonesToBananasState.PREPARING_BATCH;
             status = "Using existing profitable input stock";
+            return;
+        }
+        if (BonesToBananasTradeLimits.remaining(accountName(), activeBone.getItemId()) <= 0)
+        {
+            // Never wait on another buy order for an exhausted bone type.
+            // Banked bones are handled above when a profitable batch is ready.
+            // Once consumed, sell the produced Bananas and then rotate.
+            state = bankedBananas > 0 ? KspBonesToBananasState.SELLING_OUTPUT
+                    : KspBonesToBananasState.SCANNING_MARKET;
+            status = bankedBananas > 0
+                    ? "GE buy limit reached; selling Bananas before next bone"
+                    : "GE buy limit reached; checking next profitable bone";
+            log.info("Bones to Bananas switching after observed GE buy limit | bone={} owned={} bananas={}",
+                    activeBone.getItemName(), ownedBones, bankedBananas);
             return;
         }
         if (bankedBananas >= config.sellThreshold())
