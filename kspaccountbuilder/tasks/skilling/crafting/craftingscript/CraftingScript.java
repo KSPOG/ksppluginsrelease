@@ -11,6 +11,7 @@ import net.runelite.client.plugins.microbot.api.tileobject.models.Rs2TileObjectM
 import net.runelite.client.plugins.microbot.kspaccountbuilder.KspBankMode;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.KspTaskDebug;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.KspWalkerGuard;
+import net.runelite.client.plugins.microbot.kspaccountbuilder.ksputil.KspLiveScene;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.ksputil.KspBankWidgetHelper;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.crafting.areas.Areas;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.crafting.clevels.CraftingLevels;
@@ -364,6 +365,10 @@ public class CraftingScript extends Script
         if (furnace == null)
         {
             Microbot.status = "Waiting for " + selectedFurnaceArea.getDisplayName();
+            if (KspLiveScene.interact("Furnace", Rs2Player.getWorldLocation(), FURNACE_SEARCH_RADIUS, "Smelt")) {
+                lastActionAtMs = System.currentTimeMillis();
+                markWorldAction("furnace");
+            }
             return;
         }
 

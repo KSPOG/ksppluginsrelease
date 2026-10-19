@@ -6,9 +6,7 @@ import javax.inject.Singleton;
 import net.runelite.api.Quest;
 import net.runelite.api.QuestState;
 import net.runelite.api.Skill;
-import net.runelite.api.Tile;
 import net.runelite.api.TileObject;
-import net.runelite.api.GameObject;
 import net.runelite.api.coords.WorldPoint;
 import net.runelite.client.plugins.microbot.Microbot;
 import net.runelite.client.plugins.microbot.Script;
@@ -16,6 +14,7 @@ import net.runelite.client.plugins.microbot.api.npc.models.Rs2NpcModel;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.KspTaskDebug;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.KspWalkerGuard;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.ksputil.KspBankWidgetHelper;
+import net.runelite.client.plugins.microbot.kspaccountbuilder.ksputil.KspLiveScene;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.runeessence.inv.Equip;
 import net.runelite.client.plugins.microbot.util.bank.Rs2Bank;
 import net.runelite.client.plugins.microbot.util.bank.enums.BankLocation;
@@ -299,7 +298,7 @@ public class EssenceMining extends Script
         WorldPoint player = Rs2Player.getWorldLocation();
         // Inspect the actual loaded scene first. Object-cache misses can occur
         // after mine relocation/scene rebuild even when a portal is rendered.
-        TileObject livePortal = findPortalInLiveScene(player);
+        TileObject livePortal = KspLiveScene.nearestGameObject(ESSENCE_MINE_PORTAL_ID, player, 100);
         if (livePortal != null)
         {
             resetPortalSearch();
@@ -399,44 +398,6 @@ public class EssenceMining extends Script
                 portalLocation,
                 PORTAL_APPROACH_DISTANCE,
                 WALK_REFIRE_COOLDOWN_MS);
-    }
-
-    private TileObject findPortalInLiveScene(WorldPoint player)
-    {
-        return Microbot.getClientThread().runOnClientThreadOptional(() ->
-        {
-            Tile[][][] sceneTiles = Microbot.getClient().getScene().getTiles();
-            if (sceneTiles == null) return null;
-            TileObject best = null;
-            int bestDistance = Integer.MAX_VALUE;
-            for (Tile[][] planeTiles : sceneTiles)
-            {
-                if (planeTiles == null) continue;
-                for (Tile[] row : planeTiles)
-                {
-                    if (row == null) continue;
-                    for (Tile tile : row)
-                    {
-                        if (tile == null) continue;
-                        GameObject[] objects = tile.getGameObjects();
-                        if (objects == null) continue;
-                        for (GameObject candidate : objects)
-                        {
-                            if (candidate == null || candidate.getId() != ESSENCE_MINE_PORTAL_ID) continue;
-                            WorldPoint location = candidate.getWorldLocation();
-                            if (location == null) continue;
-                            int distance = player == null ? 0 : player.distanceTo(location);
-                            if (distance < bestDistance)
-                            {
-                                best = candidate;
-                                bestDistance = distance;
-                            }
-                        }
-                    }
-                }
-            }
-            return best;
-        }).orElse(null);
     }
 
     private int nearestPortalIndex(WorldPoint player)
