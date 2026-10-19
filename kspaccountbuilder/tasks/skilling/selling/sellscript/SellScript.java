@@ -24,6 +24,8 @@ import net.runelite.api.widgets.Widget;
 import net.runelite.client.plugins.microbot.Microbot;
 import net.runelite.client.plugins.microbot.Script;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.KspAccountPlayTimeCache;
+import net.runelite.client.plugins.microbot.kspaccountbuilder.KspAccountBuilderConfig;
+import net.runelite.client.plugins.microbot.kspaccountbuilder.KspTrainSingleSkillTask;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.KspTaskDebug;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.KspWalkerGuard;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.KspWorldMapGuard;
@@ -81,6 +83,7 @@ public class SellScript extends Script
 
     @Inject private KspAccountPlayTimeCache accountPlayTimeCache;
     @Inject private BuyScript buyScript;
+    @Inject private KspAccountBuilderConfig config;
 
     private final Set<String> blockedSellItems = new HashSet<>();
     // Avoid infinite bank loops if a particular item's withdrawal cannot be
@@ -741,12 +744,69 @@ public class SellScript extends Script
         return Math.max(1, (int) ((long) Math.max(1, guide) * 90L / 100L));
     }
 
+    /**
+     * Do not sell the only reusable tool needed by an enabled activity.
+     * In normal automatic mode all skills remain eligible; forced single-skill
+     * mode narrows the resource reservation to that activity.
+     */
+    private boolean taskAvailable(KspTrainSingleSkillTask task)
+    {
+        if (config == null) return true;
+        if (config.runSingleQuest()) return false;
+        if (config.trainSingleSkill()) return config.singleSkillTask() == task;
+        return true;
+    }
+
+    private boolean taskNeedsItem(SellList entry)
+    {
+        switch (entry)
+        {
+            case SMALL_FISHING_NET:
+            case FISHING_ROD:
+            case FISHING_BAIT:
+                return taskAvailable(KspTrainSingleSkillTask.FISHING);
+            case LOGS:
+            case OAK_LOGS:
+            case YEW_LOGS:
+                return taskAvailable(KspTrainSingleSkillTask.FIREMAKING);
+            case RAW_CHICKEN:
+                return taskAvailable(KspTrainSingleSkillTask.COOKING);
+            case COWHIDE:
+                return taskAvailable(KspTrainSingleSkillTask.CRAFTING);
+            case SILVER_ORE:
+                return taskAvailable(KspTrainSingleSkillTask.SMELTING);
+            case SILVER_BAR:
+                return taskAvailable(KspTrainSingleSkillTask.SMITHING)
+                        || taskAvailable(KspTrainSingleSkillTask.CRAFTING);
+            case BRONZE_BAR:
+            case IRON_BAR:
+            case STEEL_BAR:
+            case GOLD_BAR:
+            case MITHRIL_BAR:
+            case ADAMANT_BAR:
+            case RUNE_BAR:
+                return taskAvailable(KspTrainSingleSkillTask.SMITHING)
+                        || taskAvailable(KspTrainSingleSkillTask.CRAFTING);
+            case TUNA:
+            case LOBSTER:
+            case SWORDFISH:
+            case SPINACH_ROLL:
+                return taskAvailable(KspTrainSingleSkillTask.MELEE);
+            default:
+                return false;
+        }
+    }
+
     private boolean shouldSellEntry(SellList entry)
     {
         if (entry.isTradeRestricted() && !hasUnlockedTradeRestrictedItems()) return false;
         if (isSupportedMeleeEquipment(entry.getDisplayName())
                 && !getOutdatedMeleeGearNames().contains(entry.getDisplayName())) return false;
+        // A resource that no enabled task uses can be sold without blocking
+        // the sale on the affordability of unrelated future GE purchases.
+        if (!taskNeedsItem(entry)) return true;
         if (PROTECTED_SKILL_RESOURCES.contains(entry) && !canAffordGeBuyRequirements()) return false;
+
         int firemakingLevel = Microbot.getClient().getRealSkillLevel(Skill.FIREMAKING);
         if (entry == SellList.LOGS) return firemakingLevel >= 15;
         if (entry == SellList.OAK_LOGS) return firemakingLevel >= 30;
@@ -807,12 +867,34 @@ public class SellScript extends Script
 
     private int getSellableBankQuantity(String itemName)
     {
-        return Math.max(0, Rs2Bank.count(itemName, true) - getReservedQuestRequirementQuantity(itemName));
+        return Math.max(0, Rs2Bank.count(itemName, true) - getReservedRequirementQuantity(itemName));
     }
 
     private int getSellableInventoryQuantity(String itemName, int inventoryQuantity)
     {
-        return Math.max(0, inventoryQuantity - getReservedQuestRequirementQuantity(itemName));
+        return Math.max(0, inventoryQuantity - getReservedRequirementQuantity(itemName));
+    }
+
+    private int getReservedRequirementQuantity(String itemName)
+    {
+        int questReserved = getReservedQuestRequirementQuantity(itemName);
+        if (itemName == null) return questReserved;
+        // Explicit reservations for future clue-solving and reusable supplies.
+        // Clues and scroll boxes must never become generic GE liquidation items.
+        if ("Clue scroll (beginner)".equalsIgnoreCase(itemName)
+                || "Scroll box (beginner)".equalsIgnoreCase(itemName)
+                || "Reward casket (beginner)".equalsIgnoreCase(itemName))
+            return Integer.MAX_VALUE;
+        if (taskAvailable(KspTrainSingleSkillTask.FISHING)
+                && ("Small fishing net".equalsIgnoreCase(itemName)
+                || "Fishing rod".equalsIgnoreCase(itemName)
+                || "Fly fishing rod".equalsIgnoreCase(itemName)
+                || "Harpoon".equalsIgnoreCase(itemName)
+                || "Lobster pot".equalsIgnoreCase(itemName)))
+            return Math.max(questReserved, 1);
+        // Protect a dig tool for clue/quest use instead of selling every spade.
+        if ("Spade".equalsIgnoreCase(itemName)) return Math.max(questReserved, 1);
+        return questReserved;
     }
 
     private int getReservedQuestRequirementQuantity(String itemName)
@@ -993,7 +1075,9 @@ public class SellScript extends Script
 
     private boolean isBlocked(String itemName)
     {
-        return itemName != null && blockedSellItems.contains(itemName.toLowerCase(Locale.ROOT));
+        if (itemName == null) return false;
+        if (getReservedRequirementQuantity(itemName) == Integer.MAX_VALUE) return true;
+        return blockedSellItems.contains(itemName.toLowerCase(Locale.ROOT));
     }
 
     private String normalize(String value)
