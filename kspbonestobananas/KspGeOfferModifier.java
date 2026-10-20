@@ -53,8 +53,10 @@ final class KspGeOfferModifier
         Rs2Keyboard.typeString(Integer.toString(price));
         Rs2Keyboard.enter();
 
+        Widget[] dynamic = container.getDynamicChildren();
+        if (dynamic == null) return false;
         Widget confirm = Rs2Widget.findWidget("Confirm",
-                java.util.Arrays.asList(container.getDynamicChildren()), true);
+                java.util.Arrays.asList(dynamic), true);
         if (confirm == null || !Rs2Widget.clickWidget(confirm)) return false;
         sleepUntil(() -> !Rs2GrandExchange.isOfferScreenOpen(), 4000);
         return true;
