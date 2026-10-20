@@ -35,6 +35,7 @@ public class EssenceMining extends Script
     private static final int NPC_REACH_DISTANCE = 5;
     private static final int PORTAL_APPROACH_DISTANCE = 3;
     private static final long PORTAL_SEARCH_TIMEOUT_MS = 10_000L;
+    private static final long PORTAL_EXIT_TIMEOUT_MS = 8_000L;
     private static final long WALK_REFIRE_COOLDOWN_MS = 1_000L;
     private static final long ACTION_COOLDOWN_MS = 100L;
     private static final long ACTION_DISPATCH_TIMEOUT_MS = 1_500L;
@@ -303,7 +304,8 @@ public class EssenceMining extends Script
         clearEssenceMiningAction();
         state = EssenceState.EXITING_MINE;
         status = "Leaving rune essence mine";
-        if (Rs2Player.isAnimating() || Rs2Player.isInteracting() || isWorldActionPending("portal") || !canAct()) return;
+        if (Rs2Player.isAnimating() || Rs2Player.isInteracting()
+                || isPortalExitPending() || !canAct()) return;
 
         WorldPoint player = Rs2Player.getWorldLocation();
         // Inspect the actual loaded scene first. Object-cache misses can occur
@@ -311,6 +313,11 @@ public class EssenceMining extends Script
         TileObject livePortal = KspLiveScene.nearestGameObject(ESSENCE_MINE_PORTAL_ID, player, 100);
         if (livePortal != null)
         {
+            if (Rs2Player.isMoving())
+            {
+                status = "Approaching nearby rune essence portal";
+                return;
+            }
             resetPortalSearch();
             KspWalkerGuard.clear(WALK_KEY_PORTAL);
             try
@@ -345,6 +352,11 @@ public class EssenceMining extends Script
 
         if (portal != null)
         {
+            if (Rs2Player.isMoving())
+            {
+                status = "Approaching nearby rune essence portal";
+                return;
+            }
             resetPortalSearch();
             KspWalkerGuard.clear(WALK_KEY_PORTAL);
             try
@@ -386,12 +398,16 @@ public class EssenceMining extends Script
         }
         if (now - portalSearchStartedAtMs >= PORTAL_SEARCH_TIMEOUT_MS)
         {
-            portalFallbackIndex = (portalFallbackIndex + 1) % ESSENCE_MINE_PORTAL_LOCATIONS.length;
+            // Do NOT cycle through other exits on a cache miss. The game can
+            // render a portal before RuneLite's tile-object caches populate;
+            // cycling makes the walker zigzag forever between four entrances.
+            // Hold the original closest portal and keep looking for its object.
             portalSearchStartedAtMs = now;
-            KspWalkerGuard.clear(WALK_KEY_PORTAL);
-            KspTaskDebug.throttled(log, true, "Rune Essence", "portal-fallback", 2_000L,
-                    "Portal not visible in cache; trying alternate exit | player={} target={} index={}",
-                    player, ESSENCE_MINE_PORTAL_LOCATIONS[portalFallbackIndex], portalFallbackIndex);
+            KspTaskDebug.throttled(log, true, "Rune Essence", "portal-discovery", 10_000L,
+                    "Portal missing from scene/cache; holding nearest exit | player={} target={} index={} distance={} moving={}",
+                    player, ESSENCE_MINE_PORTAL_LOCATIONS[portalFallbackIndex], portalFallbackIndex,
+                    player == null ? -1 : player.distanceTo(ESSENCE_MINE_PORTAL_LOCATIONS[portalFallbackIndex]),
+                    Rs2Player.isMoving());
         }
 
         WorldPoint portalLocation = ESSENCE_MINE_PORTAL_LOCATIONS[portalFallbackIndex];
@@ -408,6 +424,27 @@ public class EssenceMining extends Script
                 portalLocation,
                 PORTAL_APPROACH_DISTANCE,
                 WALK_REFIRE_COOLDOWN_MS);
+    }
+
+    private boolean isPortalExitPending()
+    {
+        if (!"portal".equals(pendingWorldAction) || pendingWorldActionAtMs <= 0L)
+            return false;
+        // runLoop() handles successful mine departure before exitMine().
+        // Give the teleport time to load even when the walking/interaction
+        // flags become false between animations and the region change.
+        long elapsed = System.currentTimeMillis() - pendingWorldActionAtMs;
+        if (elapsed < PORTAL_EXIT_TIMEOUT_MS)
+        {
+            status = "Waiting for rune essence portal teleport";
+            return true;
+        }
+        KspTaskDebug.throttled(log, true, "Rune Essence", "portal-exit-timeout", 5_000L,
+                "Portal exit was not confirmed; retrying nearby portal | elapsedMs={} player={} region={}",
+                elapsed, Rs2Player.getWorldLocation(), getCurrentRegion());
+        pendingWorldAction = null;
+        pendingWorldActionAtMs = 0L;
+        return false;
     }
 
     private int nearestPortalIndex(WorldPoint player)
