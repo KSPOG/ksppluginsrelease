@@ -49,11 +49,9 @@ final class KspBonesToBananasAntiban
             Rs2Antiban.moveMouseRandomly();
             activity = "Mouse variation";
         }
-        if (r.nextDouble() < p.offscreenChance)
-        {
-            Rs2Antiban.moveMouseOffScreen();
-            activity = "Mouse off-screen";
-        }
+        // Deliberately avoid moveMouseOffScreen(): some Microbot input
+        // backends only resume automated input after a human canvas-enter
+        // event. Keep the antiban delay without moving beyond the canvas.
         if (r.nextDouble() < p.shortPauseChance)
         {
             pauseUntil = Math.max(pauseUntil, now + random(p.shortPauseMinMs, p.shortPauseMaxMs));
@@ -65,7 +63,7 @@ final class KspBonesToBananasAntiban
             pauseUntil = Math.max(pauseUntil, now + random(p.longBreakMinMs, p.longBreakMaxMs));
             longBreaks++;
             activity = "Long break";
-            Rs2Antiban.moveMouseOffScreen();
+            // Long break retains its timed pause without leaving the canvas.
             schedule(p);
         }
     }
