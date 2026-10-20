@@ -663,6 +663,16 @@ public class KspBonesToBananasScript extends KspBreakAwareScript
         }
 
         OfferSnapshot offer = offer(order.slot);
+        if (order.pendingModifiedPrice > 0 && offer != null
+                && offer.itemId == order.itemId
+                && offer.price == order.pendingModifiedPrice)
+        {
+            order.price = order.pendingModifiedPrice;
+            order.pendingModifiedPrice = 0;
+            order.placedAt = System.currentTimeMillis();
+            log.info("GE offer modified in existing slot | item={} slot={} price={}",
+                    order.itemName, order.slot, order.price);
+        }
         if (!matchesOrder(offer, order))
         {
             GrandExchangeSlots recovered = findOfferSlot(order);
@@ -771,14 +781,37 @@ public class KspBonesToBananasScript extends KspBreakAwareScript
     private void retryStalledOrder(GeOrder order)
     {
         if (order == null || order.abortRequested) return;
-        status = "Repricing stalled " + order.itemName;
-        if (!Rs2GrandExchange.abortOffer(order.itemName, true)) return;
-
-        // Microbot's abortOffer(..., true) only initiates Collect-to-bank. Do not
-        // replan against stale bank quantities until the tracked GE slot is cleared.
-        order.abortRequested = true;
-        order.lastAbortRecoveryAt = 0L;
-        status = "Recovering aborted GE offer: " + order.itemName;
+        // OSRS supports modifying a live GE offer. Keep its original slot,
+        // partially filled quantity and collected state; never abort/recreate.
+        if (order.slot == null) order.slot = findOfferSlot(order);
+        if (order.slot == null)
+        {
+            status = "Cannot modify: waiting for tracked GE slot (" + order.itemName + ")";
+            return;
+        }
+        int newPrice = order.action == GrandExchangeAction.BUY
+                ? prices.buyOfferPrice(order.itemId, config.buyMarkupPercent(),
+                        Math.min(MAX_GE_RETRIES, ++buyRetryLevel))
+                : prices.sellOfferPrice(order.itemId, config.sellDiscountPercent(),
+                        Math.min(MAX_GE_RETRIES, ++sellRetryLevel));
+        if (newPrice <= 0 || newPrice == order.price)
+        {
+            order.placedAt = System.currentTimeMillis();
+            status = "Waiting for a different GE price: " + order.itemName;
+            return;
+        }
+        status = "Modifying active GE offer: " + order.itemName + " to " + newPrice + " gp";
+        if (!KspGeOfferModifier.modifyPrice(order.slot, newPrice))
+        {
+            status = "Modify Offer action unavailable; preserving existing " + order.itemName + " offer";
+            log.warn("Could not invoke Modify offer | item={} slot={} oldPrice={} newPrice={}",
+                    order.itemName, order.slot, order.price, newPrice);
+            order.placedAt = System.currentTimeMillis();
+            return;
+        }
+        order.pendingModifiedPrice = newPrice;
+        order.placedAt = System.currentTimeMillis();
+        status = "Verifying modified offer price: " + order.itemName;
     }
 
     private void recoverAbortedOrder(GeOrder order)
@@ -1177,7 +1210,8 @@ public class KspBonesToBananasScript extends KspBreakAwareScript
     private static final class GeOrder
     {
         final GrandExchangeAction action;
-        final int itemId, quantity, price;
+        final int itemId, quantity;
+        int price, pendingModifiedPrice;
         final String itemName;
         GrandExchangeSlots slot;
         boolean placed, abortRequested;
