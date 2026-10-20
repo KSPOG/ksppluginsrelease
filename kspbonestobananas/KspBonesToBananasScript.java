@@ -13,6 +13,7 @@ import net.runelite.client.plugins.microbot.Microbot;
 import net.runelite.client.plugins.microbot.kspsupport.KspBreakAwareScript;
 import net.runelite.client.plugins.microbot.kspsupport.KspBreakService;
 import net.runelite.client.plugins.microbot.util.bank.Rs2Bank;
+import net.runelite.client.plugins.microbot.util.input.InputArbiter;
 import net.runelite.client.plugins.microbot.util.equipment.Rs2Equipment;
 import net.runelite.client.plugins.microbot.util.grandexchange.GrandExchangeAction;
 import net.runelite.client.plugins.microbot.util.grandexchange.GrandExchangeRequest;
@@ -98,9 +99,18 @@ public class KspBonesToBananasScript extends KspBreakAwareScript
                     start();
                     if (state == KspBonesToBananasState.ERROR) return;
                 }
+                // Off-screen mouse is intentional during antiban. Once its
+                // timed pause ends, return the synthetic pointer to the canvas
+                // before calling Microbot's normal automation gate.
+                // Never steal input from a real user.
+                if (config.antiban())
+                    antiban.resumeCanvasMouseIfReady(InputArbiter.isHuman());
                 if (!super.run())
                 {
-                    reportStartupGate("Waiting for Microbot blocking event");
+                    reportStartupGate("Waiting for Microbot input/blocking gate; manualInput="
+                            + InputArbiter.isHuman() + " keys=" + InputArbiter.realKeysDown()
+                            + " buttons=" + InputArbiter.realButtonsDown()
+                            + " globalPause=" + Microbot.pauseAllScripts.get());
                     return;
                 }
                 tick();
