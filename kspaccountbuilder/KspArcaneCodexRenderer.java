@@ -364,11 +364,14 @@ final class KspArcaneCodexRenderer
             g.scale(SCALE, SCALE);
             g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
             g.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
-            // Render the scaled artwork with sharp pixels while retaining transparent edges.
+            // Smoothly downsample the original artwork so the compact overlay retains fine details.
+            // Nearest-neighbor scaling at this size made the illustration excessively pixelated.
             g.setRenderingHint(RenderingHints.KEY_INTERPOLATION,
-                    RenderingHints.VALUE_INTERPOLATION_NEAREST_NEIGHBOR);
+                    RenderingHints.VALUE_INTERPOLATION_BICUBIC);
+            g.setRenderingHint(RenderingHints.KEY_RENDERING,
+                    RenderingHints.VALUE_RENDER_QUALITY);
             g.drawImage(artworkWithoutBlackBorder(), 0, 0, ART_W, ART_H, null);
-            // Restore smooth interpolation for live text and RuneLite item sprites.
+            // Use standard smoothing for live RuneLite item sprites.
             g.setRenderingHint(RenderingHints.KEY_INTERPOLATION,
                     RenderingHints.VALUE_INTERPOLATION_BILINEAR);
             final Color taskTint = accent(task);
