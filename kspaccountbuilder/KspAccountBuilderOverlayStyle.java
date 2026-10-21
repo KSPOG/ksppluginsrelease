@@ -1,24 +1,22 @@
 package net.runelite.client.plugins.microbot.kspaccountbuilder;
 
-/** Available in-game overlay layouts. Original remains the saved-setting default. */
+/** Selectable Account Builder HUDs. The original remains the initial default. */
 public enum KspAccountBuilderOverlayStyle
 {
     DEFAULT("Default (Original)"),
-    ACCOUNT_DASHBOARD("Modern - Account Dashboard"),
-    TASK_FOCUS("Compact - Task Focus"),
-    ACCOUNT_ROADMAP("Themed - Account Roadmap"),
-    WORKFLOW_HUD("Horizontal - Workflow HUD");
+    NEXUS("Nexus"),
+    PRESTIGE("Prestige"),
+    COMPACT("Compact"),
+    HORIZON("Horizon"),
+    VERTICAL_PRO("Vertical Pro"),
+    ROADMAP("Roadmap"),
+    ELEMENTAL("Elemental"),
+    CLASSIC_PLUS("Classic Plus");
 
     private final String label;
 
-    KspAccountBuilderOverlayStyle(String label)
-    {
-        this.label = label;
-    }
+    KspAccountBuilderOverlayStyle(String label) { this.label = label; }
 
     @Override
-    public String toString()
-    {
-        return label;
-    }
+    public String toString() { return label; }
 }
