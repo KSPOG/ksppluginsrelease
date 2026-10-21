@@ -3,6 +3,7 @@ package net.runelite.client.plugins.microbot.kspaccountbuilder;
 import com.google.inject.Provides;
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.events.GameTick;
+import net.runelite.client.events.ConfigChanged;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.eventbus.Subscribe;
 import net.runelite.client.plugins.Plugin;
@@ -30,7 +31,7 @@ import javax.inject.Inject;
 @SuppressWarnings("unused")
 public class KspAccountBuilderPlugin extends Plugin
 {
-    public static final String VERSION = "1.9.35";
+    public static final String VERSION = "1.9.36";
 
     @Inject
     private KspAccountBuilderScript script;
@@ -62,18 +63,52 @@ public class KspAccountBuilderPlugin extends Plugin
     protected synchronized void startUp()
     {
         cleanupRuntime("restart-before-start");
-        log.info("Starting KSP Account Builder plugin");
-
-        stopStandaloneBreakHandler();
         migrateSingleSkillTargetDefaults();
-        overlayManager.add(overlay);
+        if (config.runAccountBuilder())
+        {
+            startRuntime();
+        }
+        else
+        {
+            log.info("KSP Account Builder loaded but stopped; enable Start / Stop to run");
+        }
+    }
 
+    @Subscribe
+    public synchronized void onConfigChanged(ConfigChanged event)
+    {
+        if (!KspAccountBuilderConfig.CONFIG_GROUP.equals(event.getGroup())
+                || !"runAccountBuilder".equals(event.getKey()))
+        {
+            return;
+        }
+        if (config.runAccountBuilder()) startRuntime();
+        else cleanupRuntime("config-stop");
+    }
+
+    private void startRuntime()
+    {
+        if (runtimeActive) return;
+        log.info("Starting KSP Account Builder runtime from configuration");
+        stopStandaloneBreakHandler();
+        overlayManager.add(overlay);
         randomEventSolver = new KspRandomEventSolver();
         Microbot.getBlockingEventManager().add(randomEventSolver);
-
-        runtimeActive = true;
         resetAntibanState();
-        script.run(config);
+        runtimeActive = true;
+        try
+        {
+            if (!script.run(config))
+            {
+                log.warn("KSP Account Builder script refused to start");
+                cleanupRuntime("start-failed");
+            }
+        }
+        catch (Exception ex)
+        {
+            log.error("KSP Account Builder start failed", ex);
+            cleanupRuntime("start-exception");
+        }
     }
 
     @Override

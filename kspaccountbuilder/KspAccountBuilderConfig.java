@@ -19,6 +19,25 @@ public interface KspAccountBuilderConfig extends Config
     String CONFIG_GROUP = "kspaccountbuilder";
 
     @ConfigSection(
+            name = "Runtime Control",
+            description = "Start or stop Account Builder without disabling the plugin",
+            position = -1
+    )
+    String runtimeControlSection = "runtimeControl";
+
+    @ConfigItem(
+            keyName = "runAccountBuilder",
+            name = "Start / Stop",
+            description = "Check to start Account Builder; uncheck to stop its tasks, walker and helpers. Disabled by default for safety.",
+            position = 0,
+            section = runtimeControlSection
+    )
+    default boolean runAccountBuilder()
+    {
+        return false;
+    }
+
+    @ConfigSection(
             name = "Antiban",
             description = "General antiban controls",
             position = 0
