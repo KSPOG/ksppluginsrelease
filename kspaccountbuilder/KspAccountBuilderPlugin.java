@@ -430,6 +430,21 @@ public class KspAccountBuilderPlugin extends Plugin
             final KspAccountBuilderPanel newPanel = sidePanel;
             UIManager.put(SIDEBAR_REGISTRY_KEY, new Object[]{newButton, (Runnable) newPanel::dispose});
             clientToolbar.addNavigation(newButton);
+            // A replacement sidebar supersedes its predecessor, including
+            // any running script from the previous classloader. Do not wait
+            // until the user presses Start to stop an orphaned task scheduler.
+            synchronized (UIManager.getDefaults())
+            {
+                Object existing = UIManager.get(RUNTIME_OWNER_KEY);
+                if (existing instanceof Object[] && ((Object[]) existing).length >= 2
+                        && ((Object[]) existing)[0] != runtimeOwnerToken
+                        && ((Object[]) existing)[1] instanceof Runnable)
+                {
+                    log.warn("Account Builder sidebar takeover: stopping previous active runtime");
+                    try { ((Runnable) ((Object[]) existing)[1]).run(); }
+                    catch (Exception ex) { log.error("Unable to stop superseded Account Builder runtime", ex); }
+                }
+            }
         });
     }
 
