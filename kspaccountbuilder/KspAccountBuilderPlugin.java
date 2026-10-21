@@ -220,20 +220,23 @@ public class KspAccountBuilderPlugin extends Plugin
     @Override
     protected synchronized void shutDown()
     {
+        boolean wasSidebarOwner = isCurrentSidebarOwner();
         acceptingRuntimeChanges = false;
         panelEnabled = false;
         cleanupRuntime("plugin-stop");
-        if (isCurrentSidebarOwner())
+        if (wasSidebarOwner)
             configManager.setConfiguration(KspAccountBuilderConfig.CONFIG_GROUP, "runAccountBuilder", false);
         removeSidePanel();
     }
 
     public synchronized void prepareHotUnload()
     {
+        boolean wasSidebarOwner = isCurrentSidebarOwner();
         acceptingRuntimeChanges = false;
         panelEnabled = false;
         cleanupRuntime("hot-unload");
-        configManager.setConfiguration(KspAccountBuilderConfig.CONFIG_GROUP, "runAccountBuilder", false);
+        if (wasSidebarOwner)
+            configManager.setConfiguration(KspAccountBuilderConfig.CONFIG_GROUP, "runAccountBuilder", false);
         removeSidePanel();
     }
 
