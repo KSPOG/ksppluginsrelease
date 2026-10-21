@@ -25,7 +25,7 @@ public class KspJewelryCrafterPlugin extends Plugin
 {
     private final KspBreakService breaks = new KspBreakService();
 
-    public static final String VERSION = "0.1.31";
+    public static final String VERSION = "0.1.32";
 
     @Inject private KspJewelryCrafterConfig config;
     @Inject private KspJewelryCrafterScript script;
