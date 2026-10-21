@@ -47,7 +47,7 @@ final class KspArcaneCodexRenderer
     private static final String SOURCE_ROOT_ARTWORK_URL =
             "https://raw.githubusercontent.com/KSPOG/ksppluginsrelease/main/kspaccountbuilder/" + ARTWORK_FILE;
     private static final int ART_W = 1584, ART_H = 993;
-    private static final double SCALE = 0.50;
+    private static final double SCALE = 0.34; // ~539 x 338 px instead of 792 x 497
     private static final Color GOLD = new Color(245, 198, 116);
     private static final Color PURPLE = new Color(190, 88, 243);
     private static final Color GREEN = new Color(103, 234, 101);
@@ -58,6 +58,8 @@ final class KspArcaneCodexRenderer
     private final ItemManager itemManager;
     private final Map<Skill, Integer> baselineLevels = new EnumMap<>(Skill.class);
     private volatile BufferedImage background;
+    private BufferedImage transparentArtwork;
+    private BufferedImage transparentArtworkSource;
     private volatile boolean artworkDownloadInProgress;
     private volatile long nextArtworkDownloadAt;
     private long nextAttemptAt;
@@ -230,6 +232,116 @@ final class KspArcaneCodexRenderer
         }
     }
 
+    /**
+     * The shipped illustration has opaque black padding outside its irregular
+     * gilded frame. Remove only near-black pixels connected to the outer edge.
+     * Dark book details and text inside the frame remain untouched.
+     * Cache the alpha-masked image; do not repeat this work per paint frame.
+     */
+    private BufferedImage artworkWithoutBlackBorder()
+    {
+        BufferedImage source = background;
+        if (source == transparentArtworkSource && transparentArtwork != null)
+            return transparentArtwork;
+        if (source == null) return null;
+
+        int w = source.getWidth(), h = source.getHeight();
+        int count = w * h;
+        int[] pixels = source.getRGB(0, 0, w, h, null, 0, w);
+        boolean[] visited = new boolean[count];
+        int[] queue = new int[count];
+        int front = 0, back = 0;
+        final int threshold = 30;
+
+        // Seed every eligible edge pixel. A strict connected-component mask
+        // cannot accidentally remove the dark background inside the frame.
+        for (int x = 0; x < w; x++)
+        {
+            int top = x, bottom = (h - 1) * w + x;
+            if (!visited[top] && nearBlack(pixels[top], threshold))
+            {
+                visited[top] = true;
+                queue[back++] = top;
+            }
+            if (!visited[bottom] && nearBlack(pixels[bottom], threshold))
+            {
+                visited[bottom] = true;
+                queue[back++] = bottom;
+            }
+        }
+        for (int y = 0; y < h; y++)
+        {
+            int left = y * w, right = left + w - 1;
+            if (!visited[left] && nearBlack(pixels[left], threshold))
+            {
+                visited[left] = true;
+                queue[back++] = left;
+            }
+            if (!visited[right] && nearBlack(pixels[right], threshold))
+            {
+                visited[right] = true;
+                queue[back++] = right;
+            }
+        }
+
+        while (front < back)
+        {
+            int position = queue[front++];
+            int x = position % w;
+            int y = position / w;
+            pixels[position] &= 0x00ffffff;
+            if (x > 0)
+            {
+                int n = position - 1;
+                if (!visited[n] && nearBlack(pixels[n], threshold))
+                {
+                    visited[n] = true;
+                    queue[back++] = n;
+                }
+            }
+            if (x + 1 < w)
+            {
+                int n = position + 1;
+                if (!visited[n] && nearBlack(pixels[n], threshold))
+                {
+                    visited[n] = true;
+                    queue[back++] = n;
+                }
+            }
+            if (y > 0)
+            {
+                int n = position - w;
+                if (!visited[n] && nearBlack(pixels[n], threshold))
+                {
+                    visited[n] = true;
+                    queue[back++] = n;
+                }
+            }
+            if (y + 1 < h)
+            {
+                int n = position + w;
+                if (!visited[n] && nearBlack(pixels[n], threshold))
+                {
+                    visited[n] = true;
+                    queue[back++] = n;
+                }
+            }
+        }
+        BufferedImage result = new BufferedImage(w, h, BufferedImage.TYPE_INT_ARGB);
+        result.setRGB(0, 0, w, h, pixels, 0, w);
+        transparentArtwork = result;
+        transparentArtworkSource = source;
+        LOG.info("Account Builder: removed {} connected black border pixels from Arcane Codex", back);
+        return result;
+    }
+
+    private static boolean nearBlack(int pixel, int threshold)
+    {
+        return ((pixel >> 16) & 255) <= threshold
+                && ((pixel >> 8) & 255) <= threshold
+                && (pixel & 255) <= threshold;
+    }
+
     Dimension render(Graphics2D graphics)
     {
         if (!hasArtwork()) return null;
@@ -252,7 +364,7 @@ final class KspArcaneCodexRenderer
             g.scale(SCALE, SCALE);
             g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
             g.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
-            g.drawImage(background, 0, 0, ART_W, ART_H, null);
+            g.drawImage(artworkWithoutBlackBorder(), 0, 0, ART_W, ART_H, null);
             final Color taskTint = accent(task);
             // All of the following are LIVE overlays on the original reference art.
             text(nice(task), 200, 335, 30, true, GOLD, 305);
