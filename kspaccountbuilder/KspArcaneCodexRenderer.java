@@ -10,6 +10,9 @@ import java.awt.RenderingHints;
 import java.awt.image.BufferedImage;
 import java.io.File;
 import java.io.IOException;
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.net.URLConnection;
 import java.io.InputStream;
 import java.net.URL;
 import java.nio.file.Paths;
@@ -39,6 +42,10 @@ final class KspArcaneCodexRenderer
     private static final Logger LOG = LoggerFactory.getLogger(KspArcaneCodexRenderer.class);
     private static final String ARTWORK_FILE = "arcane_codex_background.png";
     private static final long RETRY_INTERVAL_MS = 5000L;
+    private static final long DOWNLOAD_RETRY_MS = 60000L;
+    private static final int MAX_PNG_BYTES = 8 * 1024 * 1024;
+    private static final String SOURCE_ROOT_ARTWORK_URL =
+            "https://raw.githubusercontent.com/KSPOG/ksppluginsrelease/main/kspaccountbuilder/" + ARTWORK_FILE;
     private static final int ART_W = 1584, ART_H = 993;
     private static final double SCALE = 0.50;
     private static final Color GOLD = new Color(245, 198, 116);
@@ -50,7 +57,9 @@ final class KspArcaneCodexRenderer
     private final KspAccountBuilderConfig config;
     private final ItemManager itemManager;
     private final Map<Skill, Integer> baselineLevels = new EnumMap<>(Skill.class);
-    private BufferedImage background;
+    private volatile BufferedImage background;
+    private volatile boolean artworkDownloadInProgress;
+    private volatile long nextArtworkDownloadAt;
     private long nextAttemptAt;
     private long nextWarningAt;
     private long nextReadAt;
@@ -121,6 +130,11 @@ final class KspArcaneCodexRenderer
         catch (Exception ignored) { }
 
         if (searchAncestors(new File(System.getProperty("user.dir", ".")))) return true;
+        // KSP Source Loader downloads .java sources only. Its runtime classloader
+        // consequently cannot see non-Java files from the repository plugin root.
+        // Obtain the exact same plugin-root PNG asynchronously once (never on
+        // RuneLite's overlay paint/client thread). Normal JARs still load locally.
+        scheduleSourceLoaderArtworkDownload(now);
 
         if (now >= nextWarningAt)
         {
@@ -130,6 +144,58 @@ final class KspArcaneCodexRenderer
                     ARTWORK_FILE);
         }
         return false;
+    }
+
+    private void scheduleSourceLoaderArtworkDownload(long now)
+    {
+        synchronized (this)
+        {
+            if (background != null || artworkDownloadInProgress || now < nextArtworkDownloadAt) return;
+            artworkDownloadInProgress = true;
+            nextArtworkDownloadAt = now + DOWNLOAD_RETRY_MS;
+        }
+        Thread download = new Thread(() -> {
+            try
+            {
+                URLConnection connection = new URL(SOURCE_ROOT_ARTWORK_URL).openConnection();
+                connection.setConnectTimeout(4000);
+                connection.setReadTimeout(6000);
+                connection.setUseCaches(false);
+                ByteArrayOutputStream bytes = new ByteArrayOutputStream(1024 * 1024);
+                try (InputStream in = connection.getInputStream())
+                {
+                    byte[] chunk = new byte[8192];
+                    int n;
+                    while ((n = in.read(chunk)) != -1)
+                    {
+                        if (bytes.size() + n > MAX_PNG_BYTES)
+                            throw new IOException("Arcane Codex PNG exceeds 8 MiB limit");
+                        bytes.write(chunk, 0, n);
+                    }
+                }
+                byte[] data = bytes.toByteArray();
+                if (data.length < 8 || (data[0] & 0xff) != 0x89
+                        || data[1] != 0x50 || data[2] != 0x4e || data[3] != 0x47)
+                    throw new IOException("Repository asset is not a PNG");
+                BufferedImage loaded = ImageIO.read(new ByteArrayInputStream(data));
+                if (loaded == null || loaded.getWidth() < 1 || loaded.getHeight() < 1)
+                    throw new IOException("Could not decode repository PNG");
+                background = loaded;
+                LOG.info("Account Builder: Arcane Codex artwork loaded from repository plugin root ({}x{}, {} bytes)",
+                        loaded.getWidth(), loaded.getHeight(), data.length);
+            }
+            catch (Exception ex)
+            {
+                LOG.warn("Account Builder: Arcane Codex plugin-root image download failed; retry in 60s | url={}",
+                        SOURCE_ROOT_ARTWORK_URL, ex);
+            }
+            finally
+            {
+                artworkDownloadInProgress = false;
+            }
+        }, "KSP-ArcaneCodex-Artwork");
+        download.setDaemon(true);
+        download.start();
     }
 
     private boolean searchAncestors(File start)
