@@ -383,7 +383,10 @@ public class EssenceMining extends Script
             if (Rs2Player.isMoving()) return;
             try
             {
-                if (npc.click(id == 3088 ? "Exit" : "Use"))
+                String action = id == 3088 ? "Exit" : "Use";
+                // Cached NPCs must support the same action fallback as live NPCs.
+                if (npc.click(action)
+                        || npc.click("Exit".equals(action) ? "Use" : "Exit"))
                 {
                     markPortalExit("cached NPC", id);
                     return;
