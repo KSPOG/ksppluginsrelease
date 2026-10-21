@@ -1,6 +1,7 @@
 package net.runelite.client.plugins.microbot.kspaccountbuilder;
 
 import net.runelite.client.plugins.microbot.Microbot;
+import net.runelite.client.game.ItemManager;
 import net.runelite.client.ui.overlay.OverlayPanel;
 import net.runelite.client.ui.overlay.OverlayPosition;
 import net.runelite.client.ui.overlay.components.LineComponent;
@@ -17,14 +18,16 @@ public class KSPAccountBuilderOverlay extends OverlayPanel
     private final KspAccountBuilderPlugin plugin;
     private final KspAccountBuilderScript script;
     private final KspAccountBuilderConfig config;
+    private final KspArcaneCodexRenderer arcaneCodex;
 
     @Inject
-    public KSPAccountBuilderOverlay(KspAccountBuilderPlugin plugin, KspAccountBuilderScript script, KspAccountBuilderConfig config)
+    public KSPAccountBuilderOverlay(KspAccountBuilderPlugin plugin, KspAccountBuilderScript script, KspAccountBuilderConfig config, ItemManager itemManager)
     {
         super(plugin);
         this.plugin = plugin;
         this.script = script;
         this.config = config;
+        this.arcaneCodex = new KspArcaneCodexRenderer(script, config, itemManager);
 
         setPosition(OverlayPosition.TOP_CENTER);
     }
@@ -35,6 +38,12 @@ public class KSPAccountBuilderOverlay extends OverlayPanel
         // OverlayManager can retain overlays from an older SourceLoader classloader.
         // Never render stale task state on top of the active Account Builder HUD.
         if (!plugin.mayRenderOverlay()) return null;
+        if (config.arcaneCodexOverlay() && arcaneCodex.hasArtwork())
+        {
+            panelComponent.getChildren().clear();
+            return arcaneCodex.render(graphics);
+        }
+        // If approved background is missing, show original overlay, not a mockup.
         panelComponent.getChildren().clear();
         panelComponent.setPreferredSize(new Dimension(280, 0));
         String displayStatus = normalizeStatus(Microbot.status);
