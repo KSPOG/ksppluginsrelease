@@ -1,10 +1,16 @@
 package net.runelite.client.plugins.microbot.kspbonestobananas;
 
 import java.util.concurrent.ThreadLocalRandom;
+import java.awt.Point;
+import net.runelite.client.plugins.microbot.Microbot;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import net.runelite.client.plugins.microbot.util.antiban.Rs2Antiban;
 
 final class KspBonesToBananasAntiban
 {
+    private static final Logger log = LoggerFactory.getLogger(KspBonesToBananasAntiban.class);
+    private long lastCanvasReturnAttemptAt;
     private long pauseUntil;
     private long offscreenSince;
     private boolean awaitingCanvasReturn;
@@ -16,6 +22,7 @@ final class KspBonesToBananasAntiban
         pauseUntil = 0L;
         offscreenSince = 0L;
         awaitingCanvasReturn = false;
+        lastCanvasReturnAttemptAt = 0L;
         shortPauses = longBreaks = 0;
         activity = "Ready";
         schedule(profile);
@@ -26,6 +33,7 @@ final class KspBonesToBananasAntiban
         pauseUntil = 0L;
         offscreenSince = 0L;
         awaitingCanvasReturn = false;
+        lastCanvasReturnAttemptAt = 0L;
         castsUntilLongBreak = Integer.MAX_VALUE;
         activity = "Off";
     }
@@ -83,18 +91,36 @@ final class KspBonesToBananasAntiban
      */
     void resumeCanvasMouseIfReady(boolean humanInputActive)
     {
-        if (!awaitingCanvasReturn || isPaused() || humanInputActive) return;
-        if (System.currentTimeMillis() - offscreenSince < 1_500L) return;
+        if (!awaitingCanvasReturn || isPaused()) return;
+        long now = System.currentTimeMillis();
+        if (now - offscreenSince < 1_500L) return;
+        // Never take input ownership while a real user is interacting.
+        if (humanInputActive) return;
 
         try
         {
+            Point position = Microbot.getMouse().getMousePosition();
+            int width = Microbot.getClient().getCanvasWidth();
+            int height = Microbot.getClient().getCanvasHeight();
+            if (position != null && position.x >= 0 && position.y >= 0
+                    && position.x < width && position.y < height)
+            {
+                awaitingCanvasReturn = false;
+                lastCanvasReturnAttemptAt = 0L;
+                activity = "Mouse resumed";
+                return;
+            }
+            if (now - lastCanvasReturnAttemptAt < 2_000L) return;
+            lastCanvasReturnAttemptAt = now;
+            // moveRandom() returns before animation finishes; retain the
+            // pending flag and verify the actual cursor position next tick.
             Rs2Antiban.moveMouseRandomly();
-            awaitingCanvasReturn = false;
-            activity = "Mouse resumed";
+            log.info("Bones to Bananas antiban: restoring cursor after off-screen pause | durationMs={} cursor={}",
+                    now - offscreenSince, position);
         }
         catch (RuntimeException ex)
         {
-            // Retain the pending transition and retry next scheduler tick.
+            log.warn("Bones to Bananas antiban cursor restore failed: {}", ex.toString());
         }
     }
 
