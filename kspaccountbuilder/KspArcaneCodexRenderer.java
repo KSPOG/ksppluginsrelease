@@ -251,7 +251,9 @@ final class KspArcaneCodexRenderer
         boolean[] visited = new boolean[count];
         int[] queue = new int[count];
         int front = 0, back = 0;
-        final int threshold = 30;
+        // Only remove nearly pure-black exterior padding. The previous threshold
+        // could erase dark artwork details connected to the outer border.
+        final int threshold = 8;
 
         // Seed every eligible edge pixel. A strict connected-component mask
         // cannot accidentally remove the dark background inside the frame.
