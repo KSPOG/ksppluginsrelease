@@ -292,7 +292,9 @@ public class KspAccountBuilderPlugin extends Plugin
 
         try
         {
-            if (script != null)
+            // A dormant old plugin instance must not shut down a freshly
+            // started owner's walker or task scripts during hot reload.
+            if (script != null && (wasActive || wasOwner))
             {
                 script.shutdown();
             }
