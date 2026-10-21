@@ -57,6 +57,8 @@ import net.runelite.client.plugins.microbot.util.settings.Rs2Settings;
 import net.runelite.client.plugins.microbot.util.tabs.Rs2Tab;
 import net.runelite.client.plugins.microbot.util.widget.Rs2Widget;
 import net.runelite.client.plugins.microbot.util.walker.Rs2Walker;
+import net.runelite.client.plugins.microbot.util.tile.Rs2Tile;
+import net.runelite.client.plugins.microbot.util.walker.Rs2LocalPoint;
 import net.runelite.client.config.ConfigManager;
 
 @Slf4j
@@ -93,6 +95,7 @@ public class KspAioFighterScript extends KspBreakAwareScript
 	private long lastSafeSpotWalkAttemptMs = 0L;
 	private long lastAttackAreaWalkAttemptMs = 0L;
 	private WorldPoint attackAreaReturnTarget;
+	private final Set<WorldPoint> rejectedAttackAreaTiles = new HashSet<>();
 	private long lastGearBankAttemptMs = 0L;
 	private Skill lastGearBankSkill;
 	private final Set<String> unavailableGearThisRun = new HashSet<>();
@@ -1112,51 +1115,100 @@ public class KspAioFighterScript extends KspBreakAwareScript
 		if (isInsideConfiguredArea(playerLocation))
 		{
 			attackAreaReturnTarget = null;
+			rejectedAttackAreaTiles.clear();
 			return false;
 		}
 
-		// Pick one random tile inside the configured rectangle for this return trip.
-		// Keep the same destination across walker retries so the player does not zig-zag
-		// between different random targets while returning from a bank/loot excursion.
-		if (!isConfiguredTileValid(attackAreaReturnTarget) || !isInsideConfiguredArea(attackAreaReturnTarget))
+		// Resolve only standable tiles, and never retry a walker-rejected destination.
+		if (!isConfiguredTileValid(attackAreaReturnTarget)
+				|| !isInsideConfiguredArea(attackAreaReturnTarget)
+				|| rejectedAttackAreaTiles.contains(attackAreaReturnTarget)
+				|| !isLoadedTileWalkable(attackAreaReturnTarget))
 		{
 			attackAreaReturnTarget = getRandomPointInsideConfiguredArea();
 		}
 
 		WorldPoint returnPoint = attackAreaReturnTarget;
-		if (!isConfiguredTileValid(returnPoint))
+		if (returnPoint == null)
 		{
-			return false;
+			setStatus("no walkable return tile available inside attack area");
+			return true;
 		}
 
 		if (!canRetryWalk(lastAttackAreaWalkAttemptMs))
 		{
-			setStatus("walking to random attack-area tile " + formatPoint(returnPoint));
+			setStatus("returning to attack area " + formatPoint(returnPoint));
 			return true;
 		}
 
 		lastAttackAreaWalkAttemptMs = System.currentTimeMillis();
-		Rs2Walker.walkTo(returnPoint, ATTACK_AREA_WALK_DISTANCE);
-		setStatus("walking to random attack-area tile " + formatPoint(returnPoint));
+		if (!Rs2Walker.walkTo(returnPoint, ATTACK_AREA_WALK_DISTANCE))
+		{
+			rejectedAttackAreaTiles.add(returnPoint);
+			attackAreaReturnTarget = null;
+			log.warn("[KSP AIO Fighter] Attack-area return rejected: {} (excluded for this return)", returnPoint);
+			setStatus("return tile unreachable; choosing another inside attack area");
+			return true;
+		}
+		setStatus("returning to attack area " + formatPoint(returnPoint));
 		return true;
 	}
 
+	/**
+	 * Choose a tile from the configured rectangle, filtering collision flags for
+	 * loaded scene tiles. Off-scene tiles are validated again when the walker
+	 * processes them; a rejected tile is never selected twice during this return.
+	 */
 	private WorldPoint getRandomPointInsideConfiguredArea()
 	{
 		WorldPoint tile1 = getAttackAreaTile1();
 		WorldPoint tile2 = getAttackAreaTile2();
 		if (!isConfiguredTileValid(tile1) || !isConfiguredTileValid(tile2) || tile1.getPlane() != tile2.getPlane())
 		{
-			return getAttackAreaCenterFromTiles();
+			return null;
 		}
-
 		int minX = Math.min(tile1.getX(), tile2.getX());
 		int maxX = Math.max(tile1.getX(), tile2.getX());
 		int minY = Math.min(tile1.getY(), tile2.getY());
 		int maxY = Math.max(tile1.getY(), tile2.getY());
-		int x = ThreadLocalRandom.current().nextInt(minX, maxX + 1);
-		int y = ThreadLocalRandom.current().nextInt(minY, maxY + 1);
-		return new WorldPoint(x, y, tile1.getPlane());
+		long width = (long) maxX - minX + 1;
+		long height = (long) maxY - minY + 1;
+		long total = width * height;
+		if (total <= 0)
+		{
+			return null;
+		}
+		// Bound search work for large rectangles; exhaustive for typical small areas.
+		int attempts = (int) Math.min(total, 256L);
+		long offset = ThreadLocalRandom.current().nextLong(total);
+		long step = total > 1 ? total - 1 : 1; // coprime: visit unique tiles
+		for (int i = 0; i < attempts; i++)
+		{
+			long index = (offset + i * step) % total;
+			WorldPoint candidate = new WorldPoint(minX + (int) (index % width),
+					minY + (int) (index / width), tile1.getPlane());
+			if (!rejectedAttackAreaTiles.contains(candidate) && isLoadedTileWalkable(candidate))
+			{
+				return candidate;
+			}
+		}
+		return null;
+	}
+
+	private boolean isLoadedTileWalkable(WorldPoint point)
+	{
+		try
+		{
+			var local = Rs2LocalPoint.fromWorldInstance(point);
+			// A missing local projection means the destination is outside the loaded scene.
+			// Defer its collision validation to the world walker.
+			return local == null || Rs2Tile.isWalkable(local);
+		}
+		catch (Exception e)
+		{
+			log.debug("[KSP AIO Fighter] Collision lookup unavailable for {}", point, e);
+			return true;
+		}
 	}
 
 	private WorldPoint getNearestPointInsideConfiguredArea(WorldPoint playerLocation)
