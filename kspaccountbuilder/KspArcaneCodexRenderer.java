@@ -47,7 +47,7 @@ final class KspArcaneCodexRenderer
     private static final String SOURCE_ROOT_ARTWORK_URL =
             "https://raw.githubusercontent.com/KSPOG/ksppluginsrelease/main/kspaccountbuilder/" + ARTWORK_FILE;
     private static final int ART_W = 1584, ART_H = 993;
-    private static final double SCALE = 0.34; // ~539 x 338 px instead of 792 x 497
+    private static final double SCALE = 0.25; // ~396 x 248 px; compact pixel-art overlay
     private static final Color GOLD = new Color(245, 198, 116);
     private static final Color PURPLE = new Color(190, 88, 243);
     private static final Color GREEN = new Color(103, 234, 101);
@@ -364,7 +364,13 @@ final class KspArcaneCodexRenderer
             g.scale(SCALE, SCALE);
             g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
             g.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
+            // Render the scaled artwork with sharp pixels while retaining transparent edges.
+            g.setRenderingHint(RenderingHints.KEY_INTERPOLATION,
+                    RenderingHints.VALUE_INTERPOLATION_NEAREST_NEIGHBOR);
             g.drawImage(artworkWithoutBlackBorder(), 0, 0, ART_W, ART_H, null);
+            // Restore smooth interpolation for live text and RuneLite item sprites.
+            g.setRenderingHint(RenderingHints.KEY_INTERPOLATION,
+                    RenderingHints.VALUE_INTERPOLATION_BILINEAR);
             final Color taskTint = accent(task);
             // All of the following are LIVE overlays on the original reference art.
             text(nice(task), 200, 335, 30, true, GOLD, 305);
