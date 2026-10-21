@@ -1329,6 +1329,11 @@ public class KspJewelryCrafterScript extends KspBreakAwareScript
             status = "GE sell offer missing - checking remaining output";
             return true;
         }
+        if (pendingOffer.abortRequested && offer.state == GrandExchangeOfferState.SELLING)
+        {
+            status = "Waiting for stalled GE sale cancellation";
+            return true;
+        }
         if (pendingOffer.abortRequested && offer.state != GrandExchangeOfferState.SELLING)
         {
             // Cancellation can leave unsold items and partial-sale proceeds in GE.
