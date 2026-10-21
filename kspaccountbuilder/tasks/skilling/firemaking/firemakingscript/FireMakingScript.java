@@ -40,7 +40,9 @@ public class FireMakingScript extends Script
     private static final int WEB_WALK_COOLDOWN_MS = 1_000;
     private static final int FIRE_INTERACT_COOLDOWN_MS = 100;
     private static final int FIRE_START_GRACE_MS = 600;
-    private static final int BURN_PROMPT_ACTION_COOLDOWN_MS = 100;
+    private static final int BURN_PROMPT_ACTION_COOLDOWN_MS = 1_000;
+    private static final long BURN_BATCH_STALL_MS = 4_800L;
+    private static final long CAMPFIRE_ACTION_CONFIRM_MS = 1_500L;
     private static final int BANK_ACTION_TIMEOUT_MS = 1_500;
     private static final int CAMPFIRE_DISTANCE = 6;
     private static final int NEARBY_CAMPFIRE_SCAN_RADIUS = 12;
@@ -63,6 +65,11 @@ public class FireMakingScript extends Script
     private long pendingBankActionAtMs;
     private int pendingBankEmptySlots = -1;
     private int firemakingXpBeforeAction = -1;
+    private int batchLogId = -1;
+    private int batchLogCount = -1;
+    private int batchXp = -1;
+    private long batchProgressAtMs;
+    private boolean burnBatchActive;
     private WorldPoint activeFireInteractionLocation;
     private int activeFireInteractionId = -1;
 
@@ -98,17 +105,29 @@ public class FireMakingScript extends Script
             int targetLogId = getTargetLogId(targetLogName);
             consumeFiremakingXpDrop();
 
+            // Campfires source: process the interface and observe consumption
+            // BEFORE searching the scene, changing targets, or banking.
+            if (handleLevelUpInterface()) return;
+            if (handleBurnPrompt(targetLogName, targetLogId)) return;
+            if (isBurnBatchProgressing(targetLogId)) return;
+
+            // A click can lead to a delayed widget or animation. Do not
+            // re-select the same campfire during that dispatch window.
+            if (awaitingFireStartAtMs > 0L
+                    && System.currentTimeMillis() - awaitingFireStartAtMs < CAMPFIRE_ACTION_CONFIRM_MS)
+            {
+                return;
+            }
+
             if (activeFireInteractionLocation != null)
             {
                 Rs2TileObjectModel activeFire = findFireObjectAtLocation(activeFireInteractionLocation);
                 if (activeFire == null || activeFire.getId() != activeFireInteractionId)
                 {
-                    boolean burnInterfaceOpen = isBurnInterfaceOpen(targetLogName, targetLogId);
-                    resetFireInteractionState("interacted fire disappeared");
-                    if (burnInterfaceOpen)
-                    {
-                        Rs2Keyboard.keyPress(KeyEvent.VK_ESCAPE);
-                    }
+                    // Do not close a production widget just because the fire
+                    // model changed during its conversion/animation.
+                    if (!isBurnInterfaceOpen(targetLogName, targetLogId))
+                        resetFireInteractionState("interacted fire disappeared");
                 }
             }
 
@@ -161,8 +180,6 @@ public class FireMakingScript extends Script
                     isBurnInterfaceOpen(targetLogName, targetLogId),
                     awaitingFireStartAtMs != 0L);
 
-            if (handleLevelUpInterface()) return;
-            if (handleBurnPrompt(targetLogName, targetLogId)) return;
             if (!ensureSupplies(targetLogName, fireLocation != null)) return;
 
             fireLocation = findUsableFireLocation();
@@ -230,6 +247,7 @@ public class FireMakingScript extends Script
         awaitingFireStartAtMs = 0L;
         expectingFiremakingXpDrop = false;
         firemakingXpBeforeAction = -1;
+        clearBurnBatch();
 
         if (Rs2Bank.isOpen()) return prepareSuppliesFromBank(targetLogName, hasActiveFire);
         if (Rs2Bank.walkToBankAndUseBank() || Rs2Bank.openBank()) return false;
@@ -348,7 +366,7 @@ public class FireMakingScript extends Script
 
     private void useCampfire(int targetLogId, WorldPoint fireLocation)
     {
-        if (!canBurnLog(targetLogId)) return;
+        if (!canBurnLog(targetLogId) || burnBatchActive || isWaitingForFireStart()) return;
         if (fireLocation == null) return;
         WorldPoint player = Rs2Player.getWorldLocation();
         if (player == null || !isInTargetArea(player) || !isInTargetArea(fireLocation)) return;
@@ -395,6 +413,7 @@ public class FireMakingScript extends Script
 
         lastFireInteractAtMs = now;
         awaitingFireStartAtMs = now;
+        beginBurnBatch(targetLogId);
         activeFireInteractionLocation = fire.getWorldLocation();
         activeFireInteractionId = fire.getId();
         armFiremakingXpCheck();
@@ -469,6 +488,7 @@ public class FireMakingScript extends Script
         Rs2Keyboard.keyPress(KeyEvent.VK_SPACE);
         lastBurnPromptActionAtMs = System.currentTimeMillis();
         awaitingFireStartAtMs = lastBurnPromptActionAtMs;
+        beginBurnBatch(targetLogId);
         armFiremakingXpCheck();
         return true;
     }
@@ -602,6 +622,64 @@ public class FireMakingScript extends Script
         String titleText = widget.getText().toLowerCase();
         return titleText.contains("what would you like to burn")
                 || titleText.contains("how many would you like to burn");
+    }
+
+    private void beginBurnBatch(int logId)
+    {
+        burnBatchActive = true;
+        batchLogId = logId;
+        batchLogCount = Rs2Inventory.count(logId);
+        batchXp = getFiremakingXp();
+        batchProgressAtMs = System.currentTimeMillis();
+    }
+
+    /**
+     * Campfires-style progress watchdog. Repeated animation gaps or missing
+     * fire models are not a reason to re-click while logs are being consumed.
+     * Only release the interaction after a verified stall or empty inventory.
+     */
+    private boolean isBurnBatchProgressing(int logId)
+    {
+        if (!burnBatchActive) return false;
+        if (logId != batchLogId || Rs2Bank.isOpen())
+        {
+            clearBurnBatch();
+            return false;
+        }
+        int count = Rs2Inventory.count(logId);
+        int xp = getFiremakingXp();
+        if (count <= 0)
+        {
+            clearBurnBatch();
+            return false;
+        }
+        long now = System.currentTimeMillis();
+        if ((batchLogCount >= 0 && count < batchLogCount)
+                || (batchXp >= 0 && xp > batchXp))
+        {
+            batchLogCount = count;
+            batchXp = xp;
+            batchProgressAtMs = now;
+            Microbot.status = "Burning logs at campfire";
+            return true;
+        }
+        // Animation shows that an action is in flight, but is not a
+        // substitute for inventory/XP progress: enforce a bounded stall.
+        if (now - batchProgressAtMs < BURN_BATCH_STALL_MS)
+            return true;
+        debug("Campfire batch stalled | logId={} remaining={} elapsedMs={}",
+                logId, count, now - batchProgressAtMs);
+        clearBurnBatch();
+        return false;
+    }
+
+    private void clearBurnBatch()
+    {
+        burnBatchActive = false;
+        batchLogId = -1;
+        batchLogCount = -1;
+        batchXp = -1;
+        batchProgressAtMs = 0L;
     }
 
     private void armFiremakingXpCheck()
@@ -788,6 +866,7 @@ public class FireMakingScript extends Script
         lastFireInteractAtMs = 0L;
         pendingBankActionAtMs = 0L;
         pendingBankEmptySlots = -1;
+        clearBurnBatch();
         awaitingFireStartAtMs = 0L;
         lastBurnPromptActionAtMs = 0L;
         expectingFiremakingXpDrop = false;
