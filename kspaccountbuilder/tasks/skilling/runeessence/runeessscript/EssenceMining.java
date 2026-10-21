@@ -327,7 +327,10 @@ public class EssenceMining extends Script
                 try
                 {
                     String action = liveNpcId == 3088 ? "Exit" : "Use";
-                    if (liveNpc.click(action))
+                    // Portal actions can differ between live NPC variants. Try the
+                    // alternative only if the preferred action was not dispatched.
+                    if (liveNpc.click(action)
+                            || liveNpc.click("Exit".equals(action) ? "Use" : "Exit"))
                     {
                         markPortalExit("live NPC", liveNpcId);
                         return;
@@ -354,7 +357,11 @@ public class EssenceMining extends Script
             try
             {
                 String action = portalObjectAction(id);
-                if (Rs2GameObject.interact(liveObject, action))
+                // Rune Essence portal variants can expose either Use or Exit.
+                // Try the alternate action only if the preferred one fails.
+                if (Rs2GameObject.interact(liveObject, action)
+                        || Rs2GameObject.interact(liveObject,
+                                "Exit".equals(action) ? "Use" : "Exit"))
                 {
                     markPortalExit("live object", id);
                     return;
@@ -376,7 +383,10 @@ public class EssenceMining extends Script
             if (Rs2Player.isMoving()) return;
             try
             {
-                if (npc.click(id == 3088 ? "Exit" : "Use"))
+                String action = id == 3088 ? "Exit" : "Use";
+                // Cached NPCs must support the same action fallback as live NPCs.
+                if (npc.click(action)
+                        || npc.click("Exit".equals(action) ? "Use" : "Exit"))
                 {
                     markPortalExit("cached NPC", id);
                     return;
@@ -396,7 +406,11 @@ public class EssenceMining extends Script
             if (Rs2Player.isMoving()) return;
             try
             {
-                if (portal.click(portalObjectAction(id)))
+                String action = portalObjectAction(id);
+                // Match live object handling: portal variants can expose either
+                // Use or Exit, independently of their configured object ID.
+                if (portal.click(action)
+                        || portal.click("Exit".equals(action) ? "Use" : "Exit"))
                 {
                     markPortalExit("cached object", id);
                     return;
@@ -420,11 +434,16 @@ public class EssenceMining extends Script
         }
         if (now - portalSearchStartedAtMs >= PORTAL_SEARCH_TIMEOUT_MS)
         {
-            // Do NOT cycle through other exits on a cache miss. The game can
-            // render a portal before RuneLite's tile-object caches populate;
-            // cycling makes the walker zigzag forever between four entrances.
-            // Hold the original closest portal and keep looking for its object.
+            // Give the live scene and caches time to discover the portal, but
+            // do not leave the player waiting beside a missing exit forever.
+            // Rotate only after the full timeout to avoid rapid zigzagging.
+            int previousPortalIndex = portalFallbackIndex;
+            portalFallbackIndex = (portalFallbackIndex + 1) % ESSENCE_MINE_PORTAL_LOCATIONS.length;
             portalSearchStartedAtMs = now;
+            KspWalkerGuard.clear(WALK_KEY_PORTAL);
+            KspTaskDebug.throttled(log, true, "Rune Essence", "portal-recovery", 5_000L,
+                    "Portal discovery timed out; changing exit | from={} to={} player={}",
+                    previousPortalIndex, portalFallbackIndex, player);
             KspTaskDebug.throttled(log, true, "Rune Essence", "portal-discovery", 10_000L,
                     "Portal missing from scene/cache; holding nearest exit | player={} target={} index={} distance={} moving={}",
                     player, ESSENCE_MINE_PORTAL_LOCATIONS[portalFallbackIndex], portalFallbackIndex,

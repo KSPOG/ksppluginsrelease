@@ -47,7 +47,7 @@ final class KspArcaneCodexRenderer
     private static final String SOURCE_ROOT_ARTWORK_URL =
             "https://raw.githubusercontent.com/KSPOG/ksppluginsrelease/main/kspaccountbuilder/" + ARTWORK_FILE;
     private static final int ART_W = 1584, ART_H = 993;
-    private static final double SCALE = 0.25; // ~396 x 248 px; compact pixel-art overlay
+    private static final double SCALE = 0.29; // ~459 x 288 px; compact overlay with readable artwork details
     private static final Color GOLD = new Color(245, 198, 116);
     private static final Color PURPLE = new Color(190, 88, 243);
     private static final Color GREEN = new Color(103, 234, 101);
@@ -251,7 +251,9 @@ final class KspArcaneCodexRenderer
         boolean[] visited = new boolean[count];
         int[] queue = new int[count];
         int front = 0, back = 0;
-        final int threshold = 30;
+        // Only remove nearly pure-black exterior padding. The previous threshold
+        // could erase dark artwork details connected to the outer border.
+        final int threshold = 8;
 
         // Seed every eligible edge pixel. A strict connected-component mask
         // cannot accidentally remove the dark background inside the frame.
@@ -364,11 +366,14 @@ final class KspArcaneCodexRenderer
             g.scale(SCALE, SCALE);
             g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
             g.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
-            // Render the scaled artwork with sharp pixels while retaining transparent edges.
+            // Smoothly downsample the original artwork so the compact overlay retains fine details.
+            // Nearest-neighbor scaling at this size made the illustration excessively pixelated.
             g.setRenderingHint(RenderingHints.KEY_INTERPOLATION,
-                    RenderingHints.VALUE_INTERPOLATION_NEAREST_NEIGHBOR);
+                    RenderingHints.VALUE_INTERPOLATION_BICUBIC);
+            g.setRenderingHint(RenderingHints.KEY_RENDERING,
+                    RenderingHints.VALUE_RENDER_QUALITY);
             g.drawImage(artworkWithoutBlackBorder(), 0, 0, ART_W, ART_H, null);
-            // Restore smooth interpolation for live text and RuneLite item sprites.
+            // Use standard smoothing for live RuneLite item sprites.
             g.setRenderingHint(RenderingHints.KEY_INTERPOLATION,
                     RenderingHints.VALUE_INTERPOLATION_BILINEAR);
             final Color taskTint = accent(task);
