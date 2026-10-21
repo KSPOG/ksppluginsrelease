@@ -5,6 +5,11 @@ import java.awt.Color;
 import java.awt.Dimension;
 import java.awt.Font;
 import java.awt.FontMetrics;
+import java.awt.AlphaComposite;
+import java.awt.RadialGradientPaint;
+import java.awt.geom.Point2D;
+import java.awt.image.BufferedImage;
+import net.runelite.client.game.ItemManager;
 import java.awt.GradientPaint;
 import java.awt.Graphics2D;
 import java.awt.RenderingHints;
@@ -23,6 +28,7 @@ final class KspAccountBuilderHudRenderer
     private final KspAccountBuilderScript script;
     private final KspAccountBuilderConfig config;
     private final KspAccountBuilderPlugin plugin;
+    private final ItemManager itemManager;
     private Graphics2D g;
     private String task;
     private Color accent;
@@ -33,8 +39,9 @@ final class KspAccountBuilderHudRenderer
     private String detail;
 
     KspAccountBuilderHudRenderer(KspAccountBuilderScript script, KspAccountBuilderConfig config,
-                                 KspAccountBuilderPlugin plugin)
+                                 KspAccountBuilderPlugin plugin, ItemManager itemManager)
     {
+        this.itemManager = itemManager;
         this.script = script;
         this.config = config;
         this.plugin = plugin;
@@ -50,7 +57,8 @@ final class KspAccountBuilderHudRenderer
             task = script.getCurrentTaskName();
             if (task == null || task.isEmpty()) task = "IDLE";
             detail = script.getOverlayTaskDetail();
-            if (detail == null || detail.isEmpty()) detail = "Waiting for task";
+            if (detail == null || detail.isEmpty() || "IDLE".equalsIgnoreCase(detail))
+                detail = "IDLE".equals(task) ? "Waiting for task" : "Training " + task.replace('_', ' ').toLowerCase();
             skill = resolveSkill(task);
             accent = taskColor(task);
             level = 0;
@@ -406,88 +414,103 @@ final class KspAccountBuilderHudRenderer
         g.drawString(shown, x, y);
     }
 
-    /** Vector tool emblem changes immediately when Account Builder switches tasks. */
-    private void icon(int x, int y, int size, Color color)
+    /**
+     * Use the game's actual item artwork rather than approximated shapes.
+     * These item sprites are resolved by RuneLite's ItemManager; missing sprites
+     * fall back to the vector emblem. Dynamic choice follows active task.
+     */
+    private int primaryItemId()
     {
-        int midX = x + size / 2;
-        int midY = y + size / 2;
-        g.setColor(new Color(11, 19, 34, 230));
-        g.fillOval(x, y, size, size);
-        g.setColor(color.darker());
-        g.setStroke(new BasicStroke(2));
-        g.drawOval(x + 2, y + 2, size - 4, size - 4);
-        Graphics2D pictogram = (Graphics2D)g.create();
+        if (task.contains("RUNE_ESSENCE")) return 1436; // Rune essence
+        if (task.contains("MINING")) return 1275; // Rune pickaxe
+        if (task.contains("WOODCUTTING")) return 1359; // Rune axe
+        if (task.contains("FIREMAKING")) return 590; // Tinderbox
+        if (task.contains("FISHING")) return 309; // Fly fishing rod
+        if (task.contains("COOKING")) return 379; // Lobster
+        if (task.contains("SMITHING")) return 2347; // Hammer
+        if (task.contains("SMELTING")) return 2353; // Steel bar
+        if (task.contains("CRAFTING")) return 1755; // Chisel
+        if (task.contains("MELEE")) return 1289; // Rune sword
+        if (task.contains("MAGIC")) return 554; // Fire rune
+        if (task.contains("QUEST")) return 8007; // Varrock teleport tablet
+        return 1275;
+    }
+
+    private int secondaryItemId()
+    {
+        if (task.contains("RUNE_ESSENCE")) return 1275;
+        if (task.contains("MINING")) return 440; // Iron ore
+        if (task.contains("WOODCUTTING")) return 1519; // Willow logs
+        if (task.contains("FIREMAKING")) return 1511; // Logs
+        if (task.contains("FISHING")) return 335; // Raw trout
+        if (task.contains("COOKING")) return 377; // Raw lobster
+        if (task.contains("SMITHING")) return 2353;
+        if (task.contains("SMELTING")) return 453; // Coal
+        if (task.contains("CRAFTING")) return 1623; // Uncut sapphire
+        if (task.contains("MELEE")) return 1191; // Iron kiteshield
+        if (task.contains("MAGIC")) return 556; // Air rune
+        return 1511;
+    }
+
+    private boolean drawRuneLiteSprite(int itemId, int cx, int cy, int w)
+    {
+        if (itemManager == null) return false;
+        BufferedImage sprite;
+        try { sprite = itemManager.getImage(itemId); }
+        catch (RuntimeException ex) { return false; }
+        if (sprite == null || sprite.getWidth() <= 0 || sprite.getHeight() <= 0) return false;
+        // Draw using the original game sprite with bicubic scaling and an
+        // understated double shadow. No mocked-up task illustrations.
+        Graphics2D d = (Graphics2D) g.create();
         try
         {
-            pictogram.translate(midX, midY);
-            pictogram.scale(size / 60.0, size / 60.0);
-            pictogram.setStroke(new BasicStroke(5, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
-            pictogram.setColor(new Color(170, 115, 67));
-            String name = task;
-            if (name.contains("FISHING"))
-            {
-                pictogram.drawArc(-17, -21, 35, 41, 30, 280);
-                pictogram.setColor(color);
-                pictogram.drawLine(18, -25, 18, 13);
-                pictogram.drawOval(13, 12, 7, 7);
-            }
-            else if (name.contains("FIREMAKING") || name.contains("COOKING"))
-            {
-                pictogram.setColor(color);
-                pictogram.fillOval(-14, -5, 28, 26);
-                pictogram.fillArc(-12, -26, 24, 40, 0, 170);
-                pictogram.setColor(new Color(253, 232, 155));
-                pictogram.fillOval(-5, 0, 10, 17);
-            }
-            else if (name.contains("MAGIC") || name.contains("RUNE_ESSENCE"))
-            {
-                pictogram.setColor(color);
-                pictogram.drawOval(-16, -16, 32, 32);
-                pictogram.drawLine(-25, 0, 25, 0);
-                pictogram.drawLine(0, -25, 0, 25);
-                pictogram.fillOval(-5, -5, 10, 10);
-            }
-            else if (name.contains("QUEST"))
-            {
-                pictogram.setColor(new Color(229, 198, 144));
-                pictogram.fillRoundRect(-16, -21, 32, 43, 5, 5);
-                pictogram.setColor(color);
-                pictogram.drawLine(-8, -8, 8, -8);
-                pictogram.drawLine(-8, 1, 9, 1);
-                pictogram.drawLine(-8, 10, 5, 10);
-            }
-            else if (name.contains("MELEE") || name.contains("RANGED"))
-            {
-                pictogram.setColor(new Color(225, 226, 235));
-                pictogram.drawLine(-15, 20, 16, -21);
-                pictogram.setColor(color);
-                pictogram.drawLine(-20, 6, -2, 20);
-                pictogram.fillOval(12, -26, 7, 8);
-            }
-            else if (name.contains("WOODCUTTING"))
-            {
-                pictogram.drawLine(-19, 23, 15, -22);
-                pictogram.setColor(color);
-                pictogram.fillArc(-22, -28, 42, 34, 0, 180);
-            }
-            else if (name.contains("CRAFTING"))
-            {
-                pictogram.setColor(color);
-                int[] xs = {0, 21, 11, -11, -21};
-                int[] ys = {-23, -6, 20, 20, -6};
-                pictogram.fillPolygon(xs, ys, 5);
-                pictogram.setColor(Color.WHITE);
-                pictogram.drawLine(0, -23, 0, 19);
-            }
-            else
-            {
-                // Pickaxe for Mining, furnace/anvil tasks and all other skilling.
-                pictogram.drawLine(-18, 22, 12, -23);
-                pictogram.setColor(color);
-                pictogram.setStroke(new BasicStroke(6, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
-                pictogram.drawArc(-25, -32, 53, 31, 10, 158);
-            }
+            d.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BICUBIC);
+            int h = Math.max(1, Math.round((float) sprite.getHeight() * w / Math.max(1, sprite.getWidth())));
+            d.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, .36f));
+            d.drawImage(sprite, cx - w / 2 + 3, cy - h / 2 + 4, w, h, null);
+            d.setComposite(AlphaComposite.SrcOver);
+            d.drawImage(sprite, cx - w / 2, cy - h / 2, w, h, null);
+            return true;
         }
-        finally { pictogram.dispose(); }
+        finally { d.dispose(); }
     }
+
+    private void drawIllustratedMedallion(int x, int y, int size, Color color)
+    {
+        int cx = x + size / 2, cy = y + size / 2;
+        g.setPaint(new RadialGradientPaint(new Point2D.Float(cx, cy), size * .53f,
+                new float[]{0f, .64f, 1f},
+                new Color[]{new Color(54, 49, 73), new Color(20, 25, 38), new Color(6, 10, 19)}));
+        g.fillOval(x, y, size, size);
+        g.setStroke(new BasicStroke(3));
+        g.setColor(color);
+        g.drawOval(x + 2, y + 2, size - 4, size - 4);
+        g.setColor(new Color(245, 216, 156, 175));
+        g.setStroke(new BasicStroke(1));
+        g.drawOval(x + 8, y + 8, size - 16, size - 16);
+        for (int i = 0; i < 8; i++)
+        {
+            double a = i * Math.PI / 4;
+            int px = cx + (int)((size / 2.0 - 5) * Math.cos(a));
+            int py = cy + (int)((size / 2.0 - 5) * Math.sin(a));
+            g.setColor(new Color(color.getRed(), color.getGreen(), color.getBlue(), 185));
+            g.fillOval(px - 2, py - 2, 4, 4);
+        }
+        boolean drawn = drawRuneLiteSprite(primaryItemId(), cx - size / 10, cy - size / 13, size * 3 / 5);
+        drawRuneLiteSprite(secondaryItemId(), cx + size / 4, cy + size / 4, size / 3);
+        if (!drawn) drawFallbackGlyph(cx, cy, size, color);
+    }
+
+    private void drawFallbackGlyph(int cx, int cy, int size, Color color)
+    {
+        g.setColor(color);
+        g.setFont(new Font("Serif", Font.BOLD, Math.max(16, size / 3)));
+        String glyph = task.isEmpty() ? "?" : task.substring(0, 1);
+        g.drawString(glyph, cx - size / 10, cy + size / 10);
+    }
+    private void icon(int x, int y, int size, Color color)
+    {
+        drawIllustratedMedallion(x, y, size, color);
+    }
+
 }
