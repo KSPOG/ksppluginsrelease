@@ -21,6 +21,18 @@ public interface KspAccountBuilderConfig extends Config
 
 
 
+    @ConfigSection(name = "Overlay", description = "Original or approved Arcane Codex artwork", position = -1)
+    String overlaySection = "overlay";
+
+    @ConfigItem(
+            keyName = "arcaneCodexOverlay",
+            name = "Arcane Codex (artwork)",
+            description = "Use the approved image-backed Arcane Codex HUD. Requires arcane_codex_background.jpg in ~/.runelite/kspaccountbuilder.",
+            position = 0,
+            section = overlaySection
+    )
+    default boolean arcaneCodexOverlay() { return false; }
+
     // Only advanced tuning remains in RuneLite's standard config screen.
     @ConfigSection(name = "Antiban", description = "Advanced antiban settings", position = 0)
     String antibanSection = "antiban";
