@@ -69,10 +69,12 @@ public class SmeltScript extends Script
     public boolean run(SmeltArea area, BarLevels fallbackBarLevel, boolean progressiveSmelting)
     {
         shutdown();
-        targetArea = SmeltArea.randomArea();
+        // Keep the furnace selected by the caller for the entire task. Previously
+        // randomArea() silently overrode Edgeville on every task restart.
+        targetArea = area == null ? SmeltArea.SMELT_AREA_EDGEVILLE_FURNACE : area;
         targetBar = fallbackBarLevel;
         this.progressiveSmelting = progressiveSmelting;
-        debug("Selected random Smelting area | area={}", targetArea.getDisplayName());
+        debug("Using configured Smelting area | area={}", targetArea.getDisplayName());
 
         mainScheduledFuture = scheduledExecutorService.scheduleWithFixedDelay(() ->
         {
