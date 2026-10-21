@@ -4,7 +4,6 @@ import java.util.ArrayDeque;
 import java.util.Deque;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Iterator;
 import java.util.Locale;
 import java.util.concurrent.TimeUnit;
 import lombok.extern.slf4j.Slf4j;
@@ -91,6 +90,8 @@ public class KspBonesToBananasScript extends KspBreakAwareScript
                 }
                 if (KspBreakService.shouldPause())
                 {
+                    if (config.antiban())
+                        antiban.resumeCanvasMouseIfReady(InputArbiter.isHuman());
                     reportStartupGate("Paused: break or priority plugin");
                     return;
                 }
@@ -524,8 +525,6 @@ public class KspBonesToBananasScript extends KspBreakAwareScript
         if (!freeWater) buildBuy(ItemID.WATERRUNE, "Water rune", castsNeeded * 2);
         if (!freeEarth) buildBuy(ItemID.EARTHRUNE, "Earth rune", castsNeeded * 2);
 
-        distributeBuyOrdersAcrossSlots();
-
         if (Rs2Bank.count(ItemID.COINS) > 0)
         {
             int before = Rs2Inventory.itemQuantity(ItemID.COINS);
@@ -656,7 +655,7 @@ public class KspBonesToBananasScript extends KspBreakAwareScript
         }
         if (!ensureGeOverview()) return;
 
-        // A pending order can be submitted only when an actual GE slot is free.
+        // Exactly one GE slot per required item; never duplicate an item.
         GrandExchangeSlots free = firstFreeGeSlot();
         if (free != null)
         {
@@ -682,71 +681,6 @@ public class KspBonesToBananasScript extends KspBreakAwareScript
             return;
         }
         tickGeOrder();
-    }
-
-    /**
-     * Split the configured input quantities over up to eight separate GE
-     * offers, distributing one slot per distinct item before adding any
-     * extra chunks. Splitting never increases the requested/limited quantity.
-     */
-    private void distributeBuyOrdersAcrossSlots()
-    {
-        if (buyQueue.isEmpty()) return;
-        List<GeOrder> original = new ArrayList<>(buyQueue);
-        final int maxSlots = GrandExchangeSlots.values().length;
-        int slots = Math.min(maxSlots, original.size());
-        while (slots < maxSlots)
-        {
-            boolean splittable = false;
-            for (GeOrder order : original)
-            {
-                if (order.quantity > 1) { splittable = true; break; }
-            }
-            if (!splittable) break;
-            slots++;
-        }
-
-        List<List<GeOrder>> chunks = new ArrayList<>();
-        int[] allocations = new int[original.size()];
-        for (int i = 0; i < original.size(); i++) allocations[i] = 1;
-        int extras = Math.max(0, slots - original.size());
-        while (extras > 0)
-        {
-            int best = -1;
-            double largest = 1.0;
-            for (int i = 0; i < original.size(); i++)
-            {
-                double perSlot = original.get(i).quantity / (double) allocations[i];
-                if (perSlot > largest) { largest = perSlot; best = i; }
-            }
-            if (best < 0) break;
-            allocations[best]++;
-            extras--;
-        }
-        for (int i = 0; i < original.size(); i++)
-        {
-            GeOrder order = original.get(i);
-            List<GeOrder> group = new ArrayList<>();
-            int count = Math.min(order.quantity, allocations[i]);
-            int unit = order.quantity / count;
-            int remainder = order.quantity % count;
-            for (int j = 0; j < count; j++)
-            {
-                int quantity = unit + (j < remainder ? 1 : 0);
-                group.add(new GeOrder(order.action, order.itemId, order.itemName, quantity, order.price));
-            }
-            chunks.add(group);
-        }
-        buyQueue.clear();
-        // Put one offer for each distinct input in before the extra slots.
-        int maxGroup = 0;
-        for (List<GeOrder> group : chunks) maxGroup = Math.max(maxGroup, group.size());
-        for (int j = 0; j < maxGroup; j++)
-            for (List<GeOrder> group : chunks)
-                if (j < group.size()) buyQueue.addLast(group.get(j));
-
-        log.info("Bones to Bananas parallel GE input plan | offers={} itemTypes={} slots={}",
-                buyQueue.size(), original.size(), maxSlots);
     }
 
     private void tickGeOrder()
