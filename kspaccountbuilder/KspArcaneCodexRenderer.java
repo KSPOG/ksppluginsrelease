@@ -47,7 +47,7 @@ final class KspArcaneCodexRenderer
     private static final String SOURCE_ROOT_ARTWORK_URL =
             "https://raw.githubusercontent.com/KSPOG/ksppluginsrelease/main/kspaccountbuilder/" + ARTWORK_FILE;
     private static final int ART_W = 1584, ART_H = 993;
-    private static final double SCALE = 0.25; // ~396 x 248 px; compact pixel-art overlay
+    private static final double SCALE = 0.29; // ~459 x 288 px; compact overlay with readable artwork details
     private static final Color GOLD = new Color(245, 198, 116);
     private static final Color PURPLE = new Color(190, 88, 243);
     private static final Color GREEN = new Color(103, 234, 101);
