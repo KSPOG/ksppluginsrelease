@@ -38,7 +38,7 @@ import net.runelite.client.ui.NavigationButton;
 @SuppressWarnings("unused")
 public class KspAccountBuilderPlugin extends Plugin
 {
-    public static final String VERSION = "1.9.49";
+    public static final String VERSION = "1.9.50";
 
     @Inject
     private KspAccountBuilderScript script;
@@ -63,6 +63,7 @@ public class KspAccountBuilderPlugin extends Plugin
     // Registry lives in the host Swing classloader, not the plugin classloader.
     // SourceLoader may briefly leave two enabled plugin instances after reload.
     private static final String RUNTIME_OWNER_KEY = "ksp.accountbuilder.runtime.owner.v1";
+    private static final String OVERLAY_OWNER_KEY = "ksp.accountbuilder.overlay.owner.v1";
     private final Object runtimeOwnerToken = new Object();
     private KspAccountBuilderPanel sidePanel;
     private NavigationButton navButton;
@@ -105,7 +106,11 @@ public class KspAccountBuilderPlugin extends Plugin
         {
             return;
         }
-        if (config.runAccountBuilder()) startRuntime();
+        if (config.runAccountBuilder())
+        {
+            if (isCurrentSidebarOwner()) startRuntime();
+            else log.debug("Ignoring Start event from superseded Account Builder sidebar instance");
+        }
         else cleanupRuntime("config-stop");
     }
 
@@ -115,7 +120,7 @@ public class KspAccountBuilderPlugin extends Plugin
         // classloaders. A per-instance runtimeActive flag is not sufficient.
         synchronized (UIManager.getDefaults())
         {
-            if (!acceptingRuntimeChanges || runtimeActive) return;
+            if (!acceptingRuntimeChanges || runtimeActive || !isCurrentSidebarOwner()) return;
             Object registry = UIManager.get(RUNTIME_OWNER_KEY);
             if (registry instanceof Object[])
             {
@@ -141,7 +146,10 @@ public class KspAccountBuilderPlugin extends Plugin
                 log.info("Starting KSP Account Builder runtime from configuration | owner={}",
                         System.identityHashCode(runtimeOwnerToken));
                 stopStandaloneBreakHandler();
+                // Clear any leftover overlay registered by a superseded instance.
+                removePreviousOverlay();
                 overlayManager.add(overlay);
+                UIManager.put(OVERLAY_OWNER_KEY, new Object[]{runtimeOwnerToken, overlay});
                 randomEventSolver = new KspRandomEventSolver();
                 Microbot.getBlockingEventManager().add(randomEventSolver);
                 resetAntibanState();
@@ -168,6 +176,39 @@ public class KspAccountBuilderPlugin extends Plugin
         cleanupRuntime("superseded-by-source-loader");
     }
 
+    /** Only the plugin instance whose sidebar is actually visible may start. */
+    private boolean isCurrentSidebarOwner()
+    {
+        Object registration = UIManager.get(SIDEBAR_REGISTRY_KEY);
+        return panelEnabled && navButton != null
+                && registration instanceof Object[]
+                && ((Object[]) registration).length > 0
+                && ((Object[]) registration)[0] == navButton;
+    }
+
+    private void removePreviousOverlay()
+    {
+        Object registration = UIManager.get(OVERLAY_OWNER_KEY);
+        if (!(registration instanceof Object[]) || ((Object[]) registration).length < 2) return;
+        Object old = ((Object[]) registration)[1];
+        if (old instanceof KSPAccountBuilderOverlay)
+        {
+            // Same-classloader registrations are normally removed here.
+            overlayManager.remove((KSPAccountBuilderOverlay) old);
+        }
+        else if (old instanceof net.runelite.client.ui.overlay.Overlay)
+        {
+            // Overlay base type survives separate SourceLoader classloaders.
+            overlayManager.remove((net.runelite.client.ui.overlay.Overlay) old);
+        }
+        UIManager.getDefaults().remove(OVERLAY_OWNER_KEY);
+    }
+
+    boolean mayRenderOverlay()
+    {
+        return runtimeActive && ownsRuntime() && isCurrentSidebarOwner();
+    }
+
     private boolean ownsRuntime()
     {
         Object registry = UIManager.get(RUNTIME_OWNER_KEY);
@@ -182,7 +223,8 @@ public class KspAccountBuilderPlugin extends Plugin
         acceptingRuntimeChanges = false;
         panelEnabled = false;
         cleanupRuntime("plugin-stop");
-        configManager.setConfiguration(KspAccountBuilderConfig.CONFIG_GROUP, "runAccountBuilder", false);
+        if (isCurrentSidebarOwner())
+            configManager.setConfiguration(KspAccountBuilderConfig.CONFIG_GROUP, "runAccountBuilder", false);
         removeSidePanel();
     }
 
@@ -333,6 +375,10 @@ public class KspAccountBuilderPlugin extends Plugin
             {
                 try { overlayManager.remove(overlay); }
                 catch (Exception ex) { log.warn("Unable to remove Account Builder overlay", ex); }
+                Object registration = UIManager.get(OVERLAY_OWNER_KEY);
+                if (registration instanceof Object[] && ((Object[]) registration).length > 0
+                        && ((Object[]) registration)[0] == runtimeOwnerToken)
+                    UIManager.getDefaults().remove(OVERLAY_OWNER_KEY);
             }
             synchronized (UIManager.getDefaults())
             {
