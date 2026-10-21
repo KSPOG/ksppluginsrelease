@@ -43,6 +43,7 @@ final class KspAccountBuilderPanel extends PluginPanel
     private final JComboBox<KspTrainSingleSkillTask> skill = new JComboBox<>(KspTrainSingleSkillTask.values());
     private final JComboBox<KspQuestTask> quest = new JComboBox<>(KspQuestTask.values());
     private final JComboBox<Enum<?>> target = new JComboBox<>();
+    private final JCheckBox arcaneCodex = new JCheckBox("Arcane Codex (artwork)");
     private final JCheckBox breaks = new JCheckBox("Enable breaks");
     private final JCheckBox antiban = new JCheckBox("Enable anti-ban");
     private final JCheckBox skipQuests = new JCheckBox("Skip quests in automatic mode");
@@ -119,6 +120,11 @@ final class KspAccountBuilderPanel extends PluginPanel
                 configManager.setConfiguration(KspAccountBuilderConfig.CONFIG_GROUP, "singleQuestTask", quest.getSelectedItem());
         });
         content.add(selection);
+        content.add(Box.createVerticalStrut(6));
+
+        JPanel appearance = section("Overlay artwork");
+        addCheck(appearance, arcaneCodex, "arcaneCodexOverlay");
+        content.add(appearance);
         content.add(Box.createVerticalStrut(6));
 
         JPanel quick = section("Quick settings");
@@ -241,6 +247,7 @@ final class KspAccountBuilderPanel extends PluginPanel
         Object currentTarget = selectedTarget(config.singleSkillTask());
         if (currentTarget != null && target.getSelectedItem() != currentTarget) target.setSelectedItem(currentTarget);
         if (quest.getSelectedItem() != config.singleQuestTask()) quest.setSelectedItem(config.singleQuestTask());
+        arcaneCodex.setSelected(config.arcaneCodexOverlay());
         breaks.setSelected(config.doBreaks());
         antiban.setSelected(config.useAntiban());
         skipQuests.setSelected(config.skipQuests());
