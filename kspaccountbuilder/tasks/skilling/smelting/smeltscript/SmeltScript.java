@@ -85,6 +85,16 @@ public class SmeltScript extends Script
                 return;
             }
 
+            // Finish the furnace selection/production interaction before choosing
+            // a different bar or starting a bank trip. Otherwise a transient
+            // inventory snapshot can redirect us just after clicking the furnace.
+            if (Rs2Widget.isProductionWidgetOpen()
+                    || Rs2Widget.findWidget("What would you like to smelt?", null, false) != null)
+            {
+                smeltAtFurnace(targetBar);
+                return;
+            }
+
             selectTargetBar(fallbackBarLevel);
             KspTaskDebug.throttled(log, debugLogging, "Smelting", "loop", 5_000L,
                     "loop | targetBar={} area={} player={} moving={} animating={} interacting={} bankOpen={} productionOpen={} awaitingStart={}",

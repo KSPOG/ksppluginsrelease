@@ -37,7 +37,7 @@ import net.runelite.client.ui.NavigationButton;
 @SuppressWarnings("unused")
 public class KspAccountBuilderPlugin extends Plugin
 {
-    public static final String VERSION = "1.9.39";
+    public static final String VERSION = "1.9.40";
 
     @Inject
     private KspAccountBuilderScript script;
@@ -63,7 +63,8 @@ public class KspAccountBuilderPlugin extends Plugin
 
     private KspRandomEventSolver randomEventSolver;
     private final KspAccountBuilderSkillingAntiban skillingAntiban = new KspAccountBuilderSkillingAntiban();
-    private boolean runtimeActive;
+    private volatile boolean runtimeActive;
+    private volatile boolean acceptingRuntimeChanges;
     private String antibanStateKey;
 
     @Provides
@@ -75,24 +76,23 @@ public class KspAccountBuilderPlugin extends Plugin
     @Override
     protected synchronized void startUp()
     {
+        acceptingRuntimeChanges = false;
         cleanupRuntime("restart-before-start");
         migrateSingleSkillTargetDefaults();
+        // Start/Stop is an explicit action, not a persisted auto-run option.
+        // Always require a fresh Start click after plugin enable or hot reload.
+        configManager.setConfiguration(KspAccountBuilderConfig.CONFIG_GROUP, "runAccountBuilder", false);
         panelEnabled = true;
         addSidePanel();
-        if (config.runAccountBuilder())
-        {
-            startRuntime();
-        }
-        else
-        {
-            log.info("KSP Account Builder loaded but stopped; enable Start / Stop to run");
-        }
+        acceptingRuntimeChanges = true;
+        log.info("KSP Account Builder loaded stopped; press Start in sidebar to begin automation");
     }
 
     @Subscribe
     public synchronized void onConfigChanged(ConfigChanged event)
     {
-        if (!KspAccountBuilderConfig.CONFIG_GROUP.equals(event.getGroup())
+        if (!acceptingRuntimeChanges
+                || !KspAccountBuilderConfig.CONFIG_GROUP.equals(event.getGroup())
                 || !"runAccountBuilder".equals(event.getKey()))
         {
             return;
@@ -129,15 +129,19 @@ public class KspAccountBuilderPlugin extends Plugin
     @Override
     protected synchronized void shutDown()
     {
+        acceptingRuntimeChanges = false;
         panelEnabled = false;
         cleanupRuntime("plugin-stop");
+        configManager.setConfiguration(KspAccountBuilderConfig.CONFIG_GROUP, "runAccountBuilder", false);
         removeSidePanel();
     }
 
     public synchronized void prepareHotUnload()
     {
+        acceptingRuntimeChanges = false;
         panelEnabled = false;
         cleanupRuntime("hot-unload");
+        configManager.setConfiguration(KspAccountBuilderConfig.CONFIG_GROUP, "runAccountBuilder", false);
         removeSidePanel();
     }
 
