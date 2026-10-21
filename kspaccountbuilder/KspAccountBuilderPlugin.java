@@ -38,7 +38,7 @@ import net.runelite.client.ui.NavigationButton;
 @SuppressWarnings("unused")
 public class KspAccountBuilderPlugin extends Plugin
 {
-    public static final String VERSION = "1.9.47";
+    public static final String VERSION = "1.9.48";
 
     @Inject
     private KspAccountBuilderScript script;
@@ -60,6 +60,10 @@ public class KspAccountBuilderPlugin extends Plugin
 
     // UIManager lives in the host classloader and survives plugin hot reloads.
     private static final String SIDEBAR_REGISTRY_KEY = "ksp.accountbuilder.sidebar.v1";
+    // Registry lives in the host Swing classloader, not the plugin classloader.
+    // SourceLoader may briefly leave two enabled plugin instances after reload.
+    private static final String RUNTIME_OWNER_KEY = "ksp.accountbuilder.runtime.owner.v1";
+    private final Object runtimeOwnerToken = new Object();
     private KspAccountBuilderPanel sidePanel;
     private NavigationButton navButton;
     private volatile boolean panelEnabled;
@@ -106,27 +110,69 @@ public class KspAccountBuilderPlugin extends Plugin
 
     private void startRuntime()
     {
-        if (runtimeActive) return;
-        log.info("Starting KSP Account Builder runtime from configuration");
-        stopStandaloneBreakHandler();
-        overlayManager.add(overlay);
-        randomEventSolver = new KspRandomEventSolver();
-        Microbot.getBlockingEventManager().add(randomEventSolver);
-        resetAntibanState();
-        runtimeActive = true;
-        try
+        // One authoritative runtime per game client, including across plugin
+        // classloaders. A per-instance runtimeActive flag is not sufficient.
+        synchronized (UIManager.getDefaults())
         {
-            if (!script.run(config))
+            if (!acceptingRuntimeChanges || runtimeActive) return;
+            Object registry = UIManager.get(RUNTIME_OWNER_KEY);
+            if (registry instanceof Object[])
             {
-                log.warn("KSP Account Builder script refused to start");
-                cleanupRuntime("start-failed");
+                Object[] previous = (Object[]) registry;
+                if (previous.length >= 2 && previous[0] != runtimeOwnerToken
+                        && previous[1] instanceof Runnable)
+                {
+                    log.warn("Account Builder runtime takeover: stopping previous source-loader instance");
+                    try { ((Runnable) previous[1]).run(); }
+                    catch (Exception ex)
+                    {
+                        log.error("Cannot safely stop old Account Builder runtime; refusing second start", ex);
+                        return;
+                    }
+                }
+            }
+            // Register BEFORE the script starts so concurrent configuration
+            // callbacks cannot each launch independent child task loops.
+            UIManager.put(RUNTIME_OWNER_KEY,
+                    new Object[]{runtimeOwnerToken, (Runnable) this::stopSupersededRuntime});
+            try
+            {
+                log.info("Starting KSP Account Builder runtime from configuration | owner={}",
+                        System.identityHashCode(runtimeOwnerToken));
+                stopStandaloneBreakHandler();
+                overlayManager.add(overlay);
+                randomEventSolver = new KspRandomEventSolver();
+                Microbot.getBlockingEventManager().add(randomEventSolver);
+                resetAntibanState();
+                runtimeActive = true;
+                if (!script.run(config))
+                {
+                    log.warn("KSP Account Builder script refused to start");
+                    cleanupRuntime("start-failed");
+                }
+            }
+            catch (Exception ex)
+            {
+                log.error("KSP Account Builder start failed", ex);
+                cleanupRuntime("start-exception");
             }
         }
-        catch (Exception ex)
-        {
-            log.error("KSP Account Builder start failed", ex);
-            cleanupRuntime("start-exception");
-        }
+    }
+
+    private void stopSupersededRuntime()
+    {
+        // A superseded instance must ignore future config events, which are
+        // broadcast to all enabled plugin instances by RuneLite.
+        acceptingRuntimeChanges = false;
+        cleanupRuntime("superseded-by-source-loader");
+    }
+
+    private boolean ownsRuntime()
+    {
+        Object registry = UIManager.get(RUNTIME_OWNER_KEY);
+        return registry instanceof Object[]
+                && ((Object[]) registry).length > 0
+                && ((Object[]) registry)[0] == runtimeOwnerToken;
     }
 
     @Override
@@ -180,7 +226,7 @@ public class KspAccountBuilderPlugin extends Plugin
     @Subscribe
     public void onGameTick(GameTick event)
     {
-        if (!runtimeActive || script == null || config == null)
+        if (!runtimeActive || !ownsRuntime() || script == null || config == null)
         {
             return;
         }
@@ -234,8 +280,10 @@ public class KspAccountBuilderPlugin extends Plugin
 
     private void cleanupRuntime(String reason)
     {
-        // Disable callbacks first, even if child shutdown fails.
+        // Disable callbacks before child cleanup. Only the owning instance may
+        // clear shared walker / antiban resources during a plugin unload.
         boolean wasActive = runtimeActive;
+        boolean wasOwner = ownsRuntime();
         runtimeActive = false;
         if (wasActive || randomEventSolver != null)
         {
@@ -255,15 +303,21 @@ public class KspAccountBuilderPlugin extends Plugin
         }
         finally
         {
-            try { resetAntibanState(); }
-            catch (Exception ex) { log.warn("Unable to reset antiban during shutdown", ex); }
-
-            try
+            if (wasOwner)
             {
-                KspWalkerGuard.clearActiveWalker("ksp_account_builder_" + reason);
-                KspWalkerGuard.clear("Woodcutting:target-area");
+                try { resetAntibanState(); }
+                catch (Exception ex) { log.warn("Unable to reset antiban during shutdown", ex); }
             }
-            catch (Exception ex) { log.warn("Unable to clear walker during shutdown", ex); }
+
+            if (wasOwner)
+            {
+                try
+                {
+                    KspWalkerGuard.clearActiveWalker("ksp_account_builder_" + reason);
+                    KspWalkerGuard.clear("Woodcutting:target-area");
+                }
+                catch (Exception ex) { log.warn("Unable to clear walker during shutdown", ex); }
+            }
 
             KspRandomEventSolver solver = randomEventSolver;
             randomEventSolver = null;
@@ -276,6 +330,10 @@ public class KspAccountBuilderPlugin extends Plugin
             {
                 try { overlayManager.remove(overlay); }
                 catch (Exception ex) { log.warn("Unable to remove Account Builder overlay", ex); }
+            }
+            synchronized (UIManager.getDefaults())
+            {
+                if (ownsRuntime()) UIManager.getDefaults().remove(RUNTIME_OWNER_KEY);
             }
         }
     }
