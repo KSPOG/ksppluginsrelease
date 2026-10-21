@@ -11,6 +11,10 @@ import java.awt.image.BufferedImage;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
+import java.net.URL;
+import java.nio.file.Paths;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import java.text.NumberFormat;
 import java.util.EnumMap;
 import java.util.Locale;
@@ -32,6 +36,9 @@ import net.runelite.client.plugins.microbot.Microbot;
  */
 final class KspArcaneCodexRenderer
 {
+    private static final Logger LOG = LoggerFactory.getLogger(KspArcaneCodexRenderer.class);
+    private static final String ARTWORK_FILE = "arcane_codex_background.png";
+    private static final long RETRY_INTERVAL_MS = 5000L;
     private static final int ART_W = 1584, ART_H = 993;
     private static final double SCALE = 0.50;
     private static final Color GOLD = new Color(245, 198, 116);
@@ -44,7 +51,8 @@ final class KspArcaneCodexRenderer
     private final ItemManager itemManager;
     private final Map<Skill, Integer> baselineLevels = new EnumMap<>(Skill.class);
     private BufferedImage background;
-    private boolean attemptedLoad;
+    private long nextAttemptAt;
+    private long nextWarningAt;
     private long nextReadAt;
     private long lastRuntime;
     private int cachedLevel;
@@ -63,48 +71,97 @@ final class KspArcaneCodexRenderer
     boolean hasArtwork()
     {
         if (background != null) return true;
-        if (attemptedLoad) return false;
-        attemptedLoad = true;
+        long now = System.currentTimeMillis();
+        if (now < nextAttemptAt) return false;
+        nextAttemptAt = now + RETRY_INTERVAL_MS;
 
-        // First use the asset as a classpath resource alongside this class.
-        // A source-loader that exposes non-Java resources can load this directly.
-        try (InputStream in = getClass().getResourceAsStream("arcane_codex_background.png"))
+        // Bundled JAR resource is the primary runtime source; the PNG
+        // originates from the kspaccountbuilder plugin root at build time.
+        try (InputStream stream = getClass().getResourceAsStream(ARTWORK_FILE))
         {
-            if (in != null) background = ImageIO.read(in);
+            if (stream != null) background = ImageIO.read(stream);
         }
-        catch (IOException ignored) { }
-        if (background != null) return true;
-
-        // Optional exact plugin-root override for uncommon launch layouts.
-        // This is a PLUGIN ROOT, not the user's .runelite configuration folder.
-        String configuredRoot = System.getProperty("ksp.accountbuilder.pluginRoot", "");
-        if (!configuredRoot.trim().isEmpty())
+        catch (IOException e)
         {
-            background = readArtwork(new File(configuredRoot, "arcane_codex_background.png"));
-            if (background != null) return true;
+            LOG.warn("Account Builder: failed to decode Arcane Codex classpath artwork", e);
+        }
+        if (background == null)
+        {
+            try (InputStream stream = getClass().getResourceAsStream(
+                    "/net/runelite/client/plugins/microbot/kspaccountbuilder/" + ARTWORK_FILE))
+            {
+                if (stream != null) background = ImageIO.read(stream);
+            }
+            catch (IOException e)
+            {
+                LOG.warn("Account Builder: failed to decode Arcane Codex packaged artwork", e);
+            }
+        }
+        if (background != null)
+        {
+            LOG.info("Account Builder: Arcane Codex artwork loaded from plugin JAR ({}x{})",
+                    background.getWidth(), background.getHeight());
+            return true;
         }
 
-        // Work from the current Microbot/IDE checkout upwards, accepting the
-        // repository's kspaccountbuilder/ directory or its installed Java source
-        // directory. Never search arbitrary home folders or .runelite folders.
-        File ancestor = new File(System.getProperty("user.dir", ".")).getAbsoluteFile();
-        for (int depth = 0; ancestor != null && depth < 8; depth++, ancestor = ancestor.getParentFile())
+        // Source Loader can compile classes without copying non-Java resources.
+        String root = System.getProperty("ksp.accountbuilder.pluginRoot", "").trim();
+        if (!root.isEmpty() && tryArtwork(new File(root, ARTWORK_FILE))) return true;
+
+        try
         {
-            background = readArtwork(new File(ancestor,
-                    "kspaccountbuilder/arcane_codex_background.png"));
-            if (background != null) return true;
-            background = readArtwork(new File(ancestor,
-                    "src/main/java/net/runelite/client/plugins/microbot/kspaccountbuilder/arcane_codex_background.png"));
-            if (background != null) return true;
+            URL location = getClass().getProtectionDomain().getCodeSource().getLocation();
+            if (location != null && "file".equalsIgnoreCase(location.getProtocol()))
+            {
+                File codeSource = Paths.get(location.toURI()).toFile();
+                File directory = codeSource.isDirectory() ? codeSource : codeSource.getParentFile();
+                if (searchAncestors(directory)) return true;
+            }
+        }
+        catch (Exception ignored) { }
+
+        if (searchAncestors(new File(System.getProperty("user.dir", ".")))) return true;
+
+        if (now >= nextWarningAt)
+        {
+            nextWarningAt = now + 30000L;
+            LOG.warn("Account Builder: missing {} in JAR and kspaccountbuilder plugin root; "
+                    + "for Source Loader set -Dksp.accountbuilder.pluginRoot=<plugin folder>",
+                    ARTWORK_FILE);
         }
         return false;
     }
 
-    private static BufferedImage readArtwork(File file)
+    private boolean searchAncestors(File start)
     {
-        if (!file.isFile()) return null;
-        try { return ImageIO.read(file); }
-        catch (IOException ignored) { return null; }
+        for (File dir = start == null ? null : start.getAbsoluteFile(); dir != null;
+                dir = dir.getParentFile())
+        {
+            if (tryArtwork(new File(dir, ARTWORK_FILE))
+                    || tryArtwork(new File(dir, "kspaccountbuilder/" + ARTWORK_FILE))
+                    || tryArtwork(new File(dir,
+                        "src/main/java/net/runelite/client/plugins/microbot/kspaccountbuilder/" + ARTWORK_FILE)))
+                return true;
+        }
+        return false;
+    }
+
+    private boolean tryArtwork(File file)
+    {
+        if (!file.isFile()) return false;
+        try
+        {
+            BufferedImage loaded = ImageIO.read(file);
+            if (loaded == null) return false;
+            background = loaded;
+            LOG.info("Account Builder: Arcane Codex artwork loaded from {}", file.getAbsolutePath());
+            return true;
+        }
+        catch (IOException e)
+        {
+            LOG.warn("Account Builder: failed to load artwork at {}", file.getAbsolutePath(), e);
+            return false;
+        }
     }
 
     Dimension render(Graphics2D graphics)
