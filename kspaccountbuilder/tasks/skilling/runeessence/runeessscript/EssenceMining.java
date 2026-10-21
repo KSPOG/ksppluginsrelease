@@ -308,6 +308,37 @@ public class EssenceMining extends Script
                 || isPortalExitPending() || !canAct()) return;
 
         WorldPoint player = Rs2Player.getWorldLocation();
+        // Rune Essence exit portals may be NPC entities rather than tile
+        // objects. Check both representations, especially after relocation.
+        Rs2NpcModel npcPortal = Microbot.getRs2NpcCache().query()
+                .fromWorldView().withName("Portal").nearestOnClientThread();
+        if (npcPortal != null && npcPortal.getWorldLocation() != null)
+        {
+            if (Rs2Player.isMoving())
+            {
+                status = "Approaching rune essence portal";
+                return;
+            }
+            try
+            {
+                if (npcPortal.click("Exit"))
+                {
+                    resetPortalSearch();
+                    KspWalkerGuard.clear(WALK_KEY_PORTAL);
+                    lastActionAtMs = System.currentTimeMillis();
+                    markWorldAction("portal");
+                    status = "Exiting rune essence mine via portal NPC";
+                    return;
+                }
+            }
+            catch (RuntimeException ex)
+            {
+                KspTaskDebug.throttled(log, true, "Rune Essence", "npc-portal-click-error", 5_000L,
+                        "NPC portal interaction failed | player={} portal={} error={}",
+                        player, npcPortal.getWorldLocation(), ex.toString());
+            }
+        }
+
         // Inspect the actual loaded scene first. Object-cache misses can occur
         // after mine relocation/scene rebuild even when a portal is rendered.
         TileObject livePortal = KspLiveScene.nearestGameObject(ESSENCE_MINE_PORTAL_ID, player, 100);
