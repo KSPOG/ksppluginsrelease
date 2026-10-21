@@ -406,7 +406,11 @@ public class EssenceMining extends Script
             if (Rs2Player.isMoving()) return;
             try
             {
-                if (portal.click(portalObjectAction(id)))
+                String action = portalObjectAction(id);
+                // Match the live object handling: portal variants may expose
+                // either Use or Exit, regardless of their configured object ID.
+                if (portal.click(action)
+                        || portal.click("Exit".equals(action) ? "Use" : "Exit"))
                 {
                     markPortalExit("cached object", id);
                     return;
