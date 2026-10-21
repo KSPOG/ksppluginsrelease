@@ -129,7 +129,7 @@ final class KspAccountBuilderPanel extends PluginPanel
         content.add(quick);
         content.add(Box.createVerticalStrut(6));
 
-        JLabel note = new JLabel("<html><small>Advanced timers, targets and preferences remain in the plugin configuration.</small></html>");
+        JLabel note = new JLabel("<html><small>Advanced anti-ban intensity, break and activity timers remain in plugin configuration.</small></html>");
         note.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
         note.setAlignmentX(Component.LEFT_ALIGNMENT);
         content.add(note);
