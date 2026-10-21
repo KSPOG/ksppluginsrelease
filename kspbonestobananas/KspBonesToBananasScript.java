@@ -2,6 +2,9 @@ package net.runelite.client.plugins.microbot.kspbonestobananas;
 
 import java.util.ArrayDeque;
 import java.util.Deque;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Iterator;
 import java.util.Locale;
 import java.util.concurrent.TimeUnit;
 import lombok.extern.slf4j.Slf4j;
@@ -50,6 +53,7 @@ public class KspBonesToBananasScript extends KspBreakAwareScript
     private volatile int currentBatch, bankedBananas, spendableCoins;
     private int castFailures, buyRetryLevel, sellRetryLevel;
     private GeOrder geOrder;
+    private int buyPollIndex;
     private volatile long lastStartupGateLogAt;
     private long lastRestockLogAt;
 
@@ -67,6 +71,7 @@ public class KspBonesToBananasScript extends KspBreakAwareScript
         currentBatch = bankedBananas = spendableCoins = castFailures = buyRetryLevel = sellRetryLevel = 0;
         buyQueue.clear();
         geOrder = null;
+        buyPollIndex = 0;
         lastStartupGateLogAt = 0L;
         lastRestockLogAt = 0L;
 
@@ -413,7 +418,7 @@ public class KspBonesToBananasScript extends KspBreakAwareScript
     private void restock()
     {
         if (!activeReady()) return;
-        if (geOrder != null || !buyQueue.isEmpty())
+        if (!buyQueue.isEmpty())
         {
             tickBuyQueue();
             return;
@@ -518,6 +523,8 @@ public class KspBonesToBananasScript extends KspBreakAwareScript
         buildBuy(ItemID.NATURERUNE, "Nature rune", castsNeeded);
         if (!freeWater) buildBuy(ItemID.WATERRUNE, "Water rune", castsNeeded * 2);
         if (!freeEarth) buildBuy(ItemID.EARTHRUNE, "Earth rune", castsNeeded * 2);
+
+        distributeBuyOrdersAcrossSlots();
 
         if (Rs2Bank.count(ItemID.COINS) > 0)
         {
@@ -632,17 +639,114 @@ public class KspBonesToBananasScript extends KspBreakAwareScript
         if (price > 0) buyQueue.addLast(new GeOrder(GrandExchangeAction.BUY, itemId, name, quantity, price));
     }
 
+    /**
+     * Place independent offers into all free slots first; then round-robin
+     * monitor each live slot without waiting for a previous item to fill.
+     * Never start casting until every tracked input order is collected.
+     */
     private void tickBuyQueue()
     {
-        if (geOrder == null) geOrder = buyQueue.peekFirst();
-        if (geOrder == null)
+        if (buyQueue.isEmpty())
         {
+            geOrder = null;
             buyRetryLevel = 0;
             state = KspBonesToBananasState.PREPARING_BATCH;
-            status = "Restock complete";
+            status = "All parallel input orders collected";
+            return;
+        }
+        if (!ensureGeOverview()) return;
+
+        // A pending order can be submitted only when an actual GE slot is free.
+        GrandExchangeSlots free = firstFreeGeSlot();
+        if (free != null)
+        {
+            for (GeOrder candidate : buyQueue)
+            {
+                if (!candidate.placed)
+                {
+                    geOrder = candidate;
+                    tickGeOrder();
+                    return;
+                }
+            }
+        }
+
+        List<GeOrder> active = new ArrayList<>(buyQueue);
+        if (active.isEmpty()) return;
+        buyPollIndex = Math.floorMod(buyPollIndex, active.size());
+        geOrder = active.get(buyPollIndex);
+        buyPollIndex = (buyPollIndex + 1) % active.size();
+        if (!geOrder.placed)
+        {
+            status = "Waiting for free GE slots (" + active.size() + " pending input offers)";
             return;
         }
         tickGeOrder();
+    }
+
+    /**
+     * Split the configured input quantities over up to eight separate GE
+     * offers, distributing one slot per distinct item before adding any
+     * extra chunks. Splitting never increases the requested/limited quantity.
+     */
+    private void distributeBuyOrdersAcrossSlots()
+    {
+        if (buyQueue.isEmpty()) return;
+        List<GeOrder> original = new ArrayList<>(buyQueue);
+        final int maxSlots = GrandExchangeSlots.values().length;
+        int slots = Math.min(maxSlots, original.size());
+        while (slots < maxSlots)
+        {
+            boolean splittable = false;
+            for (GeOrder order : original)
+            {
+                if (order.quantity > 1) { splittable = true; break; }
+            }
+            if (!splittable) break;
+            slots++;
+        }
+
+        List<List<GeOrder>> chunks = new ArrayList<>();
+        int[] allocations = new int[original.size()];
+        for (int i = 0; i < original.size(); i++) allocations[i] = 1;
+        int extras = Math.max(0, slots - original.size());
+        while (extras > 0)
+        {
+            int best = -1;
+            double largest = 1.0;
+            for (int i = 0; i < original.size(); i++)
+            {
+                double perSlot = original.get(i).quantity / (double) allocations[i];
+                if (perSlot > largest) { largest = perSlot; best = i; }
+            }
+            if (best < 0) break;
+            allocations[best]++;
+            extras--;
+        }
+        for (int i = 0; i < original.size(); i++)
+        {
+            GeOrder order = original.get(i);
+            List<GeOrder> group = new ArrayList<>();
+            int count = Math.min(order.quantity, allocations[i]);
+            int unit = order.quantity / count;
+            int remainder = order.quantity % count;
+            for (int j = 0; j < count; j++)
+            {
+                int quantity = unit + (j < remainder ? 1 : 0);
+                group.add(new GeOrder(order.action, order.itemId, order.itemName, quantity, order.price));
+            }
+            chunks.add(group);
+        }
+        buyQueue.clear();
+        // Put one offer for each distinct input in before the extra slots.
+        int maxGroup = 0;
+        for (List<GeOrder> group : chunks) maxGroup = Math.max(maxGroup, group.size());
+        for (int j = 0; j < maxGroup; j++)
+            for (List<GeOrder> group : chunks)
+                if (j < group.size()) buyQueue.addLast(group.get(j));
+
+        log.info("Bones to Bananas parallel GE input plan | offers={} itemTypes={} slots={}",
+                buyQueue.size(), original.size(), maxSlots);
     }
 
     private void tickGeOrder()
@@ -894,7 +998,7 @@ public class KspBonesToBananasScript extends KspBreakAwareScript
     {
         if (order.action == GrandExchangeAction.BUY)
         {
-            if (buyQueue.peekFirst() == order) buyQueue.pollFirst();
+            buyQueue.remove(order);
             geOrder = null;
             if (buyQueue.isEmpty())
             {
@@ -971,8 +1075,32 @@ public class KspBonesToBananasScript extends KspBreakAwareScript
     private boolean collectCompletedOrder(GeOrder order)
     {
         if (order == null || order.slot == null) return false;
+        // Collect-all can clear several finished slots at once. Snapshot each
+        // tracked order first and account for its fills before losing the slot.
+        List<GeOrder> completed = new ArrayList<>();
+        for (GeOrder candidate : buyQueue)
+        {
+            if (!candidate.placed || candidate.slot == null) continue;
+            OfferSnapshot snapshot = offer(candidate.slot);
+            if (snapshot == null || snapshot.itemId != candidate.itemId
+                    || snapshot.state != GrandExchangeOfferState.BOUGHT
+                    || snapshot.filled < candidate.quantity) continue;
+            int delta = Math.max(0, snapshot.filled - candidate.observedFilled);
+            if (delta > 0)
+            {
+                BonesToBananasTradeLimits.recordFill(accountName(), candidate.itemId, delta);
+                candidate.observedFilled = snapshot.filled;
+            }
+            completed.add(candidate);
+        }
         if (!Rs2GrandExchange.collectAllToBank()) return false;
-        return sleepUntil(() -> orderSlotCleared(order), 5000);
+        if (!sleepUntil(() -> orderSlotCleared(order), 5000)) return false;
+        for (GeOrder candidate : completed)
+        {
+            if (candidate != order && orderSlotCleared(candidate))
+                buyQueue.remove(candidate);
+        }
+        return true;
     }
 
     private boolean orderSlotCleared(GeOrder order)
