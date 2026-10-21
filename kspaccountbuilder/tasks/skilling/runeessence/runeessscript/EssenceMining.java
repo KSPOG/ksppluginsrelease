@@ -434,11 +434,17 @@ public class EssenceMining extends Script
         }
         if (now - portalSearchStartedAtMs >= PORTAL_SEARCH_TIMEOUT_MS)
         {
-            // Do NOT cycle through other exits on a cache miss. The game can
-            // render a portal before RuneLite's tile-object caches populate;
-            // cycling makes the walker zigzag forever between four entrances.
-            // Hold the original closest portal and keep looking for its object.
+            // A portal may remain absent from the scene/cache even after the
+            // walker reaches its coordinates. Do not wait beside that exit
+            // indefinitely: give discovery time, then try another known exit.
+            // Rotate only after the full timeout to avoid rapid zigzagging.
+            int previousPortalIndex = portalFallbackIndex;
+            portalFallbackIndex = (portalFallbackIndex + 1) % ESSENCE_MINE_PORTAL_LOCATIONS.length;
             portalSearchStartedAtMs = now;
+            KspWalkerGuard.clear(WALK_KEY_PORTAL);
+            KspTaskDebug.throttled(log, true, "Rune Essence", "portal-recovery", 5_000L,
+                    "Portal discovery timed out; changing exit | from={} to={} player={}",
+                    previousPortalIndex, portalFallbackIndex, player);
             KspTaskDebug.throttled(log, true, "Rune Essence", "portal-discovery", 10_000L,
                     "Portal missing from scene/cache; holding nearest exit | player={} target={} index={} distance={} moving={}",
                     player, ESSENCE_MINE_PORTAL_LOCATIONS[portalFallbackIndex], portalFallbackIndex,
