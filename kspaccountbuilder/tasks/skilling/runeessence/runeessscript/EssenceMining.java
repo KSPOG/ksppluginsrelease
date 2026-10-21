@@ -357,7 +357,11 @@ public class EssenceMining extends Script
             try
             {
                 String action = portalObjectAction(id);
-                if (Rs2GameObject.interact(liveObject, action))
+                // Rune Essence portal variants can expose either Use or Exit.
+                // Try the alternate action only if the preferred one fails.
+                if (Rs2GameObject.interact(liveObject, action)
+                        || Rs2GameObject.interact(liveObject,
+                                "Exit".equals(action) ? "Use" : "Exit"))
                 {
                     markPortalExit("live object", id);
                     return;
