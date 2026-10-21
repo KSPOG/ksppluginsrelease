@@ -37,6 +37,7 @@ final class KspAccountBuilderHudRenderer
     private double progress;
     private int xpToLevel;
     private String detail;
+    private KspAccountBuilderOverlayStyle activeStyle;
 
     KspAccountBuilderHudRenderer(KspAccountBuilderScript script, KspAccountBuilderConfig config,
                                  KspAccountBuilderPlugin plugin, ItemManager itemManager)
@@ -49,6 +50,7 @@ final class KspAccountBuilderHudRenderer
 
     Dimension render(Graphics2D graphics, KspAccountBuilderOverlayStyle style)
     {
+        activeStyle = style;
         g = (Graphics2D) graphics.create();
         try
         {
@@ -92,7 +94,7 @@ final class KspAccountBuilderHudRenderer
                 case PRESTIGE: prestige(); return new Dimension(334, 283);
                 case COMPACT: compact(); return new Dimension(294, 153);
                 case HORIZON: horizon(); return new Dimension(550, 119);
-                case VERTICAL_PRO: vertical(); return new Dimension(314, 347);
+                case VERTICAL_PRO: vertical(); return new Dimension(374, 347);
                 case ROADMAP: roadmap(); return new Dimension(396, 288);
                 case ELEMENTAL: elemental(); return new Dimension(334, 309);
                 case CLASSIC_PLUS: classicPlus(); return new Dimension(318, 286);
@@ -107,7 +109,7 @@ final class KspAccountBuilderHudRenderer
         base(324, 278, new Color(13, 11, 31, 241), new Color(151, 67, 247), 17);
         outline(4, 4, 316, 270, 16, new Color(60, 200, 255, 115), 1);
         strip(9, 9, 306, 39, new Color(43, 21, 81));
-        text("KSP / ACCOUNT BUILDER", 21, 32, 15, true, new Color(235, 201, 255), 270);
+        text("KSP / ACCOUNT BUILDER", 39, 32, 14, true, new Color(235, 201, 255), 258);
         icon(18, 66, 66, accent);
         text(niceTask(), 95, 91, 19, true, accent, 203);
         text(detail, 95, 110, 11, false, Color.WHITE, 206);
@@ -128,7 +130,7 @@ final class KspAccountBuilderHudRenderer
         base(334, 283, new Color(60, 45, 29, 246), new Color(218, 167, 76), 9);
         frame(8, 8, 318, 267, new Color(130, 94, 45));
         strip(14, 13, 306, 44, new Color(90, 62, 32));
-        text("KSP ACCOUNT BUILDER", 32, 39, 18, true, new Color(255, 222, 142), 275);
+        text("KSP ACCOUNT BUILDER", 61, 39, 16, true, new Color(255, 222, 142), 251);
         icon(21, 78, 63, new Color(234, 185, 95));
         text(niceTask(), 100, 102, 19, true, new Color(255, 232, 166), 218);
         text(detail, 100, 123, 12, false, new Color(248, 236, 216), 215);
@@ -177,33 +179,33 @@ final class KspAccountBuilderHudRenderer
 
     private void vertical()
     {
-        base(314, 347, new Color(10, 16, 39, 244), new Color(148, 77, 238), 13);
-        strip(8, 8, 298, 40, new Color(24, 30, 75));
-        text("KSP  /  PROGRESS TRACKER", 18, 32, 15, true, new Color(167, 203, 255), 273);
-        icon(17, 58, 72, accent);
-        text(niceTask(), 106, 85, 18, true, accent, 186);
-        text(detail, 106, 104, 11, false, Color.WHITE, 191);
-        pill(207, 113, 85, 19, state(), new Color(31, 67, 56), new Color(143, 242, 187));
-        separator(14, 144, 299, new Color(96, 91, 155));
-        text("SKILL PROGRESSION", 18, 161, 11, true, new Color(152, 182, 244), 274);
-        text(skillLabel(), 18, 185, 13, true, Color.WHITE, 279);
-        progressBar(18, 195, 277, 12, accent);
-        metricBlock(17, 220, 132, "SESSION", duration(script.getRuntimeSeconds()));
-        metricBlock(163, 220, 132, "ACCOUNT TIME", duration(script.getAccountPlayTimeSeconds()));
-        separator(17, 270, 296, new Color(96, 91, 155));
-        text("NEXT BREAK", 19, 289, 11, false, new Color(180, 195, 237), 130);
-        text(breakTime(), 203, 289, 12, true, new Color(244, 191, 99), 83);
-        text("TASK ROTATION", 19, 308, 11, false, new Color(180, 195, 237), 130);
-        text(switchTime(), 203, 308, 12, true, new Color(117, 225, 237), 83);
+        base(374, 347, new Color(10, 16, 39, 244), new Color(148, 77, 238), 13);
+        strip(49, 8, 315, 40, new Color(24, 30, 75));
+        text("KSP  /  PROGRESS TRACKER", 56, 32, 15, true, new Color(167, 203, 255), 300);
+        icon(53, 58, 72, accent);
+        text(niceTask(), 142, 85, 18, true, accent, 211);
+        text(detail, 142, 104, 11, false, Color.WHITE, 211);
+        pill(267, 113, 85, 19, state(), new Color(31, 67, 56), new Color(143, 242, 187));
+        separator(53, 144, 356, new Color(96, 91, 155));
+        text("SKILL PROGRESSION", 55, 161, 11, true, new Color(152, 182, 244), 280);
+        text(skillLabel(), 55, 185, 13, true, Color.WHITE, 299);
+        progressBar(55, 195, 299, 12, accent);
+        metricBlock(53, 220, 140, "SESSION", duration(script.getRuntimeSeconds()));
+        metricBlock(210, 220, 140, "ACCOUNT TIME", duration(script.getAccountPlayTimeSeconds()));
+        separator(54, 270, 354, new Color(96, 91, 155));
+        text("NEXT BREAK", 55, 289, 11, false, new Color(180, 195, 237), 130);
+        text(breakTime(), 269, 289, 12, true, new Color(244, 191, 99), 83);
+        text("TASK ROTATION", 55, 308, 11, false, new Color(180, 195, 237), 130);
+        text(switchTime(), 269, 308, 12, true, new Color(117, 225, 237), 83);
         text(mode() + "  /  " + (config.useAntiban() ? "ANTIBAN ACTIVE" : "ANTIBAN OFF"),
-                18, 334, 10, true, new Color(180, 172, 236), 275);
+                55, 334, 10, true, new Color(180, 172, 236), 275);
     }
 
     private void roadmap()
     {
         base(396, 288, new Color(27, 25, 24, 247), new Color(201, 152, 67), 11);
         strip(8, 8, 380, 38, new Color(70, 49, 29));
-        text("KSP / ACCOUNT ROADMAP", 22, 33, 18, true, new Color(255, 213, 127), 350);
+        text("KSP / ACCOUNT ROADMAP", 57, 33, 17, true, new Color(255, 213, 127), 327);
         panel(12, 57, 184, 157, new Color(46, 39, 30), new Color(122, 96, 59));
         panel(204, 57, 180, 157, new Color(35, 33, 32), new Color(122, 96, 59));
         text("CURRENT OBJECTIVE", 22, 75, 10, true, new Color(223, 181, 103), 161);
@@ -257,7 +259,7 @@ final class KspAccountBuilderHudRenderer
         base(318, 286, new Color(28, 29, 31, 243), new Color(191, 158, 86), 9);
         frame(6, 6, 306, 274, new Color(100, 104, 109));
         strip(12, 12, 294, 38, new Color(54, 51, 44));
-        text("KSP ACCOUNT BUILDER", 21, 37, 16, true, new Color(252, 210, 111), 275);
+        text("KSP ACCOUNT BUILDER", 61, 37, 15, true, new Color(252, 210, 111), 239);
         icon(18, 63, 66, accent);
         text(niceTask(), 100, 87, 18, true, accent, 192);
         text(detail, 100, 108, 11, false, Color.WHITE, 190);
@@ -342,6 +344,7 @@ final class KspAccountBuilderHudRenderer
         g.setPaint(new GradientPaint(0, 0, bg.brighter(), 0, h, bg));
         g.fill(new RoundRectangle2D.Float(0, 0, w - 1, h - 1, corner, corner));
         outline(1, 1, w - 3, h - 3, corner, edge, 2);
+        KspAccountBuilderThemeArt.paint(g, activeStyle, w, h, accent, System.currentTimeMillis());
         // In-game metallic corner caps and ornamental task-colored trim,
         // not a flat concept-image texture.
         int d = Math.min(24, Math.min(w, h) / 6);
