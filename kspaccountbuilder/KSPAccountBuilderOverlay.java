@@ -32,6 +32,9 @@ public class KSPAccountBuilderOverlay extends OverlayPanel
     @Override
     public Dimension render(Graphics2D graphics)
     {
+        // OverlayManager can retain overlays from an older SourceLoader classloader.
+        // Never render stale task state on top of the active Account Builder HUD.
+        if (!plugin.mayRenderOverlay()) return null;
         KspAccountBuilderOverlayStyle style = config.overlayStyle();
         if (style != null && style != KspAccountBuilderOverlayStyle.DEFAULT)
         {
