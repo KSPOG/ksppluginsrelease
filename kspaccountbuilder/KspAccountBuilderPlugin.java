@@ -38,7 +38,7 @@ import net.runelite.client.ui.NavigationButton;
 @SuppressWarnings("unused")
 public class KspAccountBuilderPlugin extends Plugin
 {
-    public static final String VERSION = "1.9.52";
+    public static final String VERSION = "1.9.53";
 
     @Inject
     private KspAccountBuilderScript script;
@@ -87,7 +87,6 @@ public class KspAccountBuilderPlugin extends Plugin
         acceptingRuntimeChanges = false;
         cleanupRuntime("restart-before-start");
         migrateSingleSkillTargetDefaults();
-        migrateRemovedOverlayStyles();
         // Start/Stop is an explicit action, not a persisted auto-run option.
         // Always require a fresh Start click after plugin enable or hot reload.
         configManager.setConfiguration(KspAccountBuilderConfig.CONFIG_GROUP, "runAccountBuilder", false);
@@ -489,24 +488,6 @@ public class KspAccountBuilderPlugin extends Plugin
             g.dispose();
         }
         return image;
-    }
-
-    private void migrateRemovedOverlayStyles()
-    {
-        String value = configManager.getConfiguration(KspAccountBuilderConfig.CONFIG_GROUP, "overlayStyle");
-        if (value == null || value.isEmpty()) return;
-        try
-        {
-            KspAccountBuilderOverlayStyle.valueOf(value);
-        }
-        catch (IllegalArgumentException ex)
-        {
-            // Old custom HUD choices no longer exist. Explicitly return to
-            // the untouched original instead of retaining a broken setting.
-            configManager.setConfiguration(KspAccountBuilderConfig.CONFIG_GROUP,
-                    "overlayStyle", KspAccountBuilderOverlayStyle.DEFAULT);
-            log.info("Migrated removed Account Builder overlay style {} to Default", value);
-        }
     }
 
     private void migrateSingleSkillTargetDefaults()
