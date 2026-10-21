@@ -1312,7 +1312,45 @@ public class KspJewelryCrafterScript extends KspBreakAwareScript
             pendingOffer.slot = slot;
             offer = getOfferSnapshot(slot);
         }
-        if (offer == null || slot == null) { status = "Recovering live GE sale offer"; return true; }
+        if (offer == null || slot == null)
+        {
+            // The offer may have completed, been aborted or been collected while we
+            // were banking. Never sit forever on an unresolvable slot.
+            if (hasCompletedGeOffers() && !collectAllCompletedOffers(false)) return true;
+            if (System.currentTimeMillis() - pendingOffer.placedAt < 10_000L)
+            {
+                status = "Recovering live GE sale offer";
+                return true;
+            }
+            String itemName = pendingOffer.itemName;
+            pendingOffer = null;
+            geRetry = 0;
+            outputPendingSale = itemName;
+            status = "GE sell offer missing - checking remaining output";
+            return true;
+        }
+        if (pendingOffer.abortRequested && offer.state == GrandExchangeOfferState.SELLING)
+        {
+            status = "Waiting for stalled GE sale cancellation";
+            return true;
+        }
+        if (pendingOffer.abortRequested && offer.state != GrandExchangeOfferState.SELLING)
+        {
+            // Cancellation can leave unsold items and partial-sale proceeds in GE.
+            if (!collectAllCompletedOffers(false)) return true;
+            if (getOfferSnapshot(slot) != null && getOfferSnapshot(slot).state != GrandExchangeOfferState.EMPTY)
+            {
+                Rs2GrandExchange.collectAllToInventory();
+                status = "Collecting cancelled sale output";
+                return true;
+            }
+            String itemName = pendingOffer.itemName;
+            pendingOffer = null;
+            geRetry = 0;
+            outputPendingSale = itemName;
+            status = "Cancelled stalled sale - recovering unsold output";
+            return true;
+        }
         if (offer.state == GrandExchangeOfferState.SOLD)
         {
             if (!collectAllCompletedOffers(false)) return true;
@@ -1323,10 +1361,26 @@ public class KspJewelryCrafterScript extends KspBreakAwareScript
             else { outputPendingSale = null; buyQueue.clear(); state = JewelryCrafterState.GE_BUY; status = "All output sold - selecting restock"; }
             return true;
         }
-        long timeout = config.offerTimeoutSeconds() * 1_000L;
+        if (offer.quantitySold > pendingOffer.lastQuantitySold)
+        {
+            pendingOffer.lastQuantitySold = offer.quantitySold;
+            pendingOffer.placedAt = System.currentTimeMillis();
+            status = "GE sale progressing: " + offer.quantitySold + " sold";
+            return true;
+        }
+        long timeout = Math.max(10, config.offerTimeoutSeconds()) * 1_000L;
         if (System.currentTimeMillis() - pendingOffer.placedAt >= timeout)
         {
-            if (geRetry >= config.maxOfferRetries()) { pendingOffer.placedAt = System.currentTimeMillis(); status = "Waiting at final sell price: " + pendingOffer.itemName; return true; }
+            if (geRetry >= config.maxOfferRetries())
+            {
+                // Do not wait forever on an unfilled final-price offer. Abort it,
+                // collect remaining items and let the next evaluation recheck ROI.
+                status = "Final GE sell price stalled - cancelling for reevaluation";
+                Rs2GrandExchange.abortOffer(pendingOffer.itemName, true);
+                pendingOffer.abortRequested = true;
+                pendingOffer.placedAt = System.currentTimeMillis();
+                return true;
+            }
             int nextRetry = geRetry + 1;
             int price = prices.sellOfferPrice(pendingOffer.itemName, config.sellDiscountPercent(), nextRetry);
             if (price <= 0) { pendingOffer.placedAt = System.currentTimeMillis(); status = "No updated sell price - keeping offer"; return true; }
@@ -1441,6 +1495,8 @@ public class KspJewelryCrafterScript extends KspBreakAwareScript
         final GrandExchangeAction action;
         GrandExchangeSlots slot;
         long placedAt;
+        int lastQuantitySold;
+        boolean abortRequested;
         PendingOffer(String itemName, int itemId, GrandExchangeAction action, GrandExchangeSlots slot, long placedAt)
         { this.itemName = itemName; this.itemId = itemId; this.action = action; this.slot = slot; this.placedAt = placedAt; }
     }
