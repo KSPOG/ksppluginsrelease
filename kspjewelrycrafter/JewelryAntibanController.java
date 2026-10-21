@@ -1,6 +1,9 @@
 package net.runelite.client.plugins.microbot.kspjewelrycrafter;
 
 import lombok.extern.slf4j.Slf4j;
+import java.awt.Point;
+import net.runelite.client.plugins.microbot.Microbot;
+import net.runelite.client.plugins.microbot.util.input.InputArbiter;
 import net.runelite.client.plugins.microbot.util.antiban.Rs2Antiban;
 import net.runelite.client.plugins.microbot.util.grandexchange.Rs2GrandExchange;
 import net.runelite.client.plugins.microbot.util.widget.Rs2Widget;
@@ -16,6 +19,9 @@ final class JewelryAntibanController {
     private long pauseUntil;
     private String pauseReason;
     private boolean mouseMovedForPause;
+    private boolean awaitingCanvasReturn;
+    private long offscreenSince;
+    private long lastCanvasReturnAttemptAt;
     private long nextWaitingMouseAt;
     private int processedBatchesSinceLongBreak;
     private int nextLongBreakBatch;
@@ -32,6 +38,8 @@ final class JewelryAntibanController {
         pauseUntil = nextWaitingMouseAt = 0L;
         pauseReason = null;
         mouseMovedForPause = false;
+        awaitingCanvasReturn = false;
+        offscreenSince = lastCanvasReturnAttemptAt = 0L;
         processedBatchesSinceLongBreak = 0;
         nextLongBreakBatch = randomBetween(profile.longBreakBatchMin, profile.longBreakBatchMax);
         activity = enabled() ? "Active" : "Disabled";
@@ -39,11 +47,18 @@ final class JewelryAntibanController {
 
     boolean beforeTick(JewelryCrafterState state, boolean marketWaiting) {
         if (!enabled()) {
+            awaitingCanvasReturn = false;
             activity = "Disabled";
             return false;
         }
 
         long now = System.currentTimeMillis();
+        // Bones to Bananas-style recovery: anti-ban must not leave the mouse
+        // outside the canvas when automated GE/bank interactions resume.
+        if (awaitingCanvasReturn && pauseUntil <= now && !restoreCanvasMouseIfReady(now)) {
+            activity = "Restoring mouse to canvas";
+            return true;
+        }
         if (pauseUntil > now) {
             if (!isPauseSafeState(state) || criticalEditorOpen()) {
                 clearPause();
@@ -149,10 +164,44 @@ final class JewelryAntibanController {
     private void moveMouseAway(String reason) {
         try {
             Rs2Antiban.moveMouseOffScreen();
+            awaitingCanvasReturn = true;
+            offscreenSince = System.currentTimeMillis();
+            lastCanvasReturnAttemptAt = 0L;
             log.debug("KSP Jewelry Crafter anti-ban mouse away: {}", reason);
         } catch (Exception ex) {
             log.debug("KSP Jewelry Crafter anti-ban mouse-away skipped: {}", ex.getMessage());
         }
+    }
+
+    /**
+     * Keep GE and banking interaction ticks suspended until the cursor actually
+     * returns to the canvas. Do not override human input ownership.
+     */
+    private boolean restoreCanvasMouseIfReady(long now) {
+        if (now - offscreenSince < 1_500L) return false;
+        if (InputArbiter.isHuman()) return false;
+        try {
+            Point position = Microbot.getMouse().getMousePosition();
+            int width = Microbot.getClient().getCanvasWidth();
+            int height = Microbot.getClient().getCanvasHeight();
+            if (position != null && position.x >= 0 && position.y >= 0
+                    && position.x < width && position.y < height) {
+                awaitingCanvasReturn = false;
+                lastCanvasReturnAttemptAt = 0L;
+                activity = "Mouse resumed";
+                return true;
+            }
+            if (now - lastCanvasReturnAttemptAt >= 2_000L) {
+                lastCanvasReturnAttemptAt = now;
+                // Movement is asynchronous: verify actual location on next tick.
+                Rs2Antiban.moveMouseRandomly();
+                log.info("Jewelry Crafter antiban restoring off-screen cursor | elapsedMs={} position={}",
+                        now - offscreenSince, position);
+            }
+        } catch (RuntimeException ex) {
+            log.warn("Jewelry Crafter cursor restore failed: {}", ex.toString());
+        }
+        return false;
     }
 
     private int fatigueAdjusted(int baseMillis) {
