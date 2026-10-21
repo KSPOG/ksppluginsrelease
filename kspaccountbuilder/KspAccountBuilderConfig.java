@@ -18,6 +18,22 @@ public interface KspAccountBuilderConfig extends Config
 {
     String CONFIG_GROUP = "kspaccountbuilder";
 
+    @ConfigSection(name = "Overlay Appearance", description = "Select the in-game Account Builder HUD", position = -1)
+    String overlayAppearanceSection = "overlayAppearance";
+
+    @ConfigItem(
+            keyName = "overlayStyle",
+            name = "Overlay Style",
+            description = "Default preserves the original overlay. Alternative Account Builder HUDs use live status and timers.",
+            position = 0,
+            section = overlayAppearanceSection
+    )
+    default KspAccountBuilderOverlayStyle overlayStyle()
+    {
+        return KspAccountBuilderOverlayStyle.DEFAULT;
+    }
+
+
     // Only advanced tuning remains in RuneLite's standard config screen.
     @ConfigSection(name = "Antiban", description = "Advanced antiban settings", position = 0)
     String antibanSection = "antiban";
