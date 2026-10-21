@@ -58,6 +58,17 @@ jobs:
           cp -R release/kspaccountbuilder "$ROOT/kspaccountbuilder"
           cp -R release/kspsupport "$ROOT/kspsupport"
 
+      - name: Install Arcane Codex artwork as Gradle resource
+        shell: bash
+        run: |
+          set -euo pipefail
+          ASSET='release/kspaccountbuilder/arcane_codex_background.png'
+          test -s "$ASSET"
+          DEST='hub/src/main/resources/net/runelite/client/plugins/microbot/kspaccountbuilder'
+          mkdir -p "$DEST"
+          cp "$ASSET" "$DEST/arcane_codex_background.png"
+          file "$DEST/arcane_codex_background.png"
+
       - name: Include shared KSP support in Account Builder source set
         shell: python
         run: |
@@ -88,6 +99,16 @@ jobs:
           set -euo pipefail
           ls -lh hub/build/libs/
           test -n "$(find hub/build/libs -maxdepth 1 -type f -name 'KspAccountBuilderPlugin-*.jar' -print -quit)"
+
+      - name: Assert Arcane Codex PNG embedded in plugin JAR
+        if: success()
+        shell: bash
+        run: |
+          set -euo pipefail
+          JAR="$(find hub/build/libs -maxdepth 1 -type f -name 'KspAccountBuilderPlugin-*.jar' -print -quit)"
+          test -n "$JAR"
+          jar tf "$JAR" | grep -Fx 'net/runelite/client/plugins/microbot/kspaccountbuilder/arcane_codex_background.png'
+          unzip -p "$JAR" net/runelite/client/plugins/microbot/kspaccountbuilder/arcane_codex_background.png | head -c 8 | od -An -tx1 | grep -Eq '89 50 4e 47 0d 0a 1a 0a'
 
       - name: Upload Account Builder JAR
         if: success()
