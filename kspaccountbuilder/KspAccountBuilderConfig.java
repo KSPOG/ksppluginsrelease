@@ -18,6 +18,17 @@ public interface KspAccountBuilderConfig extends Config
 {
     String CONFIG_GROUP = "kspaccountbuilder";
 
+    // Only advanced tuning remains in RuneLite's standard config screen.
+    @ConfigSection(name = "Antiban", description = "Advanced antiban settings", position = 0)
+    String antibanSection = "antiban";
+
+    @ConfigSection(name = "Break Handler", description = "Break duration and interval ranges", position = 1)
+    String breakHandlerSection = "breakHandler";
+
+    @ConfigSection(name = "Activity Switch", description = "Activity switch timing ranges", position = 2)
+    String activitySwitchSection = "activitySwitch";
+
+
 
     @ConfigItem(
             keyName = "runAccountBuilder",
