@@ -155,6 +155,7 @@ final class KspAccountBuilderPanel extends PluginPanel
 
     private void populateTarget()
     {
+        boolean wasUpdating = updating;
         updating = true;
         target.removeAllItems();
         KspTrainSingleSkillTask selected = (KspTrainSingleSkillTask) skill.getSelectedItem();
@@ -162,7 +163,7 @@ final class KspAccountBuilderPanel extends PluginPanel
         for (Enum<?> option : options) target.addItem(option);
         Object configured = selectedTarget(selected);
         if (configured != null) target.setSelectedItem(configured);
-        updating = false;
+        updating = wasUpdating;
     }
 
     private static String targetKey(KspTrainSingleSkillTask skill)
