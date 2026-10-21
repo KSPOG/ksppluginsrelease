@@ -108,7 +108,13 @@ jobs:
           JAR="$(find hub/build/libs -maxdepth 1 -type f -name 'KspAccountBuilderPlugin-*.jar' -print -quit)"
           test -n "$JAR"
           jar tf "$JAR" | grep -Fx 'net/runelite/client/plugins/microbot/kspaccountbuilder/arcane_codex_background.png'
-          unzip -p "$JAR" net/runelite/client/plugins/microbot/kspaccountbuilder/arcane_codex_background.png | head -c 8 | od -An -tx1 | grep -Eq '89 50 4e 47 0d 0a 1a 0a'
+          python - "$JAR" <<'PY'
+          import sys, zipfile
+          with zipfile.ZipFile(sys.argv[1]) as z:
+              artwork = z.read('net/runelite/client/plugins/microbot/kspaccountbuilder/arcane_codex_background.png')
+              assert artwork.startswith(bytes.fromhex('89504e470d0a1a0a')), 'Not a valid PNG'
+              print(f'Verified Arcane Codex PNG embedded in JAR ({len(artwork)} bytes)')
+          PY
 
       - name: Upload Account Builder JAR
         if: success()
