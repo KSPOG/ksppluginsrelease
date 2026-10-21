@@ -180,6 +180,8 @@ public class KspAccountBuilderScript extends Script
     private long lastCombatObservedAtMillis;
     private boolean postTutorialBankCameraPending;
     private volatile boolean shuttingDown;
+    // Retain the randomly chosen furnace across internal smelting task restarts.
+    private SmeltArea selectedSmeltingArea;
     private long lastBreakLoginAttemptAt;
     private long lastLoginHandoffLogAt;
     private String originalWindowTitle = "Microbot";
@@ -277,6 +279,7 @@ public class KspAccountBuilderScript extends Script
 
     private void resetRuntimeState()
     {
+        selectedSmeltingArea = null;
         currentTask = null;
         taskStarted = false;
         breakActive = false;
@@ -496,6 +499,7 @@ public class KspAccountBuilderScript extends Script
 
     private void runAccountBuilderCycle()
     {
+        if (currentTask != BuilderTask.SMELTING) selectedSmeltingArea = null;
         if (currentTask == BuilderTask.FISHING) fishingScript.stopWalkerIfInsideTargetArea();
         BuilderTask forcedTask = resolveSingleSkillTask();
         refreshSingleSkillTargetIfChanged(forcedTask);
@@ -696,7 +700,12 @@ public class KspAccountBuilderScript extends Script
             case SMELTING:
             {
                 BarLevels bar = resolveSingleSkillTarget(KspTrainSingleSkillTask.SMELTING).getValue(BarLevels.class);
-                return smeltScript.run(SmeltArea.SMELT_AREA_EDGEVILLE_FURNACE, bar == null ? resolveSmeltingFallbackBar() : bar, bar == null);
+                if (selectedSmeltingArea == null)
+                {
+                    selectedSmeltingArea = SmeltArea.randomArea();
+                    log.info("[KSP Account Builder] Selected smelting furnace for task: {}", selectedSmeltingArea.getDisplayName());
+                }
+                return smeltScript.run(selectedSmeltingArea, bar == null ? resolveSmeltingFallbackBar() : bar, bar == null);
             }
             default: return false;
         }
@@ -1975,6 +1984,7 @@ public class KspAccountBuilderScript extends Script
     public void shutdown()
     {
         shuttingDown = true;
+        selectedSmeltingArea = null;
         // Cancel the parent scheduler first: it must not start/restart a child
         // while the child shutdown pass is running.
         super.shutdown();
