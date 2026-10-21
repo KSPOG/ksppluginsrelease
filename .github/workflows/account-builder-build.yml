@@ -34,6 +34,37 @@ jobs:
         with:
           path: release
 
+      - name: Package Arcane Codex Java sources for offline handoff
+        uses: actions/upload-artifact@v4
+        with:
+          name: ArcaneCodex-v1954-source-files
+          path: |
+            release/kspaccountbuilder/KSPAccountBuilderOverlay.java
+            release/kspaccountbuilder/KspAccountBuilderConfig.java
+            release/kspaccountbuilder/KspAccountBuilderPanel.java
+            release/kspaccountbuilder/KspAccountBuilderPlugin.java
+            release/kspaccountbuilder/KspArcaneCodexRenderer.java
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Package entire Account Builder tree and shared support
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p full-source
+          cp -a release/kspaccountbuilder full-source/kspaccountbuilder
+          cp -a release/kspsupport full-source/kspsupport
+          printf 'Source snapshot of the Account Builder live-test branch.\\n' > full-source/README.txt
+          find full-source -type f | sort | tee full-source/FILE_MANIFEST.txt
+
+      - name: Upload complete source tree
+        uses: actions/upload-artifact@v4
+        with:
+          name: KspAccountBuilder-Complete-v1954
+          path: full-source/
+          if-no-files-found: error
+          retention-days: 7
+
       - name: Checkout latest Microbot Hub
         uses: actions/checkout@v4
         with:
