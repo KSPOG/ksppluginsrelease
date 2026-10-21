@@ -33,8 +33,6 @@ final class KspAccountBuilderPanel extends PluginPanel
     private final KspAccountBuilderScript script;
     private final ConfigManager configManager;
 
-    private final JComboBox<KspAccountBuilderOverlayStyle> overlayStyle =
-            new JComboBox<>(KspAccountBuilderOverlayStyle.values());
     private final JButton startStop = new JButton();
     private final JLabel status = label();
     private final JLabel task = label();
@@ -92,16 +90,6 @@ final class KspAccountBuilderPanel extends PluginPanel
         controls.add(pair("Next break", breakTimer));
         controls.add(pair("Activity switch", switchTimer));
         content.add(controls);
-        content.add(Box.createVerticalStrut(6));
-
-        JPanel appearance = section("In-game overlay");
-        addControl(appearance, "Overlay style", overlayStyle);
-        overlayStyle.addActionListener(e -> {
-            if (!updating && overlayStyle.getSelectedItem() != null)
-                configManager.setConfiguration(KspAccountBuilderConfig.CONFIG_GROUP,
-                        "overlayStyle", overlayStyle.getSelectedItem());
-        });
-        content.add(appearance);
         content.add(Box.createVerticalStrut(6));
 
         JPanel selection = section("Task selection (stop to edit)");
@@ -242,8 +230,6 @@ final class KspAccountBuilderPanel extends PluginPanel
         breakTimer.setText(running ? duration(script.getTimeUntilBreakSeconds()) : "-");
         switchTimer.setText(running ? duration(script.getTimeUntilActivitySwitchSeconds()) : "-");
 
-        if (overlayStyle.getSelectedItem() != config.overlayStyle())
-            overlayStyle.setSelectedItem(config.overlayStyle());
         int requested = config.runSingleQuest() ? 2 : config.trainSingleSkill() ? 1 : 0;
         if (mode.getSelectedIndex() != requested) mode.setSelectedIndex(requested);
         if (skill.getSelectedItem() != config.singleSkillTask())

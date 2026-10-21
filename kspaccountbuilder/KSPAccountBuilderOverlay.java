@@ -1,7 +1,6 @@
 package net.runelite.client.plugins.microbot.kspaccountbuilder;
 
 import net.runelite.client.plugins.microbot.Microbot;
-import net.runelite.client.game.ItemManager;
 import net.runelite.client.ui.overlay.OverlayPanel;
 import net.runelite.client.ui.overlay.OverlayPosition;
 import net.runelite.client.ui.overlay.components.LineComponent;
@@ -18,16 +17,14 @@ public class KSPAccountBuilderOverlay extends OverlayPanel
     private final KspAccountBuilderPlugin plugin;
     private final KspAccountBuilderScript script;
     private final KspAccountBuilderConfig config;
-    private final ItemManager itemManager;
 
     @Inject
-    public KSPAccountBuilderOverlay(KspAccountBuilderPlugin plugin, KspAccountBuilderScript script, KspAccountBuilderConfig config, ItemManager itemManager)
+    public KSPAccountBuilderOverlay(KspAccountBuilderPlugin plugin, KspAccountBuilderScript script, KspAccountBuilderConfig config)
     {
         super(plugin);
         this.plugin = plugin;
         this.script = script;
         this.config = config;
-        this.itemManager = itemManager;
 
         setPosition(OverlayPosition.TOP_CENTER);
     }
@@ -38,11 +35,6 @@ public class KSPAccountBuilderOverlay extends OverlayPanel
         // OverlayManager can retain overlays from an older SourceLoader classloader.
         // Never render stale task state on top of the active Account Builder HUD.
         if (!plugin.mayRenderOverlay()) return null;
-        KspAccountBuilderOverlayStyle style = config.overlayStyle();
-        if (style != null && style != KspAccountBuilderOverlayStyle.DEFAULT)
-        {
-            return renderCustom(graphics, style);
-        }
         panelComponent.getChildren().clear();
         panelComponent.setPreferredSize(new Dimension(280, 0));
         String displayStatus = normalizeStatus(Microbot.status);
@@ -127,16 +119,6 @@ public class KSPAccountBuilderOverlay extends OverlayPanel
         }
 
         return super.render(graphics);
-    }
-
-    /**
-     * The legacy original OverlayPanel remains untouched. Custom HUDs are
-     * drawn directly with task-aware vector artwork and live RuneLite data.
-     */
-    private Dimension renderCustom(Graphics2D graphics, KspAccountBuilderOverlayStyle style)
-    {
-        panelComponent.getChildren().clear();
-        return new KspAccountBuilderHudRenderer(script, config, plugin, itemManager).render(graphics, style);
     }
 
     private String formatDuration(long totalSeconds)
