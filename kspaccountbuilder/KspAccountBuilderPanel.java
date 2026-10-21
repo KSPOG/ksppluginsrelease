@@ -226,7 +226,7 @@ final class KspAccountBuilderPanel extends PluginPanel
         status.setText(running ? (script.isBreakActive() ? "On break" : "Running") : "Stopped");
         task.setText(running ? script.getCurrentTaskName() : "-");
         runtime.setText(running ? duration(script.getRuntimeSeconds()) : "-");
-        breakTimer.setText(running ? duration(script.getTimeUntilNextBreakSeconds()) : "-");
+        breakTimer.setText(running ? duration(script.getTimeUntilBreakSeconds()) : "-");
         switchTimer.setText(running ? duration(script.getTimeUntilActivitySwitchSeconds()) : "-");
 
         int requested = config.runSingleQuest() ? 2 : config.trainSingleSkill() ? 1 : 0;
