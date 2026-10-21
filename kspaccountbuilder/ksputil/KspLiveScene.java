@@ -17,6 +17,38 @@ public final class KspLiveScene
 {
     private KspLiveScene() { }
 
+    /**
+     * Inspect live world-view NPCs rather than the NPC cache. Portal NPCs may
+     * have markup in their names, so match the authoritative NPC IDs.
+     */
+    public static int nearestNpcId(int[] npcIds, WorldPoint origin, int maxDistance)
+    {
+        return Microbot.getClientThread().runOnClientThreadOptional(() ->
+        {
+            if (Microbot.getClient() == null || Microbot.getClient().getTopLevelWorldView() == null
+                    || Microbot.getClient().getTopLevelWorldView().npcs() == null) return -1;
+            int closestId = -1;
+            int closestDistance = Integer.MAX_VALUE;
+            for (net.runelite.api.NPC npc : Microbot.getClient().getTopLevelWorldView().npcs())
+            {
+                if (npc == null || npc.getWorldLocation() == null) continue;
+                boolean matched = false;
+                for (int id : npcIds)
+                {
+                    if (npc.getId() == id) { matched = true; break; }
+                }
+                if (!matched) continue;
+                WorldPoint location = npc.getWorldLocation();
+                if (origin != null && location.getPlane() != origin.getPlane()) continue;
+                int distance = origin == null ? 0 : origin.distanceTo(location);
+                if (distance > maxDistance || distance >= closestDistance) continue;
+                closestId = npc.getId();
+                closestDistance = distance;
+            }
+            return closestId;
+        }).orElse(-1);
+    }
+
     public static TileObject nearestGameObject(int objectId, WorldPoint origin, int maxDistance)
     {
         return Microbot.getClientThread().runOnClientThreadOptional(() ->
