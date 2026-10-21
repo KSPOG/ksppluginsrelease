@@ -18,73 +18,39 @@ public interface KspAccountBuilderConfig extends Config
 {
     String CONFIG_GROUP = "kspaccountbuilder";
 
-    @ConfigSection(
-            name = "Runtime Control",
-            description = "Start or stop Account Builder without disabling the plugin",
-            position = -1
-    )
-    String runtimeControlSection = "runtimeControl";
+    // Only advanced tuning remains in RuneLite's standard config screen.
+    @ConfigSection(name = "Antiban", description = "Advanced antiban settings", position = 0)
+    String antibanSection = "antiban";
+
+    @ConfigSection(name = "Break Handler", description = "Break duration and interval ranges", position = 1)
+    String breakHandlerSection = "breakHandler";
+
+    @ConfigSection(name = "Activity Switch", description = "Activity switch timing ranges", position = 2)
+    String activitySwitchSection = "activitySwitch";
+
+
 
     @ConfigItem(
             keyName = "runAccountBuilder",
             name = "Start / Stop",
             description = "Check to start Account Builder; uncheck to stop its tasks, walker and helpers. Disabled by default for safety.",
             position = 0,
-            section = runtimeControlSection
+            hidden = true
     )
     default boolean runAccountBuilder()
     {
         return false;
     }
 
-    @ConfigSection(
-            name = "Antiban",
-            description = "General antiban controls",
-            position = 0
-    )
-    String antibanSection = "antiban";
 
-    @ConfigSection(
-            name = "Break Handler",
-            description = "Randomized logout break scheduling",
-            position = 1
-    )
-    String breakHandlerSection = "breakHandler";
 
-    @ConfigSection(
-            name = "Activity Switch",
-            description = "Randomized activity switch timing",
-            position = 2
-    )
-    String activitySwitchSection = "activitySwitch";
-
-    @ConfigSection(
-            name = "Task Selection",
-            description = "Controls which activities the automatic account builder may select",
-            position = 3
-    )
-    String taskSelectionSection = "taskSelection";
-
-    @ConfigSection(
-            name = "Train Single Skill",
-            description = "Train one selected skill instead of randomly switching activities",
-            position = 4
-    )
-    String trainSingleSkillSection = "trainSingleSkill";
-
-    @ConfigSection(
-            name = "Run Single Quest",
-            description = "Run one selected quest instead of training skills or switching activities",
-            position = 5
-    )
-    String runSingleQuestSection = "runSingleQuest";
 
     @ConfigItem(
             keyName = "useAntiban",
             name = "Use Antiban",
             description = "Enable antiban behavior during account builder actions",
             position = 0,
-            section = antibanSection
+            hidden = true
     )
     default boolean useAntiban()
     {
@@ -121,7 +87,7 @@ public interface KspAccountBuilderConfig extends Config
             name = "Do Breaks",
             description = "If enabled, the script will perform randomized logout breaks",
             position = 0,
-            section = breakHandlerSection
+            hidden = true
     )
     default boolean doBreaks()
     {
@@ -185,7 +151,7 @@ public interface KspAccountBuilderConfig extends Config
             name = "Randomize Activity Switch",
             description = "Enable randomized timing before switching activities. Ignored while a single skill or quest is selected.",
             position = 0,
-            section = activitySwitchSection
+            hidden = true
     )
     default boolean enableActivitySwitchRandomization()
     {
@@ -223,7 +189,7 @@ public interface KspAccountBuilderConfig extends Config
             name = "Skip Quests",
             description = "Exclude quests from automatic task selection and focus on skilling. Run Single Quest still overrides this setting.",
             position = 0,
-            section = taskSelectionSection
+            hidden = true
     )
     default boolean skipQuests()
     {
@@ -235,7 +201,7 @@ public interface KspAccountBuilderConfig extends Config
             name = "Train Single Skill",
             description = "Force the account builder to train only the selected task",
             position = 0,
-            section = trainSingleSkillSection
+            hidden = true
     )
     default boolean trainSingleSkill()
     {
@@ -247,7 +213,7 @@ public interface KspAccountBuilderConfig extends Config
             name = "Skill",
             description = "Skill to train while Train Single Skill is enabled",
             position = 1,
-            section = trainSingleSkillSection
+            hidden = true
     )
     default KspTrainSingleSkillTask singleSkillTask()
     {
@@ -259,7 +225,7 @@ public interface KspAccountBuilderConfig extends Config
             name = "Mining",
             description = "Ore and mining location",
             position = 2,
-            section = trainSingleSkillSection
+            hidden = true
     )
     default KspSingleSkillConfigTarget.Mining singleSkillMiningTarget()
     {
@@ -271,7 +237,7 @@ public interface KspAccountBuilderConfig extends Config
             name = "Woodcutting",
             description = "Tree type and woodcutting location",
             position = 3,
-            section = trainSingleSkillSection
+            hidden = true
     )
     default KspSingleSkillConfigTarget.Woodcutting singleSkillWoodcuttingTarget()
     {
@@ -283,7 +249,7 @@ public interface KspAccountBuilderConfig extends Config
             name = "Fishing",
             description = "Fish and fishing location",
             position = 4,
-            section = trainSingleSkillSection
+            hidden = true
     )
     default KspSingleSkillConfigTarget.Fishing singleSkillFishingTarget()
     {
@@ -295,7 +261,7 @@ public interface KspAccountBuilderConfig extends Config
             name = "Cooking",
             description = "Cooking location",
             position = 5,
-            section = trainSingleSkillSection
+            hidden = true
     )
     default KspSingleSkillConfigTarget.Cooking singleSkillCookingTarget()
     {
@@ -307,7 +273,7 @@ public interface KspAccountBuilderConfig extends Config
             name = "Crafting",
             description = "Crafting recipe",
             position = 6,
-            section = trainSingleSkillSection
+            hidden = true
     )
     default KspSingleSkillConfigTarget.Crafting singleSkillCraftingTarget()
     {
@@ -319,7 +285,7 @@ public interface KspAccountBuilderConfig extends Config
             name = "Melee",
             description = "NPC and combat location",
             position = 7,
-            section = trainSingleSkillSection
+            hidden = true
     )
     default KspSingleSkillConfigTarget.Melee singleSkillMeleeTarget()
     {
@@ -331,7 +297,7 @@ public interface KspAccountBuilderConfig extends Config
             name = "Smithing",
             description = "Product to smith",
             position = 8,
-            section = trainSingleSkillSection
+            hidden = true
     )
     default KspSingleSkillConfigTarget.Smithing singleSkillSmithingTarget()
     {
@@ -343,7 +309,7 @@ public interface KspAccountBuilderConfig extends Config
             name = "Smelting",
             description = "Bar to smelt",
             position = 9,
-            section = trainSingleSkillSection
+            hidden = true
     )
     default KspSingleSkillConfigTarget.Smelting singleSkillSmeltingTarget()
     {
@@ -355,7 +321,7 @@ public interface KspAccountBuilderConfig extends Config
             name = "Run Single Quest",
             description = "Force the account builder to run only the selected quest. Takes priority over Train Single Skill.",
             position = 0,
-            section = runSingleQuestSection
+            hidden = true
     )
     default boolean runSingleQuest()
     {
@@ -367,7 +333,7 @@ public interface KspAccountBuilderConfig extends Config
             name = "Quest",
             description = "Quest to run while Run Single Quest is enabled",
             position = 1,
-            section = runSingleQuestSection
+            hidden = true
     )
     default KspQuestTask singleQuestTask()
     {
