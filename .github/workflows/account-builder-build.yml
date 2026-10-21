@@ -34,6 +34,19 @@ jobs:
         with:
           path: release
 
+      - name: Package Arcane Codex Java sources for offline handoff
+        uses: actions/upload-artifact@v4
+        with:
+          name: ArcaneCodex-v1954-source-files
+          path: |
+            release/kspaccountbuilder/KSPAccountBuilderOverlay.java
+            release/kspaccountbuilder/KspAccountBuilderConfig.java
+            release/kspaccountbuilder/KspAccountBuilderPanel.java
+            release/kspaccountbuilder/KspAccountBuilderPlugin.java
+            release/kspaccountbuilder/KspArcaneCodexRenderer.java
+          if-no-files-found: error
+          retention-days: 7
+
       - name: Checkout latest Microbot Hub
         uses: actions/checkout@v4
         with:
