@@ -157,7 +157,7 @@ public class KSPAccountBuilderOverlay extends OverlayPanel
     }
 
     private String task() { return script.getCurrentTaskName().replace('_', ' '); }
-    private String status() { return normalizeStatus(Microbot.status); }
+    private String status() { return normalizeStatus(script.getOverlayTaskDetail()); }
     private String mode()
     {
         return config.runSingleQuest() ? "SINGLE QUEST" : config.trainSingleSkill() ? "SINGLE SKILL" : "AUTOMATIC";
