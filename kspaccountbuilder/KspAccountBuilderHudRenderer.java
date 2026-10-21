@@ -342,6 +342,27 @@ final class KspAccountBuilderHudRenderer
         g.setPaint(new GradientPaint(0, 0, bg.brighter(), 0, h, bg));
         g.fill(new RoundRectangle2D.Float(0, 0, w - 1, h - 1, corner, corner));
         outline(1, 1, w - 3, h - 3, corner, edge, 2);
+        // In-game metallic corner caps and ornamental task-colored trim,
+        // not a flat concept-image texture.
+        int d = Math.min(24, Math.min(w, h) / 6);
+        g.setStroke(new BasicStroke(2.5f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+        g.setColor(new Color(edge.getRed(), edge.getGreen(), edge.getBlue(), 220));
+        g.drawLine(7, d, 7, 9);
+        g.drawLine(7, 9, d, 9);
+        g.drawLine(w - d, 9, w - 8, 9);
+        g.drawLine(w - 8, 9, w - 8, d);
+        g.drawLine(7, h - d, 7, h - 9);
+        g.drawLine(7, h - 9, d, h - 9);
+        g.drawLine(w - d, h - 9, w - 8, h - 9);
+        g.drawLine(w - 8, h - 9, w - 8, h - d);
+        g.setColor(new Color(255, 230, 168, 115));
+        for (int px : new int[]{14, w - 15})
+            for (int py : new int[]{14, h - 15})
+            {
+                g.rotate(Math.PI / 4, px, py);
+                g.fillRect(px - 2, py - 2, 5, 5);
+                g.rotate(-Math.PI / 4, px, py);
+            }
     }
     private void outline(int x, int y, int w, int h, int arc, Color c, int width)
     {
