@@ -16,6 +16,12 @@ import net.runelite.client.plugins.microbot.util.antiban.Rs2AntibanSettings;
 import net.runelite.client.ui.overlay.OverlayManager;
 
 import javax.inject.Inject;
+import javax.swing.SwingUtilities;
+import java.awt.Color;
+import java.awt.Graphics2D;
+import java.awt.image.BufferedImage;
+import net.runelite.client.ui.ClientToolbar;
+import net.runelite.client.ui.NavigationButton;
 
 @PluginDescriptor(
         name = PluginConstants.KSP + "Account Builder",
@@ -31,7 +37,7 @@ import javax.inject.Inject;
 @SuppressWarnings("unused")
 public class KspAccountBuilderPlugin extends Plugin
 {
-    public static final String VERSION = "1.9.36";
+    public static final String VERSION = "1.9.37";
 
     @Inject
     private KspAccountBuilderScript script;
@@ -47,6 +53,13 @@ public class KspAccountBuilderPlugin extends Plugin
 
     @Inject
     private OverlayManager overlayManager;
+
+    @Inject
+    private ClientToolbar clientToolbar;
+
+    private KspAccountBuilderPanel sidePanel;
+    private NavigationButton navButton;
+    private volatile boolean panelEnabled;
 
     private KspRandomEventSolver randomEventSolver;
     private final KspAccountBuilderSkillingAntiban skillingAntiban = new KspAccountBuilderSkillingAntiban();
@@ -64,6 +77,8 @@ public class KspAccountBuilderPlugin extends Plugin
     {
         cleanupRuntime("restart-before-start");
         migrateSingleSkillTargetDefaults();
+        panelEnabled = true;
+        addSidePanel();
         if (config.runAccountBuilder())
         {
             startRuntime();
@@ -114,12 +129,16 @@ public class KspAccountBuilderPlugin extends Plugin
     @Override
     protected synchronized void shutDown()
     {
+        panelEnabled = false;
         cleanupRuntime("plugin-stop");
+        removeSidePanel();
     }
 
     public synchronized void prepareHotUnload()
     {
+        panelEnabled = false;
         cleanupRuntime("hot-unload");
+        removeSidePanel();
     }
 
     public void afterHotReload()
@@ -252,6 +271,64 @@ public class KspAccountBuilderPlugin extends Plugin
                 catch (Exception ex) { log.warn("Unable to remove Account Builder overlay", ex); }
             }
         }
+    }
+
+    boolean isRuntimeActive()
+    {
+        return runtimeActive;
+    }
+
+    private void addSidePanel()
+    {
+        SwingUtilities.invokeLater(() ->
+        {
+            if (!panelEnabled || navButton != null) return;
+            sidePanel = new KspAccountBuilderPanel(this, config, script, configManager);
+            navButton = NavigationButton.builder()
+                    .tooltip("KSP Account Builder")
+                    .icon(createPanelIcon())
+                    .priority(6)
+                    .panel(sidePanel)
+                    .build();
+            clientToolbar.addNavigation(navButton);
+        });
+    }
+
+    private void removeSidePanel()
+    {
+        SwingUtilities.invokeLater(() ->
+        {
+            if (navButton != null)
+            {
+                clientToolbar.removeNavigation(navButton);
+                navButton = null;
+            }
+            if (sidePanel != null)
+            {
+                sidePanel.dispose();
+                sidePanel = null;
+            }
+        });
+    }
+
+    private static BufferedImage createPanelIcon()
+    {
+        BufferedImage image = new BufferedImage(16, 16, BufferedImage.TYPE_INT_ARGB);
+        Graphics2D g = image.createGraphics();
+        try
+        {
+            g.setColor(new Color(116, 197, 255));
+            g.fillRoundRect(2, 1, 12, 14, 3, 3);
+            g.setColor(new Color(35, 42, 52));
+            g.fillRect(5, 4, 6, 2);
+            g.fillRect(5, 8, 6, 2);
+            g.fillRect(5, 12, 6, 1);
+        }
+        finally
+        {
+            g.dispose();
+        }
+        return image;
     }
 
     private void migrateSingleSkillTargetDefaults()
