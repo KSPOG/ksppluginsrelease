@@ -1949,6 +1949,22 @@ public class KspAccountBuilderScript extends Script
         catch (Exception ex) { debug("Failed to stop standalone AutoLogin plugin | reason={} error={}", reason, ex.getMessage()); }
     }
 
+    /**
+     * Runtime task detail for optional HUDs; only expose information maintained
+     * by the active task, never synthetic progress or predicted quest steps.
+     */
+    public String getOverlayTaskDetail()
+    {
+        BuilderTask active = currentTask;
+        if (active == BuilderTask.SMELTING && smeltScript != null)
+        {
+            String bar = smeltScript.getTargetBar() == null ? "Bars" : smeltScript.getTargetBar().getDisplayName();
+            String furnace = smeltScript.getTargetArea() == null ? "Furnace" : smeltScript.getTargetArea().getDisplayName();
+            return bar + " | " + furnace;
+        }
+        return Microbot.status == null ? "Idle" : Microbot.status;
+    }
+
     public String getCurrentTaskName()
     {
         BuilderTask pending = pendingTask;
