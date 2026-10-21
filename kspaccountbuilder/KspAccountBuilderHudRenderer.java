@@ -94,7 +94,7 @@ final class KspAccountBuilderHudRenderer
                 case PRESTIGE: prestige(); return new Dimension(334, 283);
                 case COMPACT: compact(); return new Dimension(294, 153);
                 case HORIZON: horizon(); return new Dimension(550, 119);
-                case VERTICAL_PRO: vertical(); return new Dimension(314, 347);
+                case VERTICAL_PRO: vertical(); return new Dimension(374, 347);
                 case ROADMAP: roadmap(); return new Dimension(396, 288);
                 case ELEMENTAL: elemental(); return new Dimension(334, 309);
                 case CLASSIC_PLUS: classicPlus(); return new Dimension(318, 286);
@@ -179,26 +179,26 @@ final class KspAccountBuilderHudRenderer
 
     private void vertical()
     {
-        base(314, 347, new Color(10, 16, 39, 244), new Color(148, 77, 238), 13);
-        strip(8, 8, 298, 40, new Color(24, 30, 75));
-        text("KSP  /  PROGRESS TRACKER", 18, 32, 15, true, new Color(167, 203, 255), 273);
-        icon(17, 58, 72, accent);
-        text(niceTask(), 106, 85, 18, true, accent, 186);
-        text(detail, 106, 104, 11, false, Color.WHITE, 191);
-        pill(207, 113, 85, 19, state(), new Color(31, 67, 56), new Color(143, 242, 187));
-        separator(14, 144, 299, new Color(96, 91, 155));
-        text("SKILL PROGRESSION", 18, 161, 11, true, new Color(152, 182, 244), 274);
-        text(skillLabel(), 18, 185, 13, true, Color.WHITE, 279);
-        progressBar(18, 195, 277, 12, accent);
-        metricBlock(17, 220, 132, "SESSION", duration(script.getRuntimeSeconds()));
-        metricBlock(163, 220, 132, "ACCOUNT TIME", duration(script.getAccountPlayTimeSeconds()));
-        separator(17, 270, 296, new Color(96, 91, 155));
-        text("NEXT BREAK", 19, 289, 11, false, new Color(180, 195, 237), 130);
-        text(breakTime(), 203, 289, 12, true, new Color(244, 191, 99), 83);
-        text("TASK ROTATION", 19, 308, 11, false, new Color(180, 195, 237), 130);
-        text(switchTime(), 203, 308, 12, true, new Color(117, 225, 237), 83);
+        base(374, 347, new Color(10, 16, 39, 244), new Color(148, 77, 238), 13);
+        strip(49, 8, 315, 40, new Color(24, 30, 75));
+        text("KSP  /  PROGRESS TRACKER", 56, 32, 15, true, new Color(167, 203, 255), 300);
+        icon(53, 58, 72, accent);
+        text(niceTask(), 142, 85, 18, true, accent, 211);
+        text(detail, 142, 104, 11, false, Color.WHITE, 211);
+        pill(267, 113, 85, 19, state(), new Color(31, 67, 56), new Color(143, 242, 187));
+        separator(53, 144, 356, new Color(96, 91, 155));
+        text("SKILL PROGRESSION", 55, 161, 11, true, new Color(152, 182, 244), 280);
+        text(skillLabel(), 55, 185, 13, true, Color.WHITE, 299);
+        progressBar(55, 195, 299, 12, accent);
+        metricBlock(53, 220, 140, "SESSION", duration(script.getRuntimeSeconds()));
+        metricBlock(210, 220, 140, "ACCOUNT TIME", duration(script.getAccountPlayTimeSeconds()));
+        separator(54, 270, 354, new Color(96, 91, 155));
+        text("NEXT BREAK", 55, 289, 11, false, new Color(180, 195, 237), 130);
+        text(breakTime(), 269, 289, 12, true, new Color(244, 191, 99), 83);
+        text("TASK ROTATION", 55, 308, 11, false, new Color(180, 195, 237), 130);
+        text(switchTime(), 269, 308, 12, true, new Color(117, 225, 237), 83);
         text(mode() + "  /  " + (config.useAntiban() ? "ANTIBAN ACTIVE" : "ANTIBAN OFF"),
-                18, 334, 10, true, new Color(180, 172, 236), 275);
+                55, 334, 10, true, new Color(180, 172, 236), 275);
     }
 
     private void roadmap()
