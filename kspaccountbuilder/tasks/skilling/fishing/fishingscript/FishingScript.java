@@ -55,8 +55,10 @@ public class FishingScript extends Script
     private static final String WALK_KEY_TO_TROUT_SALMON_FIRE = "Fishing:trout-salmon-fire";
     private static final long COOKING_WIDGET_ACTION_TIMEOUT_MS = 1_500L;
     private static final long ACTION_DISPATCH_TIMEOUT_MS = 1_500L;
+    private static final long COOKING_RECOVERY_TIMEOUT_MS = 25_000L;
     private static final WorldPoint TROUT_SALMON_WALK_POSITION = new WorldPoint(3104, 3431, 0);
     private static final WorldPoint TROUT_SALMON_FIRE_POSITION = new WorldPoint(3106, 3432, 0);
+    private static final WorldPoint TROUT_SALMON_FIRE_APPROACH = new WorldPoint(3109, 3432, 0);
 
     private volatile Areas targetArea = Areas.SHRIMP_ANCHOVIES;
     private LevelReqs targetFish = LevelReqs.SHRIMP;
@@ -73,6 +75,8 @@ public class FishingScript extends Script
     private long lastWebWalkAtMs;
     private long pendingCookingWidgetActionAtMs;
     private long pendingCookingFireActionAtMs;
+    private long cookingStartedAtMs;
+    private boolean skipCookingUntilBanked;
     private long pendingBankActionAtMs;
     private int pendingBankEmptySlots = -1;
 
@@ -94,6 +98,8 @@ public class FishingScript extends Script
         expectingCookingXpDrop = false;
         pendingCookingWidgetActionAtMs = 0L;
         pendingCookingFireActionAtMs = 0L;
+        cookingStartedAtMs = 0L;
+        skipCookingUntilBanked = false;
 
         mainScheduledFuture = scheduledExecutorService.scheduleWithFixedDelay(() ->
         {
@@ -134,7 +140,10 @@ public class FishingScript extends Script
 
             if (Rs2Inventory.isFull())
             {
-                if (cookTroutOrSalmonBeforeBanking())
+                // Stop any prior fishing route before attempting cooking/banking.
+                KspWalkerGuard.clearReachedDestination(
+                        WALK_KEY_TO_FISHING_AREA, "fishing_inventory_full");
+                if (!skipCookingUntilBanked && cookTroutOrSalmonBeforeBanking())
                 {
                     state = FishingState.COOKING;
                     return;
@@ -144,6 +153,10 @@ public class FishingScript extends Script
                 bankFishOnly();
                 return;
             }
+
+            // Full-inventory recovery is complete once a free slot is visible.
+            skipCookingUntilBanked = false;
+            cookingStartedAtMs = 0L;
 
             if (!hasRequiredSupplies(targetFish))
             {
@@ -268,6 +281,29 @@ public class FishingScript extends Script
             if (cookingBatchItemId == NO_COOKING_BATCH) return false;
         }
 
+        if (cookingStartedAtMs == 0L)
+        {
+            cookingStartedAtMs = System.currentTimeMillis();
+            KspTaskDebug.throttled(log, true, "Fishing", "full-inventory-cook", 5_000L,
+                    "Full inventory: starting trout/salmon cooking | player={} raw={} emptySlots={} fire={}",
+                    Rs2Player.getWorldLocation(), Rs2Inventory.count(cookingBatchItemId),
+                    Rs2Inventory.emptySlotCount(), TROUT_SALMON_FIRE_POSITION);
+        }
+        // A fire can be visible but its tile is not walkable. Never let this
+        // optional cooking step hold the full-inventory bank transition forever.
+        if (!Rs2Player.isAnimating()
+                && System.currentTimeMillis() - cookingStartedAtMs >= COOKING_RECOVERY_TIMEOUT_MS)
+        {
+            KspTaskDebug.throttled(log, true, "Fishing", "cooking-timeout-bank", 5_000L,
+                    "Cooking not progressing; banking full inventory instead | player={} raw={} emptySlots={} walkerTarget={}",
+                    Rs2Player.getWorldLocation(), Rs2Inventory.count(cookingBatchItemId),
+                    Rs2Inventory.emptySlotCount(), Rs2Walker.getCurrentTarget());
+            skipCookingUntilBanked = true;
+            resetCookingBatch();
+            KspWalkerGuard.clear(WALK_KEY_TO_TROUT_SALMON_FIRE);
+            return false;
+        }
+
         Microbot.status = "Cooking " + getCookingBatchName() + " before banking";
 
         if (isCookingWidgetOpen())
@@ -308,10 +344,17 @@ public class FishingScript extends Script
             return false;
         }
 
-        if (player.distanceTo(fire.getWorldLocation()) > 2) {
-            KspWalkerGuard.walkToPoint(WALK_KEY_TO_TROUT_SALMON_FIRE, fire.getWorldLocation(), 2, WEB_WALK_COOLDOWN_MS);
+        // The fire occupies a sealed/non-walkable tile. Walk to a proven
+        // accessible adjacent tile, not the object position itself. From the
+        // reachable rim, use the raw fish on the fire directly.
+        WorldPoint approach = TROUT_SALMON_FIRE_POSITION.equals(fire.getWorldLocation())
+                ? TROUT_SALMON_FIRE_APPROACH : fire.getWorldLocation();
+        if (player.distanceTo(approach) > 1)
+        {
+            KspWalkerGuard.walkToPoint(WALK_KEY_TO_TROUT_SALMON_FIRE, approach, 1, WEB_WALK_COOLDOWN_MS);
             return true;
         }
+        KspWalkerGuard.clear(WALK_KEY_TO_TROUT_SALMON_FIRE);
 
         if (pendingCookingFireActionAtMs > 0L
                 && System.currentTimeMillis() - pendingCookingFireActionAtMs < ACTION_DISPATCH_TIMEOUT_MS) {
@@ -540,6 +583,7 @@ public class FishingScript extends Script
     private void bankFishOnly()
     {
         resetCookingBatch();
+        KspWalkerGuard.clear(WALK_KEY_TO_TROUT_SALMON_FIRE);
         if (!ensureInventoryTabOpen()) return;
 
         if (requiresKaramjaTravel()) {
@@ -897,6 +941,8 @@ public class FishingScript extends Script
         lastNpcInteractionAtMs = 0L;
         pendingNpcInteractionAtMs = 0L;
         pendingCookingFireActionAtMs = 0L;
+        cookingStartedAtMs = 0L;
+        skipCookingUntilBanked = false;
         pendingBankActionAtMs = 0L;
         pendingBankEmptySlots = -1;
         lastWebWalkAtMs = 0L;
