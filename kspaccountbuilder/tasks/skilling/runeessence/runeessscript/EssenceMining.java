@@ -327,7 +327,10 @@ public class EssenceMining extends Script
                 try
                 {
                     String action = liveNpcId == 3088 ? "Exit" : "Use";
-                    if (liveNpc.click(action))
+                    // Portal actions can differ between live NPC variants. Try the
+                    // alternative only if the preferred action was not dispatched.
+                    if (liveNpc.click(action)
+                            || liveNpc.click("Exit".equals(action) ? "Use" : "Exit"))
                     {
                         markPortalExit("live NPC", liveNpcId);
                         return;
