@@ -413,6 +413,7 @@ public class FireMakingScript extends Script
 
         lastFireInteractAtMs = now;
         awaitingFireStartAtMs = now;
+        beginBurnBatch(targetLogId);
         activeFireInteractionLocation = fire.getWorldLocation();
         activeFireInteractionId = fire.getId();
         armFiremakingXpCheck();
