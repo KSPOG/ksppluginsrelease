@@ -440,6 +440,11 @@ public class CraftingScript extends Script
             debug("Could not select crafting product {}", recipe.getProductName());
             return;
         }
+        // For gem cutting the production interface may default to the
+        // correct gem. Space confirms Make-All, but only with a live widget.
+        // Never send Space after a failed inventory-only combine.
+        if (recipe.getRecipeType() == RecipeType.GEM_CUTTING
+                && !isCraftingProductionWidgetOpen(recipe)) return;
 
         markProductionAction(recipe);
         Rs2Keyboard.keyPress(KeyEvent.VK_SPACE);
