@@ -136,6 +136,12 @@ public class KSPAccountBuilderOverlay extends OverlayPanel
     private Dimension renderCustom(Graphics2D graphics, KspAccountBuilderOverlayStyle style)
     {
         panelComponent.getChildren().clear();
+        if (style == KspAccountBuilderOverlayStyle.SKILL_ATLAS
+                || style == KspAccountBuilderOverlayStyle.MISSION_CONSOLE
+                || style == KspAccountBuilderOverlayStyle.XP_DIAL)
+        {
+            return new KspAccountBuilderFunctionalHud(script, config, itemManager).render(graphics, style);
+        }
         return new KspAccountBuilderHudRenderer(script, config, plugin, itemManager).render(graphics, style);
     }
 
