@@ -543,20 +543,28 @@ public class EssenceMining extends Script
     {
         int miningLevel = Microbot.getClient().getRealSkillLevel(Skill.MINING);
         int attackLevel = Microbot.getClient().getRealSkillLevel(Skill.ATTACK);
-        Equip best = Equip.bestForLevels(miningLevel, attackLevel);
 
-        for (int index = best.ordinal(); index >= 0; index--)
+        // Select the mining tool independently of Attack. A stronger pickaxe
+        // carried in inventory is usable even if it cannot be equipped.
+        Equip bestAvailable = null;
+        for (Equip pickaxe : Equip.values())
         {
-            String pickaxeName = Equip.values()[index].getDisplayName();
-            if (Rs2Equipment.isWearing(pickaxeName))
+            if (miningLevel < pickaxe.getRequiredMiningLevel()) continue;
+            if (Rs2Equipment.isWearing(pickaxe.getDisplayName())
+                    || Rs2Inventory.hasItem(pickaxe.getDisplayName()))
             {
-                return;
+                bestAvailable = pickaxe;
             }
-            if (Rs2Inventory.hasItem(pickaxeName))
-            {
-                Rs2Inventory.wield(pickaxeName);
-                return;
-            }
+        }
+        if (bestAvailable == null) return;
+
+        // Do not replace or downgrade a usable higher-tier inventory pickaxe
+        // just to equip a weaker one.
+        if (attackLevel < bestAvailable.getRequiredAttackLevel()) return;
+        if (Rs2Equipment.isWearing(bestAvailable.getDisplayName())) return;
+        if (Rs2Inventory.hasItem(bestAvailable.getDisplayName()))
+        {
+            Rs2Inventory.wield(bestAvailable.getDisplayName());
         }
     }
 

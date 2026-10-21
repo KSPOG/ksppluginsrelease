@@ -90,22 +90,15 @@ public final class Buy
 
     public static String resolveDesiredPickaxeNameForGear()
     {
-        int miningLevel = Microbot.getClient().getRealSkillLevel(Skill.MINING);
-        int attackLevel = Microbot.getClient().getRealSkillLevel(Skill.ATTACK);
-        return PICKAXE_NAMES[Math.min(
-                MiningReq.bestForMiningLevel(miningLevel).ordinal(),
-                PickaxeEquip.bestForAttackLevel(attackLevel).ordinal()
-        )];
+        // Attack only governs whether a tool can be wielded, not its use
+        // from inventory. The selling/cleanup path must protect the same
+        // skilling-level tool that buying and the active task select.
+        return resolveDesiredPickaxeNameForBuy();
     }
 
     public static String resolveDesiredAxeNameForGear()
     {
-        int woodcuttingLevel = Microbot.getClient().getRealSkillLevel(Skill.WOODCUTTING);
-        int attackLevel = Microbot.getClient().getRealSkillLevel(Skill.ATTACK);
-        return AXE_NAMES[Math.min(
-                WoodCuttingReq.bestForWoodcuttingLevel(woodcuttingLevel).ordinal(),
-                AxeEquip.bestForAttackLevel(attackLevel).ordinal()
-        )];
+        return resolveDesiredAxeNameForBuy();
     }
 
     public static boolean hasAnyGeBuyRequirementMissing()
