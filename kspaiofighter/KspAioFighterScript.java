@@ -58,7 +58,7 @@ import net.runelite.client.plugins.microbot.util.tabs.Rs2Tab;
 import net.runelite.client.plugins.microbot.util.widget.Rs2Widget;
 import net.runelite.client.plugins.microbot.util.walker.Rs2Walker;
 import net.runelite.client.plugins.microbot.util.tile.Rs2Tile;
-import net.runelite.client.plugins.microbot.util.walker.Rs2LocalPoint;
+import net.runelite.client.plugins.microbot.util.coords.Rs2LocalPoint;
 import net.runelite.client.config.ConfigManager;
 
 @Slf4j
