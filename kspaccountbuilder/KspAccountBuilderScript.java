@@ -225,7 +225,7 @@ public class KspAccountBuilderScript extends Script
     {
         try
         {
-            if (!super.run()) return;
+            if (shuttingDown || !super.run() || shuttingDown) return;
             syncDebugLogging(false);
             if (KspWorldMapGuard.closeIfOpen())
             {
@@ -258,7 +258,9 @@ public class KspAccountBuilderScript extends Script
                 awaitingActivitySwitchTimerStart = canUseActivitySwitchTimer();
                 debug("Selected initial task | currentTask={}", currentTask);
             }
+            if (shuttingDown) return;
             runAccountBuilderCycle();
+            if (shuttingDown) return;
             sampleAccountPlayTime();
             maybeLogStatus();
         }
@@ -630,9 +632,10 @@ public class KspAccountBuilderScript extends Script
 
     private boolean startTask(BuilderTask task)
     {
-        if (task == null) return false;
+        if (task == null || shuttingDown || Thread.currentThread().isInterrupted()) return false;
         applyAntibanForTask(task);
         stopAllTaskScriptsExcept(task);
+        if (shuttingDown || Thread.currentThread().isInterrupted()) return false;
         if (task == BuilderTask.TUTORIAL_ISLAND || task == BuilderTask.ROMEO_AND_JULIET || task == BuilderTask.RUNE_MYSTERIES
                 || newQuestScript(task) != null || task == BuilderTask.STRONGHOLD_OF_SECURITY) clearActivitySwitchTimerState();
         switch (task)
@@ -1382,7 +1385,9 @@ public class KspAccountBuilderScript extends Script
         {
             if (task == keep) continue;
             Script script = scriptFor(task);
-            if (script != null) script.shutdown();
+            if (script == null) continue;
+            try { script.shutdown(); }
+            catch (Exception ex) { log.warn("Account Builder failed to stop child task {}", task, ex); }
         }
     }
 
@@ -1970,6 +1975,9 @@ public class KspAccountBuilderScript extends Script
     public void shutdown()
     {
         shuttingDown = true;
+        // Cancel the parent scheduler first: it must not start/restart a child
+        // while the child shutdown pass is running.
+        super.shutdown();
         if (accountPlayTimeCache != null)
         {
             accountPlayTimeCache.sample(Microbot.isLoggedIn(), currentAccountHashSnapshot);
@@ -1984,7 +1992,6 @@ public class KspAccountBuilderScript extends Script
         catch (Exception ex) { log.warn("Account Builder auto-login shutdown failed", ex); }
         try { if (experienceLampScript != null) experienceLampScript.shutdown(); }
         catch (Exception ex) { log.warn("Account Builder experience lamp shutdown failed", ex); }
-        super.shutdown();
         taskStarted = false;
         breakActive = false;
         startedAtMillis = 0L;
