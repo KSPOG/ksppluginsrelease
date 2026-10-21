@@ -17,6 +17,7 @@ import net.runelite.client.ui.overlay.OverlayManager;
 
 import javax.inject.Inject;
 import javax.swing.SwingUtilities;
+import javax.swing.UIManager;
 import java.awt.Color;
 import java.awt.Graphics2D;
 import java.awt.image.BufferedImage;
@@ -37,7 +38,7 @@ import net.runelite.client.ui.NavigationButton;
 @SuppressWarnings("unused")
 public class KspAccountBuilderPlugin extends Plugin
 {
-    public static final String VERSION = "1.9.40";
+    public static final String VERSION = "1.9.41";
 
     @Inject
     private KspAccountBuilderScript script;
@@ -57,6 +58,8 @@ public class KspAccountBuilderPlugin extends Plugin
     @Inject
     private ClientToolbar clientToolbar;
 
+    // UIManager lives in the host classloader and survives plugin hot reloads.
+    private static final String SIDEBAR_REGISTRY_KEY = "ksp.accountbuilder.sidebar.v1";
     private KspAccountBuilderPanel sidePanel;
     private NavigationButton navButton;
     private volatile boolean panelEnabled;
@@ -287,6 +290,24 @@ public class KspAccountBuilderPlugin extends Plugin
         SwingUtilities.invokeLater(() ->
         {
             if (!panelEnabled || navButton != null) return;
+
+            // A reloaded plugin has a different classloader/instance, so its
+            // own navButton field cannot identify the previous toolbar entry.
+            Object registered = UIManager.get(SIDEBAR_REGISTRY_KEY);
+            if (registered instanceof Object[])
+            {
+                Object[] previous = (Object[]) registered;
+                if (previous.length >= 2 && previous[0] instanceof NavigationButton)
+                {
+                    clientToolbar.removeNavigation((NavigationButton) previous[0]);
+                }
+                if (previous.length >= 2 && previous[1] instanceof Runnable)
+                {
+                    ((Runnable) previous[1]).run();
+                }
+                UIManager.getDefaults().remove(SIDEBAR_REGISTRY_KEY);
+            }
+
             sidePanel = new KspAccountBuilderPanel(this, config, script, configManager);
             navButton = NavigationButton.builder()
                     .tooltip("KSP Account Builder")
@@ -294,7 +315,11 @@ public class KspAccountBuilderPlugin extends Plugin
                     .priority(6)
                     .panel(sidePanel)
                     .build();
-            clientToolbar.addNavigation(navButton);
+
+            final NavigationButton newButton = navButton;
+            final KspAccountBuilderPanel newPanel = sidePanel;
+            UIManager.put(SIDEBAR_REGISTRY_KEY, new Object[]{newButton, (Runnable) newPanel::dispose});
+            clientToolbar.addNavigation(newButton);
         });
     }
 
@@ -305,6 +330,12 @@ public class KspAccountBuilderPlugin extends Plugin
             if (navButton != null)
             {
                 clientToolbar.removeNavigation(navButton);
+                Object registered = UIManager.get(SIDEBAR_REGISTRY_KEY);
+                if (registered instanceof Object[] && ((Object[]) registered).length > 0
+                        && ((Object[]) registered)[0] == navButton)
+                {
+                    UIManager.getDefaults().remove(SIDEBAR_REGISTRY_KEY);
+                }
                 navButton = null;
             }
             if (sidePanel != null)
