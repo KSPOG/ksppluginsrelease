@@ -38,6 +38,8 @@ public class CraftingScript extends Script
     private static final int ACTION_COOLDOWN_MS = 100;
     private static final long PRODUCTION_ACTION_TIMEOUT_MS = 1_500L;
     private static final long LEATHER_PROGRESS_TIMEOUT_MS = 4_800L;
+    private static final long GEM_START_TIMEOUT_MS = 3_000L;
+    private static final long GEM_PROGRESS_TIMEOUT_MS = 4_800L;
     private static final long ACTION_DISPATCH_TIMEOUT_MS = 1_500L;
 
     private volatile CraftingState state = CraftingState.WAITING;
@@ -50,6 +52,12 @@ public class CraftingScript extends Script
     private long lastActionAtMs;
     private boolean expectingXpDrop;
     private boolean leatherBatchActive;
+    private boolean gemBatchActive;
+    private int lastUncutGemCount = -1;
+    private long lastGemProgressAtMs;
+    private boolean gemCombinationPending;
+    private long gemCombinationAtMs;
+    private boolean reverseGemCombine;
     private int lastLeatherCount = -1;
     private long lastLeatherProgressAtMs;
     private boolean bankInventoryReset;
@@ -84,7 +92,15 @@ public class CraftingScript extends Script
                 return;
             }
 
-            if (isLeatherBatchActive()) return;
+            if (isLeatherBatchActive() || isGemBatchActive()) return;
+
+            // Finish any open production dialogue before selecting a new recipe,
+            // walking to a bank, or dispatching another inventory Use click.
+            if (isCraftingProductionWidgetOpen(targetRecipe))
+            {
+                selectProductAndMakeAll(targetRecipe);
+                return;
+            }
 
             if (this.progressiveCrafting)
             {
@@ -343,6 +359,35 @@ public class CraftingScript extends Script
         if (tool == null || material == null) return;
 
         Microbot.status = "Crafting " + targetLevel.getDisplayName();
+        if (recipe.getRecipeType() == RecipeType.GEM_CUTTING)
+        {
+            // A successful combine dispatch can still leave the inventory
+            // waiting for the second click. Verify the resulting interface
+            // or consumed gems before attempting another combination.
+            long now = System.currentTimeMillis();
+            if (gemCombinationPending)
+            {
+                if (now - gemCombinationAtMs < GEM_START_TIMEOUT_MS)
+                {
+                    Microbot.status = "Waiting for chisel and uncut gem interaction";
+                    return;
+                }
+                gemCombinationPending = false;
+                reverseGemCombine = !reverseGemCombine;
+                debug("Gem combination produced no progress; reversing item order | recipe={}", recipe);
+            }
+            String first = reverseGemCombine ? material.getItemName() : tool.getItemName();
+            String second = reverseGemCombine ? tool.getItemName() : material.getItemName();
+            if (Rs2Inventory.combine(first, second))
+            {
+                lastActionAtMs = now;
+                gemCombinationAtMs = now;
+                gemCombinationPending = true;
+                markWorldAction("combine");
+            }
+            return;
+        }
+
         if (Rs2Inventory.combine(tool.getItemName(), material.getItemName()))
         {
             lastActionAtMs = System.currentTimeMillis();
@@ -395,17 +440,65 @@ public class CraftingScript extends Script
             debug("Could not select crafting product {}", recipe.getProductName());
             return;
         }
+        // For gem cutting the production interface may default to the
+        // correct gem. Space confirms Make-All, but only with a live widget.
+        // Never send Space after a failed inventory-only combine.
+        if (recipe.getRecipeType() == RecipeType.GEM_CUTTING
+                && !isCraftingProductionWidgetOpen(recipe)) return;
 
         markProductionAction(recipe);
         Rs2Keyboard.keyPress(KeyEvent.VK_SPACE);
         expectingXpDrop = true;
         lastActionAtMs = System.currentTimeMillis();
+        if (recipe.getRecipeType() == RecipeType.GEM_CUTTING)
+        {
+            gemCombinationPending = false;
+            reverseGemCombine = false;
+            gemBatchActive = true;
+            Ingredient gem = getFirstConsumable(recipe);
+            lastUncutGemCount = gem == null ? -1 : Rs2Inventory.count(gem.getItemName(), true);
+            lastGemProgressAtMs = lastActionAtMs;
+        }
         if (recipe.getRecipeType() == RecipeType.LEATHER)
         {
             leatherBatchActive = true;
             lastLeatherCount = Rs2Inventory.count(getFirstConsumable(recipe).getItemName(), true);
             lastLeatherProgressAtMs = lastActionAtMs;
         }
+    }
+
+    private boolean isGemBatchActive()
+    {
+        if (!gemBatchActive) return false;
+        Ingredient material = getFirstConsumable(targetRecipe);
+        if (material == null || targetRecipe.getRecipeType() != RecipeType.GEM_CUTTING)
+        {
+            clearGemBatch();
+            return false;
+        }
+        int count = Rs2Inventory.count(material.getItemName(), true);
+        if (Rs2Bank.isOpen() || count <= 0 || !Rs2Inventory.hasItem("Chisel", true))
+        {
+            clearGemBatch();
+            return false;
+        }
+        long now = System.currentTimeMillis();
+        if (Rs2Player.isAnimating() || count < lastUncutGemCount)
+        {
+            lastUncutGemCount = count;
+            lastGemProgressAtMs = now;
+            return true;
+        }
+        if (now - lastGemProgressAtMs < GEM_PROGRESS_TIMEOUT_MS) return true;
+        clearGemBatch();
+        return false;
+    }
+
+    private void clearGemBatch()
+    {
+        gemBatchActive = false;
+        lastUncutGemCount = -1;
+        lastGemProgressAtMs = 0L;
     }
 
     private boolean isLeatherBatchActive()
@@ -598,6 +691,10 @@ public class CraftingScript extends Script
     {
         state = CraftingState.WAITING;
         clearLeatherBatch();
+        clearGemBatch();
+        gemCombinationPending = false;
+        gemCombinationAtMs = 0L;
+        reverseGemCombine = false;
         clearProductionAction();
         pendingWorldActionAtMs = 0L;
         pendingWorldAction = null;
