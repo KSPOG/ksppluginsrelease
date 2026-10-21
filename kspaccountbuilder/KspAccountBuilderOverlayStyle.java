@@ -11,7 +11,10 @@ public enum KspAccountBuilderOverlayStyle
     VERTICAL_PRO("Vertical Pro"),
     ROADMAP("Roadmap"),
     ELEMENTAL("Elemental"),
-    CLASSIC_PLUS("Classic Plus");
+    CLASSIC_PLUS("Classic Plus"),
+    SKILL_ATLAS("Skill Atlas"),
+    MISSION_CONSOLE("Mission Console"),
+    XP_DIAL("XP Dial");
 
     private final String label;
 
