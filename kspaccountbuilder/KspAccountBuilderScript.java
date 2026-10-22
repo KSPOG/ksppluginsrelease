@@ -153,6 +153,7 @@ public class KspAccountBuilderScript extends KspManagedScript
     private volatile boolean breakActive;
     private long startedAtMillis;
     private boolean taskStarted;
+    private long nextCraftingSchedulerRecoveryAtMs;
     private long nextBreakAtMillis;
     private long breakEndsAtMillis;
     private long nextActivitySwitchAtMillis;
@@ -540,6 +541,14 @@ public class KspAccountBuilderScript extends KspManagedScript
         {
             taskStarted = false;
             return;
+        }
+        if (taskStarted && currentTask == BuilderTask.CRAFTING && !breakActive && !craftingScript.isRunning())
+        {
+            long now = System.currentTimeMillis();
+            if (now < nextCraftingSchedulerRecoveryAtMs) return;
+            nextCraftingSchedulerRecoveryAtMs = now + 15_000L;
+            log.warn("[KSP Builder] Crafting scheduler stopped unexpectedly; restarting crafting task");
+            taskStarted = false;
         }
         if (taskStarted)
         {
