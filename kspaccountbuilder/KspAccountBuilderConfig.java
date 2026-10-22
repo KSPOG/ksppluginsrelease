@@ -33,42 +33,6 @@ public interface KspAccountBuilderConfig extends Config
     )
     default boolean arcaneCodexOverlay() { return false; }
 
-    @ConfigItem(
-            keyName = "classicCinematicOverlay",
-            name = "Classic Cinematic HUD",
-            description = "Use a scalable, skill-aware RuneScape-themed HUD with live controls.",
-            position = 1,
-            section = overlaySection
-    )
-    default boolean classicCinematicOverlay() { return true; }
-
-    @ConfigItem(
-            keyName = "classicBlockClicks",
-            name = "Block clicks under HUD",
-            description = "Consume mouse input inside the HUD bounds; game canvas outside the HUD remains usable.",
-            position = 2,
-            section = overlaySection
-    )
-    default boolean classicBlockClicks() { return true; }
-
-    @ConfigItem(
-            keyName = "classicAnimations",
-            name = "Cinematic skill effects",
-            description = "Enable task-specific particle and ambient effects.",
-            position = 3,
-            section = overlaySection
-    )
-    default boolean classicAnimations() { return true; }
-
-    @ConfigItem(
-            keyName = "classicCompact",
-            name = "Compact HUD",
-            description = "Prefer the compact layout on smaller game canvases.",
-            position = 4,
-            section = overlaySection
-    )
-    default boolean classicCompact() { return false; }
-
     // Only advanced tuning remains in RuneLite's standard config screen.
     @ConfigSection(name = "Antiban", description = "Advanced antiban settings", position = 0)
     String antibanSection = "antiban";
