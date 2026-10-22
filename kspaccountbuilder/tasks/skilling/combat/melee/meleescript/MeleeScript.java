@@ -736,6 +736,16 @@ public class MeleeScript extends Script {
 
         Rs2NpcModel currentAttacker = findNpcAttackingPlayer(localPlayer, playerLocation, stage);
         if (currentAttacker != null) {
+            // An NPC targeting us does not mean we have attacked it.
+            // Retaliate once; pending attack dispatch prevents repeat clicks.
+            if (!Rs2Player.isInteracting() && !Rs2Player.isAnimating()) {
+                this.setStatus("Retaliating against " + currentAttacker.getName());
+                if (currentAttacker.click("Attack")) {
+                    pendingAttackAtMs = System.currentTimeMillis();
+                    pendingAttackNpcIndex = currentAttacker.getIndex();
+                }
+                return;
+            }
             this.setStatus("Fighting " + currentAttacker.getName());
             if (this.debugLogging) {
                 KspTaskDebug.throttled(log, true, "Melee", "already-under-attack", 3_000L,
@@ -831,7 +841,7 @@ public class MeleeScript extends Script {
     private boolean isAttackDispatchPending() {
         if (pendingAttackAtMs == 0L) return false;
 
-        if (Rs2Player.isMoving() || Rs2Player.isAnimating() || Rs2Player.isInteracting() || Rs2Combat.inCombat()) {
+        if (Rs2Player.isMoving() || Rs2Player.isAnimating() || Rs2Player.isInteracting()) {
             pendingAttackAtMs = 0L;
             pendingAttackNpcIndex = -1;
             return true;
@@ -953,7 +963,8 @@ public class MeleeScript extends Script {
             return false;
         }
 
-        return findNpcAttackingPlayer(localPlayer, playerLocation, stage) != null
+        return ((Rs2Player.isInteracting() || Rs2Player.isAnimating())
+                && findNpcAttackingPlayer(localPlayer, playerLocation, stage) != null)
                 || (Rs2Combat.inCombat()
                     && stage.area.contains(playerLocation)
                     && (Rs2Player.isAnimating() || Rs2Player.isInteracting()));
