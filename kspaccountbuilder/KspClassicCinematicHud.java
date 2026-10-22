@@ -103,6 +103,9 @@ final class KspClassicCinematicHud
     {
         if (!active || bounds == null || bounds.isEmpty()) return false;
         if (!bounds.contains(e.getPoint())) return false;
+        // Keep RuneLite's Alt-drag overlay management available. Never
+        // capture its gestures ahead of the host OverlayRenderer.
+        if (e.isAltDown()) { pressed = null; return false; }
         int x = Math.round((e.getX() - bounds.x) / scale);
         int y = Math.round((e.getY() - bounds.y) / scale);
         String target = targetAt(x, y);
