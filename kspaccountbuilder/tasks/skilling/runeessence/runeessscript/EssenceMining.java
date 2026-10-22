@@ -1,5 +1,7 @@
 package net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.runeessence.runeessscript;
 
+import net.runelite.client.plugins.microbot.kspaccountbuilder.KspManagedScript;
+
 import java.util.Arrays;
 import java.util.concurrent.TimeUnit;
 import javax.inject.Singleton;
@@ -26,7 +28,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 @Singleton
-public class EssenceMining extends Script
+public class EssenceMining extends KspManagedScript
 {
     private static final Logger log = LoggerFactory.getLogger(EssenceMining.class);
     private static final int LOOP_DELAY_MS = 100;

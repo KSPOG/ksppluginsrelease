@@ -1,5 +1,7 @@
 package net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.stronghold.script;
 
+import net.runelite.client.plugins.microbot.kspaccountbuilder.KspManagedScript;
+
 import java.util.concurrent.TimeUnit;
 import javax.inject.Singleton;
 import net.runelite.api.TileObject;
@@ -17,7 +19,7 @@ import net.runelite.client.plugins.microbot.util.walker.Rs2Walker;
 import net.runelite.client.plugins.microbot.util.walker.StrongholdAnswer;
 
 @Singleton
-public class SoCScript extends Script
+public class SoCScript extends KspManagedScript
 {
     private static final int LOOP_DELAY_MS = 100;
     private static final int WALK_REFIRE_MS = 1_000;

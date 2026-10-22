@@ -1,5 +1,7 @@
 package net.runelite.client.plugins.microbot.kspaccountbuilder.util.autologin;
 
+import net.runelite.client.plugins.microbot.kspaccountbuilder.KspManagedScript;
+
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.Client;
 import net.runelite.api.GameState;
@@ -20,7 +22,7 @@ import static net.runelite.client.plugins.microbot.util.Global.sleepUntil;
 
 @Singleton
 @Slf4j
-public class AutoLoginScript extends Script
+public class AutoLoginScript extends KspManagedScript
 {
     private static final int LOOP_DELAY_MS = 250;
     private static final int WELCOME_PLAY_CLICK_COOLDOWN_MS = 2_500;

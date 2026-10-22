@@ -1,5 +1,7 @@
 package net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.selling.sellscript;
 
+import net.runelite.client.plugins.microbot.kspaccountbuilder.KspManagedScript;
+
 import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.Map;
@@ -52,7 +54,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 @Singleton
-public class SellScript extends Script
+public class SellScript extends KspManagedScript
 {
     private static final Logger log = LoggerFactory.getLogger(SellScript.class);
     private static final int LOOP_DELAY_MS = 100;

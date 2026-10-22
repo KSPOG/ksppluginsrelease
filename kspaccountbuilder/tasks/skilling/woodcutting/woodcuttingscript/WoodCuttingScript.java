@@ -1,5 +1,7 @@
 package net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.woodcutting.woodcuttingscript;
 
+import net.runelite.client.plugins.microbot.kspaccountbuilder.KspManagedScript;
+
 import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
@@ -33,7 +35,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 @Singleton
-public class WoodCuttingScript extends Script {
+public class WoodCuttingScript extends KspManagedScript {
     private static final Logger log = LoggerFactory.getLogger(WoodCuttingScript.class);
 
     private static final int LOOP_DELAY_MS = 100;

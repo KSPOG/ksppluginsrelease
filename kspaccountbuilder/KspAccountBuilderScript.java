@@ -1,5 +1,7 @@
 package net.runelite.client.plugins.microbot.kspaccountbuilder;
 
+import net.runelite.client.plugins.microbot.kspaccountbuilder.KspManagedScript;
+
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.*;
 import net.runelite.api.coords.WorldPoint;
@@ -80,7 +82,7 @@ import java.util.concurrent.TimeUnit;
 
 @Singleton
 @Slf4j
-public class KspAccountBuilderScript extends Script
+public class KspAccountBuilderScript extends KspManagedScript
 {
     private enum BuilderTask
     {

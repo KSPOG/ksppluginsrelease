@@ -1,5 +1,7 @@
 package net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.mining.miningscript;
 
+import net.runelite.client.plugins.microbot.kspaccountbuilder.KspManagedScript;
+
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
@@ -39,7 +41,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 @Singleton
-public class MiningScript extends Script
+public class MiningScript extends KspManagedScript
 {
     private static final Logger log = LoggerFactory.getLogger(MiningScript.class);
 

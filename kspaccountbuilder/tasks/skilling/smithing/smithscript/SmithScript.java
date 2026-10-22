@@ -19,6 +19,8 @@
  */
 package net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.smithing.smithscript;
 
+import net.runelite.client.plugins.microbot.kspaccountbuilder.KspManagedScript;
+
 import java.util.concurrent.TimeUnit;
 import javax.inject.Singleton;
 import net.runelite.api.Skill;
@@ -46,7 +48,7 @@ import org.slf4j.LoggerFactory;
 
 @Singleton
 public class SmithScript
-extends Script {
+extends KspManagedScript {
     private static final Logger log = LoggerFactory.getLogger(SmithScript.class);
     private static final int LOOP_DELAY_MS = 100;
     private static final int WEB_WALK_COOLDOWN_MS = 1_000;
