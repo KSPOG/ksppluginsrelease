@@ -711,15 +711,47 @@ public class KspBonesToBananasScript extends KspBreakAwareScript
         }
 
         OfferSnapshot offer = offer(order.slot);
-        if (order.pendingModifiedPrice > 0 && offer != null
-                && offer.itemId == order.itemId
-                && offer.price == order.pendingModifiedPrice)
+        if (order.pendingModifiedPrice > 0)
         {
-            order.price = order.pendingModifiedPrice;
-            order.pendingModifiedPrice = 0;
-            order.placedAt = System.currentTimeMillis();
-            log.info("GE offer modified in existing slot | item={} slot={} price={}",
-                    order.itemName, order.slot, order.price);
+            if (offer == null || offer.itemId != order.itemId)
+            {
+                status = "Waiting for modified GE slot: " + order.itemName;
+                return;
+            }
+            if (offer.price == order.pendingModifiedPrice)
+            {
+                order.price = order.pendingModifiedPrice;
+                order.repriceLevel = order.pendingRetryLevel;
+                if (order.action == GrandExchangeAction.BUY)
+                    buyRetryLevel = Math.max(buyRetryLevel, order.repriceLevel);
+                else
+                    sellRetryLevel = Math.max(sellRetryLevel, order.repriceLevel);
+                order.pendingModifiedPrice = 0;
+                order.pendingRetryLevel = 0;
+                order.placedAt = System.currentTimeMillis();
+                log.info("GE offer modified in existing slot | item={} slot={} price={}",
+                        order.itemName, order.slot, order.price);
+            }
+            else if (offer.price == order.price)
+            {
+                if (System.currentTimeMillis() - order.placedAt < 6_000L)
+                {
+                    status = "Waiting for GE price confirmation: " + order.itemName;
+                    return;
+                }
+                log.warn("GE edit did not change the live offer price | item={} slot={} wanted={}",
+                        order.itemName, order.slot, order.pendingModifiedPrice);
+                order.pendingModifiedPrice = 0;
+                order.pendingRetryLevel = 0;
+                order.placedAt = System.currentTimeMillis();
+            }
+            else
+            {
+                status = "GE price changed unexpectedly; review " + order.itemName + " slot";
+                log.warn("GE offer edited outside tracked flow | item={} slot={} tracked={} actual={}",
+                        order.itemName, order.slot, order.price, offer.price);
+                return;
+            }
         }
         if (!matchesOrder(offer, order))
         {
@@ -828,36 +860,52 @@ public class KspBonesToBananasScript extends KspBreakAwareScript
 
     private void retryStalledOrder(GeOrder order)
     {
-        if (order == null || order.abortRequested) return;
-        // OSRS supports modifying a live GE offer. Keep its original slot,
-        // partially filled quantity and collected state; never abort/recreate.
+        if (order == null || order.abortRequested || order.pendingModifiedPrice > 0) return;
         if (order.slot == null) order.slot = findOfferSlot(order);
         if (order.slot == null)
         {
             status = "Cannot modify: waiting for tracked GE slot (" + order.itemName + ")";
             return;
         }
+
+        // Reprice only the live offer we placed, not a reused or finished slot.
+        OfferSnapshot current = offer(order.slot);
+        boolean live = current != null && current.itemId == order.itemId
+                && current.total == order.quantity && current.price == order.price
+                && (order.action == GrandExchangeAction.BUY
+                        ? current.state == GrandExchangeOfferState.BUYING
+                        : current.state == GrandExchangeOfferState.SELLING);
+        if (!live)
+        {
+            status = "Waiting for matching active GE offer: " + order.itemName;
+            return;
+        }
+
+        // Each parallel GE order has its own retry level. Do not advance it until
+        // the edited price is observed in the live GE offer snapshot.
+        int nextRetry = Math.min(MAX_GE_RETRIES, order.repriceLevel + 1);
         int newPrice = order.action == GrandExchangeAction.BUY
-                ? prices.buyOfferPrice(order.itemId, config.buyMarkupPercent(),
-                        Math.min(MAX_GE_RETRIES, ++buyRetryLevel))
-                : prices.sellOfferPrice(order.itemId, config.sellDiscountPercent(),
-                        Math.min(MAX_GE_RETRIES, ++sellRetryLevel));
+                ? prices.buyOfferPrice(order.itemId, config.buyMarkupPercent(), nextRetry)
+                : prices.sellOfferPrice(order.itemId, config.sellDiscountPercent(), nextRetry);
         if (newPrice <= 0 || newPrice == order.price)
         {
             order.placedAt = System.currentTimeMillis();
             status = "Waiting for a different GE price: " + order.itemName;
             return;
         }
+
         status = "Modifying active GE offer: " + order.itemName + " to " + newPrice + " gp";
         if (!KspGeOfferModifier.modifyPrice(order.slot, newPrice))
         {
-            status = "Modify Offer action unavailable; preserving existing " + order.itemName + " offer";
-            log.warn("Could not invoke Modify offer | item={} slot={} oldPrice={} newPrice={}",
+            status = "Modify Offer unavailable; preserving existing " + order.itemName + " offer";
+            log.warn("Could not modify live GE offer | item={} slot={} oldPrice={} newPrice={}",
                     order.itemName, order.slot, order.price, newPrice);
             order.placedAt = System.currentTimeMillis();
             return;
         }
+
         order.pendingModifiedPrice = newPrice;
+        order.pendingRetryLevel = nextRetry;
         order.placedAt = System.currentTimeMillis();
         status = "Verifying modified offer price: " + order.itemName;
     }
@@ -1283,7 +1331,7 @@ public class KspBonesToBananasScript extends KspBreakAwareScript
     {
         final GrandExchangeAction action;
         final int itemId, quantity;
-        int price, pendingModifiedPrice;
+        int price, pendingModifiedPrice, repriceLevel, pendingRetryLevel;
         final String itemName;
         GrandExchangeSlots slot;
         boolean placed, abortRequested;
