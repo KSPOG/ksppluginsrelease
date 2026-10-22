@@ -40,6 +40,8 @@ final class KspClassicCinematicHud
     private volatile Dimension lastSize = new Dimension(COMPACT_W, COMPACT_H);
     private volatile Point pointer = new Point(-100, -100);
     private volatile boolean compact = false;
+    private volatile boolean autoCompact = false;
+    private long accountHash = Long.MIN_VALUE;
     private volatile boolean showSettings = false;
     private volatile String page = "Skills";
     private volatile String pressed;
@@ -54,7 +56,8 @@ final class KspClassicCinematicHud
 
     Dimension render(Graphics2D base, int canvasWidth, Rectangle absoluteBounds)
     {
-        compact = config.classicCompact() || canvasWidth < 885;
+        autoCompact = canvasWidth < 885;
+        compact = config.classicCompact() || autoCompact;
         int w = compact ? COMPACT_W : EXPANDED_W;
         int h = compact ? COMPACT_H : EXPANDED_H;
         float factor = Math.min(1.6f, Math.max(0.65f, (canvasWidth - 16f) / w));
@@ -193,7 +196,10 @@ final class KspClassicCinematicHud
         g.fillRoundRect(34,8,7,25,2,2);
         write(g,"KSP Account Builder",49,29,16,true,PALE,w-188);
         write(g,"Runtime "+duration(script.getRuntimeSeconds()),w-142,27,10,false,MUTED,107);
-        button(g,buttons,"compact",w-35,13,23,22,compact?"+":"−",new Color(59,54,42),12);
+        if (!autoCompact)
+            button(g,buttons,"compact",w-35,13,23,22,compact?"+":"−",new Color(59,54,42),12);
+        else
+            write(g,"□",w-29,29,13,false,MUTED,17);
     }
 
     private void paintExpanded(Graphics2D g,Module m,String task,Map<String,Rectangle> buttons)
@@ -235,7 +241,10 @@ final class KspClassicCinematicHud
         paintStats(g,426,47,181,193,m);
         paintStatusStrip(g,114,245,492,17,m);
         button(g,buttons,"pause",114,267,128,29,script.isOverlayPaused()?"▶ RESUME":"Ⅱ PAUSE",new Color(109,79,33),12);
-        button(g,buttons,"skip",247,267,106,29,"SKIP TASK",new Color(65,61,48),11);
+        if (script.mayOverlaySkip())
+            button(g,buttons,"skip",247,267,106,29,"SKIP TASK",new Color(65,61,48),11);
+        else
+            disabled(g,247,267,106,29,"SKIP LOCKED");
         button(g,buttons,"stop",358,267,105,29,"■ STOP",RED,11);
         button(g,buttons,"settings",468,267,138,29,showSettings?"CLOSE SETTINGS":"⚙ SETTINGS",new Color(47,50,50),11);
     }
@@ -254,7 +263,10 @@ final class KspClassicCinematicHud
         write(g,xp.skill==null?"Task progress unavailable":fmt(xp.exp)+" XP · "+xp.percent+"%",246,94,10,false,TEXT,164);
         write(g,script.isOverlayPaused()?"PAUSED":shortText(task),246,113,10,true,script.isOverlayPaused()?GOLD:MUTED,170);
         button(g,buttons,"pause",11,139,122,27,script.isOverlayPaused()?"▶ RESUME":"Ⅱ PAUSE",new Color(105,76,31),11);
-        button(g,buttons,"skip",139,139,91,27,"SKIP",new Color(62,61,54),11);
+        if (script.mayOverlaySkip())
+            button(g,buttons,"skip",139,139,91,27,"SKIP",new Color(62,61,54),11);
+        else
+            disabled(g,139,139,91,27,"LOCKED");
         button(g,buttons,"stop",236,139,90,27,"■ STOP",RED,11);
         button(g,buttons,"settings",332,139,92,27,showSettings?"CLOSE":"⚙ OPTS",new Color(49,52,51),10);
         if(showSettings)
@@ -325,7 +337,7 @@ final class KspClassicCinematicHud
 
     private void paintHover(Graphics2D g,int x,int y,int w,int h,Module m,String task)
     {
-        if(x<0||y<0||x>=w||y>=h) return;
+        if(x<0||y<0||x>=w||y>=h || showSettings) return;
         Rectangle bar = compact ? new Rectangle(246,68,168,17):new Rectangle(437,86,160,18);
         if(!bar.contains(x,y) && !(compact ? new Rectangle(11,45,222,88):new Rectangle(113,47,307,193)).contains(x,y))
         {
@@ -457,6 +469,13 @@ final class KspClassicCinematicHud
         if(skill==null || Microbot.getClient()==null || !Microbot.isLoggedIn()) return new SkillXp();
         try
         {
+            long activeAccountHash = Microbot.getClient().getAccountHash();
+            if (accountHash != activeAccountHash)
+            {
+                xpBase.clear();
+                xpSince.clear();
+                accountHash = activeAccountHash;
+            }
             int level=Microbot.getClient().getRealSkillLevel(skill);
             int xp=Microbot.getClient().getSkillExperience(skill);
             long now=System.currentTimeMillis();
@@ -527,6 +546,13 @@ final class KspClassicCinematicHud
         g.setFont(f);FontMetrics fm=g.getFontMetrics();
         String s=ellipsize(fm,label,w-12);
         g.drawString(s,x+(w-fm.stringWidth(s))/2,y+(h-fm.getHeight())/2+fm.getAscent());
+    }
+
+    private static void disabled(Graphics2D g,int x,int y,int w,int h,String label)
+    {
+        g.setColor(new Color(36,37,37));g.fillRoundRect(x,y,w,h,7,7);
+        g.setColor(new Color(85,79,68));g.drawRoundRect(x,y,w,h,7,7);
+        write(g,label,x+9,y+h/2+4,10,false,MUTED,w-17);
     }
 
     private static void skillMark(Graphics2D g,Module module,int x,int y,int radius)
