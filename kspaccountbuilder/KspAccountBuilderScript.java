@@ -182,19 +182,6 @@ public class KspAccountBuilderScript extends KspManagedScript
     private long lastCombatObservedAtMillis;
     private boolean postTutorialBankCameraPending;
     private volatile boolean shuttingDown;
-    // Only the scheduler thread performs task lifecycle transitions.
-    // Overlay and sidebar actions merely set these cross-thread requests.
-    private volatile boolean overlayPauseRequested;
-    private volatile boolean overlayPaused;
-    private volatile boolean overlaySkipRequested;
-    private long overlayPauseStartedAtMillis;
-
-    public void requestOverlayPause() { overlayPauseRequested = true; }
-    public void requestOverlayResume() { overlayPauseRequested = false; }
-    public boolean isOverlayPaused() { return overlayPauseRequested || overlayPaused; }
-    public boolean mayOverlaySkip() { return !isSingleSkillTaskForced() && !isAnyBreakActive(); }
-    public void requestOverlaySkip() { if (mayOverlaySkip()) overlaySkipRequested = true; }
-
     // Retain the randomly chosen furnace across internal smelting task restarts.
     private SmeltArea selectedSmeltingArea;
     private long lastBreakLoginAttemptAt;
@@ -243,48 +230,6 @@ public class KspAccountBuilderScript extends KspManagedScript
         try
         {
             if (shuttingDown || !super.run() || shuttingDown) return;
-            if (overlayPauseRequested)
-            {
-                if (!overlayPaused)
-                {
-                    overlayPaused = true;
-                    overlayPauseStartedAtMillis = System.currentTimeMillis();
-                    stopAllTaskScriptsExcept(null);
-                    taskStarted = false;
-                    KspWalkerGuard.clearActiveWalker("ksp_account_builder_overlay_pause");
-                    Microbot.status = "Paused from Account Builder overlay";
-                }
-                return;
-            }
-            if (overlayPaused)
-            {
-                long elapsed = Math.max(0L, System.currentTimeMillis() - overlayPauseStartedAtMillis);
-                if (nextBreakAtMillis > 0L) nextBreakAtMillis += elapsed;
-                if (breakEndsAtMillis > 0L) breakEndsAtMillis += elapsed;
-                if (nextActivitySwitchAtMillis > 0L) nextActivitySwitchAtMillis += elapsed;
-                overlayPauseStartedAtMillis = 0L;
-                overlayPaused = false;
-                Microbot.status = "Resuming Account Builder";
-            }
-            if (overlaySkipRequested)
-            {
-                overlaySkipRequested = false;
-                if (currentTask != null && mayOverlaySkip() && isSafeToStartActivitySwitch())
-                {
-                    taskStarted = false;
-                    stopAllTaskScriptsExcept(null);
-                    pendingTask = null;
-                    pendingRandomTaskSelection = true;
-                    nextActivitySwitchAtMillis = -1L;
-                    Microbot.status = "Skipping current activity; preparing next task";
-                }
-                else if (currentTask != null && mayOverlaySkip())
-                {
-                    // Do not discard a requested skip while walking, in combat,
-                    // banking, or interacting. Retry when it is safe.
-                    overlaySkipRequested = true;
-                }
-            }
             syncDebugLogging(false);
             if (KspWorldMapGuard.closeIfOpen())
             {
@@ -336,10 +281,6 @@ public class KspAccountBuilderScript extends KspManagedScript
 
     private void resetRuntimeState()
     {
-        overlayPauseRequested = false;
-        overlayPaused = false;
-        overlaySkipRequested = false;
-        overlayPauseStartedAtMillis = 0L;
         selectedSmeltingArea = null;
         currentTask = null;
         taskStarted = false;
@@ -2061,10 +2002,6 @@ public class KspAccountBuilderScript extends KspManagedScript
     public void shutdown()
     {
         shuttingDown = true;
-        overlayPauseRequested = false;
-        overlayPaused = false;
-        overlaySkipRequested = false;
-        overlayPauseStartedAtMillis = 0L;
         selectedSmeltingArea = null;
         // Cancel the parent scheduler first: it must not start/restart a child
         // while the child shutdown pass is running.
