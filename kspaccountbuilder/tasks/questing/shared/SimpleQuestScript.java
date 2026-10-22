@@ -1,5 +1,7 @@
 package net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.questing.shared;
 
+import net.runelite.client.plugins.microbot.kspaccountbuilder.KspManagedScript;
+
 import net.runelite.api.GrandExchangeOffer;
 import net.runelite.api.GrandExchangeOfferState;
 import net.runelite.api.Quest;
@@ -25,7 +27,7 @@ import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
 /** Shared bank-first GE restocking and guarded interactions for small quest tasks. */
-public abstract class SimpleQuestScript extends Script
+public abstract class SimpleQuestScript extends KspManagedScript
 {
     protected static final QuestRequirement[] NO_REQUIREMENTS = new QuestRequirement[0];
     // Same minimum offer budget as Cook's Assistant/Goblin Diplomacy.

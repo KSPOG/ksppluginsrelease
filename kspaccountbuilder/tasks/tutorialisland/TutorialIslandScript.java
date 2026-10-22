@@ -1,5 +1,7 @@
 package net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.tutorialisland;
 
+import net.runelite.client.plugins.microbot.kspaccountbuilder.KspManagedScript;
+
 import net.runelite.api.Actor;
 import net.runelite.api.Client;
 import net.runelite.api.ItemID;
@@ -47,7 +49,7 @@ import static net.runelite.client.plugins.microbot.util.dialogues.Rs2Dialogue.ha
 import static net.runelite.client.plugins.microbot.util.dialogues.Rs2Dialogue.isInDialogue;
 
 @Singleton
-public class TutorialIslandScript extends Script
+public class TutorialIslandScript extends KspManagedScript
 {
     private static final int LOOP_DELAY_MS = 100;
     private static final long INTERACTION_DISPATCH_TIMEOUT_MS = 1_500L;

@@ -1,5 +1,7 @@
 package net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.fishing.fishingscript;
 
+import net.runelite.client.plugins.microbot.kspaccountbuilder.KspManagedScript;
+
 import java.awt.event.KeyEvent;
 import java.util.Comparator;
 import java.util.List;
@@ -36,7 +38,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 @Singleton
-public class FishingScript extends Script
+public class FishingScript extends KspManagedScript
 {
     private static final Logger log = LoggerFactory.getLogger(FishingScript.class);
 

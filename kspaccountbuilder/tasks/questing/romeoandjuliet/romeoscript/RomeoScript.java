@@ -1,5 +1,7 @@
 package net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.questing.romeoandjuliet.romeoscript;
 
+import net.runelite.client.plugins.microbot.kspaccountbuilder.KspManagedScript;
+
 import java.util.concurrent.TimeUnit;
 import javax.inject.Singleton;
 
@@ -24,7 +26,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 @Singleton
-public class RomeoScript extends Script
+public class RomeoScript extends KspManagedScript
 {
     private static final Logger log = LoggerFactory.getLogger(RomeoScript.class);
 

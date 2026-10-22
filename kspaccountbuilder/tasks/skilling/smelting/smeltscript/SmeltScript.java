@@ -3,6 +3,8 @@
  */
 package net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.smelting.smeltscript;
 
+import net.runelite.client.plugins.microbot.kspaccountbuilder.KspManagedScript;
+
 import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 import javax.inject.Singleton;
@@ -35,7 +37,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 @Singleton
-public class SmeltScript extends Script
+public class SmeltScript extends KspManagedScript
 {
     private static final Logger log = LoggerFactory.getLogger(SmeltScript.class);
     private static final int LOOP_DELAY_MS = 100;

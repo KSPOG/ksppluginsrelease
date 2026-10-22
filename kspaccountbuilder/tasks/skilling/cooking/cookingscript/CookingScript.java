@@ -1,5 +1,7 @@
 package net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.cooking.cookingscript;
 
+import net.runelite.client.plugins.microbot.kspaccountbuilder.KspManagedScript;
+
 import java.awt.event.KeyEvent;
 import java.util.Optional;
 import java.util.concurrent.TimeUnit;
@@ -26,7 +28,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 @Singleton
-public class CookingScript extends Script
+public class CookingScript extends KspManagedScript
 {
     private static final Logger log = LoggerFactory.getLogger(CookingScript.class);
     private static final String WALK_KEY = "Cooking:target-area";

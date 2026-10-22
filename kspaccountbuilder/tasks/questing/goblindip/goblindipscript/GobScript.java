@@ -1,5 +1,7 @@
 package net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.questing.goblindip.goblindipscript;
 
+import net.runelite.client.plugins.microbot.kspaccountbuilder.KspManagedScript;
+
 import net.runelite.api.Quest;
 import net.runelite.api.QuestState;
 import net.runelite.api.coords.WorldArea;
@@ -34,7 +36,7 @@ import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 
 @Singleton
-public class GobScript extends Script {
+public class GobScript extends KspManagedScript {
     private static final Logger log = LoggerFactory.getLogger(GobScript.class);
     private static final int LOOP_DELAY_MS = 50;
     private static final int WALK_REFIRE_COOLDOWN_MS = 1_000;

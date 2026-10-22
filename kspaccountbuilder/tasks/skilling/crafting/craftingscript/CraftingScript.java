@@ -1,5 +1,7 @@
 package net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.crafting.craftingscript;
 
+import net.runelite.client.plugins.microbot.kspaccountbuilder.KspManagedScript;
+
 import java.awt.event.KeyEvent;
 import java.util.concurrent.TimeUnit;
 import javax.inject.Singleton;
@@ -27,7 +29,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 @Singleton
-public class CraftingScript extends Script
+public class CraftingScript extends KspManagedScript
 {
     private static final Logger log = LoggerFactory.getLogger(CraftingScript.class);
     private static final String BANK_WALK_KEY = "Crafting:bank";

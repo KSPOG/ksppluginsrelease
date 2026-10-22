@@ -1,5 +1,7 @@
 package net.runelite.client.plugins.microbot.kspaccountbuilder.ksputil.experiencelamps;
 
+import net.runelite.client.plugins.microbot.kspaccountbuilder.KspManagedScript;
+
 import java.util.Arrays;
 import java.util.Comparator;
 import java.util.List;
@@ -19,7 +21,7 @@ import net.runelite.client.plugins.microbot.util.widget.Rs2Widget;
 
 @Singleton
 @Slf4j
-public class KspExperienceLampScript extends Script
+public class KspExperienceLampScript extends KspManagedScript
 {
     private static final int LOOP_DELAY_MS = 50;
     private static final long INTERACTION_RECOVERY_MS = 1_500L;
