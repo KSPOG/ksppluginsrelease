@@ -14,6 +14,7 @@ import net.runelite.client.plugins.microbot.breakhandler.BreakHandlerPlugin;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.ksputil.randomevents.KspRandomEventSolver;
 import net.runelite.client.plugins.microbot.util.antiban.Rs2AntibanSettings;
 import net.runelite.client.ui.overlay.OverlayManager;
+import net.runelite.client.input.MouseManager;
 
 import javax.inject.Inject;
 import javax.swing.SwingUtilities;
@@ -38,7 +39,7 @@ import net.runelite.client.ui.NavigationButton;
 @SuppressWarnings("unused")
 public class KspAccountBuilderPlugin extends Plugin
 {
-    public static final String VERSION = "1.9.58";
+    public static final String VERSION = "1.9.59";
 
     @Inject
     private KspAccountBuilderScript script;
@@ -54,6 +55,11 @@ public class KspAccountBuilderPlugin extends Plugin
 
     @Inject
     private OverlayManager overlayManager;
+
+    @Inject
+    private MouseManager mouseManager;
+
+    private KspClassicHudInput hudInput;
 
     @Inject
     private ClientToolbar clientToolbar;
@@ -149,6 +155,11 @@ public class KspAccountBuilderPlugin extends Plugin
                 removePreviousOverlay();
                 overlayManager.add(overlay);
                 UIManager.put(OVERLAY_OWNER_KEY, new Object[]{runtimeOwnerToken, overlay});
+                // Register ahead of ordinary camera/game handlers; only HUD bounds
+                // are consumed. Retire on Stop or SourceLoader hot-unload.
+                hudInput = new KspClassicHudInput(overlay);
+                mouseManager.registerMouseListener(0, hudInput);
+                mouseManager.registerMouseWheelListener(0, hudInput);
                 randomEventSolver = new KspRandomEventSolver();
                 Microbot.getBlockingEventManager().add(randomEventSolver);
                 resetAntibanState();
@@ -372,6 +383,17 @@ public class KspAccountBuilderPlugin extends Plugin
             {
                 try { Microbot.getBlockingEventManager().remove(solver); }
                 catch (Exception ex) { log.warn("Unable to remove random event solver", ex); }
+            }
+            KspClassicHudInput input = hudInput;
+            hudInput = null;
+            if (input != null && mouseManager != null)
+            {
+                try
+                {
+                    mouseManager.unregisterMouseListener(input);
+                    mouseManager.unregisterMouseWheelListener(input);
+                }
+                catch (Exception ex) { log.warn("Unable to unregister Account Builder HUD input", ex); }
             }
             if (overlayManager != null && overlay != null)
             {

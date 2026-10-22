@@ -2,6 +2,10 @@ package net.runelite.client.plugins.microbot.kspaccountbuilder;
 
 import net.runelite.client.plugins.microbot.Microbot;
 import net.runelite.client.game.ItemManager;
+import net.runelite.client.config.ConfigManager;
+import java.awt.Point;
+import java.awt.Rectangle;
+import java.awt.event.MouseEvent;
 import net.runelite.client.ui.overlay.OverlayPanel;
 import net.runelite.client.ui.overlay.OverlayPosition;
 import net.runelite.client.ui.overlay.components.LineComponent;
@@ -19,17 +23,19 @@ public class KSPAccountBuilderOverlay extends OverlayPanel
     private final KspAccountBuilderScript script;
     private final KspAccountBuilderConfig config;
     private final KspArcaneCodexRenderer arcaneCodex;
+    private final KspClassicCinematicHud classic;
 
     @Inject
-    public KSPAccountBuilderOverlay(KspAccountBuilderPlugin plugin, KspAccountBuilderScript script, KspAccountBuilderConfig config, ItemManager itemManager)
+    public KSPAccountBuilderOverlay(KspAccountBuilderPlugin plugin, KspAccountBuilderScript script, KspAccountBuilderConfig config, ItemManager itemManager, ConfigManager configManager)
     {
         super(plugin);
         this.plugin = plugin;
         this.script = script;
         this.config = config;
         this.arcaneCodex = new KspArcaneCodexRenderer(script, config, itemManager);
+        this.classic = new KspClassicCinematicHud(script, config, configManager);
 
-        setPosition(OverlayPosition.TOP_CENTER);
+        setPosition(OverlayPosition.TOP_LEFT);
     }
 
     @Override
@@ -38,6 +44,12 @@ public class KSPAccountBuilderOverlay extends OverlayPanel
         // OverlayManager can retain overlays from an older SourceLoader classloader.
         // Never render stale task state on top of the active Account Builder HUD.
         if (!plugin.mayRenderOverlay()) return null;
+        if (config.classicCinematicOverlay())
+        {
+            panelComponent.getChildren().clear();
+            int canvasWidth = Microbot.getClient() == null ? 800 : Microbot.getClient().getCanvasWidth();
+            return classic.render(graphics, canvasWidth, getBounds());
+        }
         if (config.arcaneCodexOverlay() && arcaneCodex.hasArtwork())
         {
             panelComponent.getChildren().clear();
@@ -128,6 +140,26 @@ public class KSPAccountBuilderOverlay extends OverlayPanel
         }
 
         return super.render(graphics);
+    }
+
+    /** Called exclusively by a registered RuneLite MouseManager listener. */
+    void hudPointer(Point point)
+    {
+        if (config.classicCinematicOverlay()) classic.pointer(point);
+    }
+
+    boolean hudMouseEvent(MouseEvent event)
+    {
+        return config.classicCinematicOverlay()
+                && plugin.mayRenderOverlay()
+                && classic.input(event, getBounds(), true);
+    }
+
+    boolean hudCaptures(Point point)
+    {
+        return config.classicCinematicOverlay()
+                && plugin.mayRenderOverlay()
+                && classic.captures(getBounds(), point);
     }
 
     private String formatDuration(long totalSeconds)
