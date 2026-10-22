@@ -8,6 +8,9 @@ import java.util.*;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 import net.runelite.api.Experience;
+import net.runelite.api.InventoryID;
+import net.runelite.api.Item;
+import net.runelite.api.ItemContainer;
 import net.runelite.api.Skill;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.plugins.microbot.Microbot;
@@ -163,7 +166,7 @@ final class KspClassicCinematicHud
             case "effects":
                 configManager.setConfiguration(KspAccountBuilderConfig.CONFIG_GROUP, "classicAnimations", !config.classicAnimations());
                 break;
-            case "Status": case "Skills": case "Tasks": page = action; showSettings = false; break;
+            case "Status": case "Skills": case "Quests": case "Items": case "Tasks": page = action; showSettings = false; break;
             default: break;
         }
     }
@@ -209,14 +212,14 @@ final class KspClassicCinematicHud
     {
         int sceneX=113,sceneY=47,sceneW=307,sceneH=193;
         panel(g,13,45,94,217);
-        String[] nav={"Status","Skills","Tasks"};
+        String[] nav={"Status","Skills","Quests","Items","Tasks"};
         for(int i=0;i<nav.length;i++)
         {
             String label=nav[i];
-            button(g,buttons,label,19,53+i*44,82,35,label,
+            button(g,buttons,label,19,52+i*34,82,29,label,
                     label.equals(page)?new Color(93,68,35):new Color(29,32,34),11);
         }
-        button(g,buttons,"settings",19,190,82,35,"Settings",new Color(37,39,39),10);
+        // Settings are available on the persistent bottom control row.
         if(showSettings)
         {
             paintSettings(g,sceneX,sceneY,sceneW,sceneH,buttons);
@@ -224,6 +227,14 @@ final class KspClassicCinematicHud
         else if("Status".equals(page))
         {
             paintStatus(g,sceneX,sceneY,sceneW,sceneH);
+        }
+        else if("Quests".equals(page))
+        {
+            paintQuests(g,sceneX,sceneY,sceneW,sceneH);
+        }
+        else if("Items".equals(page))
+        {
+            paintItems(g,sceneX,sceneY,sceneW,sceneH);
         }
         else if("Tasks".equals(page))
         {
@@ -300,6 +311,48 @@ final class KspClassicCinematicHud
         field(g,x+14,y+107,"Account playtime",duration(script.getAccountPlayTimeSeconds()),w-28);
         field(g,x+14,y+132,"Next break",script.isAnyBreakActive()?duration(script.getBreakTimeRemainingSeconds()):duration(script.getTimeUntilBreakSeconds()),w-28);
         field(g,x+14,y+157,"Task switching",duration(script.getTimeUntilActivitySwitchSeconds()),w-28);
+    }
+
+    private void paintQuests(Graphics2D g,int x,int y,int w,int h)
+    {
+        panel(g,x,y,w,h);
+        write(g,"QUEST ACTIVITY",x+14,y+27,16,true,PALE,w-25);
+        String current=script.getCurrentTaskName().replace('_',' ');
+        boolean quest="QUEST".equals(module(current).key);
+        field(g,x+14,y+62,"Current",quest?current:"No quest running",w-28);
+        field(g,x+14,y+94,"Quest mode",config.runSingleQuest()?"Single quest":"Automatic",w-28);
+        field(g,x+14,y+126,"Status",shortText(Microbot.status),w-28);
+        write(g,"Quest steps are controlled by Account Builder.",x+14,y+164,10,false,MUTED,w-20);
+    }
+
+    private void paintItems(Graphics2D g,int x,int y,int w,int h)
+    {
+        panel(g,x,y,w,h);
+        write(g,"INVENTORY SUMMARY",x+14,y+27,16,true,PALE,w-25);
+        int slots=-1,stacks=0,items=0;
+        try
+        {
+            ItemContainer inventory=Microbot.getClient()==null?null:
+                    Microbot.getClient().getItemContainer(InventoryID.INVENTORY);
+            if(inventory!=null)
+            {
+                slots=0;
+                for(Item item: inventory.getItems())
+                {
+                    if(item!=null && item.getId()>0)
+                    {
+                        slots++;
+                        items+=Math.max(0,item.getQuantity());
+                        stacks++;
+                    }
+                }
+            }
+        }
+        catch(Exception ignored) { slots=-1; }
+        field(g,x+14,y+62,"Used slots",slots<0?"--":slots+" / 28",w-28);
+        field(g,x+14,y+93,"Item stacks",slots<0?"--":fmt(stacks),w-28);
+        field(g,x+14,y+124,"Total units",slots<0?"--":fmt(items),w-28);
+        write(g,"Reflects the currently loaded inventory only.",x+14,y+164,10,false,MUTED,w-20);
     }
 
     private void paintTasks(Graphics2D g,int x,int y,int w,int h)
