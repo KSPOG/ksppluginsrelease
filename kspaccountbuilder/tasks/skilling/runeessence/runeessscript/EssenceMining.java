@@ -1,5 +1,6 @@
 package net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.runeessence.runeessscript;
 
+import net.runelite.client.plugins.microbot.kspaccountbuilder.KspAccountBuilderPauseGate;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.KspManagedScript;
 
 import java.util.Arrays;
@@ -99,7 +100,7 @@ public class EssenceMining extends KspManagedScript
 
     private void runLoop()
     {
-        if (!super.run() || !Microbot.isLoggedIn())
+        if (KspAccountBuilderPauseGate.isPaused() || !super.run() || !Microbot.isLoggedIn())
         {
             return;
         }
