@@ -18,6 +18,10 @@ import net.runelite.client.ui.overlay.OverlayManager;
 import javax.inject.Inject;
 import javax.swing.SwingUtilities;
 import javax.swing.UIManager;
+import java.awt.Point;
+import java.awt.event.MouseEvent;
+import net.runelite.client.input.MouseManager;
+import net.runelite.client.input.MouseAdapter;
 import java.awt.Color;
 import java.awt.Graphics2D;
 import java.awt.image.BufferedImage;
@@ -56,6 +60,10 @@ public class KspAccountBuilderPlugin extends Plugin
     private OverlayManager overlayManager;
 
     @Inject
+    private MouseManager mouseManager;
+    private boolean hudMouseRegistered;
+
+    @Inject
     private ClientToolbar clientToolbar;
 
     // UIManager lives in the host classloader and survives plugin hot reloads.
@@ -65,6 +73,102 @@ public class KspAccountBuilderPlugin extends Plugin
     private static final String RUNTIME_OWNER_KEY = "ksp.accountbuilder.runtime.owner.v1";
     private static final String OVERLAY_OWNER_KEY = "ksp.accountbuilder.overlay.owner.v1";
     private final Object runtimeOwnerToken = new Object();
+    private final MouseAdapter hudMouseListener = new MouseAdapter()
+    {
+        @Override
+        public MouseEvent mousePressed(MouseEvent e)
+        {
+            if (overlay != null && e.getButton() == MouseEvent.BUTTON1 && overlay.clickAt(e.getPoint()))
+                e.consume();
+            return e;
+        }
+        @Override
+        public MouseEvent mouseReleased(MouseEvent e)
+        {
+            if (overlay != null && overlay.acceptsMouse(e.getPoint())) e.consume();
+            return e;
+        }
+        @Override
+        public MouseEvent mouseClicked(MouseEvent e)
+        {
+            if (overlay != null && overlay.acceptsMouse(e.getPoint())) e.consume();
+            return e;
+        }
+        @Override
+        public MouseEvent mouseMoved(MouseEvent e)
+        {
+            if (overlay != null) overlay.hoverAt(e.getPoint());
+            return e;
+        }
+    };
+    private void registerHudMouse()
+    {
+        if (!hudMouseRegistered && mouseManager != null)
+        {
+            mouseManager.registerMouseListener(hudMouseListener);
+            hudMouseRegistered = true;
+        }
+    }
+    private void unregisterHudMouse()
+    {
+        if (hudMouseRegistered && mouseManager != null)
+        {
+            mouseManager.unregisterMouseListener(hudMouseListener);
+            hudMouseRegistered = false;
+        }
+    }
+
+    void dispatchHudAction(String action, KspCinematicHudRenderer renderer)
+    {
+        if (!mayRenderOverlay()) return;
+        if (action.startsWith("nav:"))
+        {
+            renderer.navigate(action.substring(4));
+            return;
+        }
+        switch (action)
+        {
+            case "minimize": setCompactOverlay(true); return;
+            case "restore": setCompactOverlay(false); return;
+            case "collapse": renderer.toggleCollapsed(); return;
+            case "close":
+                setHudVisible(false);
+                configManager.setConfiguration(KspAccountBuilderConfig.CONFIG_GROUP, "showHud", false);
+                return;
+            case "pause": script.requestManualPause(); return;
+            case "resume": script.requestManualResume(); return;
+            case "stop":
+                configManager.setConfiguration(KspAccountBuilderConfig.CONFIG_GROUP, "runAccountBuilder", false);
+                return;
+            case "skip": script.requestManualSkip(); return;
+            case "settings": case "settings-close": renderer.openSettings(); return;
+            case "queuetip": renderer.openQueue(); return;
+            case "queue-close": renderer.openQueue(); return;
+            case "setting:compact":
+                setCompactOverlay(!isCompactOverlay());
+                configManager.setConfiguration(KspAccountBuilderConfig.CONFIG_GROUP, "compactHud", isCompactOverlay());
+                return;
+            case "setting:details":
+                boolean newDetails = !config.hudDetailsVisible();
+                setOverlayDetailsVisible(newDetails);
+                configManager.setConfiguration(KspAccountBuilderConfig.CONFIG_GROUP, "hudDetailsVisible", newDetails);
+                return;
+            case "setting:visible":
+                setHudVisible(false);
+                configManager.setConfiguration(KspAccountBuilderConfig.CONFIG_GROUP, "showHud", false);
+                return;
+            case "scale-up": case "scale-down":
+                int[] scales = {75, 100, 125, 150};
+                int index = 1;
+                for (int i = 0; i < scales.length; i++)
+                    if (config.hudScalePercent() == scales[i]) index = i;
+                index = Math.max(0, Math.min(scales.length - 1, index + (action.equals("scale-up") ? 1 : -1)));
+                configManager.setConfiguration(KspAccountBuilderConfig.CONFIG_GROUP, "hudScalePercent", scales[index]);
+                return;
+            default: return;
+        }
+    }
+
     private KspAccountBuilderPanel sidePanel;
     private NavigationButton navButton;
     private volatile boolean panelEnabled;
@@ -91,6 +195,7 @@ public class KspAccountBuilderPlugin extends Plugin
         // Always require a fresh Start click after plugin enable or hot reload.
         configManager.setConfiguration(KspAccountBuilderConfig.CONFIG_GROUP, "runAccountBuilder", false);
         panelEnabled = true;
+        registerHudMouse();
         setCompactOverlay(config.compactHud());
         setOverlayDetailsVisible(config.hudDetailsVisible());
         setHudVisible(config.showHud());
@@ -175,6 +280,7 @@ public class KspAccountBuilderPlugin extends Plugin
         // A superseded instance must ignore future config events, which are
         // broadcast to all enabled plugin instances by RuneLite.
         acceptingRuntimeChanges = false;
+        unregisterHudMouse();
         cleanupRuntime("superseded-by-source-loader");
     }
 
@@ -225,6 +331,7 @@ public class KspAccountBuilderPlugin extends Plugin
         boolean wasSidebarOwner = isCurrentSidebarOwner();
         acceptingRuntimeChanges = false;
         panelEnabled = false;
+        unregisterHudMouse();
         cleanupRuntime("plugin-stop");
         if (wasSidebarOwner)
             configManager.setConfiguration(KspAccountBuilderConfig.CONFIG_GROUP, "runAccountBuilder", false);
@@ -236,6 +343,7 @@ public class KspAccountBuilderPlugin extends Plugin
         boolean wasSidebarOwner = isCurrentSidebarOwner();
         acceptingRuntimeChanges = false;
         panelEnabled = false;
+        unregisterHudMouse();
         cleanupRuntime("hot-unload");
         if (wasSidebarOwner)
             configManager.setConfiguration(KspAccountBuilderConfig.CONFIG_GROUP, "runAccountBuilder", false);
