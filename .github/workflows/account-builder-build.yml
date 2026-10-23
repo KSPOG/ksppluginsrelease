@@ -77,9 +77,9 @@ jobs:
           scene = (root / 'ksputil/KspLiveScene.java').read_text()
 
           def ids(name):
-              match = re.search(r'\\b' + name + r'\\s*=\\s*\\{([^}]*)\\}', task)
+              match = re.search(r'\b' + name + r'\s*=\s*\{([^}]*)\}', task)
               assert match, f'Missing portal registry: {name}'
-              return {int(token) for token in re.findall(r'\\d+', match.group(1))}
+              return {int(token) for token in re.findall(r'\d+', match.group(1))}
 
           assert ids('PORTAL_NPC_IDS') == {3086, 3088}, 'Incomplete NPC portal variants'
           assert ids('PORTAL_OBJECT_IDS') == {34774, 34775, 34776, 34777, 34778}, 'Incomplete object portal variants'
