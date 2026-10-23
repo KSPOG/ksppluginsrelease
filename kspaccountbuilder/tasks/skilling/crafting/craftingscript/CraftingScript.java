@@ -1,0 +1,723 @@
+package net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.crafting.craftingscript;
+
+import net.runelite.client.plugins.microbot.kspaccountbuilder.KspManagedScript;
+
+import java.awt.event.KeyEvent;
+import java.util.concurrent.TimeUnit;
+import javax.inject.Singleton;
+import net.runelite.api.Skill;
+import net.runelite.api.coords.WorldPoint;
+import net.runelite.client.plugins.microbot.Microbot;
+import net.runelite.client.plugins.microbot.Script;
+import net.runelite.client.plugins.microbot.api.tileobject.models.Rs2TileObjectModel;
+import net.runelite.client.plugins.microbot.kspaccountbuilder.KspBankMode;
+import net.runelite.client.plugins.microbot.kspaccountbuilder.KspTaskDebug;
+import net.runelite.client.plugins.microbot.kspaccountbuilder.KspWalkerGuard;
+import net.runelite.client.plugins.microbot.kspaccountbuilder.ksputil.KspLiveScene;
+import net.runelite.client.plugins.microbot.kspaccountbuilder.ksputil.KspBankWidgetHelper;
+import net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.crafting.areas.Areas;
+import net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.crafting.clevels.CraftingLevels;
+import net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.crafting.inventory.CraftInventory;
+import net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.crafting.inventory.CraftInventory.Ingredient;
+import net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.crafting.inventory.CraftInventory.RecipeType;
+import net.runelite.client.plugins.microbot.util.bank.Rs2Bank;
+import net.runelite.client.plugins.microbot.util.inventory.Rs2Inventory;
+import net.runelite.client.plugins.microbot.util.keyboard.Rs2Keyboard;
+import net.runelite.client.plugins.microbot.util.player.Rs2Player;
+import net.runelite.client.plugins.microbot.util.widget.Rs2Widget;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+@Singleton
+public class CraftingScript extends KspManagedScript
+{
+    private static final Logger log = LoggerFactory.getLogger(CraftingScript.class);
+    private static final String BANK_WALK_KEY = "Crafting:bank";
+    private static final String FURNACE_WALK_KEY = "Crafting:furnace";
+    private static final int LOOP_DELAY_MS = 100;
+    private static final int WALK_COOLDOWN_MS = 1_000;
+    private static final int FURNACE_SEARCH_RADIUS = 12;
+    private static final int ACTION_COOLDOWN_MS = 100;
+    private static final long PRODUCTION_ACTION_TIMEOUT_MS = 1_500L;
+    private static final long LEATHER_PROGRESS_TIMEOUT_MS = 4_800L;
+    private static final long GEM_START_TIMEOUT_MS = 3_000L;
+    private static final long GEM_PROGRESS_TIMEOUT_MS = 4_800L;
+    private static final long ACTION_DISPATCH_TIMEOUT_MS = 1_500L;
+
+    private volatile CraftingState state = CraftingState.WAITING;
+    private volatile CraftingLevels targetLevel = CraftingLevels.LEATHER_GLOVES;
+    private volatile CraftInventory targetRecipe = CraftInventory.LEATHER_GLOVES;
+    private volatile Areas selectedLeatherArea = Areas.EDGE_BANK;
+    private volatile Areas selectedFurnaceArea = Areas.EDGE_FURNACE;
+    private boolean progressiveCrafting = true;
+    private boolean debugLogging;
+    private long lastActionAtMs;
+    private boolean expectingXpDrop;
+    private boolean leatherBatchActive;
+    private boolean gemBatchActive;
+    private int lastUncutGemCount = -1;
+    private long lastGemProgressAtMs;
+    private boolean gemCombinationPending;
+    private long gemCombinationAtMs;
+    private boolean reverseGemCombine;
+    private int lastLeatherCount = -1;
+    private long lastLeatherProgressAtMs;
+    private boolean bankInventoryReset;
+    private long pendingProductionActionAtMs;
+    private String pendingProductionRecipe;
+    private long pendingWorldActionAtMs;
+    private String pendingWorldAction;
+    private long pendingInventoryActionAtMs;
+    private String pendingInventoryItem;
+    private int pendingInventoryBeforeCount = -1;
+
+    public boolean run() { return run(CraftingLevels.LEATHER_GLOVES, true); }
+
+    public boolean run(CraftingLevels fallbackLevel) { return run(fallbackLevel, true); }
+
+    public boolean run(CraftingLevels selectedLevel, boolean progressiveCrafting)
+    {
+        shutdown();
+        this.progressiveCrafting = progressiveCrafting;
+        targetLevel = selectedLevel == null ? CraftingLevels.LEATHER_GLOVES : selectedLevel;
+        targetRecipe = CraftInventory.valueOf(targetLevel.name());
+        selectedLeatherArea = Areas.randomLeatherArea();
+        selectedFurnaceArea = Areas.randomFurnaceArea();
+        debug("Selected Crafting areas | leather={} furnace={}",
+                selectedLeatherArea.getDisplayName(), selectedFurnaceArea.getDisplayName());
+        state = CraftingState.CHECKING_RESOURCES;
+
+        mainScheduledFuture = scheduledExecutorService.scheduleWithFixedDelay(() ->
+        {
+            if (!super.run() || !Microbot.isLoggedIn())
+            {
+                return;
+            }
+
+            if (isLeatherBatchActive() || isGemBatchActive()) return;
+
+            // Finish any open production dialogue before selecting a new recipe,
+            // walking to a bank, or dispatching another inventory Use click.
+            if (isCraftingProductionWidgetOpen(targetRecipe))
+            {
+                selectProductAndMakeAll(targetRecipe);
+                return;
+            }
+
+            if (this.progressiveCrafting)
+            {
+                selectTargetRecipe();
+            }
+            KspTaskDebug.throttled(log, debugLogging, "Crafting", "loop", 5_000L,
+                    "loop | state={} recipe={} player={} moving={} animating={} interacting={} bankOpen={} leatherArea={} furnaceArea={}",
+                    state,
+                    targetLevel.getDisplayName(),
+                    Rs2Player.getWorldLocation(),
+                    Rs2Player.isMoving(),
+                    Rs2Player.isAnimating(),
+                    Rs2Player.isInteracting(),
+                    Rs2Bank.isOpen(),
+                    selectedLeatherArea.getDisplayName(),
+                    selectedFurnaceArea.getDisplayName());
+
+            if (!hasRequiredInventory(targetRecipe))
+            {
+                state = CraftingState.BANKING;
+                prepareInventory(targetRecipe);
+                return;
+            }
+
+            if (Rs2Bank.isOpen())
+            {
+                bankInventoryReset = false;
+                Rs2Bank.closeBank();
+                return;
+            }
+
+            if (targetRecipe.requiresFurnace())
+            {
+                if (!ensureInArea(selectedFurnaceArea, FURNACE_WALK_KEY))
+                {
+                    state = CraftingState.WALKING_TO_FURNACE;
+                    return;
+                }
+
+                state = CraftingState.CRAFTING_AT_FURNACE;
+                craftAtFurnace(targetRecipe);
+                return;
+            }
+
+            Areas inventoryCraftArea = targetRecipe.getRecipeType() == RecipeType.LEATHER
+                    ? selectedLeatherArea
+                    : Areas.EDGE_BANK;
+            if (!ensureInArea(inventoryCraftArea, BANK_WALK_KEY))
+            {
+                state = CraftingState.WALKING_TO_BANK;
+                return;
+            }
+
+            state = targetRecipe.getRecipeType() == RecipeType.LEATHER
+                    ? CraftingState.CRAFTING_LEATHER
+                    : CraftingState.CUTTING_GEMS;
+            craftFromInventory(targetRecipe);
+        }, 0L, LOOP_DELAY_MS, TimeUnit.MILLISECONDS);
+
+        return true;
+    }
+
+    public void setDebugLogging(boolean debugLogging) { this.debugLogging = debugLogging; }
+
+    private void selectTargetRecipe()
+    {
+        int craftingLevel = Microbot.getClient().getRealSkillLevel(Skill.CRAFTING);
+        CraftingLevels[] levels = CraftingLevels.values();
+        for (int index = levels.length - 1; index >= 0; index--)
+        {
+            CraftingLevels candidateLevel = levels[index];
+            if (craftingLevel < candidateLevel.getRequiredLevel())
+            {
+                continue;
+            }
+
+            CraftInventory candidateRecipe = CraftInventory.valueOf(candidateLevel.name());
+            if (!hasRecipeResources(candidateRecipe))
+            {
+                continue;
+            }
+
+            if (targetLevel != candidateLevel)
+            {
+                targetLevel = candidateLevel;
+                targetRecipe = candidateRecipe;
+                expectingXpDrop = false;
+                bankInventoryReset = false;
+                debug("Selected crafting recipe {} at level {}",
+                        targetLevel.getDisplayName(), craftingLevel);
+            }
+            return;
+        }
+
+        CraftInventory fallbackRecipe = CraftInventory.valueOf(targetLevel.name());
+        targetRecipe = fallbackRecipe;
+    }
+
+    private boolean hasRecipeResources(CraftInventory recipe)
+    {
+        for (Ingredient ingredient : recipe.getIngredients())
+        {
+            int available = Rs2Inventory.count(ingredient.getItemName())
+                    + Math.max(0, Rs2Bank.count(ingredient.getItemName()));
+            if (available < ingredient.getAmount())
+            {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private boolean hasRequiredInventory(CraftInventory recipe)
+    {
+        for (Ingredient ingredient : recipe.getIngredients())
+        {
+            if (Rs2Inventory.count(ingredient.getItemName()) < ingredient.getAmount())
+            {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private void prepareInventory(CraftInventory recipe)
+    {
+        expectingXpDrop = false;
+        clearLeatherBatch();
+
+        if (!Rs2Bank.isOpen())
+        {
+            state = CraftingState.WALKING_TO_BANK;
+            Microbot.status = "Walking to nearest bank";
+            if (!Rs2Player.isMoving())
+            {
+                if (!isWorldActionPending("open-bank") && Rs2Bank.openBank())
+                {
+                    markWorldAction("open-bank");
+                }
+                else
+                {
+                    Rs2Bank.walkToBankAndUseBank();
+                }
+            }
+            return;
+        }
+
+        if (KspBankWidgetHelper.closeBankTutorialOverlayIfOpen()
+                || !KspBankMode.ensureWithdrawAsItem())
+        {
+            return;
+        }
+
+        if (!bankInventoryReset)
+        {
+            Rs2Bank.depositAll();
+            bankInventoryReset = true;
+            return;
+        }
+
+        for (Ingredient ingredient : recipe.getIngredients())
+        {
+            int desired = resolveWithdrawAmount(recipe, ingredient);
+            int current = Rs2Inventory.count(ingredient.getItemName());
+            if (current >= desired) continue;
+
+            int amount = desired - current;
+            if (amount <= 0 || Rs2Bank.count(ingredient.getItemName()) <= 0)
+            {
+                Microbot.status = "Missing crafting item: " + ingredient.getItemName();
+                return;
+            }
+
+            if (!isInventoryActionPending()
+                    && withdraw(ingredient.getItemName(), amount)) {
+                markInventoryAction(ingredient.getItemName(), current);
+            }
+            return;
+        }
+
+        if (!hasRequiredInventory(recipe)) return;
+
+        bankInventoryReset = false;
+        Rs2Bank.closeBank();
+    }
+
+    private int resolveWithdrawAmount(CraftInventory recipe, Ingredient ingredient)
+    {
+        if (ingredient.isReusable())
+        {
+            return ingredient.getAmount();
+        }
+
+        Ingredient[] ingredients = recipe.getIngredients();
+        int reusableSlots = 0;
+        int consumableTypes = 0;
+        for (Ingredient candidate : ingredients)
+        {
+            if (candidate.isReusable())
+            {
+                reusableSlots += candidate.getAmount();
+            }
+            else
+            {
+                consumableTypes++;
+            }
+        }
+
+        int bankCount = Math.max(0, Rs2Bank.count(ingredient.getItemName()));
+        if (consumableTypes == 1)
+        {
+            return Math.min(28 - reusableSlots, bankCount);
+        }
+        return Math.min(ingredient.getAmount(), bankCount);
+    }
+
+    private boolean withdraw(String itemName, int amount)
+    {
+        return amount == 1
+                ? Rs2Bank.withdrawOne(itemName)
+                : Rs2Bank.withdrawX(itemName, amount);
+    }
+
+    private boolean ensureInArea(Areas area, String walkKey)
+    {
+        WorldPoint playerLocation = Rs2Player.getWorldLocation();
+        if (area.getArea().contains(playerLocation))
+        {
+            KspWalkerGuard.clear(walkKey);
+            return true;
+        }
+
+        Microbot.status = "Walking to " + area.getDisplayName();
+        KspWalkerGuard.walkToDestination(
+                walkKey,
+                area.getArea()::getRandomPoint,
+                area.getArea()::contains,
+                2,
+                WALK_COOLDOWN_MS);
+        return false;
+    }
+
+    private void craftFromInventory(CraftInventory recipe)
+    {
+        if (isCraftingProductionWidgetOpen(recipe))
+        {
+            selectProductAndMakeAll(recipe);
+            return;
+        }
+
+        if (isProductionActionPending(recipe)) return;
+        if (isWorldActionPending("combine") || !canStartAction()) return;
+
+        Ingredient tool = recipe.getTool();
+        Ingredient material = getFirstConsumable(recipe);
+        if (tool == null || material == null) return;
+
+        Microbot.status = "Crafting " + targetLevel.getDisplayName();
+        if (recipe.getRecipeType() == RecipeType.GEM_CUTTING)
+        {
+            // A successful combine dispatch can still leave the inventory
+            // waiting for the second click. Verify the resulting interface
+            // or consumed gems before attempting another combination.
+            long now = System.currentTimeMillis();
+            if (gemCombinationPending)
+            {
+                if (now - gemCombinationAtMs < GEM_START_TIMEOUT_MS)
+                {
+                    Microbot.status = "Waiting for chisel and uncut gem interaction";
+                    return;
+                }
+                gemCombinationPending = false;
+                reverseGemCombine = !reverseGemCombine;
+                debug("Gem combination produced no progress; reversing item order | recipe={}", recipe);
+            }
+            String first = reverseGemCombine ? material.getItemName() : tool.getItemName();
+            String second = reverseGemCombine ? tool.getItemName() : material.getItemName();
+            if (Rs2Inventory.combine(first, second))
+            {
+                lastActionAtMs = now;
+                gemCombinationAtMs = now;
+                gemCombinationPending = true;
+                markWorldAction("combine");
+            }
+            return;
+        }
+
+        if (Rs2Inventory.combine(tool.getItemName(), material.getItemName()))
+        {
+            lastActionAtMs = System.currentTimeMillis();
+            markWorldAction("combine");
+        }
+    }
+
+    private void craftAtFurnace(CraftInventory recipe)
+    {
+        if (isCraftingProductionWidgetOpen(recipe))
+        {
+            selectProductAndMakeAll(recipe);
+            return;
+        }
+
+        if (isProductionActionPending(recipe)) return;
+        if (isWorldActionPending("furnace") || !canStartAction()) return;
+
+        Rs2TileObjectModel furnace = findFurnace();
+        if (furnace == null)
+        {
+            Microbot.status = "Waiting for " + selectedFurnaceArea.getDisplayName();
+            if (KspLiveScene.interact("Furnace", Rs2Player.getWorldLocation(), FURNACE_SEARCH_RADIUS, "Smelt")) {
+                lastActionAtMs = System.currentTimeMillis();
+                markWorldAction("furnace");
+            }
+            return;
+        }
+
+        Microbot.status = "Crafting " + targetLevel.getDisplayName();
+        if (furnace.click("Smelt")) {
+            lastActionAtMs = System.currentTimeMillis();
+            markWorldAction("furnace");
+        }
+    }
+
+    private void selectProductAndMakeAll(CraftInventory recipe)
+    {
+        if (!isCraftingProductionWidgetOpen(recipe) || isProductionActionPending(recipe)) return;
+        if (Rs2Player.isAnimating()) {
+            clearProductionAction();
+            return;
+        }
+
+        boolean selected = Rs2Widget.clickWidget(recipe.getProductName(), true)
+                || Rs2Widget.clickWidget(recipe.getProductName(), false);
+
+        if (!selected && recipe.getRecipeType() != RecipeType.GEM_CUTTING)
+        {
+            debug("Could not select crafting product {}", recipe.getProductName());
+            return;
+        }
+        // For gem cutting the production interface may default to the
+        // correct gem. Space confirms Make-All, but only with a live widget.
+        // Never send Space after a failed inventory-only combine.
+        if (recipe.getRecipeType() == RecipeType.GEM_CUTTING
+                && !isCraftingProductionWidgetOpen(recipe)) return;
+
+        markProductionAction(recipe);
+        Rs2Keyboard.keyPress(KeyEvent.VK_SPACE);
+        expectingXpDrop = true;
+        lastActionAtMs = System.currentTimeMillis();
+        if (recipe.getRecipeType() == RecipeType.GEM_CUTTING)
+        {
+            gemCombinationPending = false;
+            reverseGemCombine = false;
+            gemBatchActive = true;
+            Ingredient gem = getFirstConsumable(recipe);
+            lastUncutGemCount = gem == null ? -1 : Rs2Inventory.count(gem.getItemName(), true);
+            lastGemProgressAtMs = lastActionAtMs;
+        }
+        if (recipe.getRecipeType() == RecipeType.LEATHER)
+        {
+            leatherBatchActive = true;
+            lastLeatherCount = Rs2Inventory.count(getFirstConsumable(recipe).getItemName(), true);
+            lastLeatherProgressAtMs = lastActionAtMs;
+        }
+    }
+
+    private boolean isGemBatchActive()
+    {
+        if (!gemBatchActive) return false;
+        Ingredient material = getFirstConsumable(targetRecipe);
+        if (material == null || targetRecipe.getRecipeType() != RecipeType.GEM_CUTTING)
+        {
+            clearGemBatch();
+            return false;
+        }
+        int count = Rs2Inventory.count(material.getItemName(), true);
+        if (Rs2Bank.isOpen() || count <= 0 || !Rs2Inventory.hasItem("Chisel", true))
+        {
+            clearGemBatch();
+            return false;
+        }
+        long now = System.currentTimeMillis();
+        if (Rs2Player.isAnimating() || count < lastUncutGemCount)
+        {
+            lastUncutGemCount = count;
+            lastGemProgressAtMs = now;
+            return true;
+        }
+        if (now - lastGemProgressAtMs < GEM_PROGRESS_TIMEOUT_MS) return true;
+        clearGemBatch();
+        return false;
+    }
+
+    private void clearGemBatch()
+    {
+        gemBatchActive = false;
+        lastUncutGemCount = -1;
+        lastGemProgressAtMs = 0L;
+    }
+
+    private boolean isLeatherBatchActive()
+    {
+        if (!leatherBatchActive) return false;
+
+        Ingredient leather = getFirstConsumable(targetRecipe);
+        int count = leather == null ? 0 : Rs2Inventory.count(leather.getItemName(), true);
+        if (Rs2Bank.isOpen() || Rs2Player.isMoving() || count <= 0
+                || !Rs2Inventory.hasItem("Needle", true)
+                || !Rs2Inventory.hasItem("Thread", true))
+        {
+            clearLeatherBatch();
+            return false;
+        }
+
+        long now = System.currentTimeMillis();
+        if (Rs2Player.isAnimating() || count < lastLeatherCount)
+        {
+            lastLeatherCount = count;
+            lastLeatherProgressAtMs = now;
+            return true;
+        }
+
+        if (Rs2Widget.isProductionWidgetOpen()
+                || now - lastLeatherProgressAtMs >= LEATHER_PROGRESS_TIMEOUT_MS)
+        {
+            clearLeatherBatch();
+            return false;
+        }
+        return true;
+    }
+
+    private void clearLeatherBatch()
+    {
+        leatherBatchActive = false;
+        lastLeatherCount = -1;
+        lastLeatherProgressAtMs = 0L;
+    }
+
+    private boolean isCraftingProductionWidgetOpen(CraftInventory recipe)
+    {
+        if (recipe == null) return false;
+        if (recipe.requiresFurnace())
+        {
+            return Rs2Widget.isGoldCraftingWidgetOpen()
+                    || Rs2Widget.isSilverCraftingWidgetOpen()
+                    || Rs2Widget.findWidget(recipe.getProductName(), null, false) != null;
+        }
+
+        return Rs2Widget.isProductionWidgetOpen()
+                || Rs2Widget.findWidget(recipe.getProductName(), null, false) != null
+                || Rs2Widget.findWidget(targetLevel.getDisplayName(), null, false) != null;
+    }
+
+    private boolean isProductionActionPending(CraftInventory recipe)
+    {
+        if (pendingProductionActionAtMs == 0L || pendingProductionRecipe == null || recipe == null) return false;
+
+        if (Rs2Player.isAnimating())
+        {
+            clearProductionAction();
+            return false;
+        }
+
+        long elapsed = System.currentTimeMillis() - pendingProductionActionAtMs;
+        if (!pendingProductionRecipe.equals(recipe.name()) || elapsed >= PRODUCTION_ACTION_TIMEOUT_MS)
+        {
+            clearProductionAction();
+            return false;
+        }
+
+        return true;
+    }
+
+    private void markProductionAction(CraftInventory recipe)
+    {
+        pendingProductionRecipe = recipe.name();
+        pendingProductionActionAtMs = System.currentTimeMillis();
+    }
+
+    private void clearProductionAction()
+    {
+        pendingProductionActionAtMs = 0L;
+        pendingProductionRecipe = null;
+    }
+
+    private boolean isWorldActionPending(String action)
+    {
+        if (pendingWorldActionAtMs == 0L || pendingWorldAction == null) return false;
+        if (!pendingWorldAction.equals(action)) return false;
+        if (Rs2Player.isMoving() || Rs2Player.isAnimating() || Rs2Player.isInteracting()) return true;
+        if (System.currentTimeMillis() - pendingWorldActionAtMs < ACTION_DISPATCH_TIMEOUT_MS) return true;
+        pendingWorldActionAtMs = 0L;
+        pendingWorldAction = null;
+        return false;
+    }
+
+    private void markWorldAction(String action)
+    {
+        pendingWorldAction = action;
+        pendingWorldActionAtMs = System.currentTimeMillis();
+    }
+
+    private boolean isInventoryActionPending()
+    {
+        if (pendingInventoryActionAtMs == 0L || pendingInventoryItem == null) return false;
+        if (Rs2Inventory.count(pendingInventoryItem) != pendingInventoryBeforeCount) {
+            clearInventoryAction();
+            return false;
+        }
+        if (System.currentTimeMillis() - pendingInventoryActionAtMs < ACTION_DISPATCH_TIMEOUT_MS) return true;
+        clearInventoryAction();
+        return false;
+    }
+
+    private void markInventoryAction(String item, int beforeCount)
+    {
+        pendingInventoryItem = item;
+        pendingInventoryBeforeCount = beforeCount;
+        pendingInventoryActionAtMs = System.currentTimeMillis();
+    }
+
+    private void clearInventoryAction()
+    {
+        pendingInventoryActionAtMs = 0L;
+        pendingInventoryItem = null;
+        pendingInventoryBeforeCount = -1;
+    }
+
+    private boolean canStartAction()
+    {
+        if (Rs2Bank.isOpen())
+        {
+            Rs2Bank.closeBank();
+            return false;
+        }
+        if (Rs2Player.isMoving() || Rs2Player.isAnimating() || Rs2Player.isInteracting())
+        {
+            return false;
+        }
+        return System.currentTimeMillis() - lastActionAtMs >= ACTION_COOLDOWN_MS;
+    }
+
+    private Ingredient getFirstConsumable(CraftInventory recipe)
+    {
+        for (Ingredient ingredient : recipe.getIngredients())
+        {
+            if (!ingredient.isReusable())
+            {
+                return ingredient;
+            }
+        }
+        return null;
+    }
+
+    private Rs2TileObjectModel findFurnace()
+    {
+        WorldPoint playerLocation = Rs2Player.getWorldLocation();
+        if (playerLocation == null)
+        {
+            return null;
+        }
+
+        return Microbot.getClientThread().invoke(() -> Microbot.getRs2TileObjectCache().query()
+                .fromWorldView()
+                .withName("Furnace")
+                .within(playerLocation, FURNACE_SEARCH_RADIUS)
+                .where(object -> object.getWorldLocation() != null
+                        && selectedFurnaceArea.getArea().contains(object.getWorldLocation()))
+                .nearestReachable(FURNACE_SEARCH_RADIUS));
+    }
+
+    private void debug(String message, Object... args)
+    {
+        if (debugLogging)
+        {
+            KspTaskDebug.info(log, true, "Crafting", message, args);
+        }
+    }
+
+    public CraftingState getState() { return state; }
+
+    public CraftingLevels getTargetLevel() { return targetLevel; }
+
+    public CraftInventory getTargetRecipe() { return targetRecipe; }
+
+    @Override
+    public void shutdown()
+    {
+        state = CraftingState.WAITING;
+        clearLeatherBatch();
+        clearGemBatch();
+        gemCombinationPending = false;
+        gemCombinationAtMs = 0L;
+        reverseGemCombine = false;
+        clearProductionAction();
+        pendingWorldActionAtMs = 0L;
+        pendingWorldAction = null;
+        clearInventoryAction();
+        lastActionAtMs = 0L;
+        expectingXpDrop = false;
+        bankInventoryReset = false;
+        KspWalkerGuard.clear(BANK_WALK_KEY);
+        KspWalkerGuard.clear(FURNACE_WALK_KEY);
+        super.shutdown();
+    }
+
+    public enum CraftingState
+    {
+        CHECKING_RESOURCES,
+        BANKING,
+        WALKING_TO_BANK,
+        WALKING_TO_FURNACE,
+        CRAFTING_LEATHER,
+        CUTTING_GEMS,
+        CRAFTING_AT_FURNACE,
+        WAITING
+    }
+}
