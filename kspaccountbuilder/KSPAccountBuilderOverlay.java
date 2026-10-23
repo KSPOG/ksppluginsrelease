@@ -1,7 +1,6 @@
 package net.runelite.client.plugins.microbot.kspaccountbuilder;
 
 import java.awt.*;
-import java.awt.geom.RoundRectangle2D;
 import java.util.Locale;
 import java.util.concurrent.TimeUnit;
 import javax.inject.Inject;
@@ -37,9 +36,9 @@ public class KSPAccountBuilderOverlay extends OverlayPanel
     private final KspAccountBuilderScript script;
     private final KspAccountBuilderConfig config;
     private Skill sampledSkill;
-    private boolean compactMode;
+    private volatile boolean compactMode;
     private volatile boolean hudVisible = true;
-    private boolean detailsVisible = true;
+    private volatile boolean detailsVisible = true;
     private int sampleStartXp = -1;
     private long sampleStartMs;
 
@@ -77,7 +76,7 @@ public class KSPAccountBuilderOverlay extends OverlayPanel
                 return new Dimension((int) Math.ceil(compactWidth * scale), (int) Math.ceil(76 * scale));
             }
             // Do not clip the game on fixed or narrow viewports.
-            int width = compactMode ? Math.min(430, Math.max(260, available - 20)) : Math.min(WIDTH, Math.max(260, available - 20));
+            int width = Math.min(WIDTH, Math.max(260, available - 20));
             int height = width < 440 || !detailsVisible ? 183 : HEIGHT;
             paintFrame(g, 0, 0, width, height);
 
@@ -174,6 +173,12 @@ public class KSPAccountBuilderOverlay extends OverlayPanel
             Client client = Microbot.getClient();
             int xp = client.getSkillExperience(skill);
             int level = client.getRealSkillLevel(skill);
+            if (xp < 0 || level < 1)
+            {
+                g.setFont(new Font("SansSerif", Font.PLAIN, 12));
+                text(g, "Waiting for skill data", x, y + 27, MUTED);
+                return;
+            }
             long now = System.currentTimeMillis();
             if (skill != sampledSkill || xp < sampleStartXp || sampleStartXp < 0
                     || sampleStartMs <= 0L || script.getRuntimeSeconds() == 0L)
@@ -197,7 +202,7 @@ public class KSPAccountBuilderOverlay extends OverlayPanel
             text(g, capped ? "Max level" : formatNumber(xp) + " / " + formatNumber(ceiling) + " XP",
                     x, y + 39, MUTED);
             bar(g, x, y + 48, width, 12, progress, BLUE);
-            text(g, "Session XP: " + formatNumber(gained), x, y + 79, IVORY);
+            text(g, "Tracked XP: " + formatNumber(gained), x, y + 79, IVORY);
             text(g, "XP/hour: " + (hourly == 0L ? "Calculating..." : formatNumber(hourly)),
                     x, y + 98, IVORY);
             String eta = capped ? "Max level" : hourly == 0L ? "Calculating..."
