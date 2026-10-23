@@ -239,8 +239,17 @@ public class KspAccountBuilderPlugin extends Plugin
         }
         switch (action)
         {
-            case "minimize": setCompactOverlay(true); return;
-            case "restore": setCompactOverlay(false); return;
+            case "minimize":
+                // Minimize the large viewport HUD into the real chatbox.
+                configManager.setConfiguration(KspAccountBuilderConfig.CONFIG_GROUP, "hudFitChatbox", true);
+                setCompactOverlay(false);
+                return;
+            case "restore":
+                // The chatbox "Full view" button must actually restore the
+                // full cinematic layout rather than changing an unused flag.
+                configManager.setConfiguration(KspAccountBuilderConfig.CONFIG_GROUP, "hudFitChatbox", false);
+                setCompactOverlay(false);
+                return;
             case "collapse": renderer.toggleCollapsed(); return;
             case "close":
                 setHudVisible(false);
