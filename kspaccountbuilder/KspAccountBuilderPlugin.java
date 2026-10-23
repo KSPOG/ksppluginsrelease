@@ -115,8 +115,12 @@ public class KspAccountBuilderPlugin extends Plugin
         @Override
         public MouseEvent mouseMoved(MouseEvent e)
         {
+            // Update the HUD's own hover state before consuming physical
+            // movement. Otherwise tile/object tooltips and menu targets
+            // continue responding while Block Input is enabled.
             if (javax.swing.SwingUtilities.isEventDispatchThread() && overlay != null)
                 overlay.hoverAt(e.getPoint());
+            if (shouldBlockCanvasInput()) e.consume();
             return e;
         }
     };
