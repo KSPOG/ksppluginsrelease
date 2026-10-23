@@ -64,6 +64,18 @@ public interface KspAccountBuilderConfig extends Config
     default boolean cinematicHud() { return true; }
 
     @ConfigItem(
+            keyName = "hudFitChatbox",
+            name = "Fit cinematic HUD to chatbox",
+            description = "Anchor the cinematic HUD to RuneLite's actual chatbox bounds. Use full-screen mode when disabled.",
+            position = 99,
+            hidden = true
+    )
+    default boolean hudFitChatbox()
+    {
+        return true;
+    }
+
+    @ConfigItem(
             keyName = "hudDetailsVisible",
             name = "Expanded HUD details",
             description = "Show or hide the detailed skill statistics in the in-game HUD",
