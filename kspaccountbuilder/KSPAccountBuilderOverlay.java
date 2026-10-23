@@ -18,7 +18,6 @@ public class KSPAccountBuilderOverlay extends OverlayPanel
     private final KspAccountBuilderPlugin plugin;
     private final KspAccountBuilderScript script;
     private final KspAccountBuilderConfig config;
-    private final KspArcaneCodexRenderer arcaneCodex;
 
     @Inject
     public KSPAccountBuilderOverlay(KspAccountBuilderPlugin plugin, KspAccountBuilderScript script, KspAccountBuilderConfig config, ItemManager itemManager)
@@ -27,7 +26,6 @@ public class KSPAccountBuilderOverlay extends OverlayPanel
         this.plugin = plugin;
         this.script = script;
         this.config = config;
-        this.arcaneCodex = new KspArcaneCodexRenderer(script, config, itemManager);
 
         setPosition(OverlayPosition.TOP_CENTER);
     }
@@ -38,12 +36,6 @@ public class KSPAccountBuilderOverlay extends OverlayPanel
         // OverlayManager can retain overlays from an older SourceLoader classloader.
         // Never render stale task state on top of the active Account Builder HUD.
         if (!plugin.mayRenderOverlay()) return null;
-        if (config.arcaneCodexOverlay() && arcaneCodex.hasArtwork())
-        {
-            panelComponent.getChildren().clear();
-            return arcaneCodex.render(graphics);
-        }
-        // If approved background is missing, show original overlay, not a mockup.
         panelComponent.getChildren().clear();
         panelComponent.setPreferredSize(new Dimension(280, 0));
         String displayStatus = normalizeStatus(Microbot.status);
