@@ -10,6 +10,9 @@ import javax.swing.BorderFactory;
 import javax.swing.Box;
 import javax.swing.BoxLayout;
 import javax.swing.JButton;
+import javax.swing.DefaultListModel;
+import javax.swing.JList;
+import javax.swing.JScrollPane;
 import javax.swing.JCheckBox;
 import javax.swing.JComboBox;
 import javax.swing.JLabel;
@@ -36,6 +39,17 @@ final class KspAccountBuilderPanel extends PluginPanel
     private final ConfigManager configManager;
 
     private final JButton startStop = new JButton();
+    private final JCheckBox useQueue = new JCheckBox("Use ordered work queue");
+    private final JComboBox<String> addQueueTask = new JComboBox<>(KspAccountBuilderTaskQueue.SUPPORTED_TASKS);
+    private final JComboBox<Integer> addQueueSeconds =
+            new JComboBox<>(new Integer[]{60, 180, 300, 600, 1200, 3600});
+    private final DefaultListModel<String> queueListModel = new DefaultListModel<>();
+    private final JList<String> queueList = new JList<>(queueListModel);
+    private final JButton addQueuedTask = new JButton("Add");
+    private final JButton removeQueuedTask = new JButton("Remove");
+    private final JButton queueUp = new JButton("Up");
+    private final JButton queueDown = new JButton("Down");
+    private String lastQueueConfiguration = null;
     private final JLabel status = label();
     private final JLabel task = label();
     private final JLabel runtime = label();
@@ -136,6 +150,48 @@ final class KspAccountBuilderPanel extends PluginPanel
                 configManager.setConfiguration(KspAccountBuilderConfig.CONFIG_GROUP, "singleQuestTask", quest.getSelectedItem());
         });
         content.add(selection);
+        content.add(Box.createVerticalStrut(6));
+
+        JPanel queueSection = section("Ordered task queue (stop to edit)");
+        useQueue.setOpaque(false);
+        useQueue.setForeground(new Color(242, 235, 221));
+        useQueue.setToolTipText("Run the configured sequence instead of automatic random activity selection.");
+        useQueue.addActionListener(e -> {
+            if (!updating)
+                configManager.setConfiguration(KspAccountBuilderConfig.CONFIG_GROUP,
+                        "useOrderedTaskQueue", useQueue.isSelected());
+        });
+        queueSection.add(useQueue);
+        addControl(queueSection, "Task", addQueueTask);
+        addControl(queueSection, "Active work duration (seconds)", addQueueSeconds);
+        addQueuedTask.addActionListener(e -> {
+            if (updating) return;
+            String updated = KspAccountBuilderTaskQueue.append(config.orderedTaskQueue(),
+                    (String) addQueueTask.getSelectedItem(), (Integer) addQueueSeconds.getSelectedItem());
+            configManager.setConfiguration(KspAccountBuilderConfig.CONFIG_GROUP, "orderedTaskQueue", updated);
+            if (!updated.isEmpty())
+                configManager.setConfiguration(KspAccountBuilderConfig.CONFIG_GROUP, "useOrderedTaskQueue", true);
+            refreshQueueList();
+        });
+        removeQueuedTask.addActionListener(e -> {
+            if (updating) return;
+            configManager.setConfiguration(KspAccountBuilderConfig.CONFIG_GROUP, "orderedTaskQueue",
+                    KspAccountBuilderTaskQueue.remove(config.orderedTaskQueue(), queueList.getSelectedIndex()));
+            refreshQueueList();
+        });
+        queueUp.addActionListener(e -> moveQueueSelection(-1));
+        queueDown.addActionListener(e -> moveQueueSelection(1));
+        queueList.setVisibleRowCount(4);
+        queueList.setToolTipText("Select a queued task to reorder or remove. Editing is disabled while running.");
+        queueSection.add(new JScrollPane(queueList));
+        JPanel queueButtons = new JPanel(new GridLayout(1, 4, 3, 0));
+        queueButtons.setOpaque(false);
+        queueButtons.add(addQueuedTask);
+        queueButtons.add(queueUp);
+        queueButtons.add(queueDown);
+        queueButtons.add(removeQueuedTask);
+        queueSection.add(queueButtons);
+        content.add(queueSection);
         content.add(Box.createVerticalStrut(6));
 
         JPanel quick = section("Quick settings");
@@ -273,6 +329,31 @@ final class KspAccountBuilderPanel extends PluginPanel
         }
     }
 
+    private void moveQueueSelection(int direction)
+    {
+        if (updating) return;
+        int index = queueList.getSelectedIndex();
+        String current = config.orderedTaskQueue();
+        String updated = KspAccountBuilderTaskQueue.move(current, index, direction);
+        if (current.equals(updated)) return;
+        configManager.setConfiguration(KspAccountBuilderConfig.CONFIG_GROUP, "orderedTaskQueue", updated);
+        refreshQueueList();
+        queueList.setSelectedIndex(Math.max(0, index + direction));
+    }
+
+    private void refreshQueueList()
+    {
+        String raw = config.orderedTaskQueue();
+        if (raw.equals(lastQueueConfiguration)) return;
+        int selected = queueList.getSelectedIndex();
+        queueListModel.clear();
+        for (KspAccountBuilderTaskQueue.Entry task : KspAccountBuilderTaskQueue.parse(raw))
+            queueListModel.addElement(task.toString());
+        lastQueueConfiguration = raw;
+        if (selected >= 0 && queueListModel.size() > 0)
+            queueList.setSelectedIndex(Math.min(selected, queueListModel.size() - 1));
+    }
+
     private void refresh()
     {
         if (!SwingUtilities.isEventDispatchThread()) { SwingUtilities.invokeLater(this::refresh); return; }
@@ -289,6 +370,17 @@ final class KspAccountBuilderPanel extends PluginPanel
         antibanActivity.setToolTipText("Current Account Builder anti-ban activity, when enabled.");
         breakTimer.setText(running ? duration(script.getTimeUntilBreakSeconds()) : "-");
         switchTimer.setText(running ? duration(script.getTimeUntilActivitySwitchSeconds()) : "-");
+
+        refreshQueueList();
+        useQueue.setSelected(config.useOrderedTaskQueue());
+        useQueue.setEnabled(!running);
+        addQueueTask.setEnabled(!running);
+        addQueueSeconds.setEnabled(!running);
+        queueList.setEnabled(!running);
+        addQueuedTask.setEnabled(!running);
+        removeQueuedTask.setEnabled(!running);
+        queueUp.setEnabled(!running);
+        queueDown.setEnabled(!running);
 
         int requested = config.runSingleQuest() ? 2 : config.trainSingleSkill() ? 1 : 0;
         if (mode.getSelectedIndex() != requested) mode.setSelectedIndex(requested);
