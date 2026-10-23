@@ -355,73 +355,83 @@ final class KspCinematicHudRenderer
      * cinematic skill artwork and working controls without covering the
      * game viewport. Do not scale the 1130px display down to unreadable text.
      */
+    /**
+     * Classic Cinematic miniature: preserve the reference composition rather
+     * than replacing its left rail with horizontal tabs. Fixed logical bounds
+     * are scaled uniformly to the actual chatbox by render(Graphics2D,int,int).
+     *
+     * 0..81 navigation | 84..325 live skill scene | 329..493 telemetry.
+     */
     private void paintChatbox(Graphics2D g)
     {
-        // All geometry is inside 500x174 logical coordinates. The actual
-        // chat-container widget supplies the scaling and canvas placement.
         ornamentalFrame(g, 0, 0, CHAT_W, CHAT_H);
-        // All five Full HUD sections are accessible without enlarging the
-        // surface. Navigation occupies the title rail, not the skill scene.
+        g.setFont(new Font("Serif", Font.BOLD, 17));
+        ellipsis(g, "KSP Account Builder", 10, 20, 315, BRIGHT);
+        g.setFont(new Font("SansSerif", Font.PLAIN, 10));
+        alignRight(g, time(script.getRuntimeSeconds()), 488, 19, IVORY);
+        rule(g, 8, 28, 492, 28);
+
+        // Reference: persistent left-hand navigation, not a tab toolbar.
+        ornamentalFrame(g, 5, 32, 76, 104);
         String[] pages = {"Status", "Skills", "Quests", "Items", "Settings"};
-        g.setFont(new Font("SansSerif", Font.BOLD, 10));
         for (int i = 0; i < pages.length; i++)
         {
             String page = pages[i];
-            uiButton(g, "nav:" + page, 5 + i * 77, 4, 74, 23, page,
+            uiButton(g, "nav:" + page, 9, 35 + i * 20, 68, 18, page,
                     page.equals(currentPage) ? new Color(96, 65, 13) : RAISED);
         }
-        g.setFont(new Font("SansSerif", Font.PLAIN, 10));
-        alignRight(g, time(script.getRuntimeSeconds()), 489, 19, IVORY);
-        rule(g, 8, 29, 492, 29);
 
         if (settingsOpen || "Settings".equals(currentPage))
         {
-            g.setFont(new Font("Serif", Font.BOLD, 16));
-            label(g, "HUD settings", 13, 47, BRIGHT);
+            // Settings have their own page but maintain the same frame.
+            ornamentalFrame(g, 84, 32, 409, 104);
+            g.setFont(new Font("Serif", Font.BOLD, 14));
+            label(g, "HUD SETTINGS", 92, 48, BRIGHT);
             g.setFont(new Font("SansSerif", Font.PLAIN, 10));
-            toggle(g, "setting:tooltips", 12, 60, config.hudTooltips(), "Tooltips");
-            toggle(g, "setting:animation", 12, 91, config.showSkillAnimations(), "Animations");
-            toggle(g, "setting:block", 235, 60, config.blockGameInput(), "Input blocking");
-            label(g, "Scale: " + config.hudScalePercent() + "%", 251, 109, IVORY);
-            uiButton(g, "scale-down", 366, 91, 48, 32, "−", RAISED);
-            uiButton(g, "scale-up", 428, 91, 48, 32, "+", RAISED);
+            toggle(g, "setting:tooltips", 92, 55, config.hudTooltips(), "Tooltips");
+            toggle(g, "setting:animation", 92, 83, config.showSkillAnimations(), "Animations");
+            toggle(g, "setting:block", 290, 55, config.blockGameInput(), "Block input");
+            label(g, "Scale " + config.hudScalePercent() + "%", 297, 109, IVORY);
+            uiButton(g, "scale-down", 386, 87, 42, 30, "−", RAISED);
+            uiButton(g, "scale-up", 439, 87, 42, 30, "+", RAISED);
         }
         else if (!"Skills".equals(currentPage))
         {
+            // Full-size page details must stay in the content zone, leaving
+            // the reference navigation and action rail fixed in position.
             paintChatboxPage(g);
         }
         else
         {
-            String kind = resolveKind(safe(script.getCurrentTaskName(), "Idle"));
-            ornamentalFrame(g, 7, 32, 318, 104);
-            Shape previousClip = g.getClip();
-            g.clipRect(10, 35, 312, 97);
-            BufferedImage image = sceneArtwork(kind);
-            if (image != null)
-                g.drawImage(image, 10, 35, 312, 97, null);
+            String task = safe(script.getCurrentTaskName(), "Idle");
+            String kind = resolveKind(task);
+            ornamentalFrame(g, 84, 32, 241, 104);
+            Shape clip = g.getClip();
+            g.clipRect(87, 35, 235, 98);
+            BufferedImage artwork = sceneArtwork(kind);
+            if (artwork != null)
+                g.drawImage(artwork, 87, 35, 235, 98, null);
             else
             {
                 g.setColor(new Color(31, 53, 44));
-                g.fillRect(10, 35, 312, 97);
-                g.setFont(HEADING);
-                ellipsis(g, displayKind(kind), 18, 77, 275, BRIGHT);
+                g.fillRect(87, 35, 235, 98);
+                g.setFont(new Font("Serif", Font.BOLD, 18));
+                ellipsis(g, displayKind(kind), 92, 78, 223, BRIGHT);
             }
-            g.setClip(previousClip);
-            // Keep task identity visible above the artwork. Previously the
-            // scene image occupied this entire area without a task heading.
-            g.setColor(new Color(4, 9, 13, 215));
-            g.fillRoundRect(12, 38, 308, 20, 4, 4);
-            g.setFont(new Font("SansSerif", Font.BOLD, 12));
-            String taskName = safe(script.getCurrentTaskName(), "Idle").replace('_', ' ');
-            ellipsis(g, taskName, 19, 52, 292, BRIGHT);
-            g.setColor(new Color(4, 9, 13, 210));
-            g.fillRoundRect(12, 110, 308, 17, 4, 4);
+            g.setClip(clip);
+
+            // Overlay text stays inside the scene and is never drawn over
+            // the statistics panel or the six bottom action buttons.
+            g.setColor(new Color(4, 9, 13, 219));
+            g.fillRoundRect(88, 37, 233, 19, 4, 4);
+            g.setFont(new Font("Serif", Font.BOLD, 12));
+            ellipsis(g, task.replace('_', ' '), 94, 51, 218, BRIGHT);
+
+            g.setColor(new Color(4, 9, 13, 225));
+            g.fillRoundRect(88, 108, 233, 23, 4, 4);
             g.setFont(new Font("SansSerif", Font.PLAIN, 10));
             ellipsis(g, script.isManualPaused() ? "PAUSED · " + script.getOverlayTaskDetail()
-                    : script.getOverlayTaskDetail(), 17, 122, 296, IVORY);
-
-            // The green bar represents an explicit ordered task target only,
-            // never the blue next-skill-level progress.
+                    : script.getOverlayTaskDetail(), 94, 119, 217, IVORY);
             double taskProgress = Double.NaN;
             if (script.hasOrderedQueue())
             {
@@ -430,17 +440,15 @@ final class KspCinematicHudRenderer
                 if (index >= 0 && index < entries.size())
                 {
                     long target = entries.get(index).durationSeconds;
-                    long completed = script.isOrderedQueueComplete() ? target
+                    long elapsed = script.isOrderedQueueComplete() ? target
                             : script.getOrderedElapsedSeconds();
-                    taskProgress = KspAccountBuilderHudMath.taskDurationProgress(completed, target);
+                    taskProgress = KspAccountBuilderHudMath.taskDurationProgress(elapsed, target);
                 }
             }
-            drawBar(g, 15, 129, 302, 4, taskProgress, TASK_GREEN);
+            drawBar(g, 94, 124, 219, 4, taskProgress, TASK_GREEN);
             paintChatboxStats(g, kind);
         }
 
-        // Six real actions, including Skip, all within the visible chatbox.
-        // uiButton chooses font size from its own available width/height.
         uiButton(g, "pause", 5, 141, 84, 27, "Ⅱ Pause", new Color(124, 82, 6));
         uiButton(g, "resume", 92, 141, 84, 27, "▶ Resume", new Color(4, 116, 35));
         uiButton(g, "stop", 179, 141, 76, 27, "■ Stop", new Color(142, 16, 19));
@@ -452,9 +460,9 @@ final class KspCinematicHudRenderer
     /** Full information categories reflowed into the chatbox footprint. */
     private void paintChatboxPage(Graphics2D g)
     {
-        ornamentalFrame(g, 7, 33, 486, 103);
+        ornamentalFrame(g, 84, 33, 409, 103);
         g.setFont(new Font("Serif", Font.BOLD, 15));
-        label(g, currentPage, 15, 49, BRIGHT);
+        label(g, currentPage, 92, 49, BRIGHT);
         g.setFont(new Font("SansSerif", Font.PLAIN, 11));
         String task = safe(script.getCurrentTaskName(), "Idle");
         String detail = safe(script.getOverlayTaskDetail(), "Waiting for a task");
@@ -462,32 +470,32 @@ final class KspCinematicHudRenderer
         {
             case "Status":
                 ellipsis(g, "Execution: " + (script.isManualPaused() ? "Paused"
-                        : plugin.isRuntimeActive() ? "Running" : "Stopped"), 15, 67, 224, IVORY);
-                ellipsis(g, "Task: " + task, 15, 83, 224, IVORY);
-                ellipsis(g, "Action: " + detail, 15, 99, 224, MUTED);
-                label(g, "Account: " + time(script.getAccountPlayTimeSeconds()), 250, 67, IVORY);
-                label(g, "Break: " + time(script.getTimeUntilBreakSeconds()), 250, 83, IVORY);
-                label(g, "Runtime: " + time(script.getRuntimeSeconds()), 250, 99, IVORY);
+                        : plugin.isRuntimeActive() ? "Running" : "Stopped"), 92, 67, 190, IVORY);
+                ellipsis(g, "Task: " + task, 92, 83, 190, IVORY);
+                ellipsis(g, "Action: " + detail, 92, 99, 190, MUTED);
+                label(g, "Account: " + time(script.getAccountPlayTimeSeconds()), 292, 67, IVORY);
+                label(g, "Break: " + time(script.getTimeUntilBreakSeconds()), 292, 83, IVORY);
+                label(g, "Runtime: " + time(script.getRuntimeSeconds()), 292, 99, IVORY);
                 break;
             case "Quests":
-                label(g, "Single quest: " + (config.runSingleQuest() ? "Enabled" : "Disabled"), 15, 70, IVORY);
-                ellipsis(g, "Current task: " + task, 15, 89, 465, IVORY);
-                label(g, "Quest selection: Account Builder sidebar", 15, 109, MUTED);
+                label(g, "Single quest: " + (config.runSingleQuest() ? "Enabled" : "Disabled"), 92, 70, IVORY);
+                ellipsis(g, "Current task: " + task, 92, 89, 386, IVORY);
+                label(g, "Quest selection: Account Builder sidebar", 92, 109, MUTED);
                 break;
             case "Items":
-                ellipsis(g, "Current task: " + task, 15, 70, 465, IVORY);
-                ellipsis(g, "Activity: " + detail, 15, 89, 465, IVORY);
-                label(g, "Inventory, banking and GE: automatic", 15, 109, MUTED);
+                ellipsis(g, "Current task: " + task, 92, 70, 386, IVORY);
+                ellipsis(g, "Activity: " + detail, 92, 89, 386, IVORY);
+                label(g, "Inventory, banking and GE: automatic", 92, 109, MUTED);
                 break;
             case "Queue":
-                label(g, "Mode: " + (script.hasOrderedQueue() ? "Ordered" : "Automatic"), 15, 69, IVORY);
+                label(g, "Mode: " + (script.hasOrderedQueue() ? "Ordered" : "Automatic"), 92, 69, IVORY);
                 label(g, "Position: " + (script.hasOrderedQueue()
                         ? script.getOrderedQueuePosition() + " / " + script.getOrderedQueueSize()
-                        : "—"), 15, 89, IVORY);
-                label(g, "Edit tasks in the RuneLite side panel", 15, 109, MUTED);
+                        : "—"), 92, 89, IVORY);
+                label(g, "Edit tasks in the RuneLite side panel", 92, 109, MUTED);
                 break;
             default:
-                ellipsis(g, task + " · " + detail, 15, 81, 460, IVORY);
+                ellipsis(g, task + " · " + detail, 92, 81, 380, IVORY);
         }
     }
 
