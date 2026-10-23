@@ -38,6 +38,7 @@ public class KSPAccountBuilderOverlay extends OverlayPanel
     private final KspAccountBuilderConfig config;
     private Skill sampledSkill;
     private boolean compactMode;
+    private volatile boolean hudVisible = true;
     private boolean detailsVisible = true;
     private int sampleStartXp = -1;
     private long sampleStartMs;
@@ -56,7 +57,7 @@ public class KSPAccountBuilderOverlay extends OverlayPanel
     @Override
     public Dimension render(Graphics2D graphics)
     {
-        if (!plugin.mayRenderOverlay()) return null;
+        if (!plugin.mayRenderOverlay() || !hudVisible) return null;
 
         Graphics2D g = (Graphics2D) graphics.create();
         try
@@ -146,6 +147,8 @@ public class KSPAccountBuilderOverlay extends OverlayPanel
     }
 
     /** Toggle compact HUD without restarting or modifying the running task. */
+    void setHudVisible(boolean visible) { hudVisible = visible; }
+    boolean isHudVisible() { return hudVisible; }
     void setCompactMode(boolean enabled) { compactMode = enabled; }
     boolean isCompactMode() { return compactMode; }
     void setDetailsVisible(boolean enabled) { detailsVisible = enabled; }
