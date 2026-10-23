@@ -93,6 +93,19 @@ jobs:
           cp "$ASSET" "$DEST/arcane_codex_background.png"
           file "$DEST/arcane_codex_background.png"
 
+      - name: Install optional cinematic artwork resources
+        shell: bash
+        run: |
+          set -euo pipefail
+          SOURCE='release/kspaccountbuilder/cinematic'
+          DEST='hub/src/main/resources/net/runelite/client/plugins/microbot/kspaccountbuilder/cinematic'
+          if test -d "$SOURCE"; then
+            mkdir -p "$DEST"
+            find "$SOURCE" -maxdepth 1 -type f -name '*.png' -exec cp -t "$DEST" {} +
+          else
+            echo "No committed cinematic PNGs; in-client local-artwork directory remains available."
+          fi
+
       - name: Include shared KSP support in Account Builder source set
         shell: python
         run: |
