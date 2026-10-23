@@ -91,6 +91,7 @@ public class KspAccountBuilderPlugin extends Plugin
         // Always require a fresh Start click after plugin enable or hot reload.
         configManager.setConfiguration(KspAccountBuilderConfig.CONFIG_GROUP, "runAccountBuilder", false);
         panelEnabled = true;
+        setCompactOverlay(config.compactHud());
         addSidePanel();
         acceptingRuntimeChanges = true;
         log.info("KSP Account Builder loaded stopped; press Start in sidebar to begin automation");
