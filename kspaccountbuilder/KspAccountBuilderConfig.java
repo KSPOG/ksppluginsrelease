@@ -17,6 +17,17 @@ import net.runelite.client.config.Range;
 public interface KspAccountBuilderConfig extends Config
 {
     String CONFIG_GROUP = "kspaccountbuilder";
+
+    @ConfigItem(keyName = "orderedTaskQueue", name = "Ordered task queue",
+            description = "Optional comma-separated TASK:SECONDS work plan; empty uses original automatic task selection",
+            position = 87, hidden = true)
+    default String orderedTaskQueue() { return ""; }
+
+    @ConfigItem(keyName = "useOrderedTaskQueue", name = "Use ordered queue",
+            description = "Execute configured queue rather than random activity selection",
+            position = 88, hidden = true)
+    default boolean useOrderedTaskQueue() { return false; }
+
     @ConfigItem(keyName = "blockGameInput", name = "Block game input",
             description = "Block gameplay input behind the cinematic overlay; overlay controls remain usable",
             position = 90, hidden = true)
