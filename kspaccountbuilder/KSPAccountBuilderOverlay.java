@@ -11,6 +11,7 @@ import net.runelite.api.Experience;
 import net.runelite.client.game.ItemManager;
 import net.runelite.client.plugins.microbot.Microbot;
 import net.runelite.client.ui.overlay.OverlayPanel;
+import net.runelite.client.ui.overlay.OverlayLayer;
 import net.runelite.client.ui.overlay.OverlayPosition;
 
 /**
@@ -55,13 +56,29 @@ public class KSPAccountBuilderOverlay extends OverlayPanel
         this.config = config;
         this.cinematic = new KspCinematicHudRenderer(plugin, script, config);
         setPosition(OverlayPosition.TOP_CENTER);
+        setLayer(OverlayLayer.ALWAYS_ON_TOP);
+        setMovable(!config.lockHudPosition());
     }
 
     @Override
     public Dimension render(Graphics2D graphics)
     {
         if (!plugin.mayRenderOverlay() || !hudVisible) return null;
-        if (config.cinematicHud()) return cinematic.render(graphics);
+        if (config.cinematicHud())
+        {
+            if (config.blockGameInput() && Microbot.isLoggedIn() && Microbot.getClient() != null)
+            {
+                Graphics2D dim = (Graphics2D) graphics.create();
+                try
+                {
+                    dim.setColor(new Color(0, 0, 0, 112));
+                    dim.fillRect(-getBounds().x, -getBounds().y,
+                            Microbot.getClient().getCanvasWidth(), Microbot.getClient().getCanvasHeight());
+                }
+                finally { dim.dispose(); }
+            }
+            return cinematic.render(graphics);
+        }
 
         Graphics2D g = (Graphics2D) graphics.create();
         try
@@ -152,6 +169,8 @@ public class KSPAccountBuilderOverlay extends OverlayPanel
     }
 
     /** Canvas positions are in RuneLite input coordinates, not UI scale coordinates. */
+    void applyPositionLock(boolean locked) { setMovable(!locked); }
+
     boolean acceptsMouse(Point point)
     {
         return point != null && plugin.mayRenderOverlay() && hudVisible
