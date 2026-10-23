@@ -2,6 +2,12 @@ package net.runelite.client.plugins.microbot.kspaccountbuilder;
 
 import java.awt.*;
 import java.awt.geom.*;
+import java.awt.image.BufferedImage;
+import java.io.InputStream;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import javax.imageio.ImageIO;
 import java.util.*;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
@@ -35,6 +41,8 @@ final class KspCinematicHudRenderer
     private final KspAccountBuilderScript script;
     private final KspAccountBuilderConfig config;
     private final Map<String, Rectangle> hitboxes = new LinkedHashMap<>();
+    private final Map<String, BufferedImage> sceneCache = new HashMap<>();
+    private final Set<String> unavailableScenes = new HashSet<>();
     private String currentPage = "Skills";
     private boolean settingsOpen;
     private boolean queueOpen;
@@ -497,12 +505,56 @@ final class KspCinematicHudRenderer
         label(g, t, x, y, c);
     }
 
+    /**
+     * Read cached local artwork, never network resources from the canvas paint
+     * callback. JAR-bundled artwork is preferred; source-loaded plugins may use
+     * the account-scoped artwork directory. The fallback remains functional.
+     */
+    private BufferedImage sceneArtwork(String kind)
+    {
+        String key = kind.toLowerCase(Locale.ROOT);
+        if (sceneCache.containsKey(key)) return sceneCache.get(key);
+        if (unavailableScenes.contains(key)) return null;
+        String filename = key + ".png";
+        BufferedImage image = null;
+        try (InputStream stream = getClass().getResourceAsStream("cinematic/" + filename))
+        {
+            if (stream != null) image = ImageIO.read(stream);
+        }
+        catch (Exception ignored) { }
+        if (image == null)
+        {
+            String base = System.getProperty("ksp.accountbuilder.artworkRoot",
+                    Paths.get(System.getProperty("user.home"), ".runelite",
+                            "kspaccountbuilder", "artwork").toString());
+            Path file = Paths.get(base, filename);
+            if (Files.isRegularFile(file))
+            {
+                try (InputStream stream = Files.newInputStream(file))
+                {
+                    image = ImageIO.read(stream);
+                }
+                catch (Exception ignored) { }
+            }
+        }
+        if (image != null) sceneCache.put(key, image);
+        else unavailableScenes.add(key);
+        return image;
+    }
+
     private void paintScene(Graphics2D g, String kind)
     {
         // Themed locally rendered scene fallback. Future PNG sprites can replace
         // individual scene layers without replacing any surrounding UI/control.
         Shape oldClip = g.getClip();
         g.setClip(174, 52, 656, 230);
+        BufferedImage artwork = sceneArtwork(kind);
+        if (artwork != null)
+        {
+            g.drawImage(artwork, 174, 52, 656, 230, null);
+            g.setClip(oldClip);
+            return;
+        }
         java.util.Random random = new java.util.Random(kind.hashCode());
         if ("Woodcutting".equals(kind) || "Fishing".equals(kind))
         {
