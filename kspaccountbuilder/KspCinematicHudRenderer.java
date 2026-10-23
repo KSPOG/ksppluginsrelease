@@ -16,6 +16,7 @@ import net.runelite.api.Experience;
 import net.runelite.api.GameState;
 import net.runelite.api.Skill;
 import net.runelite.client.plugins.microbot.Microbot;
+import net.runelite.client.game.SkillIconManager;
 
 /**
  * Reference-composition HUD: independent canvas-rendered components, real
@@ -40,6 +41,8 @@ final class KspCinematicHudRenderer
     private final KspAccountBuilderPlugin plugin;
     private final KspAccountBuilderScript script;
     private final KspAccountBuilderConfig config;
+    private final SkillIconManager skillIcons;
+    private final Map<Skill, BufferedImage> iconCache = new EnumMap<>(Skill.class);
     private final Map<String, Rectangle> hitboxes = new LinkedHashMap<>();
     private final Map<String, BufferedImage> sceneCache = new HashMap<>();
     private final Set<String> unavailableScenes = new HashSet<>();
@@ -64,11 +67,13 @@ final class KspCinematicHudRenderer
     private static final Font SMALL = new Font("SansSerif", Font.PLAIN, 12);
     private static final Font BUTTON = new Font("Serif", Font.BOLD, 19);
 
-    KspCinematicHudRenderer(KspAccountBuilderPlugin plugin, KspAccountBuilderScript script, KspAccountBuilderConfig config)
+    KspCinematicHudRenderer(KspAccountBuilderPlugin plugin, KspAccountBuilderScript script,
+                            KspAccountBuilderConfig config, SkillIconManager skillIcons)
     {
         this.plugin = plugin;
         this.script = script;
         this.config = config;
+        this.skillIcons = skillIcons;
     }
 
     Dimension render(Graphics2D graphics)
@@ -596,9 +601,27 @@ final class KspCinematicHudRenderer
         circle(g, cx, cy, radius, new Color(14, 25, 19));
         g.setColor(BRIGHT); g.setStroke(new BasicStroke(2f));
         g.drawOval(cx - radius, cy - radius, radius * 2, radius * 2);
-        g.setFont(new Font("Serif", Font.BOLD, radius < 20 ? 18 : 27));
-        String symbol = emblem(kind);
-        label(g, symbol, cx - g.getFontMetrics().stringWidth(symbol) / 2, cy + 9, BRIGHT);
+        BufferedImage image = null;
+        Skill skill = skillFor(kind);
+        if (skill != null && skillIcons != null)
+        {
+            try
+            {
+                image = iconCache.computeIfAbsent(skill, skillIcons::getSkillImage);
+            }
+            catch (RuntimeException ignored) { }
+        }
+        if (image != null)
+        {
+            int size = Math.max(20, (int) (radius * 1.35));
+            g.drawImage(image, cx - size / 2, cy - size / 2, size, size, null);
+        }
+        else
+        {
+            g.setFont(new Font("Serif", Font.BOLD, radius < 20 ? 18 : 27));
+            String symbol = emblem(kind);
+            label(g, symbol, cx - g.getFontMetrics().stringWidth(symbol) / 2, cy + 9, BRIGHT);
+        }
     }
 
     private void circle(Graphics2D g, int cx, int cy, int radius, Color fill)
