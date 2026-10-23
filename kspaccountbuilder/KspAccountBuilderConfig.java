@@ -18,6 +18,19 @@ public interface KspAccountBuilderConfig extends Config
 {
     String CONFIG_GROUP = "kspaccountbuilder";
 
+    @ConfigItem(
+            keyName = "compactHud",
+            name = "Compact in-game HUD",
+            description = "Show a narrower Account Builder HUD without changing execution state",
+            position = 98,
+            hidden = true
+    )
+    default boolean compactHud()
+    {
+        return false;
+    }
+
+
 
 
 
