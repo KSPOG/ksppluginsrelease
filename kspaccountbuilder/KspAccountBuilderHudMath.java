@@ -28,6 +28,18 @@ final class KspAccountBuilderHudMath
         return (long) Math.min(Long.MAX_VALUE, Math.ceil(seconds));
     }
 
+    /**
+     * Progress towards an explicit task-duration target. A missing target
+     * is not interchangeable with progress towards the next skill level.
+     */
+    static double taskDurationProgress(long completedSeconds, long targetSeconds)
+    {
+        if (targetSeconds <= 0) return Double.NaN;
+        if (completedSeconds <= 0) return 0.0;
+        return Math.max(0.0, Math.min(1.0,
+                (double) completedSeconds / (double) targetSeconds));
+    }
+
     static int scaledCoordinate(int coordinate, double scale)
     {
         if (!Double.isFinite(scale) || scale <= 0) return -1;
