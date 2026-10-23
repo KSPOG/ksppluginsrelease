@@ -357,10 +357,11 @@ public class EssenceMining extends KspManagedScript
                 status = "Approaching live rune essence object portal";
                 return;
             }
-            int id = liveObject.getId();
+            int sceneId = liveObject.getId();
+            int id = KspLiveScene.resolvedObjectId(liveObject);
             KspTaskDebug.throttled(log, debugLogging, "Rune Essence", "portal-object-found", 5_000L,
-                    "Rune essence portal found | sceneId={} kind={} position={}",
-                    id, liveObject.getClass().getSimpleName(), liveObject.getWorldLocation());
+                    "Rune essence portal found | sceneId={} activeMorphId={} kind={} position={}",
+                    sceneId, id, liveObject.getClass().getSimpleName(), liveObject.getWorldLocation());
             try
             {
                 String action = portalObjectAction(id);
