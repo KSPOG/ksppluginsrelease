@@ -7,7 +7,7 @@ import java.util.concurrent.TimeUnit;
 import javax.inject.Inject;
 import net.runelite.api.Client;
 import net.runelite.api.Skill;
-import net.runelite.client.game.Experience;
+import net.runelite.api.Experience;
 import net.runelite.client.game.ItemManager;
 import net.runelite.client.plugins.microbot.Microbot;
 import net.runelite.client.ui.overlay.OverlayPanel;
