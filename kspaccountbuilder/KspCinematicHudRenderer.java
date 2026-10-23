@@ -453,9 +453,10 @@ final class KspCinematicHudRenderer
                 else if (index == script.getOrderedQueuePosition() - 1)
                     state = script.isManualPaused() ? "Paused" : "Active";
             }
-            String progress = state.equals("Active") || state.equals("Paused")
-                    ? script.getOrderedElapsedSeconds() + " / " + item.durationSeconds + " s"
-                    : "0 / " + item.durationSeconds + " s";
+            long completedSeconds = state.equals("Completed") ? item.durationSeconds
+                    : state.equals("Active") || state.equals("Paused")
+                    ? Math.min(item.durationSeconds, script.getOrderedElapsedSeconds()) : 0L;
+            String progress = completedSeconds + " / " + item.durationSeconds + " s";
             label(g, progress, 557, yy + 18, MUTED);
             alignRight(g, state, 810, yy + 18, state.equals("Active") ? TASK_GREEN : MUTED);
             hot("queue:row:" + index, 308, yy, 513, 27);
@@ -540,6 +541,14 @@ final class KspCinematicHudRenderer
         {
             title = "Skip unavailable"; lines.add("The current mode does not permit a safe task handoff");
         }
+        else if (plugin.isRuntimeActive() && ("queue:add".equals(hover)
+                || "queue:up".equals(hover) || "queue:down".equals(hover)
+                || "queue:remove".equals(hover)))
+        {
+            title = "Queue editing unavailable";
+            lines.add("Stop the Account Builder before editing its task queue.");
+            lines.add("The active queue snapshot stays unchanged.");
+        }
         else if (hover.startsWith("nav:"))
         {
             title = hover.substring(4); lines.add("Open " + hover.substring(4) + " details");
@@ -567,7 +576,10 @@ final class KspCinematicHudRenderer
         inner(g, x, y, w, h);
         boolean enabled = !("pause".equals(key) && script.isManualPaused())
                 && !("resume".equals(key) && !script.isManualPaused())
-                && !("skip".equals(key) && !script.canSkipTask());
+                && !("skip".equals(key) && !script.canSkipTask())
+                && !(("queue:add".equals(key) || "queue:up".equals(key)
+                        || "queue:down".equals(key) || "queue:remove".equals(key))
+                        && plugin.isRuntimeActive());
         Color base = enabled ? fill : new Color(39, 43, 43);
         Paint saved = g.getPaint();
         g.setPaint(new GradientPaint(x, y + 2, base.brighter(),
