@@ -346,9 +346,10 @@ public class EssenceMining extends KspManagedScript
             }
         }
 
-        // Game-object portal variants are selected by proximity, not numeric ID.
-        // A randomly selected portal morph may be any of the five object IDs.
-        TileObject liveObject = KspLiveScene.nearestGameObject(PORTAL_OBJECT_IDS, player, 100);
+        // Portals have five object morph IDs (including 34777). Look across
+        // all TileObject layers and their impostor definitions, not only
+        // Tile.getGameObjects(), which can miss visible portal variants.
+        TileObject liveObject = KspLiveScene.nearestTileObject(PORTAL_OBJECT_IDS, player, 100);
         if (liveObject != null)
         {
             if (Rs2Player.isMoving())
@@ -357,6 +358,9 @@ public class EssenceMining extends KspManagedScript
                 return;
             }
             int id = liveObject.getId();
+            KspTaskDebug.throttled(log, debugLogging, "Rune Essence", "portal-object-found", 5_000L,
+                    "Rune essence portal found | sceneId={} kind={} position={}",
+                    id, liveObject.getClass().getSimpleName(), liveObject.getWorldLocation());
             try
             {
                 String action = portalObjectAction(id);
