@@ -38,6 +38,8 @@ final class KspCinematicHudRenderer
     private String currentPage = "Skills";
     private boolean settingsOpen;
     private boolean queueOpen;
+    private int selectedQueueRow;
+    private int queueScrollOffset;
     private boolean collapsed;
     private double scale = 1;
     private int surfaceWidth;
@@ -325,13 +327,55 @@ final class KspCinematicHudRenderer
     {
         int y = 412;
         ornamentalFrame(g, 295, y, 540, 138);
-        g.setFont(new Font("Serif", Font.BOLD, 20));
-        label(g, "TASK QUEUE", 314, y + 29, BRIGHT);
-        uiButton(g, "queue-close", 800, y + 8, 27, 26, "×", RAISED);
-        g.setFont(BODY);
-        label(g, "The current automation selects tasks dynamically.", 314, y + 65, IVORY);
-        label(g, "Active task: " + safe(script.getCurrentTaskName(), "Idle"), 314, y + 94, MUTED);
-        label(g, "No editable queue exists in the original scheduler.", 314, y + 119, MUTED);
+        g.setFont(new Font("Serif", Font.BOLD, 19));
+        label(g, "TASK QUEUE", 311, y + 25, BRIGHT);
+        boolean editing = !plugin.isRuntimeActive();
+        uiButton(g, "queue:add", 531, y + 7, 106, 30, "+ Add Task", editing ? RAISED : new Color(30, 32, 32));
+        uiButton(g, "queue:up", 644, y + 7, 37, 30, "▲", editing ? RAISED : new Color(30, 32, 32));
+        uiButton(g, "queue:down", 686, y + 7, 37, 30, "▼", editing ? RAISED : new Color(30, 32, 32));
+        uiButton(g, "queue:remove", 727, y + 7, 42, 30, "−", editing ? RAISED : new Color(30, 32, 32));
+        uiButton(g, "queue-close", 794, y + 7, 29, 30, "×", RAISED);
+        List<KspAccountBuilderTaskQueue.Entry> items = plugin.isRuntimeActive()
+                ? script.getOrderedQueueSnapshot()
+                : KspAccountBuilderTaskQueue.parse(config.orderedTaskQueue());
+        int count = items.size();
+        g.setFont(SMALL);
+        if (count == 0)
+        {
+            label(g, "No queued tasks. Add tasks to schedule sequential skilling.", 313, y + 79, IVORY);
+            return;
+        }
+        queueScrollOffset = Math.max(0, Math.min(queueScrollOffset, Math.max(0, count - 3)));
+        for (int visible = 0; visible < 3; visible++)
+        {
+            int index = visible + queueScrollOffset;
+            if (index >= count) break;
+            KspAccountBuilderTaskQueue.Entry item = items.get(index);
+            int yy = y + 44 + visible * 29;
+            g.setColor(index == selectedQueueRow ? new Color(75, 56, 15, 210) : RAISED);
+            g.fillRoundRect(307, yy, 514, 27, 4, 4);
+            g.setColor(GOLD); g.drawRoundRect(307, yy, 514, 27, 4, 4);
+            label(g, (index + 1) + ". " + item.taskName.replace('_', ' '), 319, yy + 18, IVORY);
+            String state = "Queued";
+            if (plugin.isRuntimeActive() && script.hasOrderedQueue())
+            {
+                if (index < script.getOrderedQueuePosition() - 1) state = "Completed";
+                else if (index == script.getOrderedQueuePosition() - 1)
+                    state = script.isManualPaused() ? "Paused" : "Active";
+            }
+            String progress = state.equals("Active") || state.equals("Paused")
+                    ? script.getOrderedElapsedSeconds() + " / " + item.durationSeconds + " s"
+                    : "0 / " + item.durationSeconds + " s";
+            label(g, progress, 557, yy + 18, MUTED);
+            alignRight(g, state, 810, yy + 18, state.equals("Active") ? TASK_GREEN : MUTED);
+            hot("queue:row:" + index, 308, yy, 513, 27);
+        }
+        if (count > 3)
+        {
+            // Page with the same small controls when the queue exceeds three entries.
+            label(g, (queueScrollOffset + 1) + "–" + Math.min(count, queueScrollOffset + 3)
+                    + " / " + count, 762, y + 134, MUTED);
+        }
     }
 
     private void toggle(Graphics2D g, String key, int x, int y, boolean value, String title)
@@ -651,6 +695,9 @@ final class KspCinematicHudRenderer
 
     void openSettings() { settingsOpen = !settingsOpen; }
     void openQueue() { queueOpen = !queueOpen; }
+    int selectedQueueRow() { return selectedQueueRow; }
+    void selectQueueRow(int row) { selectedQueueRow = Math.max(0, row); }
+    void scrollQueue(int direction) { queueScrollOffset = Math.max(0, queueScrollOffset + direction); }
     void toggleCollapsed() { collapsed = !collapsed; if (collapsed) { settingsOpen = false; queueOpen = false; } }
     void navigate(String page) { currentPage = page; if ("Settings".equals(page)) settingsOpen = true; }
 }
