@@ -96,18 +96,17 @@ jobs:
           cp "$ASSET" "$DEST/arcane_codex_background.png"
           file "$DEST/arcane_codex_background.png"
 
-      - name: Install optional cinematic artwork resources
+      - name: Install all cinematic artwork resources
         shell: bash
         run: |
           set -euo pipefail
           SOURCE='release/kspaccountbuilder/cinematic'
           DEST='hub/src/main/resources/net/runelite/client/plugins/microbot/kspaccountbuilder/cinematic'
-          if test -d "$SOURCE"; then
-            mkdir -p "$DEST"
-            find "$SOURCE" -maxdepth 1 -type f -name '*.png' -exec cp -t "$DEST" {} +
-          else
-            echo "No committed cinematic PNGs; in-client local-artwork directory remains available."
-          fi
+          mkdir -p "$DEST"
+          for skill in woodcutting mining fishing runecrafting combat crafting cooking firemaking smithing; do
+            test -s "$SOURCE/$skill.png" || { echo "Missing committed artwork: $skill.png"; exit 1; }
+            cp "$SOURCE/$skill.png" "$DEST/$skill.png"
+          done
 
       - name: Include shared KSP support in Account Builder source set
         shell: python
@@ -154,6 +153,31 @@ jobs:
               artwork = z.read('net/runelite/client/plugins/microbot/kspaccountbuilder/arcane_codex_background.png')
               assert artwork.startswith(bytes.fromhex('89504e470d0a1a0a')), 'Not a valid PNG'
               print(f'Verified Arcane Codex PNG embedded in JAR ({len(artwork)} bytes)')
+          PY
+
+      - name: Verify every cinematic PNG embedded without alteration
+        if: success()
+        shell: bash
+        run: |
+          set -euo pipefail
+          JAR="$(find hub/build/libs -maxdepth 1 -type f -name 'KspAccountBuilderPlugin-*.jar' -print -quit)"
+          test -n "$JAR"
+          python - "$JAR" <<'PY'
+          from pathlib import Path
+          import sys, struct, hashlib, zipfile
+          skills = ('woodcutting', 'mining', 'fishing', 'runecrafting', 'combat',
+                    'crafting', 'cooking', 'firemaking', 'smithing')
+          root = Path('release/kspaccountbuilder/cinematic')
+          prefix = 'net/runelite/client/plugins/microbot/kspaccountbuilder/cinematic/'
+          with zipfile.ZipFile(sys.argv[1]) as artifact:
+              for skill in skills:
+                  source = (root / (skill + '.png')).read_bytes()
+                  baked = artifact.read(prefix + skill + '.png')
+                  assert source == baked, f'{skill}: bundled PNG differs from repository'
+                  assert source[:8] == bytes.fromhex('89504e470d0a1a0a'), f'{skill}: invalid PNG'
+                  assert struct.unpack('>II', source[16:24]) == (1328, 460), f'{skill}: unexpected artwork dimensions'
+                  print(f'Embedded {skill}: {len(baked):,} bytes, sha256={hashlib.sha256(baked).hexdigest()}')
+          print('PASS: all 9 cinematic scenes embedded byte-for-byte')
           PY
 
       - name: Upload Account Builder JAR
