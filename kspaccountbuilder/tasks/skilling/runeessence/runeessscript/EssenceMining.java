@@ -484,7 +484,7 @@ public class EssenceMining extends KspManagedScript
         KspWalkerGuard.clear(WALK_KEY_PORTAL);
         lastActionAtMs = System.currentTimeMillis();
         markWorldAction("portal");
-        status = "Exiting rune essence mine via " + source;
+        status = "Exiting rune essence mine via " + source + " (ID " + id + ")";
         KspTaskDebug.throttled(log, true, "Rune Essence", "portal-dispatch", 1_000L,
                 "Portal action dispatched | source={} id={} status={}", source, id, status);
     }
