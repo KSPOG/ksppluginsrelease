@@ -76,8 +76,8 @@ final class KspCinematicHudRenderer
         int available = Microbot.getClient() == null ? 1130 : Microbot.getClient().getCanvasWidth();
         boolean mini = plugin.isCompactOverlay() || available < 750;
         int contentW = mini ? MINI_W : settingsOpen ? 1395 : FULL_W;
-        if (mini) { settingsOpen = false; queueOpen = false; }
-        int contentH = mini ? MINI_H : queueOpen ? 557 : FULL_H;
+        if (mini) queueOpen = false;
+        int contentH = mini ? (settingsOpen ? 334 : MINI_H) : queueOpen ? 557 : FULL_H;
         // Client canvas coordinates and rendered geometry use the same scale.
         int availableH = Microbot.getClient() == null ? contentH : Microbot.getClient().getCanvasHeight();
         double userScale = Math.max(.75, Math.min(1.5, config.hudScalePercent() / 100.0));
@@ -92,7 +92,11 @@ final class KspCinematicHudRenderer
             g.scale(scale, scale);
             g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
             g.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
-            if (mini) paintMini(g);
+            if (mini)
+            {
+                paintMini(g);
+                if (settingsOpen) paintCompactSettings(g);
+            }
             else paintFull(g);
         }
         finally { g.dispose(); }
@@ -314,6 +318,26 @@ final class KspCinematicHudRenderer
         uiButton(g, "stop", 397, 33, 30, 34, "■", new Color(142, 16, 19));
         uiButton(g, "settings", 432, 33, 30, 34, "⚙", new Color(21, 41, 59));
         uiButton(g, "restore", 467, 33, 26, 34, "▴", RAISED);
+    }
+
+    private void paintCompactSettings(Graphics2D g)
+    {
+        ornamentalFrame(g, 0, 82, 500, 245);
+        g.setFont(new Font("Serif", Font.BOLD, 23));
+        label(g, "⚙ Settings", 16, 109, BRIGHT);
+        uiButton(g, "settings-close", 456, 88, 32, 26, "×", RAISED);
+        toggle(g, "setting:block", 20, 139, config.blockGameInput(), "Block game input");
+        toggle(g, "setting:tooltips", 20, 173, config.hudTooltips(), "Show tooltips");
+        toggle(g, "setting:lock", 20, 207, config.lockHudPosition(), "Lock overlay position");
+        toggle(g, "setting:animation", 20, 241, config.showSkillAnimations(), "Show animations");
+        g.setFont(SMALL);
+        label(g, "Animation:", 235, 139, IVORY);
+        uiButton(g, "animation-mode", 324, 117, 161, 29,
+                config.hudAnimationIntensity() == 0 ? "Off"
+                : config.hudAnimationIntensity() == 1 ? "Subtle" : "Cinematic", RAISED);
+        label(g, "UI scale: " + config.hudScalePercent() + "%", 235, 195, IVORY);
+        uiButton(g, "scale-down", 327, 167, 40, 34, "−", RAISED);
+        uiButton(g, "scale-up", 374, 167, 40, 34, "+", RAISED);
     }
 
     private void paintSettings(Graphics2D g)
