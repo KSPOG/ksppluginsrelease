@@ -1,5 +1,6 @@
 package net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.questing.romeoandjuliet.romeoscript;
 
+import net.runelite.client.plugins.microbot.kspaccountbuilder.KspAccountBuilderPauseGate;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.KspManagedScript;
 
 import java.util.concurrent.TimeUnit;
@@ -103,7 +104,7 @@ public class RomeoScript extends KspManagedScript
 
     private void tick()
     {
-        if (!super.run() || !Microbot.isLoggedIn()) return;
+        if (KspAccountBuilderPauseGate.isPaused() || !super.run() || !Microbot.isLoggedIn()) return;
 
         QuestState questState = Rs2Player.getQuestState(Quest.ROMEO__JULIET);
         int stage = getQuestStage();
