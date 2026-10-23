@@ -153,7 +153,7 @@ final class KspAccountBuilderPanel extends PluginPanel
         content.add(selection);
         content.add(Box.createVerticalStrut(6));
 
-        JPanel queueSection = section("Ordered task queue (stop to edit)");
+        JPanel queueSection = section("Work queue (edit while stopped)");
         useQueue.setOpaque(false);
         useQueue.setForeground(new Color(242, 235, 221));
         useQueue.setToolTipText("Run the configured sequence instead of automatic random activity selection.");
@@ -164,7 +164,7 @@ final class KspAccountBuilderPanel extends PluginPanel
         });
         queueSection.add(useQueue);
         addControl(queueSection, "Task", addQueueTask);
-        addControl(queueSection, "Active work duration (seconds)", addQueueSeconds);
+        addControl(queueSection, "Work duration (seconds)", addQueueSeconds);
         addQueuedTask.addActionListener(e -> {
             if (updating) return;
             String updated = KspAccountBuilderTaskQueue.append(config.orderedTaskQueue(),
@@ -182,15 +182,30 @@ final class KspAccountBuilderPanel extends PluginPanel
         });
         queueUp.addActionListener(e -> moveQueueSelection(-1));
         queueDown.addActionListener(e -> moveQueueSelection(1));
-        queueList.setVisibleRowCount(4);
+        queueList.setVisibleRowCount(3);
+        queueList.setFixedCellHeight(22);
         queueList.setToolTipText("Select a queued task to reorder or remove. Editing is disabled while running.");
-        queueSection.add(new JScrollPane(queueList));
-        JPanel queueButtons = new JPanel(new GridLayout(1, 4, 3, 0));
+        JScrollPane queueScroll = new JScrollPane(queueList,
+                JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED,
+                JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
+        queueScroll.setPreferredSize(new Dimension(190, 76));
+        queueScroll.setMaximumSize(new Dimension(Integer.MAX_VALUE, 76));
+        queueScroll.setAlignmentX(Component.LEFT_ALIGNMENT);
+        queueSection.add(queueScroll);
+        // Two full-width rows keep button labels legible in RuneLite's
+        // approximately 220px sidebar; avoid four truncated 45px buttons.
+        JPanel queueButtons = new JPanel(new GridLayout(2, 2, 4, 4));
+        queueButtons.setMaximumSize(new Dimension(Integer.MAX_VALUE, 57));
         queueButtons.setOpaque(false);
         queueButtons.add(addQueuedTask);
         queueButtons.add(queueUp);
         queueButtons.add(queueDown);
         queueButtons.add(removeQueuedTask);
+        addQueuedTask.setToolTipText("Append the selected task and work duration.");
+        removeQueuedTask.setToolTipText("Remove the selected queued task.");
+        queueUp.setToolTipText("Move the selected task up.");
+        queueDown.setToolTipText("Move the selected task down.");
+        queueSection.add(Box.createVerticalStrut(5));
         queueSection.add(queueButtons);
         content.add(queueSection);
         content.add(Box.createVerticalStrut(6));
@@ -256,7 +271,15 @@ final class KspAccountBuilderPanel extends PluginPanel
         note.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
         note.setAlignmentX(Component.LEFT_ALIGNMENT);
         content.add(note);
-        add(content, BorderLayout.NORTH);
+        // A vertical scrollbar is essential: RuneLite's narrow side panel
+        // must never shrink queue controls or clip their action buttons.
+        JScrollPane sidebarScroll = new JScrollPane(content,
+                JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED,
+                JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
+        sidebarScroll.setBorder(null);
+        sidebarScroll.getVerticalScrollBar().setUnitIncrement(18);
+        sidebarScroll.setBackground(PANEL_DARK);
+        add(sidebarScroll, BorderLayout.CENTER);
 
         timer = new Timer(500, e -> refresh());
         timer.start();
@@ -446,6 +469,7 @@ final class KspAccountBuilderPanel extends PluginPanel
                 new EmptyBorder(6, 6, 6, 6)));
         panel.setAlignmentX(Component.LEFT_ALIGNMENT);
         JLabel label = new JLabel(name);
+        label.setToolTipText(name);
         label.setForeground(ACCENT);
         label.setFont(label.getFont().deriveFont(Font.BOLD));
         label.setAlignmentX(Component.LEFT_ALIGNMENT);
@@ -470,6 +494,7 @@ final class KspAccountBuilderPanel extends PluginPanel
     private static void addControl(JPanel panel, String title, JComboBox<?> control)
     {
         JLabel label = new JLabel(title);
+        label.setToolTipText(title);
         label.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
         label.setAlignmentX(Component.LEFT_ALIGNMENT);
         panel.add(label);
