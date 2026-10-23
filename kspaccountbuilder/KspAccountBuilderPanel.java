@@ -241,7 +241,6 @@ final class KspAccountBuilderPanel extends PluginPanel
                 configManager.setConfiguration(KspAccountBuilderConfig.CONFIG_GROUP,
                         "hudFitChatbox", fitChatbox.isSelected());
         });
-        quick.add(fitChatbox);
 
         addControl(quick, "HUD scale (%)", hudScale);
         hudScale.setToolTipText("Scale the in-game HUD to 75%, 100%, 125%, or 150%.");
@@ -254,7 +253,6 @@ final class KspAccountBuilderPanel extends PluginPanel
         compactHud.setForeground(new Color(242, 235, 221));
         compactHud.addActionListener(e -> { if (!updating) { configManager.setConfiguration(KspAccountBuilderConfig.CONFIG_GROUP, "compactHud", compactHud.isSelected()); plugin.setCompactOverlay(compactHud.isSelected()); } });
         compactHud.setToolTipText("Switch between the full and compact in-game HUD without restarting the current task.");
-        quick.add(compactHud);
         hudDetails.setOpaque(false);
         hudDetails.setForeground(new Color(242, 235, 221));
         hudDetails.setToolTipText("Toggle the skill XP statistics section of the full in-game HUD.");
@@ -266,7 +264,6 @@ final class KspAccountBuilderPanel extends PluginPanel
                 plugin.setOverlayDetailsVisible(hudDetails.isSelected());
             }
         });
-        quick.add(hudDetails);
         breaks.setToolTipText("Enable the configured randomized break schedule.");
         antiban.setToolTipText("Use the existing Account Builder anti-ban profile.");
         skipQuests.setToolTipText("Skip quest tasks during automatic progression.");
