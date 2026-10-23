@@ -19,6 +19,19 @@ public interface KspAccountBuilderConfig extends Config
     String CONFIG_GROUP = "kspaccountbuilder";
 
     @ConfigItem(
+            keyName = "showHud",
+            name = "Show in-game HUD",
+            description = "Show or hide the Account Builder status overlay without stopping automation",
+            position = 97,
+            hidden = true
+    )
+    default boolean showHud()
+    {
+        return true;
+    }
+
+
+    @ConfigItem(
             keyName = "compactHud",
             name = "Compact in-game HUD",
             description = "Show a narrower Account Builder HUD without changing execution state",
