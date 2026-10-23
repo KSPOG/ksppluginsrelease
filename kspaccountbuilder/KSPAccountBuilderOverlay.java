@@ -8,6 +8,8 @@ import net.runelite.api.Client;
 import net.runelite.api.Skill;
 import net.runelite.api.GameState;
 import net.runelite.api.Experience;
+import net.runelite.api.widgets.InterfaceID;
+import net.runelite.api.widgets.Widget;
 import net.runelite.client.game.ItemManager;
 import net.runelite.client.game.SkillIconManager;
 import net.runelite.client.plugins.microbot.Microbot;
@@ -42,6 +44,7 @@ public class KSPAccountBuilderOverlay extends OverlayPanel
     private final KspAccountBuilderConfig config;
     private final KspCinematicHudRenderer cinematic;
     private Skill sampledSkill;
+    private boolean chatboxAnchored;
     private volatile boolean compactMode;
     private volatile boolean hudVisible = true;
     private volatile boolean detailsVisible = true;
@@ -67,6 +70,30 @@ public class KSPAccountBuilderOverlay extends OverlayPanel
     public Dimension render(Graphics2D graphics)
     {
         if (!plugin.mayRenderOverlay() || !hudVisible) return null;
+        if (config.cinematicHud() && config.hudFitChatbox())
+        {
+            Rectangle chat = findChatboxBounds();
+            if (chat != null)
+            {
+                if (!chatboxAnchored)
+                {
+                    setPosition(OverlayPosition.DYNAMIC);
+                    setMovable(false);
+                    chatboxAnchored = true;
+                }
+                Point location = chat.getLocation();
+                if (!location.equals(getPreferredLocation()))
+                    setPreferredLocation(location);
+                return cinematic.render(graphics, chat.width, chat.height);
+            }
+        }
+        if (chatboxAnchored)
+        {
+            setPreferredLocation(null);
+            setPosition(OverlayPosition.TOP_CENTER);
+            setMovable(!config.lockHudPosition());
+            chatboxAnchored = false;
+        }
         if (!config.cinematicHud()) return renderOriginalPanel(graphics);
         if (config.cinematicHud())
         {
@@ -153,6 +180,31 @@ public class KSPAccountBuilderOverlay extends OverlayPanel
         }
     }
 
+    /**
+     * Use RuneLite's chat container for fixed, resizable and modern layouts.
+     * The size is sourced from the active widget, never a hard-coded
+     * guess about the player's chosen interface scaling.
+     */
+    private Rectangle findChatboxBounds()
+    {
+        Client client = Microbot.getClient();
+        if (client == null) return null;
+        int widgetId;
+        if (!client.isResized())
+            widgetId = InterfaceID.Toplevel.CHAT_CONTAINER;
+        else if (client.getTopLevelInterfaceId() == InterfaceID.TOPLEVEL_PRE_EOC)
+            widgetId = InterfaceID.ToplevelPreEoc.CHAT_CONTAINER;
+        else
+            widgetId = InterfaceID.ToplevelOsrsStretch.CHAT_CONTAINER;
+        Widget container = client.getWidget(widgetId);
+        if (container == null || container.isHidden()) return null;
+        Rectangle bounds = container.getBounds();
+        if (bounds == null || bounds.width < 170 || bounds.height < 80) return null;
+        Rectangle canvas = new Rectangle(0, 0, client.getCanvasWidth(), client.getCanvasHeight());
+        Rectangle visible = bounds.intersection(canvas);
+        return visible.width >= 170 && visible.height >= 80 ? visible : null;
+    }
+
     /** Dedicated compact layout; the same script instance supplies all values. */
     private void paintCompact(Graphics2D g, int width)
     {
@@ -223,26 +275,35 @@ public class KSPAccountBuilderOverlay extends OverlayPanel
     }
 
     /** Canvas positions are in RuneLite input coordinates, not UI scale coordinates. */
-    void applyPositionLock(boolean locked) { setMovable(!locked); }
+    void applyPositionLock(boolean locked) { setMovable(!chatboxAnchored && !locked); }
 
-    boolean acceptsMouse(Point point)
+    private boolean insideHud(Point point)
     {
         return point != null && plugin.mayRenderOverlay() && hudVisible
                 && config.cinematicHud() && getBounds().contains(point);
     }
 
+    /** Only interactive controls consume mouse events; artwork never does. */
+    boolean acceptsMouse(Point point)
+    {
+        if (!insideHud(point)) return false;
+        Point relative = new Point(point.x - getBounds().x, point.y - getBounds().y);
+        return cinematic.at(relative) != null;
+    }
+
     boolean clickAt(Point point)
     {
-        if (!acceptsMouse(point)) return false;
+        if (!insideHud(point)) return false;
         Point relative = new Point(point.x - getBounds().x, point.y - getBounds().y);
         String action = cinematic.at(relative);
-        if (action != null) plugin.dispatchHudAction(action, cinematic);
-        return true; // Prevent game click-through anywhere inside the displayed HUD.
+        if (action == null) return false;
+        plugin.dispatchHudAction(action, cinematic);
+        return true;
     }
 
     void hoverAt(Point point)
     {
-        if (acceptsMouse(point))
+        if (insideHud(point))
             cinematic.hover(new Point(point.x - getBounds().x, point.y - getBounds().y));
         else cinematic.hover(null);
     }
