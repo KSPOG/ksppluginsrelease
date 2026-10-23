@@ -218,6 +218,9 @@ public class KspAccountBuilderScript extends KspManagedScript
     private volatile boolean manualPauseApplied;
     private String statusBeforeManualPause;
     private long manualPauseStartedAtMs;
+    // Elapsed runtime excludes intervals explicitly paused by the user.
+    private long runtimePausedAtMs;
+    private long runtimePausedTotalMs;
 
     public boolean isManualPaused() { return manualPaused; }
 
@@ -227,6 +230,7 @@ public class KspAccountBuilderScript extends KspManagedScript
         if (shuttingDown || startedAtMillis <= 0 || manualPaused) return false;
         // Stop future child task ticks immediately but keep their state.
         KspAccountBuilderPauseGate.setPaused(true);
+        runtimePausedAtMs = System.currentTimeMillis();
         manualPaused = true;
         return true;
     }
@@ -234,6 +238,10 @@ public class KspAccountBuilderScript extends KspManagedScript
     public synchronized boolean requestManualResume()
     {
         if (shuttingDown || !manualPaused || orderedComplete) return false;
+        long now = System.currentTimeMillis();
+        if (runtimePausedAtMs > 0L)
+            runtimePausedTotalMs += Math.max(0L, now - runtimePausedAtMs);
+        runtimePausedAtMs = 0L;
         manualPaused = false;
         // A rapid Pause -> Resume can happen before runLoop observes the
         // pause. In that case no timer adjustment is pending: release the
@@ -460,6 +468,8 @@ public class KspAccountBuilderScript extends KspManagedScript
         manualSkipRequested = false;
         manualPauseApplied = false;
         manualPauseStartedAtMs = 0L;
+        runtimePausedAtMs = 0L;
+        runtimePausedTotalMs = 0L;
         statusBeforeManualPause = null;
         currentTask = null;
         taskStarted = false;
@@ -2185,7 +2195,15 @@ public class KspAccountBuilderScript extends KspManagedScript
         return current == null ? "IDLE" : current.name();
     }
 
-    public long getRuntimeSeconds() { return startedAtMillis <= 0L ? 0L : TimeUnit.MILLISECONDS.toSeconds(System.currentTimeMillis() - startedAtMillis); }
+    public synchronized long getRuntimeSeconds()
+    {
+        if (startedAtMillis <= 0L) return 0L;
+        // Freeze immediately on Pause, even before runLoop observes the gate.
+        long clock = manualPaused && runtimePausedAtMs > 0L
+                ? runtimePausedAtMs : System.currentTimeMillis();
+        long elapsed = Math.max(0L, clock - startedAtMillis - runtimePausedTotalMs);
+        return TimeUnit.MILLISECONDS.toSeconds(elapsed);
+    }
     public long getAccountPlayTimeSeconds() { return TimeUnit.MILLISECONDS.toSeconds(accountPlayTimeCache.getPlayTimeMillis(currentAccountHashSnapshot)); }
 
     public long getTimeUntilBreakSeconds()
