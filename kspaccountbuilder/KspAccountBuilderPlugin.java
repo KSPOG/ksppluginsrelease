@@ -139,7 +139,11 @@ public class KspAccountBuilderPlugin extends Plugin
     }
     private boolean mayBlockGameInput()
     {
-        return config != null && config.blockGameInput()
+        // RuneLite's mouse listeners also receive synthetic/plugin-generated
+        // canvas events. Global consumption during automation prevents the
+        // builder's own interactions. Only enable full input blocking while
+        // stopped; during execution the HUD captures its own button hotspots.
+        return config != null && config.blockGameInput() && !isRuntimeActive()
                 && config.cinematicHud() && overlay != null && overlay.isHudVisible()
                 && mayRenderOverlay() && Microbot.isLoggedIn();
     }
