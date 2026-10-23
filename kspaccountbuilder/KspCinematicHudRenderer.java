@@ -38,6 +38,7 @@ final class KspCinematicHudRenderer
     private static final Color TASK_GREEN = new Color(21, 207, 37);
     private static final int FULL_W = 1130, FULL_H = 405;
     private static final int MINI_W = 500, MINI_H = 76;
+    private static final int CHAT_W = 500, CHAT_H = 174;
     private final KspAccountBuilderPlugin plugin;
     private final KspAccountBuilderScript script;
     private final KspAccountBuilderConfig config;
@@ -85,16 +86,28 @@ final class KspCinematicHudRenderer
 
     Dimension render(Graphics2D graphics)
     {
-        int available = Microbot.getClient() == null ? 1130 : Microbot.getClient().getCanvasWidth();
+        return render(graphics, 0, 0);
+    }
+
+    /** Render within the live chat-container bounds when supplied. */
+    Dimension render(Graphics2D graphics, int chatWidth, int chatHeight)
+    {
+        boolean chatbox = chatWidth > 0 && chatHeight > 0;
+        int available = chatbox ? chatWidth :
+                Microbot.getClient() == null ? 1130 : Microbot.getClient().getCanvasWidth();
         boolean mini = plugin.isCompactOverlay() || available < 750;
-        int contentW = mini ? MINI_W : settingsOpen ? 1395 : FULL_W;
-        if (mini) queueOpen = false;
-        int contentH = mini ? (settingsOpen ? 334 : MINI_H) : queueOpen ? 557 : FULL_H;
-        // Client canvas coordinates and rendered geometry use the same scale.
-        int availableH = Microbot.getClient() == null ? contentH : Microbot.getClient().getCanvasHeight();
+        int contentW = chatbox ? CHAT_W : mini ? MINI_W : settingsOpen ? 1395 : FULL_W;
+        if (mini || chatbox) queueOpen = false;
+        int contentH = chatbox ? CHAT_H : mini ? (settingsOpen ? 334 : MINI_H)
+                : queueOpen ? 557 : FULL_H;
+        // RuneLite's chat container bounds are the actual target dimensions.
+        int availableH = chatbox ? chatHeight :
+                Microbot.getClient() == null ? contentH : Microbot.getClient().getCanvasHeight();
         double userScale = Math.max(.75, Math.min(1.5, config.hudScalePercent() / 100.0));
-        scale = Math.min(userScale, Math.min(Math.max(.4, (available - 16.0) / contentW),
-                Math.max(.4, (availableH - 16.0) / contentH)));
+        scale = chatbox
+                ? Math.min(1.5, Math.min(available / (double) contentW, availableH / (double) contentH))
+                : Math.min(userScale, Math.min(Math.max(.4, (available - 16.0) / contentW),
+                        Math.max(.4, (availableH - 16.0) / contentH)));
         surfaceWidth = contentW;
         surfaceHeight = contentH;
         paintingHitboxes.clear();
@@ -104,7 +117,11 @@ final class KspCinematicHudRenderer
             g.scale(scale, scale);
             g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
             g.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
-            if (mini)
+            if (chatbox)
+            {
+                paintChatbox(g);
+            }
+            else if (mini)
             {
                 paintMini(g);
                 if (settingsOpen) paintCompactSettings(g);
@@ -331,6 +348,81 @@ final class KspCinematicHudRenderer
         label(g, "✦ " + caption, 861, y, IVORY);
         g.setFont(SMALL);
         alignRight(g, value, 1102, y, IVORY);
+    }
+
+    /**
+     * Chatbox-specific composition (500x174 logical units). Keeps full
+     * cinematic skill artwork and working controls without covering the
+     * game viewport. Do not scale the 1130px display down to unreadable text.
+     */
+    private void paintChatbox(Graphics2D g)
+    {
+        ornamentalFrame(g, 0, 0, CHAT_W, CHAT_H);
+        g.setFont(new Font("Serif", Font.BOLD, 18));
+        label(g, "KSP Account Builder", 12, 21, BRIGHT);
+        g.setFont(new Font("SansSerif", Font.PLAIN, 10));
+        alignRight(g, time(script.getRuntimeSeconds()), 486, 20, IVORY);
+        rule(g, 8, 27, 492, 27);
+
+        if (settingsOpen)
+        {
+            g.setFont(new Font("Serif", Font.BOLD, 16));
+            label(g, "HUD settings", 15, 51, BRIGHT);
+            toggle(g, "setting:tooltips", 14, 64, config.hudTooltips(), "Show tooltips");
+            toggle(g, "setting:animation", 14, 94, config.showSkillAnimations(), "Animations");
+            g.setFont(SMALL);
+            label(g, "Scale " + config.hudScalePercent() + "%", 285, 81, IVORY);
+            uiButton(g, "scale-down", 390, 56, 35, 30, "−", RAISED);
+            uiButton(g, "scale-up", 433, 56, 35, 30, "+", RAISED);
+            label(g, "Full HUD available from the sidebar", 15, 123, MUTED);
+        }
+        else
+        {
+            String kind = resolveKind(safe(script.getCurrentTaskName(), "Idle"));
+            ornamentalFrame(g, 7, 32, 320, 104);
+            Shape clip = g.getClip();
+            g.clipRect(10, 35, 314, 97);
+            BufferedImage image = sceneArtwork(kind);
+            if (image != null)
+                g.drawImage(image, 10, 35, 314, 97, null);
+            else
+            {
+                g.setColor(new Color(31, 53, 44));
+                g.fillRect(10, 35, 314, 97);
+                g.setFont(HEADING);
+                label(g, displayKind(kind), 18, 77, BRIGHT);
+            }
+            g.setClip(clip);
+            g.setColor(new Color(4, 9, 13, 196));
+            g.fillRect(10, 111, 314, 21);
+            g.setFont(SMALL);
+            ellipsis(g, script.getOverlayTaskDetail(), 17, 126, 295, IVORY);
+
+            ornamentalFrame(g, 332, 32, 161, 104);
+            Skill skill = skillFor(kind);
+            g.setFont(new Font("Serif", Font.BOLD, 16));
+            ellipsis(g, displayKind(kind), 343, 52, 140, BRIGHT);
+            g.setFont(SMALL);
+            if (skill != null && Microbot.getClient() != null
+                    && Microbot.getClient().getGameState() == GameState.LOGGED_IN)
+            {
+                int xp = Microbot.getClient().getSkillExperience(skill);
+                int level = Microbot.getClient().getRealSkillLevel(skill);
+                label(g, "Level " + level, 343, 72, IVORY);
+                double progress = nextLevelProgress(skill);
+                drawBar(g, 341, 81, 141, 11, progress, XP_BLUE);
+            }
+            else label(g, "Progress unavailable", 343, 72, MUTED);
+            label(g, "Task: " + (script.hasOrderedQueue()
+                    ? script.getOrderedQueuePosition() + "/" + script.getOrderedQueueSize()
+                    : "Auto"), 343, 116, IVORY);
+        }
+
+        uiButton(g, "pause", 8, 141, 85, 27, "Ⅱ Pause", new Color(124, 82, 6));
+        uiButton(g, "resume", 101, 141, 85, 27, "▶ Resume", new Color(4, 116, 35));
+        uiButton(g, "stop", 194, 141, 85, 27, "■ Stop", new Color(142, 16, 19));
+        uiButton(g, "settings", 287, 141, 105, 27, "⚙ Settings", new Color(21, 41, 59));
+        uiButton(g, "restore", 400, 141, 92, 27, "Full view", RAISED);
     }
 
     private void paintMini(Graphics2D g)
