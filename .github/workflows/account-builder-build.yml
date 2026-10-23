@@ -62,6 +62,17 @@ jobs:
           test -s release/kspaccountbuilder/KspAccountBuilderPlugin.java
           test -s release/kspaccountbuilder/KspCinematicHudRenderer.java
 
+      - name: Run dependency-free HUD and queue regression checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/ksp-accountbuilder-tests/src /tmp/ksp-accountbuilder-tests/bin
+          cp release/kspaccountbuilder/KspAccountBuilderHudMath.java /tmp/ksp-accountbuilder-tests/src/
+          cp release/kspaccountbuilder/KspAccountBuilderTaskQueue.java /tmp/ksp-accountbuilder-tests/src/
+          cp release/.github/tests/accountbuilder/HudAndQueueRegressionTest.java.txt /tmp/ksp-accountbuilder-tests/src/HudAndQueueRegressionTest.java
+          javac --release 11 -d /tmp/ksp-accountbuilder-tests/bin /tmp/ksp-accountbuilder-tests/src/*.java
+          java -cp /tmp/ksp-accountbuilder-tests/bin net.runelite.client.plugins.microbot.kspaccountbuilder.HudAndQueueRegressionTest
+
       - name: Install KSP Account Builder sources into Hub
         shell: bash
         run: |
