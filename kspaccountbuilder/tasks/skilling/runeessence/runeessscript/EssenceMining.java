@@ -67,8 +67,8 @@ public class EssenceMining extends KspManagedScript
     private int pendingBankEmptySlots = -1;
     private long portalSearchStartedAtMs;
     private int portalFallbackIndex = -1;
-    private EssenceState state = EssenceState.PREPARING;
-    private String status = "Idle";
+    private volatile EssenceState state = EssenceState.PREPARING;
+    private volatile String status = "Idle";
 
     public boolean run()
     {
