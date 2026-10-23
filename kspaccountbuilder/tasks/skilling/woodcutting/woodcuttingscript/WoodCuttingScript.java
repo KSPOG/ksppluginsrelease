@@ -1,5 +1,6 @@
 package net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.woodcutting.woodcuttingscript;
 
+import net.runelite.client.plugins.microbot.kspaccountbuilder.KspAccountBuilderPauseGate;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.KspManagedScript;
 
 import java.util.Arrays;
@@ -102,7 +103,7 @@ public class WoodCuttingScript extends KspManagedScript {
     }
 
     private void runLoopTick() {
-        if (!super.run() || !Microbot.isLoggedIn()) return;
+        if (KspAccountBuilderPauseGate.isPaused() || !super.run() || !Microbot.isLoggedIn()) return;
 
         int woodcuttingLevel = Microbot.getClient().getRealSkillLevel(Skill.WOODCUTTING);
         int attackLevel = Microbot.getClient().getRealSkillLevel(Skill.ATTACK);
