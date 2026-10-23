@@ -64,10 +64,9 @@ final class KspCinematicHudRenderer
     {
         int available = Microbot.getClient() == null ? 1130 : Microbot.getClient().getCanvasWidth();
         boolean mini = plugin.isCompactOverlay() || available < 750;
-        int contentW = mini ? MINI_W : FULL_W;
+        int contentW = mini ? MINI_W : settingsOpen ? 1395 : FULL_W;
         if (mini) { settingsOpen = false; queueOpen = false; }
-        int contentH = mini ? MINI_H : queueOpen ? (settingsOpen ? 801 : 557)
-                : settingsOpen ? 654 : FULL_H;
+        int contentH = mini ? MINI_H : queueOpen ? 557 : FULL_H;
         // Client canvas coordinates and rendered geometry use the same scale.
         int availableH = Microbot.getClient() == null ? contentH : Microbot.getClient().getCanvasHeight();
         double userScale = Math.max(.75, Math.min(1.5, config.hudScalePercent() / 100.0));
@@ -283,33 +282,37 @@ final class KspCinematicHudRenderer
 
     private void paintSettings(Graphics2D g)
     {
-        // Companion panel is placed BELOW the main panel so it never extends
-        // outside the overlay's hit-test bounds.
-        int y = 411;
-        ornamentalFrame(g, 850, y, 271, 240);
-        g.setFont(HEADING);
-        label(g, "⚙ Settings", 869, y + 31, BRIGHT);
-        uiButton(g, "settings-close", 1084, y + 7, 29, 28, "×", RAISED);
-        toggle(g, "setting:visible", 868, y + 60, plugin.isHudVisible(), "Show in-game HUD");
-        toggle(g, "setting:compact", 868, y + 94, plugin.isCompactOverlay(), "Compact mode");
-        toggle(g, "setting:details", 868, y + 128, config.hudDetailsVisible(), "Detailed statistics");
+        // The separate companion panel stays adjacent to the right border.
+        int x = 1146, y = 120;
+        ornamentalFrame(g, x, y, 224, 276);
+        g.setFont(new Font("Serif", Font.BOLD, 23));
+        label(g, "⚙ Settings", x + 16, y + 30, BRIGHT);
+        uiButton(g, "settings-close", x + 190, y + 7, 27, 28, "×", RAISED);
+        toggle(g, "setting:block", x + 16, y + 62, config.blockGameInput(), "Block game input");
+        toggle(g, "setting:tooltips", x + 16, y + 96, config.hudTooltips(), "Show tooltips");
+        toggle(g, "setting:lock", x + 16, y + 130, config.lockHudPosition(), "Lock overlay position");
+        toggle(g, "setting:animation", x + 16, y + 164, config.showSkillAnimations(), "Show skill animations");
         g.setFont(SMALL);
-        label(g, "UI scale: " + config.hudScalePercent() + "%", 869, y + 175, MUTED);
-        uiButton(g, "scale-down", 871, y + 186, 65, 34, "−", RAISED);
-        uiButton(g, "scale-up", 946, y + 186, 65, 34, "+", RAISED);
+        label(g, "Animation intensity:", x + 16, y + 192, IVORY);
+        uiButton(g, "animation-mode", x + 16, y + 198, 190, 26,
+                config.hudAnimationIntensity() == 0 ? "Off" :
+                config.hudAnimationIntensity() == 1 ? "Subtle" : "Cinematic", RAISED);
+        label(g, "UI scale: " + config.hudScalePercent() + "%", x + 16, y + 242, IVORY);
+        uiButton(g, "scale-down", x + 142, y + 231, 30, 31, "−", RAISED);
+        uiButton(g, "scale-up", x + 179, y + 231, 30, 31, "+", RAISED);
     }
 
     private void paintQueue(Graphics2D g)
     {
-        int y = settingsOpen ? 656 : 411;
-        ornamentalFrame(g, 180, y, 654, 140);
-        g.setFont(new Font("Serif", Font.BOLD, 21));
-        label(g, "TASK QUEUE", 196, y + 29, BRIGHT);
-        uiButton(g, "queue-close", 797, y + 7, 29, 25, "×", RAISED);
+        int y = 412;
+        ornamentalFrame(g, 295, y, 540, 138);
+        g.setFont(new Font("Serif", Font.BOLD, 20));
+        label(g, "TASK QUEUE", 314, y + 29, BRIGHT);
+        uiButton(g, "queue-close", 800, y + 8, 27, 26, "×", RAISED);
         g.setFont(BODY);
-        label(g, "The existing builder selects tasks dynamically, not from an editable queue.", 195, y + 66, IVORY);
-        label(g, "Current task: " + safe(script.getCurrentTaskName(), "Idle"), 195, y + 95, MUTED);
-        label(g, "Queue editing is unavailable until a real queue scheduler is integrated.", 195, y + 121, MUTED);
+        label(g, "The current automation selects tasks dynamically.", 314, y + 65, IVORY);
+        label(g, "Active task: " + safe(script.getCurrentTaskName(), "Idle"), 314, y + 94, MUTED);
+        label(g, "No editable queue exists in the original scheduler.", 314, y + 119, MUTED);
     }
 
     private void toggle(Graphics2D g, String key, int x, int y, boolean value, String title)
@@ -322,7 +325,7 @@ final class KspCinematicHudRenderer
 
     private void paintHover(Graphics2D g)
     {
-        if (!config.hudDetailsVisible() || hover.isEmpty()) return;
+        if (!config.hudTooltips() || hover.isEmpty()) return;
         String tooltip = hover.equals("xptip") ? "Live XP • rate measured from task observations"
                 : hover.equals("tasktip") ? "Current task • progress unavailable unless tracked by script"
                 : hover.equals("queuetip") ? "Break schedule • dynamic task selection, no editable queue"
@@ -502,6 +505,16 @@ final class KspCinematicHudRenderer
         {
             g.setColor(new Color(157, 169, 177));
             g.fillPolygon(new int[]{536, 572, 553}, new int[]{175, 157, 192}, 3);
+        }
+        if (config.showSkillAnimations() && config.hudAnimationIntensity() > 0)
+        {
+            long phase = System.currentTimeMillis() / (config.hudAnimationIntensity() > 1 ? 180L : 500L);
+            java.util.Random sparks = new java.util.Random(kind.hashCode() + phase);
+            for (int i = 0; i < (config.hudAnimationIntensity() > 1 ? 9 : 3); i++)
+            {
+                int sx = 530 + sparks.nextInt(80), sy = 135 + sparks.nextInt(100);
+                circle(g, sx, sy, 1 + sparks.nextInt(3), new Color(255, 204, 72, 205));
+            }
         }
         g.setClip(oldClip);
     }
