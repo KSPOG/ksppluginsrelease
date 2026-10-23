@@ -215,7 +215,7 @@ public class KspAccountBuilderScript extends KspManagedScript
 
     private volatile boolean manualPaused;
     private volatile boolean manualSkipRequested;
-    private boolean manualPauseApplied;
+    private volatile boolean manualPauseApplied;
     private long manualPauseStartedAtMs;
 
     public boolean isManualPaused() { return manualPaused; }
@@ -234,6 +234,10 @@ public class KspAccountBuilderScript extends KspManagedScript
     {
         if (shuttingDown || !manualPaused || orderedComplete) return false;
         manualPaused = false;
+        // A rapid Pause -> Resume can happen before runLoop observes the
+        // pause. In that case no timer adjustment is pending: release the
+        // gate immediately instead of leaving child scripts frozen forever.
+        if (!manualPauseApplied) KspAccountBuilderPauseGate.setPaused(false);
         return true;
     }
 
