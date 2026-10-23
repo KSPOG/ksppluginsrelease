@@ -87,25 +87,25 @@ public class KspAccountBuilderPlugin extends Plugin
         {
             if (overlay != null && e.getButton() == MouseEvent.BUTTON1 && overlay.clickAt(e.getPoint()))
                 e.consume();
-            else if (mayBlockGameInput()) e.consume();
+            else if (shouldBlockCanvasInput()) e.consume();
             return e;
         }
         @Override
         public MouseEvent mouseReleased(MouseEvent e)
         {
-            if (mayBlockGameInput() || overlay != null && overlay.acceptsMouse(e.getPoint())) e.consume();
+            if (shouldBlockCanvasInput() || overlay != null && overlay.acceptsMouse(e.getPoint())) e.consume();
             return e;
         }
         @Override
         public MouseEvent mouseClicked(MouseEvent e)
         {
-            if (overlay != null && overlay.acceptsMouse(e.getPoint())) e.consume();
+            if (shouldBlockCanvasInput() || overlay != null && overlay.acceptsMouse(e.getPoint())) e.consume();
             return e;
         }
         @Override
         public MouseEvent mouseDragged(MouseEvent e)
         {
-            if (mayBlockGameInput() || overlay != null && overlay.acceptsMouse(e.getPoint())) e.consume();
+            if (shouldBlockCanvasInput() || overlay != null && overlay.acceptsMouse(e.getPoint())) e.consume();
             return e;
         }
         @Override
@@ -119,7 +119,7 @@ public class KspAccountBuilderPlugin extends Plugin
     {
         @Override public MouseWheelEvent mouseWheelMoved(MouseWheelEvent e)
         {
-            if (mayBlockGameInput()) e.consume();
+            if (shouldBlockCanvasInput()) e.consume();
             return e;
         }
     };
@@ -131,7 +131,7 @@ public class KspAccountBuilderPlugin extends Plugin
     };
     private void interceptKey(KeyEvent e)
     {
-        if (!mayBlockGameInput()) return;
+        if (!shouldBlockCanvasInput()) return;
         // Emergency unlock, including when companion UI is unreachable.
         if (e.getID() == KeyEvent.KEY_PRESSED && e.getKeyCode() == KeyEvent.VK_ESCAPE)
             configManager.setConfiguration(KspAccountBuilderConfig.CONFIG_GROUP, "blockGameInput", false);
@@ -139,13 +139,20 @@ public class KspAccountBuilderPlugin extends Plugin
     }
     private boolean mayBlockGameInput()
     {
-        // RuneLite's mouse listeners also receive synthetic/plugin-generated
-        // canvas events. Global consumption during automation prevents the
-        // builder's own interactions. Only enable full input blocking while
-        // stopped; during execution the HUD captures its own button hotspots.
-        return config != null && config.blockGameInput() && !isRuntimeActive()
-                && config.cinematicHud() && overlay != null && overlay.isHudVisible()
+        // This setting protects automation from accidental physical input
+        // even while the Builder is running or the HUD is hidden.
+        return config != null && config.blockGameInput()
                 && mayRenderOverlay() && Microbot.isLoggedIn();
+    }
+
+    private boolean shouldBlockCanvasInput()
+    {
+        // Normal OS input is delivered through the AWT event dispatch thread.
+        // Microbot's direct Canvas.dispatchEvent automation generally runs on
+        // its script thread. Do not consume those script-thread events.
+        // Synthetic events dispatched from the EDT cannot be distinguished
+        // reliably here and require host-level input tagging to exempt.
+        return mayBlockGameInput() && javax.swing.SwingUtilities.isEventDispatchThread();
     }
 
     private void registerHudMouse()
