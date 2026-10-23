@@ -394,6 +394,13 @@ public class KspAccountBuilderScript extends KspManagedScript
                     manualSkipRequested = false;
                     Microbot.status = "Skip unavailable in this mode";
                 }
+                else if (isOrderedQueueActive() && !orderedComplete)
+                {
+                    // Let the existing sequential handoff advance on the next script cycle.
+                    orderedElapsedMillis = Math.max(orderedElapsedMillis,
+                            orderedEntries.get(orderedIndex).durationSeconds * 1000L);
+                    manualSkipRequested = false;
+                }
                 else if (switchToRandomTaskAfterBank(currentTask))
                 {
                     manualSkipRequested = false;
