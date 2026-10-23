@@ -264,7 +264,7 @@ public class KspAccountBuilderScript extends KspManagedScript
     private boolean sharedBreakActive;
     private boolean experienceLampInterruptionActive;
     private boolean experienceLampPausedActivityTimer;
-    private boolean essenceMineRecoveryActive;
+    private volatile boolean essenceMineRecoveryActive;
     private long lastStatusLogAt;
     private KspAccountBuilderConfig config;
     private boolean debugEnabled;
