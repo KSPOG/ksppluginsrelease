@@ -64,12 +64,17 @@ public class KSPAccountBuilderOverlay extends OverlayPanel
         {
             g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
             g.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
-            int available = Microbot.getClient() == null ? WIDTH : Microbot.getClient().getCanvasWidth();
+            int requestedScale = config.hudScalePercent();
+            // Validate old or externally edited configuration values.
+            double scale = (requestedScale == 75 || requestedScale == 100 || requestedScale == 125 || requestedScale == 150)
+                    ? requestedScale / 100.0 : 1.0;
+            g.scale(scale, scale);
+            int available = (int) ((Microbot.getClient() == null ? WIDTH : Microbot.getClient().getCanvasWidth()) / scale);
             if (compactMode)
             {
                 int compactWidth = Math.min(500, Math.max(260, available - 20));
                 paintCompact(g, compactWidth);
-                return new Dimension(compactWidth, 76);
+                return new Dimension((int) Math.ceil(compactWidth * scale), (int) Math.ceil(76 * scale));
             }
             // Do not clip the game on fixed or narrow viewports.
             int width = compactMode ? Math.min(430, Math.max(260, available - 20)) : Math.min(WIDTH, Math.max(260, available - 20));
@@ -119,7 +124,7 @@ public class KSPAccountBuilderOverlay extends OverlayPanel
                 g.setFont(new Font("SansSerif", Font.PLAIN, 10));
                 text(g, "Start / Stop & task settings: Account Builder sidebar", 19, HEIGHT - 7, MUTED);
             }
-            return new Dimension(width, height);
+            return new Dimension((int) Math.ceil(width * scale), (int) Math.ceil(height * scale));
         }
         finally
         {
