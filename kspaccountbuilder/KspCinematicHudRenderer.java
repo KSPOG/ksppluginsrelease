@@ -176,7 +176,7 @@ final class KspCinematicHudRenderer
             if (level < 1 || currentXp < 0) return Double.NaN;
             if (level >= 99) return 1.0;
             int start = Experience.getXpForLevel(level), target = Experience.getXpForLevel(level + 1);
-            return Math.max(0.0, Math.min(1.0, (currentXp - start) / (double) Math.max(1, target - start)));
+            return KspAccountBuilderHudMath.levelProgress(currentXp, start, target, false);
         }
         catch (RuntimeException e) { return Double.NaN; }
     }
@@ -234,7 +234,7 @@ final class KspCinematicHudRenderer
                 {
                     previous = Experience.getXpForLevel(Math.max(1, Math.min(99, level)));
                     next = level >= 99 ? previous : Experience.getXpForLevel(level + 1);
-                    progress = level >= 99 ? 1.0 : (xp - previous) / (double) Math.max(1, next - previous);
+                    progress = KspAccountBuilderHudMath.levelProgress(xp, previous, next, level >= 99);
                     long now = System.currentTimeMillis(), runId = script.getStartedAtMillis();
                     if (skill != observedSkill || xp < observedXp || observedSince == 0 || runId != observedRuntimeStart)
                     {
@@ -246,7 +246,7 @@ final class KspCinematicHudRenderer
                     gained = Math.max(0, xp - observedXp);
                     long elapsed = now - observedSince;
                     if (elapsed >= 60000 && gained > 0)
-                        rate = (long) Math.min(Long.MAX_VALUE, gained * 3600000.0 / elapsed);
+                        rate = KspAccountBuilderHudMath.hourlyXp(gained, elapsed);
                 }
             }
             catch (RuntimeException e) { valid = false; }
@@ -263,7 +263,7 @@ final class KspCinematicHudRenderer
         stat(g, 178, "XP/Hour:", rate > 0 ? String.format(Locale.ROOT, "%,d", rate) : "Calculating…");
         long remaining = valid ? Math.max(0, next - xp) : -1;
         stat(g, 205, "Time to Level:", level >= 99 ? "Max level" : rate > 0 && remaining >= 0
-                ? time((long) Math.ceil(remaining * 3600.0 / rate)) : "Calculating…");
+                ? time(KspAccountBuilderHudMath.etaSeconds(remaining, rate)) : "Calculating…");
         stat(g, 232, activityCounter(kind) + ":", "—");
 
         inner(g, 849, 273, 262, 57);
@@ -679,8 +679,8 @@ final class KspCinematicHudRenderer
     String at(Point relativePoint)
     {
         if (relativePoint == null || scale <= 0) return null;
-        int x = (int) (relativePoint.x / scale);
-        int y = (int) (relativePoint.y / scale);
+        int x = KspAccountBuilderHudMath.scaledCoordinate(relativePoint.x, scale);
+        int y = KspAccountBuilderHudMath.scaledCoordinate(relativePoint.y, scale);
         String selected = null;
         for (Map.Entry<String, Rectangle> entry : hitboxes.entrySet())
             if (entry.getValue().contains(x, y)) selected = entry.getKey();
