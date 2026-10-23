@@ -64,6 +64,7 @@ final class KspAccountBuilderPanel extends PluginPanel
     private final JComboBox<Integer> hudScale = new JComboBox<>(new Integer[]{75, 100, 125, 150});
     private final JCheckBox showHud = new JCheckBox("Show in-game HUD");
     private final JCheckBox cinematicHud = new JCheckBox("Use cinematic interface");
+    private final JCheckBox fitChatbox = new JCheckBox("Fit HUD to chatbox");
     private final JCheckBox hudDetails = new JCheckBox("Expanded HUD details");
     private final JCheckBox compactHud = new JCheckBox("Compact in-game HUD");
     private final JCheckBox breaks = new JCheckBox("Enable breaks");
@@ -231,6 +232,15 @@ final class KspAccountBuilderPanel extends PluginPanel
                         "cinematicHud", cinematicHud.isSelected());
         });
         quick.add(cinematicHud);
+        fitChatbox.setOpaque(false);
+        fitChatbox.setForeground(new Color(242, 235, 221));
+        fitChatbox.setToolTipText("Match the live RuneLite chatbox dimensions and position; uncheck for the full-size HUD.");
+        fitChatbox.addActionListener(e -> {
+            if (!updating)
+                configManager.setConfiguration(KspAccountBuilderConfig.CONFIG_GROUP,
+                        "hudFitChatbox", fitChatbox.isSelected());
+        });
+        quick.add(fitChatbox);
 
         addControl(quick, "HUD scale (%)", hudScale);
         hudScale.setToolTipText("Scale the in-game HUD to 75%, 100%, 125%, or 150%.");
@@ -432,6 +442,7 @@ final class KspAccountBuilderPanel extends PluginPanel
             hudScale.setSelectedItem(currentScale == 75 || currentScale == 100 || currentScale == 125 || currentScale == 150 ? currentScale : 100);
         showHud.setSelected(plugin.isHudVisible());
         cinematicHud.setSelected(config.cinematicHud());
+        fitChatbox.setSelected(config.hudFitChatbox());
         compactHud.setSelected(plugin.isCompactOverlay());
         hudDetails.setSelected(config.hudDetailsVisible());
         breaks.setSelected(config.doBreaks());
