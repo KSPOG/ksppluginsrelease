@@ -52,17 +52,17 @@ final class KspCinematicHudRenderer
     private final java.util.concurrent.ConcurrentMap<String, Long> nextArtworkRetry =
             new java.util.concurrent.ConcurrentHashMap<>();
     private final Set<String> artworkLoading = java.util.concurrent.ConcurrentHashMap.newKeySet();
-    private String currentPage = "Skills";
-    private boolean settingsOpen;
-    private boolean queueOpen;
-    private int selectedQueueRow;
-    private int queueScrollOffset;
-    private boolean collapsed;
-    private double scale = 1;
-    private int surfaceWidth;
-    private int surfaceHeight;
-    private String hover = "";
-    private Point hoverPoint;
+    private volatile String currentPage = "Skills";
+    private volatile boolean settingsOpen;
+    private volatile boolean queueOpen;
+    private volatile int selectedQueueRow;
+    private volatile int queueScrollOffset;
+    private volatile boolean collapsed;
+    private volatile double scale = 1;
+    private volatile int surfaceWidth;
+    private volatile int surfaceHeight;
+    private volatile String hover = "";
+    private volatile Point hoverPoint;
     private Skill observedSkill;
     private long observedRuntimeStart;
     private int observedXp;
