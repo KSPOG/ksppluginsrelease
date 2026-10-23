@@ -353,6 +353,7 @@ public class KspAccountBuilderScript extends KspManagedScript
                     manualPauseStartedAtMs = System.currentTimeMillis();
                     orderedLastSampleMs = manualPauseStartedAtMs;
                     pauseActivitySwitchTimer(manualPauseStartedAtMs);
+                    KspWalkerGuard.pauseOwnedWalker();
                     // Keep the active child script and its state machine alive.
                     // Each child tick cooperatively checks the pause gate.
                     // shutdown()/taskStarted=false here previously restarted
