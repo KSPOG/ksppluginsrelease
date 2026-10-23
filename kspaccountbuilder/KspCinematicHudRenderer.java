@@ -372,7 +372,7 @@ final class KspCinematicHudRenderer
     {
         final int p = Math.max(3, h / 65);
         final int gap = Math.max(3, h / 65);
-        final int header = Math.max(24, h / 8);
+        final int header = Math.max(28, h / 8);
         final int footer = Math.max(26, h / 6);
         final int top = header + gap;
         final int bottom = h - footer - gap;
@@ -385,21 +385,33 @@ final class KspCinematicHudRenderer
         final int statsX = sceneX + sceneW + gap;
 
         ornamentalFrame(g, 0, 0, w, h);
+        // Decorative reference header: skill-bars crest, embossed title and
+        // three small window controls (minimize, collapse, close).
+        g.setColor(new Color(255, 210, 91));
+        int crestX = p + 8, crestY = header - 9;
+        for (int i = 0; i < 4; i++)
+            g.fillRect(crestX + i * 4, crestY - (i + 1) * 4, 3, (i + 1) * 4);
         g.setFont(new Font("Serif", Font.BOLD, Math.max(17, h / 11)));
-        ellipsis(g, "KSP Account Builder", p + 7, header - 6, w - 120, BRIGHT);
-        g.setFont(new Font("SansSerif", Font.PLAIN, Math.max(10, h / 20)));
-        alignRight(g, time(script.getRuntimeSeconds()), w - p - 6, header - 7, IVORY);
+        ellipsis(g, "KSP Account Builder", p + 30, header - 7,
+                Math.max(80, w - 252), BRIGHT);
+        g.setFont(new Font("SansSerif", Font.PLAIN, Math.max(10, h / 21)));
+        alignRight(g, "Runtime " + time(script.getRuntimeSeconds()),
+                w - 100, header - 8, IVORY);
+        uiButton(g, "collapse", w - 92, 4, 26, header - 8, "−", RAISED);
+        uiButton(g, "settings", w - 63, 4, 26, header - 8, "⚙", RAISED);
+        uiButton(g, "close", w - 34, 4, 26, header - 8, "×", RAISED);
         rule(g, p + 3, header, w - p - 3, header);
 
         ornamentalFrame(g, navX, top, navW, bodyH);
         String[] pages = {"Status", "Skills", "Quests", "Items", "Settings"};
+        String[] navIcons = {"▤", "▥", "▧", "◆", "⚙"};
         int navGap = Math.max(2, bodyH / 65);
         int navButtonH = Math.max(10, (bodyH - 8 - navGap * 4) / 5);
         for (int i = 0; i < pages.length; i++)
         {
             int y = top + 4 + i * (navButtonH + navGap);
             uiButton(g, "nav:" + pages[i], navX + 3, y,
-                    navW - 6, navButtonH, pages[i],
+                    navW - 6, navButtonH, navIcons[i] + " " + pages[i],
                     pages[i].equals(currentPage) ? new Color(96, 65, 13) : RAISED);
         }
 
@@ -428,10 +440,16 @@ final class KspCinematicHudRenderer
             }
             g.setClip(oldClip);
             g.setColor(new Color(4, 9, 13, 220));
-            g.fillRoundRect(sceneX + 5, top + 5, sceneW - 10, 22, 5, 5);
+            g.fillRoundRect(sceneX + 5, top + 5, sceneW - 10, 32, 5, 5);
+            // The original reference uses a skill medallion and a two-line
+            // title, never a plain text label over the scene.
+            medal(g, sceneX + 22, top + 21, kind, 14);
             g.setFont(new Font("Serif", Font.BOLD, Math.max(12, bodyH / 10)));
-            ellipsis(g, task.replace('_', ' '), sceneX + 10, top + 20,
-                    sceneW - 20, BRIGHT);
+            ellipsis(g, displayKind(kind), sceneX + 42, top + 19,
+                    sceneW - 48, BRIGHT);
+            g.setFont(new Font("SansSerif", Font.PLAIN, Math.max(10, bodyH / 13)));
+            ellipsis(g, task.replace('_', ' '), sceneX + 42, top + 31,
+                    sceneW - 48, IVORY);
             g.setColor(new Color(4, 9, 13, 225));
             g.fillRoundRect(sceneX + 5, bottom - 27, sceneW - 10, 20, 5, 5);
             g.setFont(new Font("SansSerif", Font.PLAIN, Math.max(10, bodyH / 12)));
@@ -449,7 +467,7 @@ final class KspCinematicHudRenderer
                                     : script.getOrderedElapsedSeconds(),
                             entries.get(index).durationSeconds);
             }
-            drawBar(g, sceneX + 10, bottom - 6, sceneW - 20, 3, progress, TASK_GREEN);
+            drawBar(g, sceneX + 10, bottom - 6, sceneW - 20, 4, progress, TASK_GREEN);
             paintChatboxStatsHd(g, statsX, top, statsW, bodyH, kind);
         }
         else
@@ -546,25 +564,26 @@ final class KspCinematicHudRenderer
         g.setFont(new Font("Serif", Font.BOLD, Math.max(12, h / 9)));
         ellipsis(g, displayKind(kind), left, y + 17, w - 14, BRIGHT);
         g.setFont(new Font("SansSerif", Font.PLAIN, Math.max(10, h / 11)));
-        label(g, valid ? "Lv " + level : "XP unavailable", left, y + 33, IVORY);
+        medal(g, x + 20, y + 17, kind, 12);
+        label(g, valid ? "Level " + level : "XP unavailable", left + 28, y + 33, IVORY);
         alignRight(g, valid ? briefXp(xp) + "/" + briefXp(next) : "—",
                 right, y + 33, MUTED);
         drawBar(g, left, y + 39, w - 14, 7, progress, XP_BLUE);
         int lineY = y + Math.max(58, h / 2);
         int step = Math.max(12, (h - (lineY - y) - 8) / 4);
-        label(g, "XP +" + String.format(Locale.ROOT, "%,d", gained), left, lineY, IVORY);
+        label(g, "⚔ XP +" + String.format(Locale.ROOT, "%,d", gained), left, lineY, IVORY);
         alignRight(g, rate > 0 ? String.format(Locale.ROOT, "%,d/h", rate) : "—/h",
                 right, lineY, IVORY);
-        label(g, "Next:", left, lineY + step, MUTED);
+        label(g, "◷ Next:", left, lineY + step, MUTED);
         alignRight(g, !valid ? "—" : remaining == 0 ? "Max level"
                 : rate > 0 ? time(KspAccountBuilderHudMath.etaSeconds(remaining, rate))
                         : "Calculating", right, lineY + step, IVORY);
-        label(g, "Break:", left, lineY + step * 2, MUTED);
+        label(g, "◷ Break:", left, lineY + step * 2, MUTED);
         alignRight(g, script.isBreakActive() ? time(script.getBreakTimeRemainingSeconds())
                 : script.isAnyBreakActive() ? "Active"
                         : time(script.getTimeUntilBreakSeconds()),
                 right, lineY + step * 2, IVORY);
-        label(g, "Queue:", left, lineY + step * 3, MUTED);
+        label(g, "☷ Queue:", left, lineY + step * 3, MUTED);
         alignRight(g, script.hasOrderedQueue()
                 ? script.getOrderedQueuePosition() + "/" + script.getOrderedQueueSize()
                 : "Automatic", right, lineY + step * 3, IVORY);
