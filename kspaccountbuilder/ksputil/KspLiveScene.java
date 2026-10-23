@@ -49,6 +49,48 @@ public final class KspLiveScene
         }).orElse(-1);
     }
 
+    /** Find the nearest portal across all known object variants in one scene pass. */
+    public static TileObject nearestGameObject(int[] objectIds, WorldPoint origin, int maxDistance)
+    {
+        return Microbot.getClientThread().runOnClientThreadOptional(() ->
+        {
+            if (Microbot.getClient() == null || Microbot.getClient().getScene() == null) return null;
+            Tile[][][] tiles = Microbot.getClient().getScene().getTiles();
+            if (tiles == null) return null;
+            TileObject closest = null;
+            int bestDistance = Integer.MAX_VALUE;
+            for (Tile[][] plane : tiles)
+            {
+                if (plane == null) continue;
+                for (Tile[] row : plane)
+                {
+                    if (row == null) continue;
+                    for (Tile tile : row)
+                    {
+                        if (tile == null || tile.getGameObjects() == null) continue;
+                        for (GameObject candidate : tile.getGameObjects())
+                        {
+                            if (candidate == null) continue;
+                            boolean matchingId = false;
+                            for (int id : objectIds)
+                            {
+                                if (candidate.getId() == id) { matchingId = true; break; }
+                            }
+                            if (!matchingId) continue;
+                            WorldPoint position = candidate.getWorldLocation();
+                            if (position == null || origin != null && position.getPlane() != origin.getPlane()) continue;
+                            int distance = origin == null ? 0 : origin.distanceTo(position);
+                            if (distance > maxDistance || distance >= bestDistance) continue;
+                            closest = candidate;
+                            bestDistance = distance;
+                        }
+                    }
+                }
+            }
+            return closest;
+        }).orElse(null);
+    }
+
     public static TileObject nearestGameObject(int objectId, WorldPoint origin, int maxDistance)
     {
         return Microbot.getClientThread().runOnClientThreadOptional(() ->
