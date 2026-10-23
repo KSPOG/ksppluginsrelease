@@ -43,7 +43,10 @@ final class KspCinematicHudRenderer
     private final KspAccountBuilderConfig config;
     private final SkillIconManager skillIcons;
     private final Map<Skill, BufferedImage> iconCache = new EnumMap<>(Skill.class);
-    private final Map<String, Rectangle> hitboxes = new LinkedHashMap<>();
+    // Paint into a private map and publish an immutable hitbox snapshot.
+    // Mouse callbacks and RuneLite paint can execute on different threads.
+    private final Map<String, Rectangle> paintingHitboxes = new LinkedHashMap<>();
+    private volatile Map<String, Rectangle> hitboxes = Collections.emptyMap();
     private final java.util.concurrent.ConcurrentMap<String, BufferedImage> sceneCache =
             new java.util.concurrent.ConcurrentHashMap<>();
     private final java.util.concurrent.ConcurrentMap<String, Long> nextArtworkRetry =
@@ -93,7 +96,7 @@ final class KspCinematicHudRenderer
                 Math.max(.4, (availableH - 16.0) / contentH)));
         surfaceWidth = contentW;
         surfaceHeight = contentH;
-        hitboxes.clear();
+        paintingHitboxes.clear();
         Graphics2D g = (Graphics2D) graphics.create();
         try
         {
@@ -107,7 +110,11 @@ final class KspCinematicHudRenderer
             }
             else paintFull(g);
         }
-        finally { g.dispose(); }
+        finally
+        {
+            hitboxes = Collections.unmodifiableMap(new LinkedHashMap<>(paintingHitboxes));
+            g.dispose();
+        }
         return new Dimension((int) Math.ceil(surfaceWidth * scale), (int) Math.ceil(surfaceHeight * scale));
     }
 
@@ -981,7 +988,7 @@ final class KspCinematicHudRenderer
                 TimeUnit.SECONDS.toHours(total), TimeUnit.SECONDS.toMinutes(total) % 60, total % 60);
     }
 
-    private void hot(String id, int x, int y, int w, int h) { hitboxes.put(id, new Rectangle(x, y, w, h)); }
+    private void hot(String id, int x, int y, int w, int h) { paintingHitboxes.put(id, new Rectangle(x, y, w, h)); }
 
     /**
      * Pass canvas coordinates relative to the overlay bounds. MouseManager
