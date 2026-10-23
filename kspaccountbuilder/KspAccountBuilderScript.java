@@ -216,6 +216,7 @@ public class KspAccountBuilderScript extends KspManagedScript
     private volatile boolean manualPaused;
     private volatile boolean manualSkipRequested;
     private volatile boolean manualPauseApplied;
+    private String statusBeforeManualPause;
     private long manualPauseStartedAtMs;
 
     public boolean isManualPaused() { return manualPaused; }
@@ -350,6 +351,7 @@ public class KspAccountBuilderScript extends KspManagedScript
                 if (!manualPauseApplied)
                 {
                     manualPauseApplied = true;
+                    statusBeforeManualPause = Microbot.status;
                     manualPauseStartedAtMs = System.currentTimeMillis();
                     orderedLastSampleMs = manualPauseStartedAtMs;
                     pauseActivitySwitchTimer(manualPauseStartedAtMs);
@@ -372,6 +374,12 @@ public class KspAccountBuilderScript extends KspManagedScript
                 orderedLastSampleMs = now;
                 manualPauseApplied = false;
                 manualPauseStartedAtMs = 0L;
+                // Restore the last meaningful action instead of leaving the
+                // HUD reporting "Account Builder paused" after Resume.
+                if ("Account Builder paused".equals(Microbot.status)
+                        && statusBeforeManualPause != null)
+                    Microbot.status = statusBeforeManualPause;
+                statusBeforeManualPause = null;
                 // Resume child loops only after parent timers are adjusted.
                 KspAccountBuilderPauseGate.setPaused(false);
             }
@@ -452,6 +460,7 @@ public class KspAccountBuilderScript extends KspManagedScript
         manualSkipRequested = false;
         manualPauseApplied = false;
         manualPauseStartedAtMs = 0L;
+        statusBeforeManualPause = null;
         currentTask = null;
         taskStarted = false;
         breakActive = false;
@@ -2205,6 +2214,7 @@ public class KspAccountBuilderScript extends KspManagedScript
         manualPaused = false;
         manualSkipRequested = false;
         manualPauseApplied = false;
+        statusBeforeManualPause = null;
         // Always release the scoped gate when the runtime is stopped.
         KspAccountBuilderPauseGate.setPaused(false);
         shuttingDown = true;
