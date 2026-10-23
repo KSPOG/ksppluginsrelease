@@ -88,27 +88,27 @@ public class KspAccountBuilderPlugin extends Plugin
             if (javax.swing.SwingUtilities.isEventDispatchThread() && overlay != null
                     && e.getButton() == MouseEvent.BUTTON1 && overlay.clickAt(e.getPoint()))
                 e.consume();
-            else if (shouldBlockCanvasInput()) e.consume();
+            else if (shouldBlockCanvasInput(e)) e.consume();
             return e;
         }
         @Override
         public MouseEvent mouseReleased(MouseEvent e)
         {
-            if (shouldBlockCanvasInput() || javax.swing.SwingUtilities.isEventDispatchThread()
+            if (shouldBlockCanvasInput(e) || javax.swing.SwingUtilities.isEventDispatchThread()
                     && overlay != null && overlay.acceptsMouse(e.getPoint())) e.consume();
             return e;
         }
         @Override
         public MouseEvent mouseClicked(MouseEvent e)
         {
-            if (shouldBlockCanvasInput() || javax.swing.SwingUtilities.isEventDispatchThread()
+            if (shouldBlockCanvasInput(e) || javax.swing.SwingUtilities.isEventDispatchThread()
                     && overlay != null && overlay.acceptsMouse(e.getPoint())) e.consume();
             return e;
         }
         @Override
         public MouseEvent mouseDragged(MouseEvent e)
         {
-            if (shouldBlockCanvasInput() || javax.swing.SwingUtilities.isEventDispatchThread()
+            if (shouldBlockCanvasInput(e) || javax.swing.SwingUtilities.isEventDispatchThread()
                     && overlay != null && overlay.acceptsMouse(e.getPoint())) e.consume();
             return e;
         }
@@ -120,7 +120,7 @@ public class KspAccountBuilderPlugin extends Plugin
             // continue responding while Block Input is enabled.
             if (javax.swing.SwingUtilities.isEventDispatchThread() && overlay != null)
                 overlay.hoverAt(e.getPoint());
-            if (shouldBlockCanvasInput()) e.consume();
+            if (shouldBlockCanvasInput(e)) e.consume();
             return e;
         }
     };
@@ -128,7 +128,7 @@ public class KspAccountBuilderPlugin extends Plugin
     {
         @Override public MouseWheelEvent mouseWheelMoved(MouseWheelEvent e)
         {
-            if (shouldBlockCanvasInput()) e.consume();
+            if (shouldBlockCanvasInput(e)) e.consume();
             return e;
         }
     };
@@ -140,7 +140,7 @@ public class KspAccountBuilderPlugin extends Plugin
     };
     private void interceptKey(KeyEvent e)
     {
-        if (!shouldBlockCanvasInput()) return;
+        if (!mayBlockGameInput() || !javax.swing.SwingUtilities.isEventDispatchThread()) return;
         // Emergency unlock, including when companion UI is unreachable.
         if (e.getID() == KeyEvent.KEY_PRESSED && e.getKeyCode() == KeyEvent.VK_ESCAPE)
             configManager.setConfiguration(KspAccountBuilderConfig.CONFIG_GROUP, "blockGameInput", false);
@@ -154,14 +154,29 @@ public class KspAccountBuilderPlugin extends Plugin
                 && mayRenderOverlay() && Microbot.isLoggedIn();
     }
 
-    private boolean shouldBlockCanvasInput()
+    private boolean shouldBlockCanvasInput(MouseEvent event)
     {
-        // Normal OS input is delivered through the AWT event dispatch thread.
-        // Microbot's direct Canvas.dispatchEvent automation generally runs on
-        // its script thread. Do not consume those script-thread events.
-        // Synthetic events dispatched from the EDT cannot be distinguished
-        // reliably here and require host-level input tagging to exempt.
-        return mayBlockGameInput() && javax.swing.SwingUtilities.isEventDispatchThread();
+        if (!mayBlockGameInput() || !javax.swing.SwingUtilities.isEventDispatchThread())
+            return false;
+
+        // BotMouse can post synthetic events on the AWT thread, too. Block
+        // only input whose screen position matches the physical OS pointer.
+        // A synthetic click elsewhere on the canvas must pass through.
+        // Never globally consume events if the OS pointer is unavailable.
+        try
+        {
+            java.awt.PointerInfo pointer = java.awt.MouseInfo.getPointerInfo();
+            if (pointer == null || event.getComponent() == null
+                    || !event.getComponent().isShowing()) return false;
+            java.awt.Point physical = pointer.getLocation();
+            java.awt.Point eventScreen = new java.awt.Point(event.getX(), event.getY());
+            javax.swing.SwingUtilities.convertPointToScreen(eventScreen, event.getComponent());
+            return physical.distanceSq(eventScreen) <= 144.0; // 12 px tolerance
+        }
+        catch (RuntimeException | java.awt.AWTError ex)
+        {
+            return false;
+        }
     }
 
     private void registerHudMouse()
