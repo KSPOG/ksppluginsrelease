@@ -53,6 +53,7 @@ final class KspCinematicHudRenderer
     private int surfaceWidth;
     private int surfaceHeight;
     private String hover = "";
+    private Point hoverPoint;
     private Skill observedSkill;
     private long observedRuntimeStart;
     private int observedXp;
@@ -400,18 +401,88 @@ final class KspCinematicHudRenderer
 
     private void paintHover(Graphics2D g)
     {
-        if (!config.hudTooltips() || hover.isEmpty()) return;
-        String tooltip = hover.equals("xptip") ? "Live XP • rate measured from task observations"
-                : hover.equals("tasktip") ? "Current task • progress unavailable unless tracked by script"
-                : hover.equals("queuetip") ? "Break schedule • dynamic task selection, no editable queue"
-                : hover.startsWith("nav:") ? "Open " + hover.substring(4) + " information" : "";
-        if ("pause".equals(hover) && script.isManualPaused()) tooltip = "Already paused";
-        if ("resume".equals(hover) && !script.isManualPaused()) tooltip = "Pause before resuming";
-        if ("skip".equals(hover) && !script.canSkipTask()) tooltip = "Skip unavailable for this task or mode";
-        if (tooltip.isEmpty()) return;
-        inner(g, 360, 6, 424, 29);
+        if (!config.hudTooltips() || hover.isEmpty() || hoverPoint == null) return;
+        List<String> lines = new ArrayList<>();
+        String title = "KSP Account Builder";
+        if ("xptip".equals(hover))
+        {
+            String kind = resolveKind(script.getCurrentTaskName());
+            Skill skill = skillFor(kind);
+            title = kind + " XP";
+            Client c = Microbot.getClient();
+            if (skill != null && c != null && c.getGameState() == GameState.LOGGED_IN)
+            {
+                int level = c.getRealSkillLevel(skill), xp = c.getSkillExperience(skill);
+                int target = level >= 99 ? xp : Experience.getXpForLevel(level + 1);
+                double levelProgress = nextLevelProgress(skill);
+                long observed = skill == observedSkill ? Math.max(0, xp - observedXp) : 0;
+                long rate = KspAccountBuilderHudMath.hourlyXp(observed,
+                        Math.max(1, System.currentTimeMillis() - observedSince));
+                lines.add("Level: " + level + (level >= 99 ? " (maximum)" : " → " + (level + 1)));
+                lines.add(String.format(Locale.ROOT, "Total XP: %,d", xp));
+                lines.add(String.format(Locale.ROOT, "Progress: %.1f%%", levelProgress * 100));
+                lines.add(String.format(Locale.ROOT, "XP remaining: %,d", Math.max(0, target - xp)));
+                lines.add("Tracked XP: " + observed);
+                lines.add("XP/hour: " + (rate <= 0 ? "Calculating…" : rate));
+                lines.add("ETA: " + (rate <= 0 ? "Calculating…"
+                        : time(KspAccountBuilderHudMath.etaSeconds(target - xp, rate))));
+            }
+            else lines.add("Skill telemetry unavailable");
+        }
+        else if ("tasktip".equals(hover))
+        {
+            title = "Current task";
+            lines.add("Task: " + safe(script.getCurrentTaskName(), "Idle").replace('_', ' '));
+            lines.add("Activity: " + safe(script.getOverlayTaskDetail(), "—"));
+            lines.add("Task actions: not reported by the current task script");
+            lines.add("Elapsed: " + time(script.getRuntimeSeconds()));
+            if (script.hasOrderedQueue())
+            {
+                lines.add("Queue: " + script.getOrderedQueuePosition() + "/" + script.getOrderedQueueSize());
+                lines.add("Queued work: " + time(script.getOrderedElapsedSeconds()));
+            }
+        }
+        else if ("queuetip".equals(hover))
+        {
+            title = "Breaks and queue";
+            lines.add("Break: " + (script.isAnyBreakActive() ? "Active" : time(script.getTimeUntilBreakSeconds())));
+            lines.add("Task selection: " + (script.hasOrderedQueue() ? "Ordered queue" : "Automatic"));
+            if (script.hasOrderedQueue())
+                lines.add("Queue item: " + script.getOrderedQueuePosition() + "/" + script.getOrderedQueueSize());
+            lines.add("Click to view the task queue");
+        }
+        else if ("pause".equals(hover) && script.isManualPaused())
+        {
+            title = "Pause unavailable"; lines.add("The current task is already paused");
+        }
+        else if ("resume".equals(hover) && !script.isManualPaused())
+        {
+            title = "Resume unavailable"; lines.add("Pause execution before resuming");
+        }
+        else if ("skip".equals(hover) && !script.canSkipTask())
+        {
+            title = "Skip unavailable"; lines.add("The current mode does not permit a safe task handoff");
+        }
+        else if (hover.startsWith("nav:"))
+        {
+            title = hover.substring(4); lines.add("Open " + hover.substring(4) + " details");
+        }
+        else return;
+
         g.setFont(SMALL);
-        label(g, tooltip, 370, 25, BRIGHT);
+        FontMetrics metrics = g.getFontMetrics();
+        int width = metrics.stringWidth(title) + 26;
+        for (String line : lines) width = Math.max(width, metrics.stringWidth(line) + 26);
+        width = Math.min(490, Math.max(160, width));
+        int height = 35 + lines.size() * 18;
+        int x = Math.min(Math.max(8, hoverPoint.x + 15), Math.max(8, surfaceWidth - width - 8));
+        int y = Math.min(Math.max(7, hoverPoint.y + 16), Math.max(7, surfaceHeight - height - 6));
+        ornamentalFrame(g, x, y, width, height);
+        g.setFont(new Font("Serif", Font.BOLD, 16));
+        label(g, title, x + 12, y + 23, BRIGHT);
+        g.setFont(SMALL);
+        for (int i = 0; i < lines.size(); i++)
+            ellipsis(g, lines.get(i), x + 12, y + 43 + i * 18, width - 22, IVORY);
     }
 
     private void uiButton(Graphics2D g, String key, int x, int y, int w, int h, String text, Color fill)
@@ -745,6 +816,9 @@ final class KspCinematicHudRenderer
 
     void hover(Point p)
     {
+        hoverPoint = p == null || scale <= 0 ? null : new Point(
+                KspAccountBuilderHudMath.scaledCoordinate(p.x, scale),
+                KspAccountBuilderHudMath.scaledCoordinate(p.y, scale));
         String key = at(p);
         hover = key == null ? "" : key;
     }
