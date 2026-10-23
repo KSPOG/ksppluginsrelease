@@ -6,6 +6,7 @@ import java.util.concurrent.TimeUnit;
 import javax.inject.Inject;
 import net.runelite.api.Client;
 import net.runelite.api.Skill;
+import net.runelite.api.GameState;
 import net.runelite.api.Experience;
 import net.runelite.client.game.ItemManager;
 import net.runelite.client.plugins.microbot.Microbot;
@@ -161,11 +162,11 @@ public class KSPAccountBuilderOverlay extends OverlayPanel
     {
         g.setFont(new Font("Serif", Font.BOLD, 18));
         text(g, skill == null ? "Session" : prettify(skill), x, y + 1, GOLD_LIGHT);
-        if (skill == null || Microbot.getClient() == null)
+        if (skill == null || Microbot.getClient() == null || Microbot.getClient().getGameState() != GameState.LOGGED_IN)
         {
             g.setFont(new Font("SansSerif", Font.PLAIN, 12));
             text(g, "Skill XP: unavailable", x, y + 23, MUTED);
-            text(g, "Waiting for skilling task", x, y + 42, MUTED);
+            text(g, "Waiting for live skill telemetry", x, y + 42, MUTED);
             return;
         }
         try
