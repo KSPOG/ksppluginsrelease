@@ -794,7 +794,8 @@ final class KspCinematicHudRenderer
         Path home = Paths.get(System.getProperty("user.home"));
         Path[] candidates = {
                 Paths.get(base, "KSP_Account_Builder_Cinematic_Artwork.zip"),
-                home.resolve("Downloads").resolve("KSP_Account_Builder_Cinematic_Artwork.zip")
+                home.resolve("Downloads").resolve("KSP_Account_Builder_Cinematic_Artwork.zip"),
+                home.resolve("Downloads").resolve("KSP_Account_Builder_Dev_Cinematic_Assets_OneClick.zip")
         };
         for (Path archive : candidates)
         {
@@ -803,6 +804,7 @@ final class KspCinematicHudRenderer
             {
                 java.util.zip.ZipEntry entry = zip.getEntry(filename);
                 if (entry == null) entry = zip.getEntry("ksp_account_builder_artwork_pack/" + filename);
+                if (entry == null) entry = zip.getEntry("kspaccountbuilder/cinematic/" + filename);
                 if (entry == null || entry.isDirectory() || entry.getSize() > 8L * 1024 * 1024) continue;
                 try (InputStream stream = zip.getInputStream(entry))
                 {
