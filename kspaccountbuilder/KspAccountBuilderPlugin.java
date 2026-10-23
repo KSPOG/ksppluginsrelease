@@ -85,7 +85,8 @@ public class KspAccountBuilderPlugin extends Plugin
         @Override
         public MouseEvent mousePressed(MouseEvent e)
         {
-            if (overlay != null && e.getButton() == MouseEvent.BUTTON1 && overlay.clickAt(e.getPoint()))
+            if (javax.swing.SwingUtilities.isEventDispatchThread() && overlay != null
+                    && e.getButton() == MouseEvent.BUTTON1 && overlay.clickAt(e.getPoint()))
                 e.consume();
             else if (shouldBlockCanvasInput()) e.consume();
             return e;
