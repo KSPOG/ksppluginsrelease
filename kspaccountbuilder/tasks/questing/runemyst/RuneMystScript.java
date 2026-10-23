@@ -1,5 +1,6 @@
 package net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.questing.runemyst;
 
+import net.runelite.client.plugins.microbot.kspaccountbuilder.KspAccountBuilderPauseGate;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.KspManagedScript;
 
 import java.util.concurrent.TimeUnit;
@@ -76,7 +77,7 @@ public class RuneMystScript extends KspManagedScript
 
     private void runLoop()
     {
-        if (!super.run() || !Microbot.isLoggedIn())
+        if (KspAccountBuilderPauseGate.isPaused() || !super.run() || !Microbot.isLoggedIn())
         {
             return;
         }
