@@ -94,25 +94,29 @@ public class KspAccountBuilderPlugin extends Plugin
         @Override
         public MouseEvent mouseReleased(MouseEvent e)
         {
-            if (shouldBlockCanvasInput() || overlay != null && overlay.acceptsMouse(e.getPoint())) e.consume();
+            if (shouldBlockCanvasInput() || javax.swing.SwingUtilities.isEventDispatchThread()
+                    && overlay != null && overlay.acceptsMouse(e.getPoint())) e.consume();
             return e;
         }
         @Override
         public MouseEvent mouseClicked(MouseEvent e)
         {
-            if (shouldBlockCanvasInput() || overlay != null && overlay.acceptsMouse(e.getPoint())) e.consume();
+            if (shouldBlockCanvasInput() || javax.swing.SwingUtilities.isEventDispatchThread()
+                    && overlay != null && overlay.acceptsMouse(e.getPoint())) e.consume();
             return e;
         }
         @Override
         public MouseEvent mouseDragged(MouseEvent e)
         {
-            if (shouldBlockCanvasInput() || overlay != null && overlay.acceptsMouse(e.getPoint())) e.consume();
+            if (shouldBlockCanvasInput() || javax.swing.SwingUtilities.isEventDispatchThread()
+                    && overlay != null && overlay.acceptsMouse(e.getPoint())) e.consume();
             return e;
         }
         @Override
         public MouseEvent mouseMoved(MouseEvent e)
         {
-            if (overlay != null) overlay.hoverAt(e.getPoint());
+            if (javax.swing.SwingUtilities.isEventDispatchThread() && overlay != null)
+                overlay.hoverAt(e.getPoint());
             return e;
         }
     };
