@@ -525,14 +525,21 @@ final class KspAccountBuilderPanel extends PluginPanel
 
     private static JPanel pair(String title, JLabel value)
     {
-        JPanel row = new JPanel(new BorderLayout(4, 0));
+        // Keep live status values readable in RuneLite's narrow sidebar.
+        // Side-by-side labels compete for the same fixed width and may clip
+        // task names, break timers and account play time.
+        JPanel row = new JPanel(new BorderLayout(0, 2));
         row.setOpaque(false);
         row.setAlignmentX(Component.LEFT_ALIGNMENT);
-        row.setMaximumSize(new Dimension(Integer.MAX_VALUE, 19));
+        row.setMaximumSize(new Dimension(Integer.MAX_VALUE, 39));
         JLabel caption = new JLabel(title);
-        caption.setForeground(Color.WHITE);
-        row.add(caption, BorderLayout.WEST);
-        row.add(value, BorderLayout.EAST);
+        caption.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
+        caption.setFont(caption.getFont().deriveFont(Font.PLAIN, 11f));
+        caption.setToolTipText(title);
+        value.setForeground(ACCENT);
+        value.setToolTipText(title);
+        row.add(caption, BorderLayout.NORTH);
+        row.add(value, BorderLayout.CENTER);
         return row;
     }
 
