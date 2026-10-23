@@ -149,6 +149,70 @@ public class KspAccountBuilderScript extends KspManagedScript
     @Inject private KspAccountPlayTimeCache accountPlayTimeCache;
     @Inject private KspAccountTaskCache accountTaskCache;
 
+    private volatile java.util.List<KspAccountBuilderTaskQueue.Entry> orderedEntries =
+            java.util.Collections.emptyList();
+    private volatile int orderedIndex;
+    private volatile long orderedElapsedMillis;
+    private long orderedLastSampleMs;
+    private volatile boolean orderedComplete;
+
+    private boolean isOrderedQueueActive()
+    {
+        return config != null && config.useOrderedTaskQueue() && !orderedEntries.isEmpty()
+                && !config.trainSingleSkill() && !config.runSingleQuest();
+    }
+
+    public boolean hasOrderedQueue() { return isOrderedQueueActive(); }
+    public boolean isOrderedQueueComplete() { return orderedComplete && isOrderedQueueActive(); }
+    public int getOrderedQueuePosition() { return Math.min(orderedIndex + 1, orderedEntries.size()); }
+    public int getOrderedQueueSize() { return orderedEntries.size(); }
+    public long getOrderedElapsedSeconds() { return orderedElapsedMillis / 1000L; }
+    public java.util.List<KspAccountBuilderTaskQueue.Entry> getOrderedQueueSnapshot()
+    {
+        return orderedEntries;
+    }
+    private BuilderTask orderedTaskAt(int index)
+    {
+        if (index < 0 || index >= orderedEntries.size()) return null;
+        try { return BuilderTask.valueOf(orderedEntries.get(index).taskName); }
+        catch (IllegalArgumentException e) { return null; }
+    }
+    private void sampleOrderedElapsed()
+    {
+        long now = System.currentTimeMillis();
+        if (isOrderedQueueActive() && !orderedComplete && taskStarted
+                && currentTask == orderedTaskAt(orderedIndex) && orderedLastSampleMs > 0)
+            orderedElapsedMillis += Math.min(1000L, Math.max(0L, now - orderedLastSampleMs));
+        orderedLastSampleMs = now;
+    }
+    private boolean processOrderedTaskCompletion()
+    {
+        if (!isOrderedQueueActive() || orderedComplete || currentTask != orderedTaskAt(orderedIndex))
+            return false;
+        if (orderedElapsedMillis < orderedEntries.get(orderedIndex).durationSeconds * 1000L)
+            return false;
+        BuilderTask next = orderedTaskAt(orderedIndex + 1);
+        if (next == null)
+        {
+            stopCurrentTaskScript();
+            taskStarted = false;
+            orderedComplete = true;
+            manualPaused = true;
+            Microbot.status = "Ordered task queue completed";
+            return true;
+        }
+        if (!stopCurrentTaskForHandoff(next) || !prepareForTaskSwitchAtBank()) return true;
+        currentTask = next;
+        taskStarted = false;
+        orderedIndex++;
+        orderedElapsedMillis = 0L;
+        orderedLastSampleMs = System.currentTimeMillis();
+        pendingTask = null;
+        preselectedHandoffTask = null;
+        Microbot.status = "Queue: " + next.name();
+        return true;
+    }
+
     private volatile boolean manualPaused;
     private volatile boolean manualSkipRequested;
     private boolean manualPauseApplied;
@@ -166,7 +230,7 @@ public class KspAccountBuilderScript extends KspManagedScript
 
     public synchronized boolean requestManualResume()
     {
-        if (shuttingDown || !manualPaused) return false;
+        if (shuttingDown || !manualPaused || orderedComplete) return false;
         manualPaused = false;
         return true;
     }
@@ -175,6 +239,7 @@ public class KspAccountBuilderScript extends KspManagedScript
     {
         BuilderTask active = currentTask;
         return !shuttingDown && startedAtMillis > 0 && active != null
+                && (!isOrderedQueueActive() || !orderedComplete)
                 && active != BuilderTask.TUTORIAL_ISLAND && !isSingleSkillTaskForced()
                 && !manualSkipRequested && !manualPaused;
     }
@@ -251,6 +316,11 @@ public class KspAccountBuilderScript extends KspManagedScript
         shuttingDown = false;
         this.config = config;
         resetRuntimeState();
+        orderedEntries = KspAccountBuilderTaskQueue.parse(config.orderedTaskQueue());
+        orderedIndex = 0;
+        orderedElapsedMillis = 0L;
+        orderedLastSampleMs = 0L;
+        orderedComplete = false;
         stopExternalAutoLoginPlugin("builder-start");
         startAutoLoginHelper();
         if (experienceLampScript != null) experienceLampScript.run();
@@ -338,6 +408,7 @@ public class KspAccountBuilderScript extends KspManagedScript
                 debug("Selected initial task | currentTask={}", currentTask);
             }
             if (shuttingDown) return;
+            sampleOrderedElapsed();
             runAccountBuilderCycle();
             if (shuttingDown) return;
             sampleAccountPlayTime();
@@ -620,6 +691,7 @@ public class KspAccountBuilderScript extends KspManagedScript
             taskStarted = false;
             return;
         }
+        if (processOrderedTaskCompletion()) return;
         if (taskStarted)
         {
             if (!handleCompletedTask()) maybeStartActivitySwitchTimer();
@@ -831,6 +903,8 @@ public class KspAccountBuilderScript extends KspManagedScript
         if (TutorialIslandScript.isOnTutorialIsland()) return BuilderTask.TUTORIAL_ISLAND;
         BuilderTask singleSkillTask = resolveSingleSkillTask();
         if (singleSkillTask != null) return singleSkillTask;
+        if (isOrderedQueueActive() && orderedTaskAt(orderedIndex) != null)
+            return orderedTaskAt(orderedIndex);
         return getRandomTaskExcluding(null);
     }
 
@@ -978,7 +1052,8 @@ public class KspAccountBuilderScript extends KspManagedScript
 
     private boolean isActivitySwitchRandomizationEnabled()
     {
-        return config != null && config.enableActivitySwitchRandomization() && !isSingleSkillTaskForced();
+        return config != null && config.enableActivitySwitchRandomization()
+                && !isSingleSkillTaskForced() && !isOrderedQueueActive();
     }
 
     private boolean canUseActivitySwitchTimer()
@@ -1379,6 +1454,12 @@ public class KspAccountBuilderScript extends KspManagedScript
     private BuilderTask getRandomTaskWithResourcesExcluding(BuilderTask excluded)
     {
         if (TutorialIslandScript.isOnTutorialIsland()) return excluded == BuilderTask.TUTORIAL_ISLAND ? null : BuilderTask.TUTORIAL_ISLAND;
+        if (isOrderedQueueActive() && !orderedComplete)
+        {
+            BuilderTask requested = orderedTaskAt(orderedIndex);
+            if (requested != null && requested != excluded && hasResourcesForTaskSelection(requested))
+                return requested;
+        }
         return selectTaskWithSupportFallback(excluded, true, false);
     }
 
