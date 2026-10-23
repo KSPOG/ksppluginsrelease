@@ -813,7 +813,78 @@ final class KspCinematicHudRenderer
                 }
             }
         }
-        return null;
+        // Source Loader compiles Java sources without carrying PNG resources.
+        // Fetch the immutable dev-branch artwork automatically in the worker,
+        // cache it locally, and never ask the user to install an artwork ZIP.
+        return downloadDevArtwork(filename, direct);
+    }
+
+    private BufferedImage downloadDevArtwork(String filename, Path localCache) throws java.io.IOException
+    {
+        final String prefix =
+                "https://raw.githubusercontent.com/KSPOG/ksppluginsrelease/dev/kspaccountbuilder/cinematic/";
+        java.net.HttpURLConnection connection = (java.net.HttpURLConnection)
+                new java.net.URL(prefix + filename).openConnection();
+        connection.setConnectTimeout(6000);
+        connection.setReadTimeout(12000);
+        connection.setRequestMethod("GET");
+        connection.setInstanceFollowRedirects(false);
+        try
+        {
+            if (connection.getResponseCode() != 200) return null;
+            long declaredSize = connection.getContentLengthLong();
+            if (declaredSize > 8L * 1024 * 1024) return null;
+            java.io.ByteArrayOutputStream buffer = new java.io.ByteArrayOutputStream(
+                    declaredSize > 0 ? (int) declaredSize : 1024 * 1024);
+            try (InputStream stream = connection.getInputStream())
+            {
+                byte[] bytes = new byte[16384];
+                int length;
+                while ((length = stream.read(bytes)) != -1)
+                {
+                    if (buffer.size() + length > 8 * 1024 * 1024) return null;
+                    buffer.write(bytes, 0, length);
+                }
+            }
+            byte[] png = buffer.toByteArray();
+            if (png.length < 24 || png[0] != (byte) 0x89 || png[1] != 0x50
+                    || png[2] != 0x4e || png[3] != 0x47) return null;
+            BufferedImage image = ImageIO.read(new java.io.ByteArrayInputStream(png));
+            if (image == null || image.getWidth() != 1328 || image.getHeight() != 460)
+                return null;
+            // Failed cache writes do not stop rendering the successfully
+            // downloaded artwork in memory.
+            try
+            {
+                Path directory = localCache.getParent();
+                if (directory != null) Files.createDirectories(directory);
+                Path staged = Files.createTempFile(directory, "cinematic-", ".png");
+                try
+                {
+                    Files.write(staged, png);
+                    try
+                    {
+                        Files.move(staged, localCache,
+                                java.nio.file.StandardCopyOption.ATOMIC_MOVE,
+                                java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                    }
+                    catch (java.nio.file.AtomicMoveNotSupportedException ex)
+                    {
+                        Files.move(staged, localCache,
+                                java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                    }
+                }
+                finally { Files.deleteIfExists(staged); }
+            }
+            catch (java.io.IOException cacheException)
+            {
+                org.slf4j.LoggerFactory.getLogger(KspCinematicHudRenderer.class)
+                        .debug("Cinematic scene downloaded but could not be cached: {}",
+                                filename, cacheException);
+            }
+            return image;
+        }
+        finally { connection.disconnect(); }
     }
 
     private void paintScene(Graphics2D g, String kind)
@@ -918,7 +989,7 @@ final class KspCinematicHudRenderer
             g.setFont(SMALL);
             g.setColor(new Color(8, 13, 14, 222));
             g.fillRoundRect(201, 250, 575, 24, 4, 4);
-            label(g, "Scene artwork missing — install KSP cinematic artwork ZIP in Downloads",
+            label(g, "Scene artwork unavailable — retrying automatic dev artwork retrieval",
                     211, 267, BRIGHT);
         }
         g.setClip(oldClip);
