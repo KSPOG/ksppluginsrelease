@@ -346,21 +346,20 @@ public class EssenceMining extends KspManagedScript
             }
         }
 
-        // Live game objects are second: these IDs are NOT NPC IDs.
-        for (int id : PORTAL_OBJECT_IDS)
+        // Game-object portal variants are selected by proximity, not numeric ID.
+        // A randomly selected portal morph may be any of the five object IDs.
+        TileObject liveObject = KspLiveScene.nearestGameObject(PORTAL_OBJECT_IDS, player, 100);
+        if (liveObject != null)
         {
-            TileObject liveObject = KspLiveScene.nearestGameObject(id, player, 100);
-            if (liveObject == null) continue;
             if (Rs2Player.isMoving())
             {
                 status = "Approaching live rune essence object portal";
                 return;
             }
+            int id = liveObject.getId();
             try
             {
                 String action = portalObjectAction(id);
-                // Rune Essence portal variants can expose either Use or Exit.
-                // Try the alternate action only if the preferred one fails.
                 if (Rs2GameObject.interact(liveObject, action)
                         || Rs2GameObject.interact(liveObject,
                                 "Exit".equals(action) ? "Use" : "Exit"))
