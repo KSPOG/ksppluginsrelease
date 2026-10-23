@@ -92,6 +92,7 @@ public class KspAccountBuilderPlugin extends Plugin
         configManager.setConfiguration(KspAccountBuilderConfig.CONFIG_GROUP, "runAccountBuilder", false);
         panelEnabled = true;
         setCompactOverlay(config.compactHud());
+        setOverlayDetailsVisible(config.hudDetailsVisible());
         setHudVisible(config.showHud());
         addSidePanel();
         acceptingRuntimeChanges = true;
@@ -399,6 +400,11 @@ public class KspAccountBuilderPlugin extends Plugin
     boolean isHudVisible()
     {
         return overlay != null && overlay.isHudVisible();
+    }
+
+    void setOverlayDetailsVisible(boolean visible)
+    {
+        if (overlay != null) overlay.setDetailsVisible(visible);
     }
 
     void setCompactOverlay(boolean compact)
