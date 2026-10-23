@@ -497,8 +497,8 @@ final class KspCinematicHudRenderer
         alignRight(g, script.hasOrderedQueue()
                 ? script.getOrderedQueuePosition() + "/" + script.getOrderedQueueSize()
                 : "Automatic", 485, 125, IVORY);
-        hot("xptip", 330, 32, 162, 78);
-        hot("queuetip", 330, 111, 162, 24);
+        // Stats are informational in chatbox mode: they must not capture
+        // synthetic game clicks. Only the six actual buttons use hitboxes.
     }
 
     private void paintMini(Graphics2D g)
