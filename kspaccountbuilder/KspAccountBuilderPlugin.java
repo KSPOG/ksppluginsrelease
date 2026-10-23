@@ -20,6 +20,11 @@ import javax.swing.SwingUtilities;
 import javax.swing.UIManager;
 import java.awt.Point;
 import java.awt.event.MouseEvent;
+import java.awt.event.KeyEvent;
+import java.awt.event.MouseWheelEvent;
+import net.runelite.client.input.KeyManager;
+import net.runelite.client.input.KeyListener;
+import net.runelite.client.input.MouseWheelListener;
 import net.runelite.client.input.MouseManager;
 import net.runelite.client.input.MouseAdapter;
 import java.awt.Color;
@@ -61,6 +66,7 @@ public class KspAccountBuilderPlugin extends Plugin
 
     @Inject
     private MouseManager mouseManager;
+    @Inject private KeyManager keyManager;
     private boolean hudMouseRegistered;
 
     @Inject
@@ -80,12 +86,13 @@ public class KspAccountBuilderPlugin extends Plugin
         {
             if (overlay != null && e.getButton() == MouseEvent.BUTTON1 && overlay.clickAt(e.getPoint()))
                 e.consume();
+            else if (mayBlockGameInput()) e.consume();
             return e;
         }
         @Override
         public MouseEvent mouseReleased(MouseEvent e)
         {
-            if (overlay != null && overlay.acceptsMouse(e.getPoint())) e.consume();
+            if (mayBlockGameInput() || overlay != null && overlay.acceptsMouse(e.getPoint())) e.consume();
             return e;
         }
         @Override
@@ -95,17 +102,54 @@ public class KspAccountBuilderPlugin extends Plugin
             return e;
         }
         @Override
+        public MouseEvent mouseDragged(MouseEvent e)
+        {
+            if (mayBlockGameInput() || overlay != null && overlay.acceptsMouse(e.getPoint())) e.consume();
+            return e;
+        }
+        @Override
         public MouseEvent mouseMoved(MouseEvent e)
         {
             if (overlay != null) overlay.hoverAt(e.getPoint());
             return e;
         }
     };
+    private final MouseWheelListener hudWheelListener = new MouseWheelListener()
+    {
+        @Override public MouseWheelEvent mouseWheelMoved(MouseWheelEvent e)
+        {
+            if (mayBlockGameInput()) e.consume();
+            return e;
+        }
+    };
+    private final KeyListener hudKeyListener = new KeyListener()
+    {
+        @Override public void keyPressed(KeyEvent e) { interceptKey(e); }
+        @Override public void keyReleased(KeyEvent e) { interceptKey(e); }
+        @Override public void keyTyped(KeyEvent e) { interceptKey(e); }
+    };
+    private void interceptKey(KeyEvent e)
+    {
+        if (!mayBlockGameInput()) return;
+        // Emergency unlock, including when companion UI is unreachable.
+        if (e.getID() == KeyEvent.KEY_PRESSED && e.getKeyCode() == KeyEvent.VK_ESCAPE)
+            configManager.setConfiguration(KspAccountBuilderConfig.CONFIG_GROUP, "blockGameInput", false);
+        e.consume();
+    }
+    private boolean mayBlockGameInput()
+    {
+        return config != null && config.blockGameInput()
+                && config.cinematicHud() && overlay != null && overlay.isHudVisible()
+                && mayRenderOverlay() && Microbot.isLoggedIn();
+    }
+
     private void registerHudMouse()
     {
         if (!hudMouseRegistered && mouseManager != null)
         {
             mouseManager.registerMouseListener(hudMouseListener);
+            mouseManager.registerMouseWheelListener(hudWheelListener);
+            if (keyManager != null) keyManager.registerKeyListener(hudKeyListener);
             hudMouseRegistered = true;
         }
     }
@@ -114,6 +158,8 @@ public class KspAccountBuilderPlugin extends Plugin
         if (hudMouseRegistered && mouseManager != null)
         {
             mouseManager.unregisterMouseListener(hudMouseListener);
+            mouseManager.unregisterMouseWheelListener(hudWheelListener);
+            if (keyManager != null) keyManager.unregisterKeyListener(hudKeyListener);
             hudMouseRegistered = false;
         }
     }
@@ -144,6 +190,27 @@ public class KspAccountBuilderPlugin extends Plugin
             case "settings": case "settings-close": renderer.openSettings(); return;
             case "queuetip": renderer.openQueue(); return;
             case "queue-close": renderer.openQueue(); return;
+            case "setting:block":
+                configManager.setConfiguration(KspAccountBuilderConfig.CONFIG_GROUP, "blockGameInput",
+                        !config.blockGameInput());
+                return;
+            case "setting:tooltips":
+                configManager.setConfiguration(KspAccountBuilderConfig.CONFIG_GROUP, "hudTooltips",
+                        !config.hudTooltips());
+                return;
+            case "setting:lock":
+                boolean lock = !config.lockHudPosition();
+                if (overlay != null) overlay.applyPositionLock(lock);
+                configManager.setConfiguration(KspAccountBuilderConfig.CONFIG_GROUP, "lockHudPosition", lock);
+                return;
+            case "setting:animation":
+                configManager.setConfiguration(KspAccountBuilderConfig.CONFIG_GROUP, "showSkillAnimations",
+                        !config.showSkillAnimations());
+                return;
+            case "animation-mode":
+                configManager.setConfiguration(KspAccountBuilderConfig.CONFIG_GROUP, "hudAnimationIntensity",
+                        (config.hudAnimationIntensity() + 1) % 3);
+                return;
             case "setting:compact":
                 setCompactOverlay(!isCompactOverlay());
                 configManager.setConfiguration(KspAccountBuilderConfig.CONFIG_GROUP, "compactHud", isCompactOverlay());
@@ -196,6 +263,7 @@ public class KspAccountBuilderPlugin extends Plugin
         configManager.setConfiguration(KspAccountBuilderConfig.CONFIG_GROUP, "runAccountBuilder", false);
         panelEnabled = true;
         registerHudMouse();
+        if (overlay != null) overlay.applyPositionLock(config.lockHudPosition());
         setCompactOverlay(config.compactHud());
         setOverlayDetailsVisible(config.hudDetailsVisible());
         setHudVisible(config.showHud());
