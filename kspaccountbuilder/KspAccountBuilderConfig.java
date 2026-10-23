@@ -17,6 +17,18 @@ import net.runelite.client.config.Range;
 public interface KspAccountBuilderConfig extends Config
 {
     String CONFIG_GROUP = "kspaccountbuilder";
+    @ConfigItem(
+            keyName = "hudDetailsVisible",
+            name = "Expanded HUD details",
+            description = "Show or hide the detailed skill statistics in the in-game HUD",
+            position = 95,
+            hidden = true
+    )
+    default boolean hudDetailsVisible()
+    {
+        return true;
+    }
+
 
     @ConfigItem(
             keyName = "hudScalePercent",
