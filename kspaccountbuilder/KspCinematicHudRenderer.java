@@ -65,11 +65,14 @@ final class KspCinematicHudRenderer
         int available = Microbot.getClient() == null ? 1130 : Microbot.getClient().getCanvasWidth();
         boolean mini = plugin.isCompactOverlay() || available < 750;
         int contentW = mini ? MINI_W : FULL_W;
-        int contentH = mini ? MINI_H : FULL_H;
-        // Never render outside the host canvas: narrow canvases use the compact layout.
+        if (mini) { settingsOpen = false; queueOpen = false; }
+        int contentH = mini ? MINI_H : queueOpen ? (settingsOpen ? 801 : 557)
+                : settingsOpen ? 654 : FULL_H;
+        // Client canvas coordinates and rendered geometry use the same scale.
+        int availableH = Microbot.getClient() == null ? contentH : Microbot.getClient().getCanvasHeight();
         double userScale = Math.max(.75, Math.min(1.5, config.hudScalePercent() / 100.0));
-        scale = Math.min(userScale, Math.max(.4, (available - 16.0) / contentW));
-        settingsOpen = settingsOpen && !mini;
+        scale = Math.min(userScale, Math.min(Math.max(.4, (available - 16.0) / contentW),
+                Math.max(.4, (availableH - 16.0) / contentH)));
         surfaceWidth = contentW;
         surfaceHeight = contentH;
         hitboxes.clear();
@@ -610,6 +613,6 @@ final class KspCinematicHudRenderer
 
     void openSettings() { settingsOpen = !settingsOpen; }
     void openQueue() { queueOpen = !queueOpen; }
-    void toggleCollapsed() { collapsed = !collapsed; }
+    void toggleCollapsed() { collapsed = !collapsed; if (collapsed) { settingsOpen = false; queueOpen = false; } }
     void navigate(String page) { currentPage = page; if ("Settings".equals(page)) settingsOpen = true; }
 }
