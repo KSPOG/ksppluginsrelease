@@ -156,27 +156,17 @@ public class KspAccountBuilderPlugin extends Plugin
 
     private boolean shouldBlockCanvasInput(MouseEvent event)
     {
-        if (!mayBlockGameInput() || !javax.swing.SwingUtilities.isEventDispatchThread())
+        if (!mayBlockGameInput()) return false;
+
+        // Microbot's AwtEmitter wraps bot-owned input in BotEventGuard.
+        // Unlike screen-coordinate or EDT checks, this identifies the input
+        // producer, so bot clicks/movement cannot be mistaken for human input.
+        if (net.runelite.client.plugins.microbot.util.mouse.BotEventGuard.isSynthetic())
             return false;
 
-        // BotMouse can post synthetic events on the AWT thread, too. Block
-        // only input whose screen position matches the physical OS pointer.
-        // A synthetic click elsewhere on the canvas must pass through.
-        // Never globally consume events if the OS pointer is unavailable.
-        try
-        {
-            java.awt.PointerInfo pointer = java.awt.MouseInfo.getPointerInfo();
-            if (pointer == null || event.getComponent() == null
-                    || !event.getComponent().isShowing()) return false;
-            java.awt.Point physical = pointer.getLocation();
-            java.awt.Point eventScreen = new java.awt.Point(event.getX(), event.getY());
-            javax.swing.SwingUtilities.convertPointToScreen(eventScreen, event.getComponent());
-            return physical.distanceSq(eventScreen) <= 144.0; // 12 px tolerance
-        }
-        catch (RuntimeException | java.awt.AWTError ex)
-        {
-            return false;
-        }
+        // The bot may also dispatch directly on its worker thread.
+        // Consume only ordinary physical canvas input arriving via AWT.
+        return javax.swing.SwingUtilities.isEventDispatchThread();
     }
 
     private void registerHudMouse()
