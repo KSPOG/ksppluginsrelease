@@ -1,5 +1,6 @@
 package net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.questing.shared;
 
+import net.runelite.client.plugins.microbot.kspaccountbuilder.KspAccountBuilderPauseGate;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.KspManagedScript;
 
 import net.runelite.api.GrandExchangeOffer;
@@ -69,7 +70,7 @@ public abstract class SimpleQuestScript extends KspManagedScript
 
     private void tick()
     {
-        if (!super.run() || !Microbot.isLoggedIn()) return;
+        if (KspAccountBuilderPauseGate.isPaused() || !super.run() || !Microbot.isLoggedIn()) return;
         if (isComplete()) { state = QuestTaskState.COMPLETE; setStatus(questName + " complete"); shutdown(); return; }
         if (handleDialogue()) return;
         if (System.currentTimeMillis() < nextActionAt) return;
