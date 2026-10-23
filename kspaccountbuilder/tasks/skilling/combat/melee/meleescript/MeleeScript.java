@@ -1,5 +1,6 @@
 package net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.combat.melee.meleescript;
 
+import net.runelite.client.plugins.microbot.kspaccountbuilder.KspAccountBuilderPauseGate;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.KspManagedScript;
 
 import java.util.Arrays;
@@ -127,7 +128,7 @@ public class MeleeScript extends KspManagedScript {
         this.mainScheduledFuture = this.scheduledExecutorService.scheduleWithFixedDelay(() -> {
             if (generation != this.runGeneration) return;
             try {
-                if (generation != this.runGeneration || !super.run() || !Microbot.isLoggedIn()) {
+                if (generation != this.runGeneration || KspAccountBuilderPauseGate.isPaused() || !super.run() || !Microbot.isLoggedIn()) {
                     return;
                 }
 
