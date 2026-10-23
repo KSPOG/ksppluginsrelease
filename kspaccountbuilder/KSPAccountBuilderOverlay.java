@@ -64,6 +64,12 @@ public class KSPAccountBuilderOverlay extends OverlayPanel
             g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
             g.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
             int available = Microbot.getClient() == null ? WIDTH : Microbot.getClient().getCanvasWidth();
+            if (compactMode)
+            {
+                int compactWidth = Math.min(500, Math.max(260, available - 20));
+                paintCompact(g, compactWidth);
+                return new Dimension(compactWidth, 76);
+            }
             // Do not clip the game on fixed or narrow viewports.
             int width = compactMode ? Math.min(430, Math.max(260, available - 20)) : Math.min(WIDTH, Math.max(260, available - 20));
             int height = width < 440 || !detailsVisible ? 183 : HEIGHT;
@@ -118,6 +124,25 @@ public class KSPAccountBuilderOverlay extends OverlayPanel
         {
             g.dispose();
         }
+    }
+
+    /** Dedicated compact layout; the same script instance supplies all values. */
+    private void paintCompact(Graphics2D g, int width)
+    {
+        paintFrame(g, 0, 0, width, 76);
+        g.setFont(new Font("Serif", Font.BOLD, 17));
+        text(g, "KSP Account Builder", 12, 20, GOLD_LIGHT);
+        g.setFont(new Font("SansSerif", Font.PLAIN, 10));
+        String elapsed = formatDuration(script.getRuntimeSeconds());
+        text(g, "Runtime " + elapsed, Math.max(205, width - 116), 18, MUTED);
+        line(g, 10, 27, width - 10, 27, GOLD);
+        String activity = safe(script.getCurrentTaskName(), "No active task");
+        Skill skill = identifySkill(activity + " " + safe(script.getOverlayTaskDetail(), ""));
+        drawSkillEmblem(g, 13, 32, skill);
+        g.setFont(new Font("Serif", Font.BOLD, 14));
+        text(g, skill == null ? "Account Progression" : prettify(skill), 62, 47, GOLD_LIGHT);
+        g.setFont(new Font("SansSerif", Font.PLAIN, 11));
+        clippedText(g, activity, 62, 65, Math.max(25, width - 74), IVORY);
     }
 
     /** Toggle compact HUD without restarting or modifying the running task. */
