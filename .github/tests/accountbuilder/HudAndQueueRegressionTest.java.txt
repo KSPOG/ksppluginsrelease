@@ -1,0 +1,51 @@
+package net.runelite.client.plugins.microbot.kspaccountbuilder;
+
+import java.util.List;
+
+/**
+ * Dependency-free regression tests for the reference HUD state math and queue.
+ * Stored as .java.txt so the Source Loader never treats test code as a plugin.
+ */
+public final class HudAndQueueRegressionTest
+{
+    private static int checks;
+    private static void check(boolean condition, String message)
+    {
+        checks++;
+        if (!condition) throw new AssertionError(message);
+    }
+
+    public static void main(String[] args)
+    {
+        check(Double.isNaN(KspAccountBuilderHudMath.levelProgress(12, 12, 12, false)), "bad XP bounds");
+        check(KspAccountBuilderHudMath.levelProgress(500, 0, 1000, false) == 0.5, "level percent");
+        check(KspAccountBuilderHudMath.levelProgress(-100, 0, 1000, false) == 0.0, "lower clamp");
+        check(KspAccountBuilderHudMath.levelProgress(2000, 0, 1000, false) == 1.0, "upper clamp");
+        check(KspAccountBuilderHudMath.levelProgress(2000, 0, 1000, true) == 1.0, "max skill level");
+        check(KspAccountBuilderHudMath.hourlyXp(50, 5000) == 0, "initial unknown rate");
+        check(KspAccountBuilderHudMath.hourlyXp(500, 3600000) == 500, "XP per hour");
+        check(KspAccountBuilderHudMath.hourlyXp(Long.MAX_VALUE, 60000) == Long.MAX_VALUE,
+                "overflow-safe XP rate");
+        check(KspAccountBuilderHudMath.etaSeconds(0, 1) == 0, "completed ETA");
+        check(KspAccountBuilderHudMath.etaSeconds(120, 0) == -1, "unknown ETA");
+        check(KspAccountBuilderHudMath.etaSeconds(100, 120) == 3000, "ETA calculation");
+        check(KspAccountBuilderHudMath.scaledCoordinate(75, .75) == 100, "scaled hit coordinate");
+        check(KspAccountBuilderHudMath.scaledCoordinate(75, 0) == -1, "invalid scale");
+        check(KspAccountBuilderTaskQueue.parse("").isEmpty(), "empty queue preserves auto mode");
+        String queue = KspAccountBuilderTaskQueue.append("", "WOODCUTTING", 300);
+        queue = KspAccountBuilderTaskQueue.append(queue, "MINING", 600);
+        queue = KspAccountBuilderTaskQueue.append(queue, "FISHING", 900);
+        List<KspAccountBuilderTaskQueue.Entry> parsed = KspAccountBuilderTaskQueue.parse(queue);
+        check(parsed.size() == 3, "queued tasks");
+        check(parsed.get(0).durationSeconds == 300, "task duration");
+        check(KspAccountBuilderTaskQueue.move(queue, 2, -1).startsWith("WOODCUTTING:300,FISHING:900"),
+                "reorder identity");
+        check(KspAccountBuilderTaskQueue.remove(queue, 1).equals("WOODCUTTING:300,FISHING:900"),
+                "remove exactly selected task");
+        check(KspAccountBuilderTaskQueue.parse("INVALID:1000,WOODCUTTING:-2,MINING:300").size() == 1,
+                "reject malformed queue entries");
+        check(KspAccountBuilderTaskQueue.append(queue, "NOT_REAL", 300).equals(queue),
+                "reject unknown tasks");
+        System.out.println("PASS: " + checks + " Account Builder HUD/queue regression checks");
+    }
+}
