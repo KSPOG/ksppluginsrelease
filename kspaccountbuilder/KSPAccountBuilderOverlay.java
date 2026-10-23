@@ -36,6 +36,7 @@ public class KSPAccountBuilderOverlay extends OverlayPanel
     private final KspAccountBuilderPlugin plugin;
     private final KspAccountBuilderScript script;
     private final KspAccountBuilderConfig config;
+    private final KspCinematicHudRenderer cinematic;
     private Skill sampledSkill;
     private volatile boolean compactMode;
     private volatile boolean hudVisible = true;
@@ -52,6 +53,7 @@ public class KSPAccountBuilderOverlay extends OverlayPanel
         this.plugin = plugin;
         this.script = script;
         this.config = config;
+        this.cinematic = new KspCinematicHudRenderer(plugin, script, config);
         setPosition(OverlayPosition.TOP_CENTER);
     }
 
@@ -59,6 +61,7 @@ public class KSPAccountBuilderOverlay extends OverlayPanel
     public Dimension render(Graphics2D graphics)
     {
         if (!plugin.mayRenderOverlay() || !hudVisible) return null;
+        if (config.cinematicHud()) return cinematic.render(graphics);
 
         Graphics2D g = (Graphics2D) graphics.create();
         try
@@ -146,6 +149,29 @@ public class KSPAccountBuilderOverlay extends OverlayPanel
         text(g, skill == null ? "Account Progression" : prettify(skill), 62, 47, GOLD_LIGHT);
         g.setFont(new Font("SansSerif", Font.PLAIN, 11));
         clippedText(g, activity, 62, 65, Math.max(25, width - 74), IVORY);
+    }
+
+    /** Canvas positions are in RuneLite input coordinates, not UI scale coordinates. */
+    boolean acceptsMouse(Point point)
+    {
+        return point != null && plugin.mayRenderOverlay() && hudVisible
+                && config.cinematicHud() && getBounds().contains(point);
+    }
+
+    boolean clickAt(Point point)
+    {
+        if (!acceptsMouse(point)) return false;
+        Point relative = new Point(point.x - getBounds().x, point.y - getBounds().y);
+        String action = cinematic.at(relative);
+        if (action != null) plugin.dispatchHudAction(action, cinematic);
+        return true; // Prevent game click-through anywhere inside the displayed HUD.
+    }
+
+    void hoverAt(Point point)
+    {
+        if (acceptsMouse(point))
+            cinematic.hover(new Point(point.x - getBounds().x, point.y - getBounds().y));
+        else cinematic.hover(null);
     }
 
     /** Toggle compact HUD without restarting or modifying the running task. */
