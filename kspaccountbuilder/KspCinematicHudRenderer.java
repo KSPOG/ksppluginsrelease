@@ -52,6 +52,7 @@ final class KspCinematicHudRenderer
     private final java.util.concurrent.ConcurrentMap<String, Long> nextArtworkRetry =
             new java.util.concurrent.ConcurrentHashMap<>();
     private final Set<String> artworkLoading = java.util.concurrent.ConcurrentHashMap.newKeySet();
+    private final Set<String> missingArtwork = java.util.concurrent.ConcurrentHashMap.newKeySet();
     private volatile String currentPage = "Skills";
     private volatile boolean settingsOpen;
     private volatile boolean queueOpen;
@@ -744,7 +745,12 @@ final class KspCinematicHudRenderer
                 if (loaded != null)
                 {
                     sceneCache.put(key, loaded);
+                    missingArtwork.remove(key);
                     nextArtworkRetry.remove(key);
+                }
+                else
+                {
+                    missingArtwork.add(key);
                 }
             }
             catch (Exception ex)
@@ -902,6 +908,16 @@ final class KspCinematicHudRenderer
                 int sx = 530 + sparks.nextInt(80), sy = 135 + sparks.nextInt(100);
                 circle(g, sx, sy, 1 + sparks.nextInt(3), new Color(255, 204, 72, 205));
             }
+        }
+        // Never silently present procedural fallback shapes as the finished
+        // reference artwork. The message disappears as soon as the PNG loads.
+        if (missingArtwork.contains(kind.toLowerCase(Locale.ROOT)))
+        {
+            g.setFont(SMALL);
+            g.setColor(new Color(8, 13, 14, 222));
+            g.fillRoundRect(201, 250, 575, 24, 4, 4);
+            label(g, "Scene artwork missing — install KSP cinematic artwork ZIP in Downloads",
+                    211, 267, BRIGHT);
         }
         g.setClip(oldClip);
     }
