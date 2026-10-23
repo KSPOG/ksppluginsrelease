@@ -49,6 +49,7 @@ final class KspAccountBuilderPanel extends PluginPanel
     private final JComboBox<Enum<?>> target = new JComboBox<>();
     private final JComboBox<Integer> hudScale = new JComboBox<>(new Integer[]{75, 100, 125, 150});
     private final JCheckBox showHud = new JCheckBox("Show in-game HUD");
+    private final JCheckBox hudDetails = new JCheckBox("Expanded HUD details");
     private final JCheckBox compactHud = new JCheckBox("Compact in-game HUD");
     private final JCheckBox breaks = new JCheckBox("Enable breaks");
     private final JCheckBox antiban = new JCheckBox("Enable anti-ban");
@@ -161,6 +162,18 @@ final class KspAccountBuilderPanel extends PluginPanel
         compactHud.addActionListener(e -> { if (!updating) { configManager.setConfiguration(KspAccountBuilderConfig.CONFIG_GROUP, "compactHud", compactHud.isSelected()); plugin.setCompactOverlay(compactHud.isSelected()); } });
         compactHud.setToolTipText("Switch between the full and compact in-game HUD without restarting the current task.");
         quick.add(compactHud);
+        hudDetails.setOpaque(false);
+        hudDetails.setForeground(new Color(242, 235, 221));
+        hudDetails.setToolTipText("Toggle the skill XP statistics section of the full in-game HUD.");
+        hudDetails.addActionListener(e -> {
+            if (!updating)
+            {
+                configManager.setConfiguration(KspAccountBuilderConfig.CONFIG_GROUP,
+                        "hudDetailsVisible", hudDetails.isSelected());
+                plugin.setOverlayDetailsVisible(hudDetails.isSelected());
+            }
+        });
+        quick.add(hudDetails);
         breaks.setToolTipText("Enable the configured randomized break schedule.");
         antiban.setToolTipText("Use the existing Account Builder anti-ban profile.");
         skipQuests.setToolTipText("Skip quest tasks during automatic progression.");
@@ -293,6 +306,7 @@ final class KspAccountBuilderPanel extends PluginPanel
             hudScale.setSelectedItem(currentScale == 75 || currentScale == 100 || currentScale == 125 || currentScale == 150 ? currentScale : 100);
         showHud.setSelected(plugin.isHudVisible());
         compactHud.setSelected(plugin.isCompactOverlay());
+        hudDetails.setSelected(config.hudDetailsVisible());
         breaks.setSelected(config.doBreaks());
         antiban.setSelected(config.useAntiban());
         skipQuests.setSelected(config.skipQuests());
