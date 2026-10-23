@@ -103,11 +103,19 @@ public final class KspLiveScene
     {
         return Microbot.getClientThread().runOnClientThreadOptional(() ->
         {
-            if (Microbot.getClient() == null || Microbot.getClient().getScene() == null)
-                return null;
-            Tile[][][] tiles = Microbot.getClient().getScene().getTiles();
+            if (Microbot.getClient() == null) return null;
+            net.runelite.api.Player player = Microbot.getClient().getLocalPlayer();
+            net.runelite.api.WorldView view = player == null ? null : player.getWorldView();
+            net.runelite.api.Scene scene = view == null ? Microbot.getClient().getScene() : view.getScene();
+            if (scene == null) return null;
+            Tile[][][] tiles = scene.getTiles();
             if (tiles == null) return null;
 
+            // In a mapped/instanced area, TileObject.getWorldLocation() can
+            // use different coordinates than Rs2Player.getWorldLocation().
+            // LocalPoint positions in the SAME WorldView remain comparable.
+            net.runelite.api.coords.LocalPoint playerLocal =
+                    player == null ? null : player.getLocalLocation();
             TileObject closest = null;
             int bestDistance = Integer.MAX_VALUE;
             for (Tile[][] plane : tiles)
@@ -119,26 +127,29 @@ public final class KspLiveScene
                     for (Tile tile : row)
                     {
                         if (tile == null) continue;
-                        // Avoid allocating arrays for every tile on frequent scans.
                         for (int layer = 0; layer < 3; layer++)
                         {
                             TileObject candidate = layer == 0 ? tile.getWallObject()
                                     : layer == 1 ? tile.getDecorativeObject()
                                     : tile.getGroundObject();
-                            if (!withinDistance(candidate, origin, maxDistance, bestDistance)
+                            if (candidate == null
                                     || !matchesObjectOrMorph(candidate.getId(), objectIds)) continue;
+                            int distance = distanceToPlayer(candidate, origin, playerLocal, view);
+                            if (distance < 0 || distance > maxDistance || distance >= bestDistance) continue;
                             closest = candidate;
-                            bestDistance = origin == null ? 0 : origin.distanceTo(candidate.getWorldLocation());
+                            bestDistance = distance;
                         }
 
                         GameObject[] objects = tile.getGameObjects();
                         if (objects == null) continue;
                         for (GameObject candidate : objects)
                         {
-                            if (!withinDistance(candidate, origin, maxDistance, bestDistance)
+                            if (candidate == null
                                     || !matchesObjectOrMorph(candidate.getId(), objectIds)) continue;
+                            int distance = distanceToPlayer(candidate, origin, playerLocal, view);
+                            if (distance < 0 || distance > maxDistance || distance >= bestDistance) continue;
                             closest = candidate;
-                            bestDistance = origin == null ? 0 : origin.distanceTo(candidate.getWorldLocation());
+                            bestDistance = distance;
                         }
                     }
                 }
@@ -147,14 +158,29 @@ public final class KspLiveScene
         }).orElse(null);
     }
 
-    private static boolean withinDistance(TileObject candidate, WorldPoint origin,
-                                          int maxDistance, int bestDistance)
+    /**
+     * Tile distance in the current rendered scene; never mix template,
+     * instance and player world coordinates. Fall back to world locations
+     * only when the client has no usable local position.
+     */
+    private static int distanceToPlayer(TileObject candidate, WorldPoint origin,
+                                        net.runelite.api.coords.LocalPoint playerLocal,
+                                        net.runelite.api.WorldView playerView)
     {
-        if (candidate == null || candidate.getWorldLocation() == null) return false;
-        WorldPoint position = candidate.getWorldLocation();
-        if (origin != null && position.getPlane() != origin.getPlane()) return false;
-        int distance = origin == null ? 0 : origin.distanceTo(position);
-        return distance <= maxDistance && distance < bestDistance;
+        if (candidate == null) return -1;
+        if (playerView != null && candidate.getPlane() != playerView.getPlane()) return -1;
+        net.runelite.api.coords.LocalPoint objectLocal = candidate.getLocalLocation();
+        if (playerLocal != null && objectLocal != null && playerView != null
+                && candidate.getWorldView() == playerView)
+        {
+            int dx = Math.abs(objectLocal.getX() - playerLocal.getX());
+            int dy = Math.abs(objectLocal.getY() - playerLocal.getY());
+            return Math.max(dx, dy) / 128;
+        }
+        WorldPoint objectWorld = candidate.getWorldLocation();
+        if (objectWorld == null) return -1;
+        if (origin != null && origin.getPlane() != objectWorld.getPlane()) return -1;
+        return origin == null ? 0 : origin.distanceTo(objectWorld);
     }
 
     private static boolean matchesObjectOrMorph(int objectId, int[] expectedIds)
