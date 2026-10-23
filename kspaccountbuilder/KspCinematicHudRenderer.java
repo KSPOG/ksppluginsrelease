@@ -360,13 +360,21 @@ final class KspCinematicHudRenderer
         // All geometry is inside 500x174 logical coordinates. The actual
         // chat-container widget supplies the scaling and canvas placement.
         ornamentalFrame(g, 0, 0, CHAT_W, CHAT_H);
-        g.setFont(new Font("Serif", Font.BOLD, 17));
-        ellipsis(g, "KSP Account Builder", 10, 20, 310, BRIGHT);
+        // All five Full HUD sections are accessible without enlarging the
+        // surface. Navigation occupies the title rail, not the skill scene.
+        String[] pages = {"Status", "Skills", "Quests", "Items", "Settings"};
+        g.setFont(new Font("SansSerif", Font.BOLD, 10));
+        for (int i = 0; i < pages.length; i++)
+        {
+            String page = pages[i];
+            uiButton(g, "nav:" + page, 5 + i * 77, 4, 74, 23, page,
+                    page.equals(currentPage) ? new Color(96, 65, 13) : RAISED);
+        }
         g.setFont(new Font("SansSerif", Font.PLAIN, 10));
-        alignRight(g, time(script.getRuntimeSeconds()), 488, 19, IVORY);
-        rule(g, 8, 27, 492, 27);
+        alignRight(g, time(script.getRuntimeSeconds()), 489, 19, IVORY);
+        rule(g, 8, 29, 492, 29);
 
-        if (settingsOpen)
+        if (settingsOpen || "Settings".equals(currentPage))
         {
             g.setFont(new Font("Serif", Font.BOLD, 16));
             label(g, "HUD settings", 13, 47, BRIGHT);
@@ -377,6 +385,10 @@ final class KspCinematicHudRenderer
             label(g, "Scale: " + config.hudScalePercent() + "%", 251, 109, IVORY);
             uiButton(g, "scale-down", 366, 91, 48, 32, "−", RAISED);
             uiButton(g, "scale-up", 428, 91, 48, 32, "+", RAISED);
+        }
+        else if (!"Skills".equals(currentPage))
+        {
+            paintChatboxPage(g);
         }
         else
         {
@@ -427,7 +439,49 @@ final class KspCinematicHudRenderer
         uiButton(g, "stop", 179, 141, 76, 27, "■ Stop", new Color(142, 16, 19));
         uiButton(g, "skip", 258, 141, 70, 27, "▶▶ Skip", new Color(21, 41, 59));
         uiButton(g, "settings", 331, 141, 94, 27, "⚙ Settings", new Color(21, 41, 59));
-        uiButton(g, "restore", 428, 141, 67, 27, "Full", RAISED);
+        uiButton(g, "nav:Queue", 428, 141, 67, 27, "Queue", RAISED);
+    }
+
+    /** Full information categories reflowed into the chatbox footprint. */
+    private void paintChatboxPage(Graphics2D g)
+    {
+        ornamentalFrame(g, 7, 33, 486, 103);
+        g.setFont(new Font("Serif", Font.BOLD, 15));
+        label(g, currentPage, 15, 49, BRIGHT);
+        g.setFont(new Font("SansSerif", Font.PLAIN, 11));
+        String task = safe(script.getCurrentTaskName(), "Idle");
+        String detail = safe(script.getOverlayTaskDetail(), "Waiting for a task");
+        switch (currentPage)
+        {
+            case "Status":
+                ellipsis(g, "Execution: " + (script.isManualPaused() ? "Paused"
+                        : plugin.isRuntimeActive() ? "Running" : "Stopped"), 15, 67, 224, IVORY);
+                ellipsis(g, "Task: " + task, 15, 83, 224, IVORY);
+                ellipsis(g, "Action: " + detail, 15, 99, 224, MUTED);
+                label(g, "Account: " + time(script.getAccountPlayTimeSeconds()), 250, 67, IVORY);
+                label(g, "Break: " + time(script.getTimeUntilBreakSeconds()), 250, 83, IVORY);
+                label(g, "Runtime: " + time(script.getRuntimeSeconds()), 250, 99, IVORY);
+                break;
+            case "Quests":
+                label(g, "Single quest: " + (config.runSingleQuest() ? "Enabled" : "Disabled"), 15, 70, IVORY);
+                ellipsis(g, "Current task: " + task, 15, 89, 465, IVORY);
+                label(g, "Quest selection: Account Builder sidebar", 15, 109, MUTED);
+                break;
+            case "Items":
+                ellipsis(g, "Current task: " + task, 15, 70, 465, IVORY);
+                ellipsis(g, "Activity: " + detail, 15, 89, 465, IVORY);
+                label(g, "Inventory, banking and GE: automatic", 15, 109, MUTED);
+                break;
+            case "Queue":
+                label(g, "Mode: " + (script.hasOrderedQueue() ? "Ordered" : "Automatic"), 15, 69, IVORY);
+                label(g, "Position: " + (script.hasOrderedQueue()
+                        ? script.getOrderedQueuePosition() + " / " + script.getOrderedQueueSize()
+                        : "—"), 15, 89, IVORY);
+                label(g, "Edit tasks in the RuneLite side panel", 15, 109, MUTED);
+                break;
+            default:
+                ellipsis(g, task + " · " + detail, 15, 81, 460, IVORY);
+        }
     }
 
     /** Compact telemetry: separate XP, next-level, break and queue fields. */
