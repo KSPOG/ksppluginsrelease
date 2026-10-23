@@ -174,12 +174,31 @@ final class KspCinematicHudRenderer
         inner(g, 180, 285, 641, 48);
         g.setFont(new Font("Serif", Font.BOLD, 15));
         ellipsis(g, "Current Task: " + displayActivity(detail, task), 254, 302, 520, IVORY);
-        double levelProgress = nextLevelProgress(skillFor(kind));
-        drawBar(g, 256, 310, 480, 16, levelProgress, TASK_GREEN);
+        // Green means TASK progress, never the blue next-skill-level XP.
+        // A duration-target queue is the only task type with an actual
+        // completed/target metric currently exported by the builder.
+        double taskProgress = Double.NaN;
+        String taskProgressText = "Progress: —";
+        if (script.hasOrderedQueue())
+        {
+            List<KspAccountBuilderTaskQueue.Entry> entries = script.getOrderedQueueSnapshot();
+            int index = script.getOrderedQueuePosition() - 1;
+            if (index >= 0 && index < entries.size())
+            {
+                long targetSeconds = entries.get(index).durationSeconds;
+                long completedSeconds = script.isOrderedQueueComplete()
+                        ? targetSeconds : Math.min(targetSeconds, script.getOrderedElapsedSeconds());
+                if (targetSeconds > 0L)
+                {
+                    taskProgress = Math.min(1.0, (double) completedSeconds / targetSeconds);
+                    taskProgressText = String.format(Locale.ROOT, "%d / %d s (%.1f%%)",
+                            completedSeconds, targetSeconds, taskProgress * 100.0);
+                }
+            }
+        }
+        drawBar(g, 256, 310, 480, 16, taskProgress, TASK_GREEN);
         g.setFont(SMALL);
-        label(g, Double.isFinite(levelProgress)
-                ? String.format(Locale.ROOT, "Level: %.1f%%", levelProgress * 100.0)
-                : "Progress: —", 742, 323, MUTED);
+        label(g, taskProgressText, 742, 323, MUTED);
         circle(g, 213, 309, 23, new Color(69, 47, 12));
         g.setFont(new Font("Serif", Font.BOLD, 21));
         label(g, emblem(kind), 205, 317, BRIGHT);
