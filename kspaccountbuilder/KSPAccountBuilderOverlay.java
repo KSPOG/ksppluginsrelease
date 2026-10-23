@@ -151,7 +151,10 @@ public class KSPAccountBuilderOverlay extends OverlayPanel
             }
             int gained = Math.max(0, xp - sampleStartXp);
             long elapsed = Math.max(1L, now - sampleStartMs);
-            long hourly = elapsed < 60000L ? 0L : (gained * 3600000L) / elapsed;
+            // A zero-rate initial sample must not be presented as a measured rate.
+            // Avoid integer multiplication overflow for very large XP observations.
+            long hourly = elapsed < 60000L || gained == 0 ? 0L
+                    : (long) Math.min(Long.MAX_VALUE, ((double) gained * 3600000.0) / elapsed);
             boolean capped = level >= 99;
             int floor = Experience.getXpForLevel(Math.max(1, Math.min(99, level)));
             int ceiling = capped ? floor : Experience.getXpForLevel(level + 1);
@@ -165,7 +168,7 @@ public class KSPAccountBuilderOverlay extends OverlayPanel
             text(g, "XP/hour: " + (hourly == 0L ? "Calculating..." : formatNumber(hourly)),
                     x, y + 98, IVORY);
             String eta = capped ? "Max level" : hourly == 0L ? "Calculating..."
-                    : formatDuration(((long) Math.max(0, ceiling - xp) * 3600L) / hourly);
+                    : formatDuration((long) Math.ceil(((double) Math.max(0, ceiling - xp) * 3600.0) / hourly));
             text(g, "Next level: " + eta, x, y + 117, IVORY);
         }
         catch (RuntimeException ex)
