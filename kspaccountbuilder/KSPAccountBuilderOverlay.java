@@ -37,6 +37,8 @@ public class KSPAccountBuilderOverlay extends OverlayPanel
     private final KspAccountBuilderScript script;
     private final KspAccountBuilderConfig config;
     private Skill sampledSkill;
+    private boolean compactMode;
+    private boolean detailsVisible = true;
     private int sampleStartXp = -1;
     private long sampleStartMs;
 
@@ -63,8 +65,8 @@ public class KSPAccountBuilderOverlay extends OverlayPanel
             g.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
             int available = Microbot.getClient() == null ? WIDTH : Microbot.getClient().getCanvasWidth();
             // Do not clip the game on fixed or narrow viewports.
-            int width = Math.min(WIDTH, Math.max(260, available - 20));
-            int height = width < 440 ? 183 : HEIGHT;
+            int width = compactMode ? Math.min(430, Math.max(260, available - 20)) : Math.min(WIDTH, Math.max(260, available - 20));
+            int height = width < 440 || !detailsVisible ? 183 : HEIGHT;
             paintFrame(g, 0, 0, width, height);
 
             String task = safe(script.getCurrentTaskName(), "No active task");
@@ -72,7 +74,7 @@ public class KSPAccountBuilderOverlay extends OverlayPanel
             String status = normalizeStatus(Microbot.status);
             Skill skill = identifySkill(task + " " + detail);
             int inset = 16;
-            boolean narrow = width < 440;
+            boolean narrow = width < 440 || !detailsVisible;
 
             g.setFont(new Font("Serif", Font.BOLD, narrow ? 17 : 23));
             text(g, "KSP Account Builder", inset, 29, GOLD_LIGHT);
@@ -117,6 +119,11 @@ public class KSPAccountBuilderOverlay extends OverlayPanel
             g.dispose();
         }
     }
+
+    /** Toggle compact HUD without restarting or modifying the running task. */
+    void setCompactMode(boolean enabled) { compactMode = enabled; }
+    boolean isCompactMode() { return compactMode; }
+    void setDetailsVisible(boolean enabled) { detailsVisible = enabled; }
 
     private void paintTelemetry(Graphics2D g, int x, int y, int width, Skill skill)
     {
