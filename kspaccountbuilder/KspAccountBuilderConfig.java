@@ -19,6 +19,19 @@ public interface KspAccountBuilderConfig extends Config
     String CONFIG_GROUP = "kspaccountbuilder";
 
     @ConfigItem(
+            keyName = "hudScalePercent",
+            name = "HUD scale",
+            description = "Scaling of the in-game Account Builder HUD (75, 100, 125 or 150 percent)",
+            position = 96,
+            hidden = true
+    )
+    default int hudScalePercent()
+    {
+        return 100;
+    }
+
+
+    @ConfigItem(
             keyName = "showHud",
             name = "Show in-game HUD",
             description = "Show or hide the Account Builder status overlay without stopping automation",
