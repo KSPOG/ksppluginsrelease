@@ -1350,5 +1350,10 @@ final class KspCinematicHudRenderer
     void selectQueueRow(int row) { selectedQueueRow = Math.max(0, row); }
     void scrollQueue(int direction) { queueScrollOffset = Math.max(0, queueScrollOffset + direction); }
     void toggleCollapsed() { collapsed = !collapsed; if (collapsed) { settingsOpen = false; queueOpen = false; } }
-    void navigate(String page) { currentPage = page; if ("Settings".equals(page)) settingsOpen = true; }
+    void navigate(String page)
+    {
+        currentPage = page;
+        settingsOpen = "Settings".equals(page);
+        queueOpen = false;
+    }
 }
