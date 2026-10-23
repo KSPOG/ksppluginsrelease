@@ -47,6 +47,7 @@ final class KspAccountBuilderPanel extends PluginPanel
     private final JComboBox<KspTrainSingleSkillTask> skill = new JComboBox<>(KspTrainSingleSkillTask.values());
     private final JComboBox<KspQuestTask> quest = new JComboBox<>(KspQuestTask.values());
     private final JComboBox<Enum<?>> target = new JComboBox<>();
+    private final JComboBox<Integer> hudScale = new JComboBox<>(new Integer[]{75, 100, 125, 150});
     private final JCheckBox showHud = new JCheckBox("Show in-game HUD");
     private final JCheckBox compactHud = new JCheckBox("Compact in-game HUD");
     private final JCheckBox breaks = new JCheckBox("Enable breaks");
@@ -148,6 +149,13 @@ final class KspAccountBuilderPanel extends PluginPanel
             }
         });
         quick.add(showHud);
+        addControl(quick, "HUD scale (%)", hudScale);
+        hudScale.setToolTipText("Scale the in-game HUD to 75%, 100%, 125%, or 150%.");
+        hudScale.addActionListener(e -> {
+            if (!updating && hudScale.getSelectedItem() != null)
+                configManager.setConfiguration(KspAccountBuilderConfig.CONFIG_GROUP,
+                        "hudScalePercent", hudScale.getSelectedItem());
+        });
         compactHud.setOpaque(false);
         compactHud.setForeground(new Color(242, 235, 221));
         compactHud.addActionListener(e -> { if (!updating) { configManager.setConfiguration(KspAccountBuilderConfig.CONFIG_GROUP, "compactHud", compactHud.isSelected()); plugin.setCompactOverlay(compactHud.isSelected()); } });
@@ -280,6 +288,9 @@ final class KspAccountBuilderPanel extends PluginPanel
         Object currentTarget = selectedTarget(config.singleSkillTask());
         if (currentTarget != null && target.getSelectedItem() != currentTarget) target.setSelectedItem(currentTarget);
         if (quest.getSelectedItem() != config.singleQuestTask()) quest.setSelectedItem(config.singleQuestTask());
+        int currentScale = config.hudScalePercent();
+        if (hudScale.getSelectedItem() == null || !hudScale.getSelectedItem().equals(currentScale))
+            hudScale.setSelectedItem(currentScale == 75 || currentScale == 100 || currentScale == 125 || currentScale == 150 ? currentScale : 100);
         showHud.setSelected(plugin.isHudVisible());
         compactHud.setSelected(plugin.isCompactOverlay());
         breaks.setSelected(config.doBreaks());
