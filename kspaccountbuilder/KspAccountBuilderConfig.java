@@ -17,6 +17,31 @@ import net.runelite.client.config.Range;
 public interface KspAccountBuilderConfig extends Config
 {
     String CONFIG_GROUP = "kspaccountbuilder";
+    @ConfigItem(keyName = "blockGameInput", name = "Block game input",
+            description = "Block gameplay input behind the cinematic overlay; overlay controls remain usable",
+            position = 90, hidden = true)
+    default boolean blockGameInput() { return false; }
+
+    @ConfigItem(keyName = "hudTooltips", name = "Show HUD tooltips",
+            description = "Show contextual gold-bordered HUD tooltips",
+            position = 91, hidden = true)
+    default boolean hudTooltips() { return true; }
+
+    @ConfigItem(keyName = "lockHudPosition", name = "Lock HUD position",
+            description = "Prevent moving the Account Builder overlay",
+            position = 92, hidden = true)
+    default boolean lockHudPosition() { return false; }
+
+    @ConfigItem(keyName = "showSkillAnimations", name = "Show skill animations",
+            description = "Enable lightweight scene accents in the cinematic interface",
+            position = 93, hidden = true)
+    default boolean showSkillAnimations() { return true; }
+
+    @ConfigItem(keyName = "hudAnimationIntensity", name = "Skill animation intensity",
+            description = "0: off, 1: subtle, 2: cinematic",
+            position = 89, hidden = true)
+    default int hudAnimationIntensity() { return 2; }
+
 
     @ConfigItem(
             keyName = "cinematicHud",
