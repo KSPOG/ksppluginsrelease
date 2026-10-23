@@ -2138,6 +2138,16 @@ public class KspAccountBuilderScript extends KspManagedScript
     public String getOverlayTaskDetail()
     {
         BuilderTask active = currentTask;
+        // EssenceMining owns the full seven-variant portal resolver and its
+        // per-portal status, including ID 34777. Use that same information for
+        // the Account Builder HUD and for unexpected-mine recovery.
+        if ((active == BuilderTask.RUNE_ESSENCE || essenceMineRecoveryActive)
+                && essenceMining != null)
+        {
+            String detail = essenceMining.getStatus();
+            if (detail != null && !detail.trim().isEmpty()
+                    && !"Idle".equalsIgnoreCase(detail)) return detail;
+        }
         if (active == BuilderTask.SMELTING && smeltScript != null)
         {
             String bar = smeltScript.getTargetBar() == null ? "Bars" : smeltScript.getTargetBar().getDisplayName();
