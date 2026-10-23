@@ -85,7 +85,9 @@ public class KspAccountBuilderPlugin extends Plugin
         @Override
         public MouseEvent mousePressed(MouseEvent e)
         {
-            if (javax.swing.SwingUtilities.isEventDispatchThread() && overlay != null
+            if (javax.swing.SwingUtilities.isEventDispatchThread()
+                    && !net.runelite.client.plugins.microbot.util.mouse.BotEventGuard.isSynthetic()
+                    && overlay != null
                     && e.getButton() == MouseEvent.BUTTON1 && overlay.clickAt(e.getPoint()))
                 e.consume();
             else if (shouldBlockCanvasInput(e)) e.consume();
@@ -118,7 +120,9 @@ public class KspAccountBuilderPlugin extends Plugin
             // Update the HUD's own hover state before consuming physical
             // movement. Otherwise tile/object tooltips and menu targets
             // continue responding while Block Input is enabled.
-            if (javax.swing.SwingUtilities.isEventDispatchThread() && overlay != null)
+            if (javax.swing.SwingUtilities.isEventDispatchThread()
+                    && !net.runelite.client.plugins.microbot.util.mouse.BotEventGuard.isSynthetic()
+                    && overlay != null)
                 overlay.hoverAt(e.getPoint());
             if (shouldBlockCanvasInput(e)) e.consume();
             return e;
