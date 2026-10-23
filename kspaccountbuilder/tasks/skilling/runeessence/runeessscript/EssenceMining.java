@@ -352,11 +352,15 @@ public class EssenceMining extends KspManagedScript
         TileObject liveObject = KspLiveScene.nearestTileObject(PORTAL_OBJECT_IDS, player, 100);
         if (liveObject != null)
         {
+            // Portal discovery now uses local scene positions. Cancel the
+            // coordinate-only fallback walk before trying the real object.
+            KspWalkerGuard.clear(WALK_KEY_PORTAL);
             int sceneId = liveObject.getId();
             int id = KspLiveScene.resolvedObjectId(liveObject);
-            KspTaskDebug.throttled(log, debugLogging, "Rune Essence", "portal-object-found", 5_000L,
-                    "Rune essence portal found | sceneId={} activeMorphId={} kind={} position={}",
-                    sceneId, id, liveObject.getClass().getSimpleName(), liveObject.getWorldLocation());
+            KspTaskDebug.throttled(log, true, "Rune Essence", "portal-object-found", 5_000L,
+                    "Rune essence portal found | sceneId={} activeMorphId={} kind={} world={} local={}",
+                    sceneId, id, liveObject.getClass().getSimpleName(),
+                    liveObject.getWorldLocation(), liveObject.getLocalLocation());
             if (Rs2Player.isMoving())
             {
                 status = "Approaching rune essence portal (ID " + id + ")";
