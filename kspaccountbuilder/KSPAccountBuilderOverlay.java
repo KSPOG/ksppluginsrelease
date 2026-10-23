@@ -70,25 +70,22 @@ public class KSPAccountBuilderOverlay extends OverlayPanel
     public Dimension render(Graphics2D graphics)
     {
         if (!plugin.mayRenderOverlay() || !hudVisible) return null;
-        if (config.cinematicHud() && config.hudFitChatbox())
+        // One cinematic layout: anchored to the actual RuneLite chatbox.
+        // The old 1130x405 viewport HUD is intentionally no longer used.
+        if (config.cinematicHud())
         {
             Rectangle chat = findChatboxBounds();
-            if (chat != null)
+            if (chat == null) return null;
+            if (!chatboxAnchored)
             {
-                if (!chatboxAnchored)
-                {
-                    setPosition(OverlayPosition.DYNAMIC);
-                    setMovable(false);
-                    chatboxAnchored = true;
-                }
-                Point location = chat.getLocation();
-                if (!location.equals(getPreferredLocation()))
-                    setPreferredLocation(location);
-                return cinematic.render(graphics, chat.width, chat.height);
+                setPosition(OverlayPosition.DYNAMIC);
+                setMovable(false);
+                chatboxAnchored = true;
             }
-            // If the user collapses/hides RuneLite chat, do not suddenly
-            // place the 1130px HUD on top of the game viewport.
-            return null;
+            Point location = chat.getLocation();
+            if (!location.equals(getPreferredLocation()))
+                setPreferredLocation(location);
+            return cinematic.render(graphics, chat.width, chat.height);
         }
         if (chatboxAnchored)
         {
@@ -98,21 +95,6 @@ public class KSPAccountBuilderOverlay extends OverlayPanel
             chatboxAnchored = false;
         }
         if (!config.cinematicHud()) return renderOriginalPanel(graphics);
-        if (config.cinematicHud())
-        {
-            if (config.blockGameInput() && Microbot.isLoggedIn() && Microbot.getClient() != null)
-            {
-                Graphics2D dim = (Graphics2D) graphics.create();
-                try
-                {
-                    dim.setColor(new Color(0, 0, 0, 112));
-                    dim.fillRect(-getBounds().x, -getBounds().y,
-                            Microbot.getClient().getCanvasWidth(), Microbot.getClient().getCanvasHeight());
-                }
-                finally { dim.dispose(); }
-            }
-            return cinematic.render(graphics);
-        }
 
         Graphics2D g = (Graphics2D) graphics.create();
         try
