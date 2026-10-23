@@ -491,10 +491,16 @@ final class KspCinematicHudRenderer
         boolean enabled = !("pause".equals(key) && script.isManualPaused())
                 && !("resume".equals(key) && !script.isManualPaused())
                 && !("skip".equals(key) && !script.canSkipTask());
-        g.setColor(enabled ? fill : new Color(39, 43, 43));
+        Color base = enabled ? fill : new Color(39, 43, 43);
+        Paint saved = g.getPaint();
+        g.setPaint(new GradientPaint(x, y + 2, base.brighter(),
+                x, y + h - 3, base.darker()));
         g.fillRoundRect(x + 2, y + 2, w - 4, h - 4, 6, 6);
+        g.setPaint(saved);
         g.setColor(hover.equals(key) ? BRIGHT : GOLD);
         g.drawRoundRect(x + 2, y + 2, w - 4, h - 4, 4, 4);
+        g.setColor(new Color(255, 239, 172, enabled ? 130 : 35));
+        g.drawLine(x + 6, y + 5, x + w - 7, y + 5);
         g.setFont(BUTTON);
         int tx = x + Math.max(8, (w - g.getFontMetrics().stringWidth(text)) / 2);
         label(g, text, tx, y + h / 2 + 6, enabled ? IVORY : MUTED);
@@ -503,7 +509,23 @@ final class KspCinematicHudRenderer
 
     private void ornamentalFrame(Graphics2D g, int x, int y, int w, int h)
     {
+        g.setColor(new Color(0, 0, 0, 110));
+        g.fillRoundRect(x + 3, y + 5, w, h, 10, 10);
         g.setColor(INK); g.fillRoundRect(x, y, w, h, 8, 8);
+        Shape oldClip = g.getClip();
+        g.clip(new RoundRectangle2D.Double(x + 5, y + 5, w - 10, h - 10, 6, 6));
+        for (int ix = x + 4; ix < x + w; ix += 30)
+        {
+            for (int iy = y + 5; iy < y + h; iy += 30)
+            {
+                g.setColor(new Color(198, 157, 71, 12));
+                g.drawLine(ix, iy + 14, ix + 14, iy);
+                g.drawLine(ix + 14, iy, ix + 29, iy + 14);
+                g.drawLine(ix + 29, iy + 14, ix + 14, iy + 29);
+                g.drawLine(ix + 14, iy + 29, ix, iy + 14);
+            }
+        }
+        g.setClip(oldClip);
         for (int step = 0; step < 3; step++)
         {
             g.setColor(step == 0 ? new Color(82, 55, 9) : step == 1 ? GOLD : BRIGHT);
@@ -517,6 +539,8 @@ final class KspCinematicHudRenderer
         {
             g.drawLine(cx, cy, cx + 13, cy);
             g.drawLine(cx, cy, cx, cy + 13);
+            g.drawArc(cx - 5, cy - 5, 19, 19, 8, 75);
+            g.fillOval(cx + 4, cy + 4, 3, 3);
         }
     }
 
