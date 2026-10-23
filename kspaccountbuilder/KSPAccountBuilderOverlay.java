@@ -57,7 +57,7 @@ public class KSPAccountBuilderOverlay extends OverlayPanel
         this.plugin = plugin;
         this.script = script;
         this.config = config;
-        this.cinematic = new KspCinematicHudRenderer(plugin, script, config, skillIconManager);
+        this.cinematic = new KspCinematicHudRenderer(plugin, script, config, skillIconManager, itemManager);
         setPosition(OverlayPosition.TOP_CENTER);
         setLayer(OverlayLayer.ALWAYS_ON_TOP);
         setMovable(!config.lockHudPosition());
