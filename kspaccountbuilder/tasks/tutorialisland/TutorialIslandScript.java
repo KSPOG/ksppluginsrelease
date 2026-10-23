@@ -1,5 +1,6 @@
 package net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.tutorialisland;
 
+import net.runelite.client.plugins.microbot.kspaccountbuilder.KspAccountBuilderPauseGate;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.KspManagedScript;
 
 import net.runelite.api.Actor;
@@ -163,7 +164,7 @@ public class TutorialIslandScript extends KspManagedScript
     {
         try
         {
-            if (!super.run()) return;
+            if (KspAccountBuilderPauseGate.isPaused() || !super.run()) return;
             if (!Microbot.isLoggedIn())
             {
                 handleQueuedLogin();
