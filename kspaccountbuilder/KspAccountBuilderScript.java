@@ -1358,8 +1358,19 @@ public class KspAccountBuilderScript extends KspManagedScript
             essenceMineRecoveryActive = true;
             debug("Paused task to exit unexpected essence mine | currentTask={} player={}", currentTask, Rs2Player.getWorldLocation());
         }
-        Microbot.status = "Leaving unexpected essence mine";
-        essenceMining.recoverFromEssenceMine();
+        // Share the Rune Essence task's complete object/NPC portal resolver,
+        // including morph-aware object ID 34777. Never maintain a second,
+        // potentially incomplete portal-ID list in the parent scheduler.
+        if (!essenceMining.recoverFromEssenceMine())
+        {
+            // The region changed between the initial check and recovery.
+            // Resume the selected task on the next scheduler cycle.
+            essenceMineRecoveryActive = false;
+            return false;
+        }
+        // Keep the portal-specific status visible, rather than replacing it
+        // with an unchanging "Leaving unexpected essence mine" message.
+        Microbot.status = "Rune Essence recovery: " + essenceMining.getStatus();
         return true;
     }
 
