@@ -1344,7 +1344,11 @@ final class KspCinematicHudRenderer
         hover = key == null ? "" : key;
     }
 
-    void openSettings() { settingsOpen = !settingsOpen; }
+    void openSettings()
+    {
+        settingsOpen = !settingsOpen;
+        currentPage = settingsOpen ? "Settings" : "Skills";
+    }
     void openQueue() { queueOpen = !queueOpen; }
     int selectedQueueRow() { return selectedQueueRow; }
     void selectQueueRow(int row) { selectedQueueRow = Math.max(0, row); }
