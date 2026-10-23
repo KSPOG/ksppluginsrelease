@@ -14,6 +14,8 @@ import net.runelite.client.plugins.microbot.Microbot;
 import net.runelite.client.ui.overlay.OverlayPanel;
 import net.runelite.client.ui.overlay.OverlayLayer;
 import net.runelite.client.ui.overlay.OverlayPosition;
+import net.runelite.client.ui.overlay.components.LineComponent;
+import net.runelite.client.ui.overlay.components.TitleComponent;
 
 /**
  * Skill-aware, canvas-native status HUD for the existing Account Builder engine.
@@ -65,6 +67,7 @@ public class KSPAccountBuilderOverlay extends OverlayPanel
     public Dimension render(Graphics2D graphics)
     {
         if (!plugin.mayRenderOverlay() || !hudVisible) return null;
+        if (!config.cinematicHud()) return renderOriginalPanel(graphics);
         if (config.cinematicHud())
         {
             if (config.blockGameInput() && Microbot.isLoggedIn() && Microbot.getClient() != null)
@@ -167,6 +170,56 @@ public class KSPAccountBuilderOverlay extends OverlayPanel
         text(g, skill == null ? "Account Progression" : prettify(skill), 62, 47, GOLD_LIGHT);
         g.setFont(new Font("SansSerif", Font.PLAIN, 11));
         clippedText(g, activity, 62, 65, Math.max(25, width - 74), IVORY);
+    }
+
+    /**
+     * Exact original Account Builder status fields retained as a recoverable
+     * fallback. Cosmetic redevelopment must never remove existing telemetry.
+     */
+    private Dimension renderOriginalPanel(Graphics2D graphics)
+    {
+        panelComponent.getChildren().clear();
+        panelComponent.setPreferredSize(new Dimension(280, 0));
+        String title = "KSP Account Builder V" + KspAccountBuilderPlugin.VERSION;
+        if (script.isAnyBreakActive())
+            title += script.isBreakActive()
+                    ? " | Break " + formatDuration(script.getBreakTimeRemainingSeconds())
+                    : " | Break";
+        panelComponent.getChildren().add(TitleComponent.builder()
+                .text(title).color(Color.CYAN).build());
+        panelComponent.getChildren().add(LineComponent.builder()
+                .left("Current Task:").right(script.getCurrentTaskName()).build());
+        panelComponent.getChildren().add(LineComponent.builder()
+                .left("Status:").right(normalizeStatus(Microbot.status)).build());
+        panelComponent.getChildren().add(LineComponent.builder()
+                .left("Time Running:").right(formatDuration(script.getRuntimeSeconds())).build());
+        panelComponent.getChildren().add(LineComponent.builder()
+                .left("Account Play Time:").right(formatDuration(script.getAccountPlayTimeSeconds())).build());
+        if (config.useAntiban())
+        {
+            panelComponent.getChildren().add(LineComponent.builder()
+                    .left("Antiban:")
+                    .right(plugin.isAntibanEnabledForCurrentTask() ? "ON | Task profile" : "OFF | Task profile")
+                    .build());
+            panelComponent.getChildren().add(LineComponent.builder()
+                    .left("Antiban Activity:").right(plugin.getAntibanActivity()).build());
+        }
+        if (config.doBreaks())
+        {
+            panelComponent.getChildren().add(LineComponent.builder()
+                    .left(script.isBreakActive() ? "Break Remaining:" : "Time till break:")
+                    .right(formatDuration(script.isBreakActive()
+                            ? script.getBreakTimeRemainingSeconds()
+                            : script.getTimeUntilBreakSeconds())).build());
+        }
+        if (config.enableActivitySwitchRandomization()
+                && !config.trainSingleSkill() && !config.runSingleQuest())
+        {
+            panelComponent.getChildren().add(LineComponent.builder()
+                    .left("Time till activity change:")
+                    .right(formatDuration(script.getTimeUntilActivitySwitchSeconds())).build());
+        }
+        return super.render(graphics);
     }
 
     /** Canvas positions are in RuneLite input coordinates, not UI scale coordinates. */
