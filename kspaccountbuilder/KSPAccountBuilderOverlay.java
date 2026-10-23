@@ -37,7 +37,7 @@ public class KSPAccountBuilderOverlay extends OverlayPanel
         // Never render stale task state on top of the active Account Builder HUD.
         if (!plugin.mayRenderOverlay()) return null;
         panelComponent.getChildren().clear();
-        panelComponent.setPreferredSize(new Dimension(280, 0));
+        panelComponent.setPreferredSize(new Dimension(320, 0));
         String displayStatus = normalizeStatus(Microbot.status);
 
         String title = "KSP Account Builder V" + KspAccountBuilderPlugin.VERSION;
@@ -50,7 +50,7 @@ public class KSPAccountBuilderOverlay extends OverlayPanel
 
         panelComponent.getChildren().add(TitleComponent.builder()
                 .text(title)
-                .color(Color.CYAN)
+                .color(new Color(255, 226, 138))
                 .build());
 
         panelComponent.getChildren().add(LineComponent.builder()
@@ -159,7 +159,7 @@ public class KSPAccountBuilderOverlay extends OverlayPanel
             String treeName = normalizedStatus.substring("Chopping Down ".length()).trim();
             if (!treeName.isEmpty())
             {
-                return "Choppin " + treeName;
+                return "Chopping " + treeName;
             }
         }
 
