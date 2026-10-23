@@ -65,6 +65,33 @@ jobs:
           test -s release/kspaccountbuilder/KspAccountBuilderPlugin.java
           test -s release/kspaccountbuilder/KspCinematicHudRenderer.java
 
+      - name: Verify all Rune Essence portal variants and shared recovery
+        shell: python
+        run: |
+          from pathlib import Path
+          import re
+
+          root = Path('release/kspaccountbuilder')
+          task = (root / 'tasks/skilling/runeessence/runeessscript/EssenceMining.java').read_text()
+          parent = (root / 'KspAccountBuilderScript.java').read_text()
+          scene = (root / 'ksputil/KspLiveScene.java').read_text()
+
+          def ids(name):
+              match = re.search(r'\\b' + name + r'\\s*=\\s*\\{([^}]*)\\}', task)
+              assert match, f'Missing portal registry: {name}'
+              return {int(token) for token in re.findall(r'\\d+', match.group(1))}
+
+          assert ids('PORTAL_NPC_IDS') == {3086, 3088}, 'Incomplete NPC portal variants'
+          assert ids('PORTAL_OBJECT_IDS') == {34774, 34775, 34776, 34777, 34778}, 'Incomplete object portal variants'
+          assert 'id == 34775 || id == 34777' in task, 'Exit-action variants missing'
+          assert 'nearestTileObject(PORTAL_OBJECT_IDS' in task, 'All-layer object discovery missing'
+          assert 'resolvedObjectId(liveObject)' in task, 'Active morph resolution missing'
+          assert 'nearestNpcId(PORTAL_NPC_IDS' in task, 'NPC discovery missing'
+          assert 'public static TileObject nearestTileObject(' in scene, 'Shared scene object resolver missing'
+          assert 'essenceMining.recoverFromEssenceMine()' in parent, 'Parent scheduler recovery must delegate'
+          assert 'essenceMining.getStatus()' in parent, 'Parent scheduler must report portal status'
+          print('PASS: all 7 Rune Essence portal variants and shared recovery routing')
+
       - name: Run dependency-free HUD and queue regression checks
         shell: bash
         run: |
