@@ -44,8 +44,11 @@ final class KspCinematicHudRenderer
     private final SkillIconManager skillIcons;
     private final Map<Skill, BufferedImage> iconCache = new EnumMap<>(Skill.class);
     private final Map<String, Rectangle> hitboxes = new LinkedHashMap<>();
-    private final Map<String, BufferedImage> sceneCache = new HashMap<>();
-    private final Set<String> unavailableScenes = new HashSet<>();
+    private final java.util.concurrent.ConcurrentMap<String, BufferedImage> sceneCache =
+            new java.util.concurrent.ConcurrentHashMap<>();
+    private final java.util.concurrent.ConcurrentMap<String, Long> nextArtworkRetry =
+            new java.util.concurrent.ConcurrentHashMap<>();
+    private final Set<String> artworkLoading = java.util.concurrent.ConcurrentHashMap.newKeySet();
     private String currentPage = "Skills";
     private boolean settingsOpen;
     private boolean queueOpen;
@@ -655,40 +658,93 @@ final class KspCinematicHudRenderer
     }
 
     /**
-     * Read cached local artwork, never network resources from the canvas paint
-     * callback. JAR-bundled artwork is preferred; source-loaded plugins may use
-     * the account-scoped artwork directory. The fallback remains functional.
+     * Resolve artwork without blocking RuneLite's paint callback. This also
+     * recognizes the supplied reference-derived artwork ZIP in Downloads, so
+     * users do not need to extract individual skill PNGs manually.
+     *
+     * Cache misses are retried periodically: adding the ZIP while the client
+     * is running must not require a plugin restart.
      */
     private BufferedImage sceneArtwork(String kind)
     {
-        String key = kind.toLowerCase(Locale.ROOT);
-        if (sceneCache.containsKey(key)) return sceneCache.get(key);
-        if (unavailableScenes.contains(key)) return null;
-        String filename = key + ".png";
-        BufferedImage image = null;
+        final String key = kind.toLowerCase(Locale.ROOT);
+        BufferedImage cached = sceneCache.get(key);
+        if (cached != null) return cached;
+        long now = System.currentTimeMillis();
+        Long next = nextArtworkRetry.get(key);
+        if (next != null && now < next) return null;
+        if (!artworkLoading.add(key)) return null;
+        nextArtworkRetry.put(key, now + 30000L);
+        java.util.concurrent.CompletableFuture.runAsync(() ->
+        {
+            try
+            {
+                BufferedImage loaded = loadArtwork(key + ".png");
+                if (loaded != null)
+                {
+                    sceneCache.put(key, loaded);
+                    nextArtworkRetry.remove(key);
+                }
+            }
+            catch (Exception ex)
+            {
+                // The in-game overlay can still use the themed fallback.
+                org.slf4j.LoggerFactory.getLogger(KspCinematicHudRenderer.class)
+                        .warn("Could not load Account Builder cinematic artwork {}", key, ex);
+            }
+            finally
+            {
+                artworkLoading.remove(key);
+            }
+        });
+        return null;
+    }
+
+    private BufferedImage loadArtwork(String filename) throws java.io.IOException
+    {
         try (InputStream stream = getClass().getResourceAsStream("cinematic/" + filename))
         {
-            if (stream != null) image = ImageIO.read(stream);
-        }
-        catch (Exception ignored) { }
-        if (image == null)
-        {
-            String base = System.getProperty("ksp.accountbuilder.artworkRoot",
-                    Paths.get(System.getProperty("user.home"), ".runelite",
-                            "kspaccountbuilder", "artwork").toString());
-            Path file = Paths.get(base, filename);
-            if (Files.isRegularFile(file))
+            if (stream != null)
             {
-                try (InputStream stream = Files.newInputStream(file))
-                {
-                    image = ImageIO.read(stream);
-                }
-                catch (Exception ignored) { }
+                BufferedImage image = ImageIO.read(stream);
+                if (image != null) return image;
             }
         }
-        if (image != null) sceneCache.put(key, image);
-        else unavailableScenes.add(key);
-        return image;
+
+        String base = System.getProperty("ksp.accountbuilder.artworkRoot",
+                Paths.get(System.getProperty("user.home"), ".runelite",
+                        "kspaccountbuilder", "artwork").toString());
+        Path direct = Paths.get(base, filename);
+        if (Files.isRegularFile(direct))
+        {
+            try (InputStream stream = Files.newInputStream(direct))
+            {
+                BufferedImage image = ImageIO.read(stream);
+                if (image != null) return image;
+            }
+        }
+
+        Path home = Paths.get(System.getProperty("user.home"));
+        Path[] candidates = {
+                Paths.get(base, "KSP_Account_Builder_Cinematic_Artwork.zip"),
+                home.resolve("Downloads").resolve("KSP_Account_Builder_Cinematic_Artwork.zip")
+        };
+        for (Path archive : candidates)
+        {
+            if (!Files.isRegularFile(archive)) continue;
+            try (java.util.zip.ZipFile zip = new java.util.zip.ZipFile(archive.toFile()))
+            {
+                java.util.zip.ZipEntry entry = zip.getEntry(filename);
+                if (entry == null) entry = zip.getEntry("ksp_account_builder_artwork_pack/" + filename);
+                if (entry == null || entry.isDirectory() || entry.getSize() > 8L * 1024 * 1024) continue;
+                try (InputStream stream = zip.getInputStream(entry))
+                {
+                    BufferedImage image = ImageIO.read(stream);
+                    if (image != null) return image;
+                }
+            }
+        }
+        return null;
     }
 
     private void paintScene(Graphics2D g, String kind)
