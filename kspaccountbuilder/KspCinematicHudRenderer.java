@@ -308,9 +308,12 @@ final class KspCinematicHudRenderer
         g.setFont(new Font("Serif", Font.BOLD, 14));
         label(g, displayKind(kind), 53, 43, BRIGHT);
         g.setFont(SMALL);
-        ellipsis(g, script.getOverlayTaskDetail(), 53, 63, 255, IVORY);
-        uiButton(g, "restore", 407, 31, 35, 35, "▴", new Color(16, 45, 24));
-        uiButton(g, "close", 449, 31, 36, 35, "×", new Color(112, 16, 19));
+        ellipsis(g, script.getOverlayTaskDetail(), 53, 63, 265, IVORY);
+        uiButton(g, "pause", 327, 33, 30, 34, "Ⅱ", new Color(124, 82, 6));
+        uiButton(g, "resume", 362, 33, 30, 34, "▶", new Color(4, 116, 35));
+        uiButton(g, "stop", 397, 33, 30, 34, "■", new Color(142, 16, 19));
+        uiButton(g, "settings", 432, 33, 30, 34, "⚙", new Color(21, 41, 59));
+        uiButton(g, "restore", 467, 33, 26, 34, "▴", RAISED);
     }
 
     private void paintSettings(Graphics2D g)
