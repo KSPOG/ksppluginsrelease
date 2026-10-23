@@ -1,5 +1,6 @@
 package net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.stronghold.script;
 
+import net.runelite.client.plugins.microbot.kspaccountbuilder.KspAccountBuilderPauseGate;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.KspManagedScript;
 
 import java.util.concurrent.TimeUnit;
@@ -56,7 +57,7 @@ public class SoCScript extends KspManagedScript
         Microbot.status = "Preparing Stronghold of Security";
         mainScheduledFuture = scheduledExecutorService.scheduleWithFixedDelay(() ->
         {
-            if (!super.run() || !Microbot.isLoggedIn() || complete)
+            if (KspAccountBuilderPauseGate.isPaused() || !super.run() || !Microbot.isLoggedIn() || complete)
             {
                 return;
             }
