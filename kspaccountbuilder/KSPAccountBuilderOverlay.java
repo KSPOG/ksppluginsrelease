@@ -86,6 +86,9 @@ public class KSPAccountBuilderOverlay extends OverlayPanel
                     setPreferredLocation(location);
                 return cinematic.render(graphics, chat.width, chat.height);
             }
+            // If the user collapses/hides RuneLite chat, do not suddenly
+            // place the 1130px HUD on top of the game viewport.
+            return null;
         }
         if (chatboxAnchored)
         {
