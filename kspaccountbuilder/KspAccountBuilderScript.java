@@ -358,11 +358,12 @@ public class KspAccountBuilderScript extends KspManagedScript
                 {
                     manualPauseApplied = true;
                     manualPauseStartedAtMs = System.currentTimeMillis();
+                    orderedLastSampleMs = manualPauseStartedAtMs;
                     pauseActivitySwitchTimer(manualPauseStartedAtMs);
                     if (isTaskScriptRunning(currentTask)) stopCurrentTaskScript();
                     taskStarted = false;
                 }
-                Microbot.status = "Account Builder paused";
+                Microbot.status = orderedComplete ? "Ordered task queue completed" : "Account Builder paused";
                 updateWindowTitle();
                 return;
             }
@@ -372,6 +373,7 @@ public class KspAccountBuilderScript extends KspManagedScript
                 long duration = Math.max(0L, now - manualPauseStartedAtMs);
                 if (nextBreakAtMillis > 0L) nextBreakAtMillis += duration;
                 resumeActivitySwitchTimer(now);
+                orderedLastSampleMs = now;
                 manualPauseApplied = false;
                 manualPauseStartedAtMs = 0L;
             }
