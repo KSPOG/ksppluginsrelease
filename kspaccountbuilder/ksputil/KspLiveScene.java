@@ -171,6 +171,25 @@ public final class KspLiveScene
         return false;
     }
 
+    /**
+     * Return the active varbit-selected object ID when the scene object is a
+     * multiloc. The visible rune-essence portal can be 34777 even when its
+     * underlying scene object uses a different base ID.
+     */
+    public static int resolvedObjectId(TileObject object)
+    {
+        if (object == null) return -1;
+        int sceneId = object.getId();
+        return Microbot.getClientThread().runOnClientThreadOptional(() ->
+        {
+            if (Microbot.getClient() == null) return sceneId;
+            ObjectComposition definition = Microbot.getClient().getObjectDefinition(sceneId);
+            if (definition == null || definition.getImpostorIds() == null) return sceneId;
+            ObjectComposition active = definition.getImpostor();
+            return active == null ? sceneId : active.getId();
+        }).orElse(sceneId);
+    }
+
     public static TileObject nearestGameObject(int objectId, WorldPoint origin, int maxDistance)
     {
         return Microbot.getClientThread().runOnClientThreadOptional(() ->
