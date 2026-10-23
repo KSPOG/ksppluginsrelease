@@ -171,7 +171,7 @@ public final class KspLiveScene
         if (playerView != null && candidate.getPlane() != playerView.getPlane()) return -1;
         net.runelite.api.coords.LocalPoint objectLocal = candidate.getLocalLocation();
         if (playerLocal != null && objectLocal != null && playerView != null
-                && candidate.getWorldView() == playerView)
+                && objectLocal.getWorldView() == playerLocal.getWorldView())
         {
             int dx = Math.abs(objectLocal.getX() - playerLocal.getX());
             int dy = Math.abs(objectLocal.getY() - playerLocal.getY());
