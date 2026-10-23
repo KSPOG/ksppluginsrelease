@@ -345,19 +345,6 @@ public class KspAccountBuilderScript extends KspManagedScript
         {
             if (shuttingDown || !super.run() || shuttingDown) return;
             syncDebugLogging(false);
-            if (KspWorldMapGuard.closeIfOpen())
-            {
-                KspWalkerGuard.clearActiveWalker("ksp_account_builder_world_map_open");
-                maybeLogStatus();
-                return;
-            }
-            refreshAccountIdentity();
-            if (handleExperienceLampInterruption())
-            {
-                updateWindowTitle();
-                maybeLogStatus();
-                return;
-            }
             if (manualPaused)
             {
                 if (!manualPauseApplied)
@@ -386,6 +373,19 @@ public class KspAccountBuilderScript extends KspManagedScript
                 manualPauseStartedAtMs = 0L;
                 // Resume child loops only after parent timers are adjusted.
                 KspAccountBuilderPauseGate.setPaused(false);
+            }
+            if (KspWorldMapGuard.closeIfOpen())
+            {
+                KspWalkerGuard.clearActiveWalker("ksp_account_builder_world_map_open");
+                maybeLogStatus();
+                return;
+            }
+            refreshAccountIdentity();
+            if (handleExperienceLampInterruption())
+            {
+                updateWindowTitle();
+                maybeLogStatus();
+                return;
             }
             processTimers();
             updateWindowTitle();
