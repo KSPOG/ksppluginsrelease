@@ -42,6 +42,7 @@ public class KSPAccountBuilderOverlay extends OverlayPanel
     private volatile boolean detailsVisible = true;
     private int sampleStartXp = -1;
     private long sampleStartMs;
+    private long sampleRuntimeStartMs = -1L;
 
     @Inject
     public KSPAccountBuilderOverlay(KspAccountBuilderPlugin plugin, KspAccountBuilderScript script,
@@ -181,10 +182,12 @@ public class KSPAccountBuilderOverlay extends OverlayPanel
                 return;
             }
             long now = System.currentTimeMillis();
+            long runtimeStart = script.getStartedAtMillis();
             if (skill != sampledSkill || xp < sampleStartXp || sampleStartXp < 0
-                    || sampleStartMs <= 0L || script.getRuntimeSeconds() == 0L)
+                    || sampleStartMs <= 0L || runtimeStart != sampleRuntimeStartMs)
             {
                 sampledSkill = skill;
+                sampleRuntimeStartMs = runtimeStart;
                 sampleStartXp = xp;
                 sampleStartMs = now;
             }
