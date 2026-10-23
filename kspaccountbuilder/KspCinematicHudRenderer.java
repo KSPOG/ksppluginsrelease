@@ -407,6 +407,13 @@ final class KspCinematicHudRenderer
                 ellipsis(g, displayKind(kind), 18, 77, 275, BRIGHT);
             }
             g.setClip(previousClip);
+            // Keep task identity visible above the artwork. Previously the
+            // scene image occupied this entire area without a task heading.
+            g.setColor(new Color(4, 9, 13, 215));
+            g.fillRoundRect(12, 38, 308, 20, 4, 4);
+            g.setFont(new Font("SansSerif", Font.BOLD, 12));
+            String taskName = safe(script.getCurrentTaskName(), "Idle").replace('_', ' ');
+            ellipsis(g, taskName, 19, 52, 292, BRIGHT);
             g.setColor(new Color(4, 9, 13, 210));
             g.fillRoundRect(12, 110, 308, 17, 4, 4);
             g.setFont(new Font("SansSerif", Font.PLAIN, 10));
@@ -494,7 +501,7 @@ final class KspCinematicHudRenderer
                 && client.getGameState() == GameState.LOGGED_IN;
         g.setFont(new Font("Serif", Font.BOLD, 14));
         ellipsis(g, displayKind(kind), 337, 46, 146, BRIGHT);
-        g.setFont(new Font("SansSerif", Font.PLAIN, 10));
+        g.setFont(new Font("SansSerif", Font.PLAIN, 11));
         long gained = 0L, rate = 0L;
         long remaining = -1L;
         double progress = Double.NaN;
@@ -536,7 +543,7 @@ final class KspCinematicHudRenderer
         }
         if (!valid) label(g, "XP unavailable", 337, 60, MUTED);
         drawBar(g, 337, 65, 147, 7, progress, XP_BLUE);
-        g.setFont(new Font("SansSerif", Font.PLAIN, 10));
+        g.setFont(new Font("SansSerif", Font.PLAIN, 11));
         label(g, "XP +" + String.format(Locale.ROOT, "%,d", gained), 337, 86, IVORY);
         alignRight(g, rate > 0L ? String.format(Locale.ROOT, "%,d/h", rate)
                 : "—/h", 485, 86, IVORY);
