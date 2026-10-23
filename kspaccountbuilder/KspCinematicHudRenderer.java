@@ -190,7 +190,7 @@ final class KspCinematicHudRenderer
                         ? targetSeconds : Math.min(targetSeconds, script.getOrderedElapsedSeconds());
                 if (targetSeconds > 0L)
                 {
-                    taskProgress = Math.min(1.0, (double) completedSeconds / targetSeconds);
+                    taskProgress = KspAccountBuilderHudMath.taskDurationProgress(completedSeconds, targetSeconds);
                     taskProgressText = String.format(Locale.ROOT, "%d / %d s (%.1f%%)",
                             completedSeconds, targetSeconds, taskProgress * 100.0);
                 }
@@ -354,7 +354,7 @@ final class KspCinematicHudRenderer
                 {
                     long completed = script.isOrderedQueueComplete()
                             ? target : Math.min(target, script.getOrderedElapsedSeconds());
-                    progress = Math.min(1.0, (double) completed / target);
+                    progress = KspAccountBuilderHudMath.taskDurationProgress(completed, target);
                     progressLabel = String.format(Locale.ROOT, "%d/%ds (%.0f%%)",
                             completed, target, progress * 100.0);
                 }
