@@ -95,6 +95,39 @@ jobs:
           assert 'essenceMining.getStatus()' in parent, 'Parent scheduler must report portal status'
           print('PASS: all 7 Rune Essence portal variants and shared recovery routing')
 
+      - name: Verify state-preserving pause and fitted chatbox controls
+        shell: python
+        run: |
+          from pathlib import Path
+          root = Path('release/kspaccountbuilder')
+          parent = (root / 'KspAccountBuilderScript.java').read_text()
+          gate = (root / 'KspAccountBuilderPauseGate.java').read_text()
+          walker = (root / 'KspWalkerGuard.java').read_text()
+          renderer = (root / 'KspCinematicHudRenderer.java').read_text()
+          assert 'public static boolean isPaused()' in gate
+          assert 'KspAccountBuilderPauseGate.setPaused(true);' in parent
+          assert 'KspAccountBuilderPauseGate.setPaused(false);' in parent
+          assert 'KspWalkerGuard.pauseOwnedWalker();' in parent
+          assert 'public static void pauseOwnedWalker()' in walker
+          beginning = parent.index('if (manualPaused)', parent.index('private void runLoop()'))
+          resume = parent.index('if (manualPauseApplied)', beginning)
+          paused = parent[beginning:resume]
+          assert 'stopCurrentTaskScript()' not in paused, 'Pause must not restart child state'
+          assert 'taskStarted = false' not in paused, 'Pause must not reset taskStarted'
+          guarded = 0
+          for path in (root / 'tasks').rglob('*.java'):
+              content = path.read_text()
+              if '!super.run()' in content:
+                  guarded += 1
+                  assert 'KspAccountBuilderPauseGate.isPaused() || !super.run()' in content, str(path)
+          assert guarded >= 18, f'Expected all runnable tasks, found {guarded}'
+          layout = renderer[renderer.index('private void paintChatbox('):renderer.index('private void paintMini(')]
+          for action in ('pause','resume','stop','skip','settings','restore'):
+              assert 'uiButton(g, "' + action + '"' in layout, action
+          assert 'paintChatboxStats(g, kind);' in layout
+          assert 'while (size > 9f' in renderer, 'Button labels must fit small chatbox'
+          print(f'PASS: {guarded} runnable child loops pause safely; six fitted chatbox controls')
+
       - name: Run dependency-free HUD and queue regression checks
         shell: bash
         run: |
