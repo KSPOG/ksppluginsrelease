@@ -114,6 +114,17 @@ public final class KspWalkerGuard
         clearKey(key, "ksp_account_builder_clear_walker");
     }
 
+    /**
+     * Halt only a route currently owned by Account Builder. This pauses
+     * navigation without shutting down/reinitializing the active task.
+     * A later task tick can resume walking from the player's current tile.
+     */
+    public static void pauseOwnedWalker()
+    {
+        if (activeWalkerKey != null)
+            clearActiveWalker("ksp_account_builder_manual_pause");
+    }
+
     public static void clearActiveWalker(String reason)
     {
         if (Rs2Walker.getCurrentTarget() != null)
