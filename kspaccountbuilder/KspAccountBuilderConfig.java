@@ -17,6 +17,16 @@ import net.runelite.client.config.Range;
 public interface KspAccountBuilderConfig extends Config
 {
     String CONFIG_GROUP = "kspaccountbuilder";
+
+    @ConfigItem(
+            keyName = "cinematicHud",
+            name = "Cinematic interface",
+            description = "Use the gold-framed skill-aware interface; turn off to use the legacy HUD",
+            position = 94,
+            hidden = true
+    )
+    default boolean cinematicHud() { return true; }
+
     @ConfigItem(
             keyName = "hudDetailsVisible",
             name = "Expanded HUD details",
