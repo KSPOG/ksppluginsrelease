@@ -85,7 +85,7 @@ final class KspAccountBuilderPanel extends PluginPanel
         setLayout(new BorderLayout());
         setBackground(PANEL_DARK);
 
-        JPanel content = new JPanel();
+        JPanel content = new SidebarContent();
         content.setBackground(PANEL_DARK);
         content.setLayout(new BoxLayout(content, BoxLayout.Y_AXIS));
         content.setBorder(BorderFactory.createCompoundBorder(
@@ -468,6 +468,39 @@ final class KspAccountBuilderPanel extends PluginPanel
         JLabel result = new JLabel("-");
         result.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
         return result;
+    }
+
+    /**
+     * Swing's ordinary JPanel retains its preferred width in a JScrollPane,
+     * clipping combo boxes and queue controls when the RuneLite navigation
+     * rail is narrower than their labels. Always track the viewport width.
+     */
+    private static final class SidebarContent extends JPanel implements javax.swing.Scrollable
+    {
+        @Override public Dimension getPreferredScrollableViewportSize()
+        {
+            return getPreferredSize();
+        }
+
+        @Override public int getScrollableUnitIncrement(Rectangle visibleRect, int orientation, int direction)
+        {
+            return 20;
+        }
+
+        @Override public int getScrollableBlockIncrement(Rectangle visibleRect, int orientation, int direction)
+        {
+            return Math.max(50, visibleRect.height - 20);
+        }
+
+        @Override public boolean getScrollableTracksViewportWidth()
+        {
+            return true;
+        }
+
+        @Override public boolean getScrollableTracksViewportHeight()
+        {
+            return false;
+        }
     }
 
     private static JPanel section(String name)
