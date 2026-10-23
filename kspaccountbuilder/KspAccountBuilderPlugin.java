@@ -92,6 +92,7 @@ public class KspAccountBuilderPlugin extends Plugin
         configManager.setConfiguration(KspAccountBuilderConfig.CONFIG_GROUP, "runAccountBuilder", false);
         panelEnabled = true;
         setCompactOverlay(config.compactHud());
+        setHudVisible(config.showHud());
         addSidePanel();
         acceptingRuntimeChanges = true;
         log.info("KSP Account Builder loaded stopped; press Start in sidebar to begin automation");
@@ -388,6 +389,16 @@ public class KspAccountBuilderPlugin extends Plugin
                 if (ownsRuntime()) UIManager.getDefaults().remove(RUNTIME_OWNER_KEY);
             }
         }
+    }
+
+    void setHudVisible(boolean visible)
+    {
+        if (overlay != null) overlay.setHudVisible(visible);
+    }
+
+    boolean isHudVisible()
+    {
+        return overlay != null && overlay.isHudVisible();
     }
 
     void setCompactOverlay(boolean compact)
