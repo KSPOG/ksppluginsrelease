@@ -120,11 +120,7 @@ public class KSPAccountBuilderOverlay extends OverlayPanel
                 : config.doBreaks() ? "Next break " + formatDuration(script.getTimeUntilBreakSeconds()) : "Breaks off";
             clippedText(g, breakLabel, narrow ? width / 2 : width - 171, footerY + 18,
                     narrow ? width / 2 - 30 : 155, MUTED);
-            if (!narrow)
-            {
-                g.setFont(new Font("SansSerif", Font.PLAIN, 10));
-                text(g, "Start / Stop & task settings: Account Builder sidebar", 19, HEIGHT - 7, MUTED);
-            }
+
             return new Dimension((int) Math.ceil(width * scale), (int) Math.ceil(height * scale));
         }
         finally
