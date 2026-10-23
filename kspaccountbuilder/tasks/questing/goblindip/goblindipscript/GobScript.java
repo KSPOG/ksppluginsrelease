@@ -1,5 +1,6 @@
 package net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.questing.goblindip.goblindipscript;
 
+import net.runelite.client.plugins.microbot.kspaccountbuilder.KspAccountBuilderPauseGate;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.KspManagedScript;
 
 import net.runelite.api.Quest;
@@ -113,7 +114,7 @@ public class GobScript extends KspManagedScript {
     }
 
     private void runLoop() {
-        if (!super.run() || !Microbot.isLoggedIn()) {
+        if (KspAccountBuilderPauseGate.isPaused() || !super.run() || !Microbot.isLoggedIn()) {
             return;
         }
 
