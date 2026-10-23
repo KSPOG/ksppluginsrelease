@@ -98,6 +98,7 @@ final class KspAccountBuilderPanel extends PluginPanel
         controls.add(pair("Anti-ban activity", antibanActivity));
         controls.add(pair("Next break", breakTimer));
         controls.add(pair("Activity switch", switchTimer));
+        switchTimer.setToolTipText("Time until the next random activity change, when enabled and supported.");
         content.add(controls);
         content.add(Box.createVerticalStrut(6));
 
@@ -251,6 +252,8 @@ final class KspAccountBuilderPanel extends PluginPanel
         runtime.setText(running ? duration(script.getRuntimeSeconds()) : "-");
         accountPlayTime.setText(running ? duration(script.getAccountPlayTimeSeconds()) : "-");
         antibanActivity.setText(running && config.useAntiban() ? plugin.getAntibanActivity() : "-");
+        accountPlayTime.setToolTipText("Total play time tracked for the active account.");
+        antibanActivity.setToolTipText("Current Account Builder anti-ban activity, when enabled.");
         breakTimer.setText(running ? duration(script.getTimeUntilBreakSeconds()) : "-");
         switchTimer.setText(running ? duration(script.getTimeUntilActivitySwitchSeconds()) : "-");
 
