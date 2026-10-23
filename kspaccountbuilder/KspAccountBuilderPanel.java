@@ -47,6 +47,7 @@ final class KspAccountBuilderPanel extends PluginPanel
     private final JComboBox<KspTrainSingleSkillTask> skill = new JComboBox<>(KspTrainSingleSkillTask.values());
     private final JComboBox<KspQuestTask> quest = new JComboBox<>(KspQuestTask.values());
     private final JComboBox<Enum<?>> target = new JComboBox<>();
+    private final JCheckBox showHud = new JCheckBox("Show in-game HUD");
     private final JCheckBox compactHud = new JCheckBox("Compact in-game HUD");
     private final JCheckBox breaks = new JCheckBox("Enable breaks");
     private final JCheckBox antiban = new JCheckBox("Enable anti-ban");
@@ -136,6 +137,17 @@ final class KspAccountBuilderPanel extends PluginPanel
         content.add(Box.createVerticalStrut(6));
 
         JPanel quick = section("Quick settings");
+        showHud.setOpaque(false);
+        showHud.setForeground(new Color(242, 235, 221));
+        showHud.setToolTipText("Hide or reopen the in-game overlay without stopping the automation.");
+        showHud.addActionListener(e -> {
+            if (!updating)
+            {
+                configManager.setConfiguration(KspAccountBuilderConfig.CONFIG_GROUP, "showHud", showHud.isSelected());
+                plugin.setHudVisible(showHud.isSelected());
+            }
+        });
+        quick.add(showHud);
         compactHud.setOpaque(false);
         compactHud.setForeground(new Color(242, 235, 221));
         compactHud.addActionListener(e -> { if (!updating) { configManager.setConfiguration(KspAccountBuilderConfig.CONFIG_GROUP, "compactHud", compactHud.isSelected()); plugin.setCompactOverlay(compactHud.isSelected()); } });
@@ -268,6 +280,7 @@ final class KspAccountBuilderPanel extends PluginPanel
         Object currentTarget = selectedTarget(config.singleSkillTask());
         if (currentTarget != null && target.getSelectedItem() != currentTarget) target.setSelectedItem(currentTarget);
         if (quest.getSelectedItem() != config.singleQuestTask()) quest.setSelectedItem(config.singleQuestTask());
+        showHud.setSelected(plugin.isHudVisible());
         compactHud.setSelected(plugin.isCompactOverlay());
         breaks.setSelected(config.doBreaks());
         antiban.setSelected(config.useAntiban());
