@@ -29,6 +29,18 @@ public final class HudAndQueueRegressionTest
         check(KspAccountBuilderHudMath.etaSeconds(0, 1) == 0, "completed ETA");
         check(KspAccountBuilderHudMath.etaSeconds(120, 0) == -1, "unknown ETA");
         check(KspAccountBuilderHudMath.etaSeconds(100, 120) == 3000, "ETA calculation");
+        check(Double.isNaN(KspAccountBuilderHudMath.taskDurationProgress(30, 0)),
+                "no fabricated task progress without a target");
+        check(KspAccountBuilderHudMath.taskDurationProgress(0, 300) == 0.0,
+                "new queued task starts empty");
+        check(KspAccountBuilderHudMath.taskDurationProgress(90, 300) == 0.3,
+                "queued duration progress");
+        check(KspAccountBuilderHudMath.taskDurationProgress(300, 300) == 1.0,
+                "completed queued task");
+        check(KspAccountBuilderHudMath.taskDurationProgress(999, 300) == 1.0,
+                "task progress clamps to target");
+        check(KspAccountBuilderHudMath.taskDurationProgress(Long.MAX_VALUE, Long.MAX_VALUE) == 1.0,
+                "task progress avoids overflow");
         check(KspAccountBuilderHudMath.scaledCoordinate(75, .75) == 100, "scaled hit coordinate");
         check(KspAccountBuilderHudMath.scaledCoordinate(75, 0) == -1, "invalid scale");
         check(KspAccountBuilderTaskQueue.parse("").isEmpty(), "empty queue preserves auto mode");
