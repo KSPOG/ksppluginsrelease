@@ -18,6 +18,7 @@ import net.runelite.client.ui.overlay.OverlayManager;
 import javax.inject.Inject;
 import javax.swing.SwingUtilities;
 import javax.swing.UIManager;
+import javax.swing.JOptionPane;
 import java.awt.Point;
 import java.awt.event.MouseEvent;
 import java.awt.event.KeyEvent;
@@ -167,6 +168,66 @@ public class KspAccountBuilderPlugin extends Plugin
     void dispatchHudAction(String action, KspCinematicHudRenderer renderer)
     {
         if (!mayRenderOverlay()) return;
+        if (action.startsWith("queue:row:"))
+        {
+            try { renderer.selectQueueRow(Integer.parseInt(action.substring("queue:row:".length()))); }
+            catch (NumberFormatException ignored) { }
+            return;
+        }
+        if (action.startsWith("queue:") && !action.equals("queue-close"))
+        {
+            if (isRuntimeActive()) return; // Prevent editing the running queue snapshot.
+            String queue = config.orderedTaskQueue();
+            int selected = renderer.selectedQueueRow();
+            if ("queue:add".equals(action))
+            {
+                String task = (String) JOptionPane.showInputDialog(null, "Choose a task",
+                        "Add Account Builder Task", JOptionPane.PLAIN_MESSAGE, null,
+                        KspAccountBuilderTaskQueue.SUPPORTED_TASKS,
+                        KspAccountBuilderTaskQueue.SUPPORTED_TASKS[0]);
+                if (task == null) return;
+                String value = JOptionPane.showInputDialog(null,
+                        "Active work duration in seconds (30–86400):", "300");
+                if (value == null) return;
+                try
+                {
+                    int seconds = Integer.parseInt(value.trim());
+                    String updated = KspAccountBuilderTaskQueue.append(queue, task, seconds);
+                    configManager.setConfiguration(KspAccountBuilderConfig.CONFIG_GROUP,
+                            "orderedTaskQueue", updated);
+                    if (!updated.isEmpty())
+                        configManager.setConfiguration(KspAccountBuilderConfig.CONFIG_GROUP,
+                                "useOrderedTaskQueue", true);
+                    renderer.selectQueueRow(KspAccountBuilderTaskQueue.parse(updated).size() - 1);
+                }
+                catch (NumberFormatException ignored)
+                {
+                    JOptionPane.showMessageDialog(null, "Enter a whole number from 30 to 86400 seconds.");
+                }
+                return;
+            }
+            if ("queue:up".equals(action) || "queue:down".equals(action))
+            {
+                int delta = action.equals("queue:up") ? -1 : 1;
+                String updated = KspAccountBuilderTaskQueue.move(queue, selected, delta);
+                configManager.setConfiguration(KspAccountBuilderConfig.CONFIG_GROUP,
+                        "orderedTaskQueue", updated);
+                if (!updated.equals(queue)) renderer.selectQueueRow(selected + delta);
+                else renderer.scrollQueue(delta);
+                return;
+            }
+            if ("queue:remove".equals(action))
+            {
+                String updated = KspAccountBuilderTaskQueue.remove(queue, selected);
+                configManager.setConfiguration(KspAccountBuilderConfig.CONFIG_GROUP,
+                        "orderedTaskQueue", updated);
+                if (updated.isEmpty())
+                    configManager.setConfiguration(KspAccountBuilderConfig.CONFIG_GROUP,
+                            "useOrderedTaskQueue", false);
+                renderer.selectQueueRow(Math.min(selected, KspAccountBuilderTaskQueue.parse(updated).size() - 1));
+                return;
+            }
+        }
         if (action.startsWith("nav:"))
         {
             renderer.navigate(action.substring(4));
