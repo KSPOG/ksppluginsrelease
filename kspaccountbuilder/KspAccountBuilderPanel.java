@@ -87,6 +87,7 @@ final class KspAccountBuilderPanel extends PluginPanel
         startStop.setFocusPainted(false);
         startStop.addActionListener(e -> configManager.setConfiguration(
                 KspAccountBuilderConfig.CONFIG_GROUP, "runAccountBuilder", !config.runAccountBuilder()));
+        startStop.setToolTipText("Starts or stops the existing Account Builder runtime. Stopping cancels the current automation.");
         controls.add(startStop);
         controls.add(pair("State", status));
         controls.add(pair("Task", task));
@@ -97,6 +98,10 @@ final class KspAccountBuilderPanel extends PluginPanel
         content.add(Box.createVerticalStrut(6));
 
         JPanel selection = section("Task selection (stop to edit)");
+        mode.setToolTipText("Choose automatic progression, one skill, or one quest while stopped.");
+        skill.setToolTipText("Select the skill to train while in single skill mode.");
+        quest.setToolTipText("Select the quest to complete while in single quest mode.");
+        target.setToolTipText("Select the configured training target for the selected skill.");
         addControl(selection, "Mode", mode);
         addControl(selection, "Skill", skill);
         addControl(selection, "Target", target);
@@ -129,7 +134,12 @@ final class KspAccountBuilderPanel extends PluginPanel
         compactHud.setOpaque(false);
         compactHud.setForeground(new Color(242, 235, 221));
         compactHud.addActionListener(e -> { if (!updating) { configManager.setConfiguration(KspAccountBuilderConfig.CONFIG_GROUP, "compactHud", compactHud.isSelected()); plugin.setCompactOverlay(compactHud.isSelected()); } });
+        compactHud.setToolTipText("Switch between the full and compact in-game HUD without restarting the current task.");
         quick.add(compactHud);
+        breaks.setToolTipText("Enable the configured randomized break schedule.");
+        antiban.setToolTipText("Use the existing Account Builder anti-ban profile.");
+        skipQuests.setToolTipText("Skip quest tasks during automatic progression.");
+        randomSwitch.setToolTipText("Randomize automatic skilling activity switches.");
         addCheck(quick, breaks, "doBreaks");
         addCheck(quick, antiban, "useAntiban");
         addCheck(quick, skipQuests, "skipQuests");
