@@ -8,7 +8,7 @@ import net.runelite.api.Client;
 import net.runelite.api.Skill;
 import net.runelite.api.GameState;
 import net.runelite.api.Experience;
-import net.runelite.api.widgets.InterfaceID;
+import net.runelite.api.gameval.InterfaceID;
 import net.runelite.api.widgets.Widget;
 import net.runelite.client.game.ItemManager;
 import net.runelite.client.game.SkillIconManager;
