@@ -224,6 +224,8 @@ public class KspAccountBuilderScript extends KspManagedScript
     public synchronized boolean requestManualPause()
     {
         if (shuttingDown || startedAtMillis <= 0 || manualPaused) return false;
+        // Stop future child task ticks immediately but keep their state.
+        KspAccountBuilderPauseGate.setPaused(true);
         manualPaused = true;
         return true;
     }
@@ -360,8 +362,10 @@ public class KspAccountBuilderScript extends KspManagedScript
                     manualPauseStartedAtMs = System.currentTimeMillis();
                     orderedLastSampleMs = manualPauseStartedAtMs;
                     pauseActivitySwitchTimer(manualPauseStartedAtMs);
-                    if (isTaskScriptRunning(currentTask)) stopCurrentTaskScript();
-                    taskStarted = false;
+                    // Keep the active child script and its state machine alive.
+                    // Each child tick cooperatively checks the pause gate.
+                    // shutdown()/taskStarted=false here previously restarted
+                    // banking, walking and quest steps on Resume.
                 }
                 Microbot.status = orderedComplete ? "Ordered task queue completed" : "Account Builder paused";
                 updateWindowTitle();
@@ -376,6 +380,8 @@ public class KspAccountBuilderScript extends KspManagedScript
                 orderedLastSampleMs = now;
                 manualPauseApplied = false;
                 manualPauseStartedAtMs = 0L;
+                // Resume child loops only after parent timers are adjusted.
+                KspAccountBuilderPauseGate.setPaused(false);
             }
             processTimers();
             updateWindowTitle();
@@ -2194,6 +2200,8 @@ public class KspAccountBuilderScript extends KspManagedScript
         manualPaused = false;
         manualSkipRequested = false;
         manualPauseApplied = false;
+        // Always release the scoped gate when the runtime is stopped.
+        KspAccountBuilderPauseGate.setPaused(false);
         shuttingDown = true;
         selectedSmeltingArea = null;
         // Cancel the parent scheduler first: it must not start/restart a child
