@@ -27,7 +27,9 @@ import net.runelite.client.ui.PluginPanel;
  */
 final class KspAccountBuilderPanel extends PluginPanel
 {
-    private static final Color ACCENT = new Color(116, 197, 255);
+    private static final Color ACCENT = new Color(255, 226, 138);
+    private static final Color PANEL_DARK = new Color(16, 24, 25);
+    private static final Color GOLD_BORDER = new Color(201, 155, 43);
     private final KspAccountBuilderPlugin plugin;
     private final KspAccountBuilderConfig config;
     private final KspAccountBuilderScript script;
@@ -59,15 +61,16 @@ final class KspAccountBuilderPanel extends PluginPanel
         this.script = script;
         this.configManager = configManager;
         setLayout(new BorderLayout());
-        setBackground(ColorScheme.DARK_GRAY_COLOR);
+        setBackground(PANEL_DARK);
 
         JPanel content = new JPanel();
-        content.setBackground(ColorScheme.DARK_GRAY_COLOR);
+        content.setBackground(PANEL_DARK);
         content.setLayout(new BoxLayout(content, BoxLayout.Y_AXIS));
-        content.setBorder(new EmptyBorder(8, 7, 8, 7));
+        content.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(GOLD_BORDER, 1), new EmptyBorder(10, 9, 10, 9)));
 
         JLabel title = new JLabel("KSP Account Builder");
-        title.setFont(title.getFont().deriveFont(Font.BOLD, 16f));
+        title.setFont(title.getFont().deriveFont(Font.BOLD, 18f));
         title.setForeground(ACCENT);
         title.setAlignmentX(Component.LEFT_ALIGNMENT);
         content.add(title);
@@ -145,7 +148,7 @@ final class KspAccountBuilderPanel extends PluginPanel
     private void addCheck(JPanel parent, JCheckBox check, String key)
     {
         check.setOpaque(false);
-        check.setForeground(Color.WHITE);
+        check.setForeground(new Color(242, 235, 221));
         check.setAlignmentX(Component.LEFT_ALIGNMENT);
         check.addActionListener(e -> {
             if (!updating) configManager.setConfiguration(KspAccountBuilderConfig.CONFIG_GROUP, key, check.isSelected());
