@@ -3,6 +3,7 @@
  */
 package net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.smelting.smeltscript;
 
+import net.runelite.client.plugins.microbot.kspaccountbuilder.KspAccountBuilderPauseGate;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.KspManagedScript;
 
 import java.util.Optional;
@@ -80,7 +81,7 @@ public class SmeltScript extends KspManagedScript
 
         mainScheduledFuture = scheduledExecutorService.scheduleWithFixedDelay(() ->
         {
-            if (!super.run() || !Microbot.isLoggedIn()) return;
+            if (KspAccountBuilderPauseGate.isPaused() || !super.run() || !Microbot.isLoggedIn()) return;
             if (isSmeltingBatchActive(targetBar))
             {
                 Microbot.status = "Smelting " + targetBar.getDisplayName();
