@@ -91,6 +91,86 @@ public final class KspLiveScene
         }).orElse(null);
     }
 
+    /**
+     * Locate a tile object regardless of its scene layer. Rune Essence portal
+     * variants can be represented by a game, wall, decorative or ground object.
+     * A transformed object's visible ID may also be one of its impostor IDs.
+     *
+     * Scan on the client thread, but interact only after returning the result.
+     * Keep nearestGameObject() unchanged for callers requiring GameObjects.
+     */
+    public static TileObject nearestTileObject(int[] objectIds, WorldPoint origin, int maxDistance)
+    {
+        return Microbot.getClientThread().runOnClientThreadOptional(() ->
+        {
+            if (Microbot.getClient() == null || Microbot.getClient().getScene() == null)
+                return null;
+            Tile[][][] tiles = Microbot.getClient().getScene().getTiles();
+            if (tiles == null) return null;
+
+            TileObject closest = null;
+            int bestDistance = Integer.MAX_VALUE;
+            for (Tile[][] plane : tiles)
+            {
+                if (plane == null) continue;
+                for (Tile[] row : plane)
+                {
+                    if (row == null) continue;
+                    for (Tile tile : row)
+                    {
+                        if (tile == null) continue;
+                        // Avoid allocating arrays for every tile on frequent scans.
+                        for (int layer = 0; layer < 3; layer++)
+                        {
+                            TileObject candidate = layer == 0 ? tile.getWallObject()
+                                    : layer == 1 ? tile.getDecorativeObject()
+                                    : tile.getGroundObject();
+                            if (!withinDistance(candidate, origin, maxDistance, bestDistance)
+                                    || !matchesObjectOrMorph(candidate.getId(), objectIds)) continue;
+                            closest = candidate;
+                            bestDistance = origin == null ? 0 : origin.distanceTo(candidate.getWorldLocation());
+                        }
+
+                        GameObject[] objects = tile.getGameObjects();
+                        if (objects == null) continue;
+                        for (GameObject candidate : objects)
+                        {
+                            if (!withinDistance(candidate, origin, maxDistance, bestDistance)
+                                    || !matchesObjectOrMorph(candidate.getId(), objectIds)) continue;
+                            closest = candidate;
+                            bestDistance = origin == null ? 0 : origin.distanceTo(candidate.getWorldLocation());
+                        }
+                    }
+                }
+            }
+            return closest;
+        }).orElse(null);
+    }
+
+    private static boolean withinDistance(TileObject candidate, WorldPoint origin,
+                                          int maxDistance, int bestDistance)
+    {
+        if (candidate == null || candidate.getWorldLocation() == null) return false;
+        WorldPoint position = candidate.getWorldLocation();
+        if (origin != null && position.getPlane() != origin.getPlane()) return false;
+        int distance = origin == null ? 0 : origin.distanceTo(position);
+        return distance <= maxDistance && distance < bestDistance;
+    }
+
+    private static boolean matchesObjectOrMorph(int objectId, int[] expectedIds)
+    {
+        for (int expected : expectedIds)
+            if (objectId == expected) return true;
+        // Rune Essence portal appearances are selected by varbit-backed morphs.
+        // Their actual scene ID can be the untransformed base object ID.
+        ObjectComposition definition = Microbot.getClient().getObjectDefinition(objectId);
+        if (definition == null || definition.getImpostorIds() == null) return false;
+        for (int morphId : definition.getImpostorIds())
+            for (int expected : expectedIds)
+                if (morphId == expected) return true;
+        return false;
+    }
+
     public static TileObject nearestGameObject(int objectId, WorldPoint origin, int maxDistance)
     {
         return Microbot.getClientThread().runOnClientThreadOptional(() ->
