@@ -457,9 +457,9 @@ final class KspCinematicHudRenderer
                     int levelEnd = level >= 99 ? levelStart : Experience.getXpForLevel(level + 1);
                     progress = KspAccountBuilderHudMath.levelProgress(xp, levelStart,
                             levelEnd, level >= 99);
-                    label(g, "Level " + level, 337, 60, IVORY);
-                    alignRight(g, level >= 99 ? "MAX" :
-                            String.format(Locale.ROOT, "%.1f%%", progress * 100.0),
+                    label(g, "Lv " + level, 337, 60, IVORY);
+                    alignRight(g, level >= 99 ? "MAX XP" :
+                            briefXp(xp) + " / " + briefXp(levelEnd) + " XP",
                             484, 60, MUTED);
                     long now = System.currentTimeMillis();
                     long runId = script.getStartedAtMillis();
@@ -491,8 +491,9 @@ final class KspCinematicHudRenderer
                         : rate > 0L ? time(KspAccountBuilderHudMath.etaSeconds(remaining, rate))
                         : "Calculating", 485, 99, IVORY);
         label(g, "Break:", 337, 112, MUTED);
-        alignRight(g, script.isAnyBreakActive() ? "Active" :
-                time(script.getTimeUntilBreakSeconds()), 485, 112, IVORY);
+        alignRight(g, script.isBreakActive() ? time(script.getBreakTimeRemainingSeconds())
+                : script.isAnyBreakActive() ? "Active"
+                : time(script.getTimeUntilBreakSeconds()), 485, 112, IVORY);
         label(g, "Queue:", 337, 125, MUTED);
         alignRight(g, script.hasOrderedQueue()
                 ? script.getOrderedQueuePosition() + "/" + script.getOrderedQueueSize()
@@ -1241,6 +1242,13 @@ final class KspCinematicHudRenderer
             case "Combat": return "⚔";
             default: return "✦";
         }
+    }
+    /** Compact XP totals fit beside skill level in the narrow chatbox. */
+    private static String briefXp(long xp)
+    {
+        if (xp >= 1000000L) return String.format(Locale.ROOT, "%.1fm", xp / 1000000.0);
+        if (xp >= 10000L) return String.format(Locale.ROOT, "%.1fk", xp / 1000.0);
+        return String.format(Locale.ROOT, "%,d", xp);
     }
     private static String displayKind(String k) { return "Status".equals(k) ? "Account Progression" : k; }
     private static String displayActivity(String detail, String task)
