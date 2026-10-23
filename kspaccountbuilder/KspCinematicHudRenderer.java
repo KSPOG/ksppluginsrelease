@@ -357,72 +357,148 @@ final class KspCinematicHudRenderer
      */
     private void paintChatbox(Graphics2D g)
     {
+        // All geometry is inside 500x174 logical coordinates. The actual
+        // chat-container widget supplies the scaling and canvas placement.
         ornamentalFrame(g, 0, 0, CHAT_W, CHAT_H);
-        g.setFont(new Font("Serif", Font.BOLD, 18));
-        label(g, "KSP Account Builder", 12, 21, BRIGHT);
+        g.setFont(new Font("Serif", Font.BOLD, 17));
+        ellipsis(g, "KSP Account Builder", 10, 20, 310, BRIGHT);
         g.setFont(new Font("SansSerif", Font.PLAIN, 10));
-        alignRight(g, time(script.getRuntimeSeconds()), 486, 20, IVORY);
+        alignRight(g, time(script.getRuntimeSeconds()), 488, 19, IVORY);
         rule(g, 8, 27, 492, 27);
 
         if (settingsOpen)
         {
             g.setFont(new Font("Serif", Font.BOLD, 16));
-            label(g, "HUD settings", 15, 51, BRIGHT);
-            toggle(g, "setting:tooltips", 14, 64, config.hudTooltips(), "Show tooltips");
-            toggle(g, "setting:animation", 14, 94, config.showSkillAnimations(), "Animations");
-            g.setFont(SMALL);
-            label(g, "Scale " + config.hudScalePercent() + "%", 285, 81, IVORY);
-            uiButton(g, "scale-down", 390, 56, 35, 30, "−", RAISED);
-            uiButton(g, "scale-up", 433, 56, 35, 30, "+", RAISED);
-            label(g, "Full HUD available from the sidebar", 15, 123, MUTED);
+            label(g, "HUD settings", 13, 47, BRIGHT);
+            g.setFont(new Font("SansSerif", Font.PLAIN, 10));
+            toggle(g, "setting:tooltips", 12, 60, config.hudTooltips(), "Tooltips");
+            toggle(g, "setting:animation", 12, 91, config.showSkillAnimations(), "Animations");
+            toggle(g, "setting:block", 235, 60, config.blockGameInput(), "Input blocking");
+            label(g, "Scale: " + config.hudScalePercent() + "%", 251, 109, IVORY);
+            uiButton(g, "scale-down", 366, 91, 48, 32, "−", RAISED);
+            uiButton(g, "scale-up", 428, 91, 48, 32, "+", RAISED);
         }
         else
         {
             String kind = resolveKind(safe(script.getCurrentTaskName(), "Idle"));
-            ornamentalFrame(g, 7, 32, 320, 104);
-            Shape clip = g.getClip();
-            g.clipRect(10, 35, 314, 97);
+            ornamentalFrame(g, 7, 32, 318, 104);
+            Shape previousClip = g.getClip();
+            g.clipRect(10, 35, 312, 97);
             BufferedImage image = sceneArtwork(kind);
             if (image != null)
-                g.drawImage(image, 10, 35, 314, 97, null);
+                g.drawImage(image, 10, 35, 312, 97, null);
             else
             {
                 g.setColor(new Color(31, 53, 44));
-                g.fillRect(10, 35, 314, 97);
+                g.fillRect(10, 35, 312, 97);
                 g.setFont(HEADING);
-                label(g, displayKind(kind), 18, 77, BRIGHT);
+                ellipsis(g, displayKind(kind), 18, 77, 275, BRIGHT);
             }
-            g.setClip(clip);
-            g.setColor(new Color(4, 9, 13, 196));
-            g.fillRect(10, 111, 314, 21);
-            g.setFont(SMALL);
-            ellipsis(g, script.getOverlayTaskDetail(), 17, 126, 295, IVORY);
+            g.setClip(previousClip);
+            g.setColor(new Color(4, 9, 13, 210));
+            g.fillRoundRect(12, 110, 308, 17, 4, 4);
+            g.setFont(new Font("SansSerif", Font.PLAIN, 10));
+            ellipsis(g, script.isManualPaused() ? "PAUSED · " + script.getOverlayTaskDetail()
+                    : script.getOverlayTaskDetail(), 17, 122, 296, IVORY);
 
-            ornamentalFrame(g, 332, 32, 161, 104);
-            Skill skill = skillFor(kind);
-            g.setFont(new Font("Serif", Font.BOLD, 16));
-            ellipsis(g, displayKind(kind), 343, 52, 140, BRIGHT);
-            g.setFont(SMALL);
-            if (skill != null && Microbot.getClient() != null
-                    && Microbot.getClient().getGameState() == GameState.LOGGED_IN)
+            // The green bar represents an explicit ordered task target only,
+            // never the blue next-skill-level progress.
+            double taskProgress = Double.NaN;
+            if (script.hasOrderedQueue())
             {
-                int xp = Microbot.getClient().getSkillExperience(skill);
-                int level = Microbot.getClient().getRealSkillLevel(skill);
-                label(g, "Level " + level, 343, 72, IVORY);
-                double progress = nextLevelProgress(skill);
-                drawBar(g, 341, 81, 141, 11, progress, XP_BLUE);
+                List<KspAccountBuilderTaskQueue.Entry> entries = script.getOrderedQueueSnapshot();
+                int index = script.getOrderedQueuePosition() - 1;
+                if (index >= 0 && index < entries.size())
+                {
+                    long target = entries.get(index).durationSeconds;
+                    long completed = script.isOrderedQueueComplete() ? target
+                            : script.getOrderedElapsedSeconds();
+                    taskProgress = KspAccountBuilderHudMath.taskDurationProgress(completed, target);
+                }
             }
-            else label(g, "Progress unavailable", 343, 72, MUTED);
-            label(g, "Task: " + (script.hasOrderedQueue()
-                    ? script.getOrderedQueuePosition() + "/" + script.getOrderedQueueSize()
-                    : "Auto"), 343, 116, IVORY);
+            drawBar(g, 15, 129, 302, 4, taskProgress, TASK_GREEN);
+            paintChatboxStats(g, kind);
         }
 
-        uiButton(g, "pause", 8, 141, 85, 27, "Ⅱ Pause", new Color(124, 82, 6));
-        uiButton(g, "resume", 101, 141, 85, 27, "▶ Resume", new Color(4, 116, 35));
-        uiButton(g, "stop", 194, 141, 85, 27, "■ Stop", new Color(142, 16, 19));
-        uiButton(g, "settings", 287, 141, 105, 27, "⚙ Settings", new Color(21, 41, 59));
-        uiButton(g, "restore", 400, 141, 92, 27, "Full view", RAISED);
+        // Six real actions, including Skip, all within the visible chatbox.
+        // uiButton chooses font size from its own available width/height.
+        uiButton(g, "pause", 5, 141, 84, 27, "Ⅱ Pause", new Color(124, 82, 6));
+        uiButton(g, "resume", 92, 141, 84, 27, "▶ Resume", new Color(4, 116, 35));
+        uiButton(g, "stop", 179, 141, 76, 27, "■ Stop", new Color(142, 16, 19));
+        uiButton(g, "skip", 258, 141, 70, 27, "▶▶ Skip", new Color(21, 41, 59));
+        uiButton(g, "settings", 331, 141, 94, 27, "⚙ Settings", new Color(21, 41, 59));
+        uiButton(g, "restore", 428, 141, 67, 27, "Full", RAISED);
+    }
+
+    /** Compact telemetry: separate XP, next-level, break and queue fields. */
+    private void paintChatboxStats(Graphics2D g, String kind)
+    {
+        ornamentalFrame(g, 329, 32, 164, 104);
+        Client client = Microbot.getClient();
+        Skill skill = skillFor(kind);
+        boolean valid = client != null && skill != null
+                && client.getGameState() == GameState.LOGGED_IN;
+        g.setFont(new Font("Serif", Font.BOLD, 14));
+        ellipsis(g, displayKind(kind), 337, 46, 146, BRIGHT);
+        g.setFont(new Font("SansSerif", Font.PLAIN, 10));
+        long gained = 0L, rate = 0L;
+        long remaining = -1L;
+        double progress = Double.NaN;
+        if (valid)
+        {
+            try
+            {
+                int xp = client.getSkillExperience(skill);
+                int level = client.getRealSkillLevel(skill);
+                valid = xp >= 0 && level >= 1;
+                if (valid)
+                {
+                    int levelStart = Experience.getXpForLevel(Math.min(99, level));
+                    int levelEnd = level >= 99 ? levelStart : Experience.getXpForLevel(level + 1);
+                    progress = KspAccountBuilderHudMath.levelProgress(xp, levelStart,
+                            levelEnd, level >= 99);
+                    label(g, "Level " + level, 337, 60, IVORY);
+                    alignRight(g, level >= 99 ? "MAX" :
+                            String.format(Locale.ROOT, "%.1f%%", progress * 100.0),
+                            484, 60, MUTED);
+                    long now = System.currentTimeMillis();
+                    long runId = script.getStartedAtMillis();
+                    if (skill != observedSkill || xp < observedXp || observedSince == 0
+                            || runId != observedRuntimeStart)
+                    {
+                        observedSkill = skill;
+                        observedRuntimeStart = runId;
+                        observedXp = xp;
+                        observedSince = now;
+                    }
+                    gained = Math.max(0L, (long) xp - observedXp);
+                    long elapsed = Math.max(0L, now - observedSince);
+                    if (elapsed >= 60000L)
+                        rate = KspAccountBuilderHudMath.hourlyXp(gained, elapsed);
+                    remaining = level >= 99 ? 0L : Math.max(0, levelEnd - xp);
+                }
+            }
+            catch (RuntimeException ignored) { valid = false; }
+        }
+        if (!valid) label(g, "XP unavailable", 337, 60, MUTED);
+        drawBar(g, 337, 65, 147, 7, progress, XP_BLUE);
+        g.setFont(new Font("SansSerif", Font.PLAIN, 10));
+        label(g, "XP +" + String.format(Locale.ROOT, "%,d", gained), 337, 86, IVORY);
+        alignRight(g, rate > 0L ? String.format(Locale.ROOT, "%,d/h", rate)
+                : "—/h", 485, 86, IVORY);
+        label(g, "Next:", 337, 99, MUTED);
+        alignRight(g, !valid ? "—" : remaining == 0L ? "Max level"
+                        : rate > 0L ? time(KspAccountBuilderHudMath.etaSeconds(remaining, rate))
+                        : "Calculating", 485, 99, IVORY);
+        label(g, "Break:", 337, 112, MUTED);
+        alignRight(g, script.isAnyBreakActive() ? "Active" :
+                time(script.getTimeUntilBreakSeconds()), 485, 112, IVORY);
+        label(g, "Queue:", 337, 125, MUTED);
+        alignRight(g, script.hasOrderedQueue()
+                ? script.getOrderedQueuePosition() + "/" + script.getOrderedQueueSize()
+                : "Automatic", 485, 125, IVORY);
+        hot("xptip", 330, 32, 162, 78);
+        hot("queuetip", 330, 111, 162, 24);
     }
 
     private void paintMini(Graphics2D g)
@@ -690,9 +766,20 @@ final class KspCinematicHudRenderer
         g.drawRoundRect(x + 2, y + 2, w - 4, h - 4, 4, 4);
         g.setColor(new Color(255, 239, 172, enabled ? 130 : 35));
         g.drawLine(x + 6, y + 5, x + w - 7, y + 5);
-        g.setFont(BUTTON);
-        int tx = x + Math.max(8, (w - g.getFontMetrics().stringWidth(text)) / 2);
-        label(g, text, tx, y + h / 2 + 6, enabled ? IVORY : MUTED);
+        // Fit text to each button, especially the six chatbox actions:
+        // the original fixed 19pt font clipped Resume, Settings and Full.
+        float size = Math.min(19f, Math.max(10f, h * 0.48f));
+        Font font = BUTTON.deriveFont(size);
+        g.setFont(font);
+        while (size > 9f && g.getFontMetrics().stringWidth(text) > w - 12)
+        {
+            size -= 0.5f;
+            g.setFont(BUTTON.deriveFont(size));
+        }
+        int tx = x + Math.max(3, (w - g.getFontMetrics().stringWidth(text)) / 2);
+        int baseline = y + (h + g.getFontMetrics().getAscent()
+                - g.getFontMetrics().getDescent()) / 2;
+        label(g, text, tx, baseline, enabled ? IVORY : MUTED);
         hot(key, x, y, w, h);
     }
 
