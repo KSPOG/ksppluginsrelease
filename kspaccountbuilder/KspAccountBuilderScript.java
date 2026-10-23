@@ -149,6 +149,44 @@ public class KspAccountBuilderScript extends KspManagedScript
     @Inject private KspAccountPlayTimeCache accountPlayTimeCache;
     @Inject private KspAccountTaskCache accountTaskCache;
 
+    private volatile boolean manualPaused;
+    private volatile boolean manualSkipRequested;
+    private boolean manualPauseApplied;
+    private long manualPauseStartedAtMs;
+
+    public boolean isManualPaused() { return manualPaused; }
+
+    /** Request pause from the canvas; the script thread performs the handoff. */
+    public synchronized boolean requestManualPause()
+    {
+        if (shuttingDown || startedAtMillis <= 0 || manualPaused) return false;
+        manualPaused = true;
+        return true;
+    }
+
+    public synchronized boolean requestManualResume()
+    {
+        if (shuttingDown || !manualPaused) return false;
+        manualPaused = false;
+        return true;
+    }
+
+    public boolean canSkipTask()
+    {
+        BuilderTask active = currentTask;
+        return !shuttingDown && startedAtMillis > 0 && active != null
+                && active != BuilderTask.TUTORIAL_ISLAND && !isSingleSkillTaskForced()
+                && !manualSkipRequested && !manualPaused;
+    }
+
+    /** Queue a bank-safe existing task handoff; never mutate currentTask on the EDT. */
+    public synchronized boolean requestManualSkip()
+    {
+        if (!canSkipTask()) return false;
+        manualSkipRequested = true;
+        return true;
+    }
+
     private volatile BuilderTask currentTask;
     private volatile boolean breakActive;
     private long startedAtMillis;
@@ -244,6 +282,29 @@ public class KspAccountBuilderScript extends KspManagedScript
                 maybeLogStatus();
                 return;
             }
+            if (manualPaused)
+            {
+                if (!manualPauseApplied)
+                {
+                    manualPauseApplied = true;
+                    manualPauseStartedAtMs = System.currentTimeMillis();
+                    pauseActivitySwitchTimer(manualPauseStartedAtMs);
+                    if (isTaskScriptRunning(currentTask)) stopCurrentTaskScript();
+                    taskStarted = false;
+                }
+                Microbot.status = "Account Builder paused";
+                updateWindowTitle();
+                return;
+            }
+            if (manualPauseApplied)
+            {
+                long now = System.currentTimeMillis();
+                long duration = Math.max(0L, now - manualPauseStartedAtMs);
+                if (nextBreakAtMillis > 0L) nextBreakAtMillis += duration;
+                resumeActivitySwitchTimer(now);
+                manualPauseApplied = false;
+                manualPauseStartedAtMs = 0L;
+            }
             processTimers();
             updateWindowTitle();
             if (isAnyBreakActive() || !Microbot.isLoggedIn() || !isReadyAfterLoginHandoff())
@@ -254,6 +315,20 @@ public class KspAccountBuilderScript extends KspManagedScript
             if (handleUnexpectedEssenceMineRecovery() || pendingTask != null || pendingRandomTaskSelection)
             {
                 maybeLogStatus();
+                return;
+            }
+            if (manualSkipRequested && currentTask != null)
+            {
+                if (isSingleSkillTaskForced() || currentTask == BuilderTask.TUTORIAL_ISLAND)
+                {
+                    manualSkipRequested = false;
+                    Microbot.status = "Skip unavailable in this mode";
+                }
+                else if (switchToRandomTaskAfterBank(currentTask))
+                {
+                    manualSkipRequested = false;
+                    Microbot.status = "Switched to next eligible task";
+                }
                 return;
             }
             if (currentTask == null)
@@ -282,6 +357,10 @@ public class KspAccountBuilderScript extends KspManagedScript
     private void resetRuntimeState()
     {
         selectedSmeltingArea = null;
+        manualPaused = false;
+        manualSkipRequested = false;
+        manualPauseApplied = false;
+        manualPauseStartedAtMs = 0L;
         currentTask = null;
         taskStarted = false;
         breakActive = false;
@@ -2001,6 +2080,9 @@ public class KspAccountBuilderScript extends KspManagedScript
     @Override
     public void shutdown()
     {
+        manualPaused = false;
+        manualSkipRequested = false;
+        manualPauseApplied = false;
         shuttingDown = true;
         selectedSmeltingArea = null;
         // Cancel the parent scheduler first: it must not start/restart a child
