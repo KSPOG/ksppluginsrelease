@@ -19,6 +19,7 @@
  */
 package net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.smithing.smithscript;
 
+import net.runelite.client.plugins.microbot.kspaccountbuilder.KspAccountBuilderPauseGate;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.KspManagedScript;
 
 import java.util.concurrent.TimeUnit;
@@ -103,7 +104,7 @@ extends KspManagedScript {
                 : SmithRecipe.BRONZE_DAGGER;
         this.expectingSmithXpDrop = false;
         this.mainScheduledFuture = this.scheduledExecutorService.scheduleWithFixedDelay(() -> {
-            if (!super.run() || !Microbot.isLoggedIn()) {
+            if (KspAccountBuilderPauseGate.isPaused() || !super.run() || !Microbot.isLoggedIn()) {
                 return;
             }
             if (this.isSmithingBatchActive()) return;
