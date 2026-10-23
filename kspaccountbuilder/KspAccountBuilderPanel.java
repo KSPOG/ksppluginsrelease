@@ -128,7 +128,7 @@ final class KspAccountBuilderPanel extends PluginPanel
         JPanel quick = section("Quick settings");
         compactHud.setOpaque(false);
         compactHud.setForeground(new Color(242, 235, 221));
-        compactHud.addActionListener(e -> { if (!updating) plugin.setCompactOverlay(compactHud.isSelected()); });
+        compactHud.addActionListener(e -> { if (!updating) { configManager.setConfiguration(KspAccountBuilderConfig.CONFIG_GROUP, "compactHud", compactHud.isSelected()); plugin.setCompactOverlay(compactHud.isSelected()); } });
         quick.add(compactHud);
         addCheck(quick, breaks, "doBreaks");
         addCheck(quick, antiban, "useAntiban");
