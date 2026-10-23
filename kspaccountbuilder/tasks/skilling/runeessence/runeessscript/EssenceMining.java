@@ -349,7 +349,10 @@ public class EssenceMining extends KspManagedScript
         // Portals have five object morph IDs (including 34777). Look across
         // all TileObject layers and their impostor definitions, not only
         // Tile.getGameObjects(), which can miss visible portal variants.
-        TileObject liveObject = KspLiveScene.nearestTileObject(PORTAL_OBJECT_IDS, player, 100);
+        // Keep direct interactions inside Microbot's 51-tile local click
+        // range; beyond that its legacy object-click path may attempt to
+        // walk using non-comparable instance/template world coordinates.
+        TileObject liveObject = KspLiveScene.nearestTileObject(PORTAL_OBJECT_IDS, player, 45);
         if (liveObject != null)
         {
             // Portal discovery now uses local scene positions. Cancel the
