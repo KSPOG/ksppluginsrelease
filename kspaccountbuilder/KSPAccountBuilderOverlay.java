@@ -9,6 +9,7 @@ import net.runelite.api.Skill;
 import net.runelite.api.GameState;
 import net.runelite.api.Experience;
 import net.runelite.client.game.ItemManager;
+import net.runelite.client.game.SkillIconManager;
 import net.runelite.client.plugins.microbot.Microbot;
 import net.runelite.client.ui.overlay.OverlayPanel;
 import net.runelite.client.ui.overlay.OverlayLayer;
@@ -48,13 +49,13 @@ public class KSPAccountBuilderOverlay extends OverlayPanel
 
     @Inject
     public KSPAccountBuilderOverlay(KspAccountBuilderPlugin plugin, KspAccountBuilderScript script,
-                                    KspAccountBuilderConfig config, ItemManager itemManager)
+                                    KspAccountBuilderConfig config, ItemManager itemManager, SkillIconManager skillIconManager)
     {
         super(plugin);
         this.plugin = plugin;
         this.script = script;
         this.config = config;
-        this.cinematic = new KspCinematicHudRenderer(plugin, script, config);
+        this.cinematic = new KspCinematicHudRenderer(plugin, script, config, skillIconManager);
         setPosition(OverlayPosition.TOP_CENTER);
         setLayer(OverlayLayer.ALWAYS_ON_TOP);
         setMovable(!config.lockHudPosition());
