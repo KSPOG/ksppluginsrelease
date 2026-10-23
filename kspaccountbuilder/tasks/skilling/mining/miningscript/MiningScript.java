@@ -1,5 +1,6 @@
 package net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.mining.miningscript;
 
+import net.runelite.client.plugins.microbot.kspaccountbuilder.KspAccountBuilderPauseGate;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.KspManagedScript;
 
 import java.util.Arrays;
@@ -148,7 +149,7 @@ public class MiningScript extends KspManagedScript
 
         mainScheduledFuture = scheduledExecutorService.scheduleWithFixedDelay(() ->
         {
-            if (!super.run() || !Microbot.isLoggedIn())
+            if (KspAccountBuilderPauseGate.isPaused() || !super.run() || !Microbot.isLoggedIn())
             {
                 return;
             }
