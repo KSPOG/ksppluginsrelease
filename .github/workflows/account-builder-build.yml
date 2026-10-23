@@ -57,10 +57,10 @@ jobs:
           ACTUAL="$(find release/kspaccountbuilder -type f -name '*.java' | wc -l)"
           echo "Account Builder Java sources: $ACTUAL"
           test "$ACTUAL" -ge 135
-          # Strict preservation: every original source path must still exist.
+          # Strict preservation: assert every pre-existing Java source still exists.
           git -C release fetch --depth=1 origin 841cc614883156f92fd1356a265eef1676272046
-          git -C release ls-tree -r --name-only 841cc614883156f92fd1356a265eef1676272046 -- kspaccountbuilder \\
-            | grep '\\.java
+          python -c 'import pathlib, subprocess; root=pathlib.Path("release"); paths=subprocess.check_output(["git","-C","release","ls-tree","-r","--name-only","841cc614883156f92fd1356a265eef1676272046","--","kspaccountbuilder"],text=True).splitlines(); missing=[p for p in paths if p.endswith(".java") and not (root/p).is_file()]; assert not missing, "Missing original Java sources: "+str(missing)'
+          test -s release/kspaccountbuilder/KSPAccountBuilderOverlay.java
           test -s release/kspaccountbuilder/KspAccountBuilderScript.java
           test -s release/kspaccountbuilder/KspAccountBuilderPlugin.java
           test -s release/kspaccountbuilder/KspCinematicHudRenderer.java
