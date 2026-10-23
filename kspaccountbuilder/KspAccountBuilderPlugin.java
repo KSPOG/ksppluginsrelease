@@ -173,6 +173,37 @@ public class KspAccountBuilderPlugin extends Plugin
         return javax.swing.SwingUtilities.isEventDispatchThread();
     }
 
+    /**
+     * The host CanvasInputListener records physical input independently of
+     * MouseManager event consumption. Without this guard its InputArbiter
+     * marks HUMAN and aborts BotMouse gestures even when our events are blocked.
+     * Restore the host's previous setting on disable/unload.
+     */
+    private synchronized void syncInputArbiterGuard()
+    {
+        boolean shouldOwn = runtimeActive && ownsRuntime() && isCurrentSidebarOwner()
+                && config != null && config.blockGameInput();
+        if (shouldOwn && !inputArbiterOverrideOwned)
+        {
+            inputArbiterPreviouslyDisabled =
+                    net.runelite.client.plugins.microbot.util.input.InputArbiter.isDisabled();
+            net.runelite.client.plugins.microbot.util.input.InputArbiter.setDisabled(true);
+            inputArbiterOverrideOwned = true;
+        }
+        else if (!shouldOwn)
+        {
+            restoreInputArbiterGuard();
+        }
+    }
+
+    private synchronized void restoreInputArbiterGuard()
+    {
+        if (!inputArbiterOverrideOwned) return;
+        net.runelite.client.plugins.microbot.util.input.InputArbiter
+                .setDisabled(inputArbiterPreviouslyDisabled);
+        inputArbiterOverrideOwned = false;
+    }
+
     private void registerHudMouse()
     {
         if (!hudMouseRegistered && mouseManager != null)
@@ -344,6 +375,8 @@ public class KspAccountBuilderPlugin extends Plugin
     private volatile boolean runtimeActive;
     private volatile boolean acceptingRuntimeChanges;
     private String antibanStateKey;
+    private boolean inputArbiterOverrideOwned;
+    private boolean inputArbiterPreviouslyDisabled;
 
     @Provides
     KspAccountBuilderConfig provideConfig(ConfigManager configManager)
@@ -368,6 +401,7 @@ public class KspAccountBuilderPlugin extends Plugin
         setHudVisible(config.showHud());
         addSidePanel();
         acceptingRuntimeChanges = true;
+        syncInputArbiterGuard();
         log.info("KSP Account Builder loaded stopped; press Start in sidebar to begin automation");
     }
 
@@ -375,17 +409,23 @@ public class KspAccountBuilderPlugin extends Plugin
     public synchronized void onConfigChanged(ConfigChanged event)
     {
         if (!acceptingRuntimeChanges
-                || !KspAccountBuilderConfig.CONFIG_GROUP.equals(event.getGroup())
-                || !"runAccountBuilder".equals(event.getKey()))
+                || !KspAccountBuilderConfig.CONFIG_GROUP.equals(event.getGroup()))
         {
             return;
         }
+        if ("blockGameInput".equals(event.getKey()))
+        {
+            syncInputArbiterGuard();
+            return;
+        }
+        if (!"runAccountBuilder".equals(event.getKey())) return;
         if (config.runAccountBuilder())
         {
             if (isCurrentSidebarOwner()) startRuntime();
             else log.debug("Ignoring Start event from superseded Account Builder sidebar instance");
         }
         else cleanupRuntime("config-stop");
+        syncInputArbiterGuard();
     }
 
     private void startRuntime()
@@ -500,6 +540,7 @@ public class KspAccountBuilderPlugin extends Plugin
         panelEnabled = false;
         unregisterHudMouse();
         cleanupRuntime("plugin-stop");
+        restoreInputArbiterGuard();
         if (wasSidebarOwner)
             configManager.setConfiguration(KspAccountBuilderConfig.CONFIG_GROUP, "runAccountBuilder", false);
         removeSidePanel();
@@ -512,6 +553,7 @@ public class KspAccountBuilderPlugin extends Plugin
         panelEnabled = false;
         unregisterHudMouse();
         cleanupRuntime("hot-unload");
+        restoreInputArbiterGuard();
         if (wasSidebarOwner)
             configManager.setConfiguration(KspAccountBuilderConfig.CONFIG_GROUP, "runAccountBuilder", false);
         removeSidePanel();
@@ -549,6 +591,7 @@ public class KspAccountBuilderPlugin extends Plugin
     @Subscribe
     public void onGameTick(GameTick event)
     {
+        syncInputArbiterGuard();
         if (!runtimeActive || !ownsRuntime() || script == null || config == null)
         {
             return;
@@ -608,6 +651,7 @@ public class KspAccountBuilderPlugin extends Plugin
         boolean wasActive = runtimeActive;
         boolean wasOwner = ownsRuntime();
         runtimeActive = false;
+        restoreInputArbiterGuard();
         if (wasActive || randomEventSolver != null)
         {
             log.info("Stopping KSP Account Builder runtime | reason={}", reason);
