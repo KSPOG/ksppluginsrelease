@@ -39,6 +39,8 @@ final class KspAccountBuilderPanel extends PluginPanel
     private final JLabel status = label();
     private final JLabel task = label();
     private final JLabel runtime = label();
+    private final JLabel accountPlayTime = label();
+    private final JLabel antibanActivity = label();
     private final JLabel breakTimer = label();
     private final JLabel switchTimer = label();
     private final JComboBox<String> mode = new JComboBox<>(new String[]{"Automatic", "Single skill", "Single quest"});
@@ -92,6 +94,8 @@ final class KspAccountBuilderPanel extends PluginPanel
         controls.add(pair("State", status));
         controls.add(pair("Task", task));
         controls.add(pair("Runtime", runtime));
+        controls.add(pair("Account play time", accountPlayTime));
+        controls.add(pair("Anti-ban activity", antibanActivity));
         controls.add(pair("Next break", breakTimer));
         controls.add(pair("Activity switch", switchTimer));
         content.add(controls);
@@ -245,6 +249,8 @@ final class KspAccountBuilderPanel extends PluginPanel
         status.setText(running ? (script.isBreakActive() ? "On break" : "Running") : "Stopped");
         task.setText(running ? script.getCurrentTaskName() : "-");
         runtime.setText(running ? duration(script.getRuntimeSeconds()) : "-");
+        accountPlayTime.setText(running ? duration(script.getAccountPlayTimeSeconds()) : "-");
+        antibanActivity.setText(running && config.useAntiban() ? plugin.getAntibanActivity() : "-");
         breakTimer.setText(running ? duration(script.getTimeUntilBreakSeconds()) : "-");
         switchTimer.setText(running ? duration(script.getTimeUntilActivitySwitchSeconds()) : "-");
 
