@@ -151,13 +151,32 @@ final class KspCinematicHudRenderer
         inner(g, 180, 285, 641, 48);
         g.setFont(new Font("Serif", Font.BOLD, 15));
         ellipsis(g, "Current Task: " + displayActivity(detail, task), 254, 302, 520, IVORY);
-        drawBar(g, 256, 310, 480, 16, Double.NaN, TASK_GREEN);
+        double levelProgress = nextLevelProgress(skillFor(kind));
+        drawBar(g, 256, 310, 480, 16, levelProgress, TASK_GREEN);
         g.setFont(SMALL);
-        label(g, "Progress unavailable", 745, 323, MUTED);
+        label(g, Double.isFinite(levelProgress)
+                ? String.format(Locale.ROOT, "Level: %.1f%%", levelProgress * 100.0)
+                : "Progress: —", 742, 323, MUTED);
         circle(g, 213, 309, 23, new Color(69, 47, 12));
         g.setFont(new Font("Serif", Font.BOLD, 21));
         label(g, emblem(kind), 205, 317, BRIGHT);
         hot("tasktip", 180, 285, 641, 48);
+    }
+
+    private double nextLevelProgress(Skill skill)
+    {
+        Client client = Microbot.getClient();
+        if (skill == null || client == null || client.getGameState() != GameState.LOGGED_IN)
+            return Double.NaN;
+        try
+        {
+            int level = client.getRealSkillLevel(skill), currentXp = client.getSkillExperience(skill);
+            if (level < 1 || currentXp < 0) return Double.NaN;
+            if (level >= 99) return 1.0;
+            int start = Experience.getXpForLevel(level), target = Experience.getXpForLevel(level + 1);
+            return Math.max(0.0, Math.min(1.0, (currentXp - start) / (double) Math.max(1, target - start)));
+        }
+        catch (RuntimeException e) { return Double.NaN; }
     }
 
     private void paintSection(Graphics2D g, String page, String task, String detail, String kind)
@@ -330,6 +349,9 @@ final class KspCinematicHudRenderer
                 : hover.equals("tasktip") ? "Current task • progress unavailable unless tracked by script"
                 : hover.equals("queuetip") ? "Break schedule • dynamic task selection, no editable queue"
                 : hover.startsWith("nav:") ? "Open " + hover.substring(4) + " information" : "";
+        if ("pause".equals(hover) && script.isManualPaused()) tooltip = "Already paused";
+        if ("resume".equals(hover) && !script.isManualPaused()) tooltip = "Pause before resuming";
+        if ("skip".equals(hover) && !script.canSkipTask()) tooltip = "Skip unavailable for this task or mode";
         if (tooltip.isEmpty()) return;
         inner(g, 360, 6, 424, 29);
         g.setFont(SMALL);
@@ -339,13 +361,16 @@ final class KspCinematicHudRenderer
     private void uiButton(Graphics2D g, String key, int x, int y, int w, int h, String text, Color fill)
     {
         inner(g, x, y, w, h);
-        g.setColor(fill);
+        boolean enabled = !("pause".equals(key) && script.isManualPaused())
+                && !("resume".equals(key) && !script.isManualPaused())
+                && !("skip".equals(key) && !script.canSkipTask());
+        g.setColor(enabled ? fill : new Color(39, 43, 43));
         g.fillRoundRect(x + 2, y + 2, w - 4, h - 4, 6, 6);
         g.setColor(hover.equals(key) ? BRIGHT : GOLD);
         g.drawRoundRect(x + 2, y + 2, w - 4, h - 4, 4, 4);
         g.setFont(BUTTON);
         int tx = x + Math.max(8, (w - g.getFontMetrics().stringWidth(text)) / 2);
-        label(g, text, tx, y + h / 2 + 6, IVORY);
+        label(g, text, tx, y + h / 2 + 6, enabled ? IVORY : MUTED);
         hot(key, x, y, w, h);
     }
 
