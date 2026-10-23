@@ -1,5 +1,6 @@
 package net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.fishing.fishingscript;
 
+import net.runelite.client.plugins.microbot.kspaccountbuilder.KspAccountBuilderPauseGate;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.KspManagedScript;
 
 import java.awt.event.KeyEvent;
@@ -105,7 +106,7 @@ public class FishingScript extends KspManagedScript
 
         mainScheduledFuture = scheduledExecutorService.scheduleWithFixedDelay(() ->
         {
-            if (!super.run() || !Microbot.isLoggedIn())
+            if (KspAccountBuilderPauseGate.isPaused() || !super.run() || !Microbot.isLoggedIn())
             {
                 return;
             }
