@@ -339,7 +339,30 @@ final class KspCinematicHudRenderer
         g.setFont(new Font("Serif", Font.BOLD, 14));
         label(g, displayKind(kind), 53, 43, BRIGHT);
         g.setFont(SMALL);
-        ellipsis(g, script.getOverlayTaskDetail(), 53, 63, 265, IVORY);
+        // Reserve room for a real task-progress bar, independently of XP.
+        ellipsis(g, script.getOverlayTaskDetail(), 53, 63, 115, IVORY);
+        double progress = Double.NaN;
+        String progressLabel = "—";
+        if (script.hasOrderedQueue())
+        {
+            List<KspAccountBuilderTaskQueue.Entry> entries = script.getOrderedQueueSnapshot();
+            int index = script.getOrderedQueuePosition() - 1;
+            if (index >= 0 && index < entries.size())
+            {
+                long target = entries.get(index).durationSeconds;
+                if (target > 0)
+                {
+                    long completed = script.isOrderedQueueComplete()
+                            ? target : Math.min(target, script.getOrderedElapsedSeconds());
+                    progress = Math.min(1.0, (double) completed / target);
+                    progressLabel = String.format(Locale.ROOT, "%d/%ds (%.0f%%)",
+                            completed, target, progress * 100.0);
+                }
+            }
+        }
+        g.setFont(SMALL);
+        label(g, progressLabel, 177, 46, MUTED);
+        drawBar(g, 176, 55, 139, 10, progress, TASK_GREEN);
         uiButton(g, "pause", 327, 33, 30, 34, "Ⅱ", new Color(124, 82, 6));
         uiButton(g, "resume", 362, 33, 30, 34, "▶", new Color(4, 116, 35));
         uiButton(g, "stop", 397, 33, 30, 34, "■", new Color(142, 16, 19));
