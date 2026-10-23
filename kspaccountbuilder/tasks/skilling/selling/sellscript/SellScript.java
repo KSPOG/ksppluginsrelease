@@ -1,5 +1,6 @@
 package net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.selling.sellscript;
 
+import net.runelite.client.plugins.microbot.kspaccountbuilder.KspAccountBuilderPauseGate;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.KspManagedScript;
 
 import java.util.EnumSet;
@@ -138,7 +139,7 @@ public class SellScript extends KspManagedScript
         {
             try
             {
-                if (!super.run() || !Microbot.isLoggedIn() || complete) return;
+                if (KspAccountBuilderPauseGate.isPaused() || !super.run() || !Microbot.isLoggedIn() || complete) return;
                 tick();
             }
             catch (RuntimeException ex)
