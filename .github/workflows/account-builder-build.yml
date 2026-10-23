@@ -50,6 +50,18 @@ jobs:
           cache: gradle
           cache-dependency-path: hub/**/*.gradle*
 
+      - name: Verify all Account Builder source files remain present
+        shell: bash
+        run: |
+          set -euo pipefail
+          ACTUAL="$(find release/kspaccountbuilder -type f -name '*.java' | wc -l)"
+          echo "Account Builder Java sources: $ACTUAL"
+          test "$ACTUAL" -ge 135
+          test -s release/kspaccountbuilder/KSPAccountBuilderOverlay.java
+          test -s release/kspaccountbuilder/KspAccountBuilderScript.java
+          test -s release/kspaccountbuilder/KspAccountBuilderPlugin.java
+          test -s release/kspaccountbuilder/KspCinematicHudRenderer.java
+
       - name: Install KSP Account Builder sources into Hub
         shell: bash
         run: |
