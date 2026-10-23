@@ -94,19 +94,16 @@ final class KspCinematicHudRenderer
     {
         boolean chatbox = chatWidth > 0 && chatHeight > 0;
         int available = chatbox ? chatWidth :
-                Microbot.getClient() == null ? 1130 : Microbot.getClient().getCanvasWidth();
+                Microbot.getClient() == null ? FULL_W : Microbot.getClient().getCanvasWidth();
         boolean mini = plugin.isCompactOverlay() || available < 750;
-        int contentW = chatbox ? CHAT_W : mini ? MINI_W : settingsOpen ? 1395 : FULL_W;
-        if (mini || chatbox) queueOpen = false;
-        int contentH = chatbox ? CHAT_H : mini ? (settingsOpen ? 334 : MINI_H)
+        int contentW = chatbox ? chatWidth : mini ? MINI_W : settingsOpen ? 1395 : FULL_W;
+        int contentH = chatbox ? chatHeight : mini ? (settingsOpen ? 334 : MINI_H)
                 : queueOpen ? 557 : FULL_H;
-        // RuneLite's chat container bounds are the actual target dimensions.
-        int availableH = chatbox ? chatHeight :
-                Microbot.getClient() == null ? contentH : Microbot.getClient().getCanvasHeight();
+        if (mini || chatbox) queueOpen = false;
         double userScale = Math.max(.75, Math.min(1.5, config.hudScalePercent() / 100.0));
-        scale = chatbox
-                ? Math.min(1.5, Math.min(available / (double) contentW, availableH / (double) contentH))
-                : Math.min(userScale, Math.min(Math.max(.4, (available - 16.0) / contentW),
+        int availableH = Microbot.getClient() == null ? contentH : Microbot.getClient().getCanvasHeight();
+        scale = chatbox ? 1.0 : Math.min(userScale,
+                Math.min(Math.max(.4, (available - 16.0) / contentW),
                         Math.max(.4, (availableH - 16.0) / contentH)));
         surfaceWidth = contentW;
         surfaceHeight = contentH;
@@ -114,26 +111,31 @@ final class KspCinematicHudRenderer
         Graphics2D g = (Graphics2D) graphics.create();
         try
         {
-            g.scale(scale, scale);
             g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
             g.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
+            g.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY);
+            g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BICUBIC);
+            g.setRenderingHint(RenderingHints.KEY_FRACTIONALMETRICS, RenderingHints.VALUE_FRACTIONALMETRICS_ON);
             if (chatbox)
+                paintChatboxHd(g, chatWidth, chatHeight);
+            else
             {
-                paintChatbox(g);
+                g.scale(scale, scale);
+                if (mini)
+                {
+                    paintMini(g);
+                    if (settingsOpen) paintCompactSettings(g);
+                }
+                else paintFull(g);
             }
-            else if (mini)
-            {
-                paintMini(g);
-                if (settingsOpen) paintCompactSettings(g);
-            }
-            else paintFull(g);
         }
         finally
         {
             hitboxes = Collections.unmodifiableMap(new LinkedHashMap<>(paintingHitboxes));
             g.dispose();
         }
-        return new Dimension((int) Math.ceil(surfaceWidth * scale), (int) Math.ceil(surfaceHeight * scale));
+        return new Dimension((int) Math.ceil(surfaceWidth * scale),
+                (int) Math.ceil(surfaceHeight * scale));
     }
 
     private void paintFull(Graphics2D g)
@@ -362,6 +364,212 @@ final class KspCinematicHudRenderer
      *
      * 0..81 navigation | 84..325 live skill scene | 329..493 telemetry.
      */
+    /**
+     * Native-resolution chatbox compositor. Every shape, image and glyph is
+     * rendered at its final pixel coordinates; no 500x174 bitmap scaling.
+     */
+    private void paintChatboxHd(Graphics2D g, int w, int h)
+    {
+        final int p = Math.max(3, h / 65);
+        final int gap = Math.max(3, h / 65);
+        final int header = Math.max(24, h / 8);
+        final int footer = Math.max(26, h / 6);
+        final int top = header + gap;
+        final int bottom = h - footer - gap;
+        final int bodyH = Math.max(35, bottom - top - gap);
+        final int navW = Math.max(65, Math.min(92, (int) (w * 0.12)));
+        final int statsW = Math.max(145, (int) (w * 0.29));
+        final int navX = p;
+        final int sceneX = navX + navW + gap;
+        final int sceneW = Math.max(80, w - sceneX - statsW - gap - p);
+        final int statsX = sceneX + sceneW + gap;
+
+        ornamentalFrame(g, 0, 0, w, h);
+        g.setFont(new Font("Serif", Font.BOLD, Math.max(17, h / 11)));
+        ellipsis(g, "KSP Account Builder", p + 7, header - 6, w - 120, BRIGHT);
+        g.setFont(new Font("SansSerif", Font.PLAIN, Math.max(10, h / 20)));
+        alignRight(g, time(script.getRuntimeSeconds()), w - p - 6, header - 7, IVORY);
+        rule(g, p + 3, header, w - p - 3, header);
+
+        ornamentalFrame(g, navX, top, navW, bodyH);
+        String[] pages = {"Status", "Skills", "Quests", "Items", "Settings"};
+        int navGap = Math.max(2, bodyH / 65);
+        int navButtonH = Math.max(10, (bodyH - 8 - navGap * 4) / 5);
+        for (int i = 0; i < pages.length; i++)
+        {
+            int y = top + 4 + i * (navButtonH + navGap);
+            uiButton(g, "nav:" + pages[i], navX + 3, y,
+                    navW - 6, navButtonH, pages[i],
+                    pages[i].equals(currentPage) ? new Color(96, 65, 13) : RAISED);
+        }
+
+        if ("Skills".equals(currentPage) && !settingsOpen)
+        {
+            String task = safe(script.getCurrentTaskName(), "Idle");
+            String kind = resolveKind(task);
+            ornamentalFrame(g, sceneX, top, sceneW, bodyH);
+            Shape oldClip = g.getClip();
+            g.clipRect(sceneX + 3, top + 3, sceneW - 6, bodyH - 6);
+            BufferedImage scene = sceneArtwork(kind);
+            if (scene != null)
+            {
+                // Cover rather than stretch: retain source aspect ratio.
+                double ratio = Math.max((sceneW - 6.0) / scene.getWidth(),
+                        (bodyH - 6.0) / scene.getHeight());
+                int iw = (int) Math.ceil(scene.getWidth() * ratio);
+                int ih = (int) Math.ceil(scene.getHeight() * ratio);
+                g.drawImage(scene, sceneX + (sceneW - iw) / 2,
+                        top + (bodyH - ih) / 2, iw, ih, null);
+            }
+            else
+            {
+                g.setColor(new Color(31, 53, 44));
+                g.fillRect(sceneX + 3, top + 3, sceneW - 6, bodyH - 6);
+            }
+            g.setClip(oldClip);
+            g.setColor(new Color(4, 9, 13, 220));
+            g.fillRoundRect(sceneX + 5, top + 5, sceneW - 10, 22, 5, 5);
+            g.setFont(new Font("Serif", Font.BOLD, Math.max(12, bodyH / 10)));
+            ellipsis(g, task.replace('_', ' '), sceneX + 10, top + 20,
+                    sceneW - 20, BRIGHT);
+            g.setColor(new Color(4, 9, 13, 225));
+            g.fillRoundRect(sceneX + 5, bottom - 27, sceneW - 10, 20, 5, 5);
+            g.setFont(new Font("SansSerif", Font.PLAIN, Math.max(10, bodyH / 12)));
+            ellipsis(g, (script.isManualPaused() ? "PAUSED · " : "")
+                    + safe(script.getOverlayTaskDetail(), "Idle"),
+                    sceneX + 10, bottom - 13, sceneW - 20, IVORY);
+            double progress = Double.NaN;
+            if (script.hasOrderedQueue())
+            {
+                List<KspAccountBuilderTaskQueue.Entry> entries = script.getOrderedQueueSnapshot();
+                int index = script.getOrderedQueuePosition() - 1;
+                if (index >= 0 && index < entries.size())
+                    progress = KspAccountBuilderHudMath.taskDurationProgress(
+                            script.isOrderedQueueComplete() ? entries.get(index).durationSeconds
+                                    : script.getOrderedElapsedSeconds(),
+                            entries.get(index).durationSeconds);
+            }
+            drawBar(g, sceneX + 10, bottom - 6, sceneW - 20, 3, progress, TASK_GREEN);
+            paintChatboxStatsHd(g, statsX, top, statsW, bodyH, kind);
+        }
+        else
+        {
+            ornamentalFrame(g, sceneX, top, w - sceneX - p, bodyH);
+            g.setFont(new Font("Serif", Font.BOLD, Math.max(14, bodyH / 7)));
+            label(g, currentPage, sceneX + 10, top + 19, BRIGHT);
+            g.setFont(new Font("SansSerif", Font.PLAIN, Math.max(10, bodyH / 11)));
+            if ("Settings".equals(currentPage) || settingsOpen)
+            {
+                toggle(g, "setting:tooltips", sceneX + 10, top + 28,
+                        config.hudTooltips(), "Tooltips");
+                toggle(g, "setting:animation", sceneX + 10, top + 57,
+                        config.showSkillAnimations(), "Animations");
+                toggle(g, "setting:block", sceneX + sceneW + 8, top + 28,
+                        config.blockGameInput(), "Block input");
+                uiButton(g, "scale-down", w - 103, bottom - 34, 42, 26, "−", RAISED);
+                uiButton(g, "scale-up", w - 55, bottom - 34, 42, 26, "+", RAISED);
+            }
+            else
+            {
+                String task = safe(script.getCurrentTaskName(), "Idle");
+                String detail = safe(script.getOverlayTaskDetail(), "Waiting");
+                ellipsis(g, "Task: " + task, sceneX + 10, top + 39,
+                        w - sceneX - 22, IVORY);
+                ellipsis(g, "Action: " + detail, sceneX + 10, top + 61,
+                        w - sceneX - 22, IVORY);
+                label(g, "Queue " + (script.hasOrderedQueue()
+                        ? script.getOrderedQueuePosition() + "/" + script.getOrderedQueueSize()
+                        : "Automatic"), sceneX + 10, top + 83, MUTED);
+            }
+        }
+
+        String[] ids = {"pause", "resume", "stop", "skip", "settings", "nav:Queue"};
+        String[] labels = {"Ⅱ Pause", "▶ Resume", "■ Stop", "▶▶ Skip", "⚙ Settings", "Queue"};
+        Color[] colors = {new Color(124, 82, 6), new Color(4, 116, 35),
+                new Color(142, 16, 19), new Color(21, 41, 59),
+                new Color(21, 41, 59), RAISED};
+        int btnGap = 3;
+        int usable = w - 2 * p - 5 * btnGap;
+        int x = p;
+        for (int i = 0; i < ids.length; i++)
+        {
+            int width = (i == 5) ? w - p - x : usable / 6;
+            uiButton(g, ids[i], x, h - footer, width, footer - p,
+                    labels[i], colors[i]);
+            x += width + btnGap;
+        }
+    }
+
+    private void paintChatboxStatsHd(Graphics2D g, int x, int y, int w, int h, String kind)
+    {
+        ornamentalFrame(g, x, y, w, h);
+        Client client = Microbot.getClient();
+        Skill skill = skillFor(kind);
+        boolean valid = client != null && skill != null
+                && client.getGameState() == GameState.LOGGED_IN;
+        int level = 0, xp = 0, next = 0;
+        long gained = 0, rate = 0, remaining = -1;
+        double progress = Double.NaN;
+        if (valid)
+        {
+            try
+            {
+                xp = client.getSkillExperience(skill);
+                level = client.getRealSkillLevel(skill);
+                valid = xp >= 0 && level >= 1;
+                if (valid)
+                {
+                    int startXp = Experience.getXpForLevel(Math.min(99, level));
+                    next = level >= 99 ? startXp : Experience.getXpForLevel(level + 1);
+                    progress = KspAccountBuilderHudMath.levelProgress(xp, startXp,
+                            next, level >= 99);
+                    long now = System.currentTimeMillis();
+                    long runId = script.getStartedAtMillis();
+                    if (skill != observedSkill || xp < observedXp
+                            || observedSince == 0 || runId != observedRuntimeStart)
+                    {
+                        observedSkill = skill;
+                        observedRuntimeStart = runId;
+                        observedXp = xp;
+                        observedSince = now;
+                    }
+                    gained = Math.max(0L, (long) xp - observedXp);
+                    long elapsed = Math.max(0L, now - observedSince);
+                    if (elapsed >= 60000L)
+                        rate = KspAccountBuilderHudMath.hourlyXp(gained, elapsed);
+                    remaining = level >= 99 ? 0 : Math.max(0, next - xp);
+                }
+            }
+            catch (RuntimeException ex) { valid = false; }
+        }
+        int left = x + 7, right = x + w - 7;
+        g.setFont(new Font("Serif", Font.BOLD, Math.max(12, h / 9)));
+        ellipsis(g, displayKind(kind), left, y + 17, w - 14, BRIGHT);
+        g.setFont(new Font("SansSerif", Font.PLAIN, Math.max(10, h / 11)));
+        label(g, valid ? "Lv " + level : "XP unavailable", left, y + 33, IVORY);
+        alignRight(g, valid ? briefXp(xp) + "/" + briefXp(next) : "—",
+                right, y + 33, MUTED);
+        drawBar(g, left, y + 39, w - 14, 7, progress, XP_BLUE);
+        int lineY = y + Math.max(58, h / 2);
+        int step = Math.max(12, (h - (lineY - y) - 8) / 4);
+        label(g, "XP +" + String.format(Locale.ROOT, "%,d", gained), left, lineY, IVORY);
+        alignRight(g, rate > 0 ? String.format(Locale.ROOT, "%,d/h", rate) : "—/h",
+                right, lineY, IVORY);
+        label(g, "Next:", left, lineY + step, MUTED);
+        alignRight(g, !valid ? "—" : remaining == 0 ? "Max level"
+                : rate > 0 ? time(KspAccountBuilderHudMath.etaSeconds(remaining, rate))
+                        : "Calculating", right, lineY + step, IVORY);
+        label(g, "Break:", left, lineY + step * 2, MUTED);
+        alignRight(g, script.isBreakActive() ? time(script.getBreakTimeRemainingSeconds())
+                : script.isAnyBreakActive() ? "Active"
+                        : time(script.getTimeUntilBreakSeconds()),
+                right, lineY + step * 2, IVORY);
+        label(g, "Queue:", left, lineY + step * 3, MUTED);
+        alignRight(g, script.hasOrderedQueue()
+                ? script.getOrderedQueuePosition() + "/" + script.getOrderedQueueSize()
+                : "Automatic", right, lineY + step * 3, IVORY);
+    }
+
     private void paintChatbox(Graphics2D g)
     {
         ornamentalFrame(g, 0, 0, CHAT_W, CHAT_H);
