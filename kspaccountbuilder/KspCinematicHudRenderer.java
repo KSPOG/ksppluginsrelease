@@ -262,8 +262,8 @@ final class KspCinematicHudRenderer
         label(g, valid ? "Level " + level : "Skill unavailable", 929, 87, BRIGHT);
         drawBar(g, 929, 100, 182, 19, progress, XP_BLUE);
         g.setFont(SMALL);
-        label(g, valid ? String.format(Locale.ROOT, "%,d / %,d XP", xp, next)
-                : "Waiting for skill telemetry", 938, 115, IVORY);
+        label(g, valid ? String.format(Locale.ROOT, "%,d / %,d XP (%.1f%%)",
+                xp, next, progress * 100.0) : "Waiting for skill telemetry", 938, 115, IVORY);
 
         inner(g, 849, 132, 262, 132);
         g.setFont(BODY);
@@ -276,8 +276,11 @@ final class KspCinematicHudRenderer
 
         inner(g, 849, 273, 262, 57);
         stat(g, 292, "Break Timer:", script.isBreakActive() ? time(script.getBreakTimeRemainingSeconds())
-                : time(script.getTimeUntilBreakSeconds()));
-        stat(g, 318, "Queue Position:", "Not available");
+                : script.isAnyBreakActive() ? "Break active" : time(script.getTimeUntilBreakSeconds()));
+        stat(g, 318, "Queue Position:",
+                script.hasOrderedQueue()
+                    ? script.getOrderedQueuePosition() + " / " + script.getOrderedQueueSize()
+                    : "Automatic");
         hot("xptip", 850, 72, 260, 188);
         hot("queuetip", 850, 274, 260, 58);
     }
@@ -367,7 +370,8 @@ final class KspCinematicHudRenderer
             String state = "Queued";
             if (plugin.isRuntimeActive() && script.hasOrderedQueue())
             {
-                if (index < script.getOrderedQueuePosition() - 1) state = "Completed";
+                if (script.isOrderedQueueComplete()) state = "Completed";
+                else if (index < script.getOrderedQueuePosition() - 1) state = "Completed";
                 else if (index == script.getOrderedQueuePosition() - 1)
                     state = script.isManualPaused() ? "Paused" : "Active";
             }
