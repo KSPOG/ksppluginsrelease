@@ -389,6 +389,16 @@ public class KspAccountBuilderPlugin extends Plugin
         }
     }
 
+    void setCompactOverlay(boolean compact)
+    {
+        if (overlay != null) overlay.setCompactMode(compact);
+    }
+
+    boolean isCompactOverlay()
+    {
+        return overlay != null && overlay.isCompactMode();
+    }
+
     boolean isRuntimeActive()
     {
         return runtimeActive;
