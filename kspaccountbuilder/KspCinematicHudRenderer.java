@@ -383,7 +383,10 @@ final class KspCinematicHudRenderer
         Graphics2D g = (Graphics2D) target.create();
         try
         {
-            g.scale(width / (double) refW, height / (double) refH);
+            // One uniform scale: never compress the reference vertically.
+            // The overlay supplies a height rounded up from its exact ratio.
+            double referenceScale = width / (double) refW;
+            g.scale(referenceScale, referenceScale);
             g.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY);
             g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BICUBIC);
             g.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
@@ -473,9 +476,9 @@ final class KspCinematicHudRenderer
             Rectangle rect = entry.getValue();
             resized.put(entry.getKey(), new Rectangle(
                     (int) Math.round(rect.x * width / (double) refW),
-                    (int) Math.round(rect.y * height / (double) refH),
+                    (int) Math.round(rect.y * width / (double) refW),
                     Math.max(1, (int) Math.round(rect.width * width / (double) refW)),
-                    Math.max(1, (int) Math.round(rect.height * height / (double) refH))));
+                    Math.max(1, (int) Math.round(rect.height * width / (double) refW))));
         }
         paintingHitboxes.clear();
         paintingHitboxes.putAll(resized);
@@ -542,7 +545,8 @@ final class KspCinematicHudRenderer
         int width = 305;
         int height = 47 + messages.size() * 26;
         int px = (int) (hoverPoint.x * 1395.0 / actualW);
-        int py = (int) (hoverPoint.y * 482.0 / actualH);
+        // The image and hitboxes share the same width-derived scale.
+        int py = (int) (hoverPoint.y * 1395.0 / actualW);
         int x = Math.max(7, Math.min(1395 - width - 7, px + 24));
         int y = Math.max(6, Math.min(482 - height - 6, py - height - 12));
         ornamentalFrame(g, x, y, width, height);
