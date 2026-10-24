@@ -76,16 +76,37 @@ public class KSPAccountBuilderOverlay extends OverlayPanel
         {
             Rectangle chat = findChatboxBounds();
             if (chat == null) return null;
+
+            // Preserve the approved cinematic artwork's native 1395:482
+            // aspect ratio. The RuneLite chat container is wider/shorter,
+            // so keeping full chatbox width requires extending the top of
+            // the HUD slightly into the game, never stretching its artwork.
+            // The HUD's bottom stays exactly aligned with the chatbox bottom.
+            int width = chat.width;
+            int height = KspAccountBuilderHudMath.referenceHeight(width);
+            int availableAboveBottom = chat.y + chat.height;
+            if (height > availableAboveBottom)
+            {
+                // Extremely short canvas: fit the entire HUD instead of
+                // allowing it to disappear beyond the canvas top edge.
+                width = Math.min(width,
+                        KspAccountBuilderHudMath.referenceWidthForHeight(availableAboveBottom));
+                height = KspAccountBuilderHudMath.referenceHeight(width);
+            }
+            if (width < 170 || height < 60) return null;
+
             if (!chatboxAnchored)
             {
                 setPosition(OverlayPosition.DYNAMIC);
                 setMovable(false);
                 chatboxAnchored = true;
             }
-            Point location = chat.getLocation();
+            int x = chat.x + (chat.width - width) / 2;
+            int y = chat.y + chat.height - height;
+            Point location = new Point(x, y);
             if (!location.equals(getPreferredLocation()))
                 setPreferredLocation(location);
-            return cinematic.render(graphics, chat.width, chat.height);
+            return cinematic.render(graphics, width, height);
         }
         if (chatboxAnchored)
         {
