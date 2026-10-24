@@ -398,7 +398,7 @@ final class KspCinematicHudRenderer
 
             // Reference window controls and navigation remain raster-exact.
             hot("collapse", 1180, 9, 68, 49);
-            hot("settings", 1250, 9, 64, 49);
+            hot("settings-header", 1250, 9, 64, 49);
             hot("close", 1316, 9, 70, 49);
             String[] names = {"Status", "Skills", "Quests", "Items", "Settings"};
             for (int i = 0; i < names.length; i++)
