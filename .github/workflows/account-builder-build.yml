@@ -121,12 +121,19 @@ jobs:
                   guarded += 1
                   assert 'KspAccountBuilderPauseGate.isPaused() || !super.run()' in content, str(path)
           assert guarded >= 18, f'Expected all runnable tasks, found {guarded}'
-          layout = renderer[renderer.index('private void paintChatbox('):renderer.index('private void paintMini(')]
-          for action in ('pause','resume','stop','skip','settings','restore'):
-              assert 'uiButton(g, "' + action + '"' in layout, action
-          assert 'paintChatboxStats(g, kind);' in layout
-          assert 'while (size > 9f' in renderer, 'Button labels must fit small chatbox'
-          print(f'PASS: {guarded} runnable child loops pause safely; six fitted chatbox controls')
+          reference = renderer[renderer.index('private void paintReferenceBackedHud('):renderer.index('private void paintChatboxHd(')]
+          for action in ('pause','resume','stop','skip','settings','nav:Queue'):
+              assert 'hot("' + action + '"' in reference, 'Missing interactive reference control: ' + action
+          assert 'paintReferenceStats(g, reference, kind);' in reference
+          assert 'paintReferenceSkill(g, reference);' in reference
+          assert 'KspClassicReferenceSkin.get()' in renderer
+          skin = (root / 'KspClassicReferenceSkin.java').read_text()
+          for i in range(4):
+              assert f'KspClassicReferenceData{i}.text()' in skin
+              source = root / f'KspClassicReferenceData{i}.java'
+              assert source.is_file() and source.stat().st_size < 1000000, str(source)
+          assert 'while (size > 9f' in renderer, 'Legacy control sizing guard missing'
+          print(f'PASS: {guarded} child loops preserve pause; reference skin and six interactive HUD controls verified')
 
       - name: Run dependency-free HUD and queue regression checks
         shell: bash
