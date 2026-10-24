@@ -89,77 +89,86 @@ public class CraftingScript extends KspManagedScript
 
         mainScheduledFuture = scheduledExecutorService.scheduleWithFixedDelay(() ->
         {
-            if (!super.run() || !Microbot.isLoggedIn())
+            try
             {
-                return;
-            }
-
-            if (isLeatherBatchActive() || isGemBatchActive()) return;
-
-            // Finish any open production dialogue before selecting a new recipe,
-            // walking to a bank, or dispatching another inventory Use click.
-            if (isCraftingProductionWidgetOpen(targetRecipe))
-            {
-                selectProductAndMakeAll(targetRecipe);
-                return;
-            }
-
-            if (this.progressiveCrafting)
-            {
-                selectTargetRecipe();
-            }
-            KspTaskDebug.throttled(log, debugLogging, "Crafting", "loop", 5_000L,
-                    "loop | state={} recipe={} player={} moving={} animating={} interacting={} bankOpen={} leatherArea={} furnaceArea={}",
-                    state,
-                    targetLevel.getDisplayName(),
-                    Rs2Player.getWorldLocation(),
-                    Rs2Player.isMoving(),
-                    Rs2Player.isAnimating(),
-                    Rs2Player.isInteracting(),
-                    Rs2Bank.isOpen(),
-                    selectedLeatherArea.getDisplayName(),
-                    selectedFurnaceArea.getDisplayName());
-
-            if (!hasRequiredInventory(targetRecipe))
-            {
-                state = CraftingState.BANKING;
-                prepareInventory(targetRecipe);
-                return;
-            }
-
-            if (Rs2Bank.isOpen())
-            {
-                bankInventoryReset = false;
-                Rs2Bank.closeBank();
-                return;
-            }
-
-            if (targetRecipe.requiresFurnace())
-            {
-                if (!ensureInArea(selectedFurnaceArea, FURNACE_WALK_KEY))
+                if (!super.run() || !Microbot.isLoggedIn())
                 {
-                    state = CraftingState.WALKING_TO_FURNACE;
                     return;
                 }
 
-                state = CraftingState.CRAFTING_AT_FURNACE;
-                craftAtFurnace(targetRecipe);
-                return;
-            }
+                if (isLeatherBatchActive() || isGemBatchActive()) return;
 
-            Areas inventoryCraftArea = targetRecipe.getRecipeType() == RecipeType.LEATHER
-                    ? selectedLeatherArea
-                    : Areas.EDGE_BANK;
-            if (!ensureInArea(inventoryCraftArea, BANK_WALK_KEY))
+                // Finish any open production dialogue before selecting a new recipe,
+                // walking to a bank, or dispatching another inventory Use click.
+                if (isCraftingProductionWidgetOpen(targetRecipe))
+                {
+                    selectProductAndMakeAll(targetRecipe);
+                    return;
+                }
+
+                if (this.progressiveCrafting)
+                {
+                    selectTargetRecipe();
+                }
+                KspTaskDebug.throttled(log, debugLogging, "Crafting", "loop", 5_000L,
+                        "loop | state={} recipe={} player={} moving={} animating={} interacting={} bankOpen={} leatherArea={} furnaceArea={}",
+                        state,
+                        targetLevel.getDisplayName(),
+                        Rs2Player.getWorldLocation(),
+                        Rs2Player.isMoving(),
+                        Rs2Player.isAnimating(),
+                        Rs2Player.isInteracting(),
+                        Rs2Bank.isOpen(),
+                        selectedLeatherArea.getDisplayName(),
+                        selectedFurnaceArea.getDisplayName());
+
+                if (!hasRequiredInventory(targetRecipe))
+                {
+                    state = CraftingState.BANKING;
+                    prepareInventory(targetRecipe);
+                    return;
+                }
+
+                if (Rs2Bank.isOpen())
+                {
+                    bankInventoryReset = false;
+                    Rs2Bank.closeBank();
+                    return;
+                }
+
+                if (targetRecipe.requiresFurnace())
+                {
+                    if (!ensureInArea(selectedFurnaceArea, FURNACE_WALK_KEY))
+                    {
+                        state = CraftingState.WALKING_TO_FURNACE;
+                        return;
+                    }
+
+                    state = CraftingState.CRAFTING_AT_FURNACE;
+                    craftAtFurnace(targetRecipe);
+                    return;
+                }
+
+                Areas inventoryCraftArea = targetRecipe.getRecipeType() == RecipeType.LEATHER
+                        ? selectedLeatherArea
+                        : Areas.EDGE_BANK;
+                if (!ensureInArea(inventoryCraftArea, BANK_WALK_KEY))
+                {
+                    state = CraftingState.WALKING_TO_BANK;
+                    return;
+                }
+
+                state = targetRecipe.getRecipeType() == RecipeType.LEATHER
+                        ? CraftingState.CRAFTING_LEATHER
+                        : CraftingState.CUTTING_GEMS;
+                craftFromInventory(targetRecipe);
+
+            }
+            catch (RuntimeException ex)
             {
-                state = CraftingState.WALKING_TO_BANK;
-                return;
+                log.error("[KSP Crafting] Scheduled crafting loop failed; parent task recovery will restart it", ex);
+                throw ex;
             }
-
-            state = targetRecipe.getRecipeType() == RecipeType.LEATHER
-                    ? CraftingState.CRAFTING_LEATHER
-                    : CraftingState.CUTTING_GEMS;
-            craftFromInventory(targetRecipe);
         }, 0L, LOOP_DELAY_MS, TimeUnit.MILLISECONDS);
 
         return true;
