@@ -97,21 +97,24 @@ public class KspAccountBuilderPlugin extends Plugin
         public MouseEvent mouseReleased(MouseEvent e)
         {
             if (shouldBlockCanvasInput(e) || javax.swing.SwingUtilities.isEventDispatchThread()
-                    && overlay != null && overlay.acceptsMouse(e.getPoint())) e.consume();
+                    && !net.runelite.client.plugins.microbot.util.mouse.BotEventGuard.isSynthetic()
+                     && overlay != null && overlay.acceptsMouse(e.getPoint())) e.consume();
             return e;
         }
         @Override
         public MouseEvent mouseClicked(MouseEvent e)
         {
             if (shouldBlockCanvasInput(e) || javax.swing.SwingUtilities.isEventDispatchThread()
-                    && overlay != null && overlay.acceptsMouse(e.getPoint())) e.consume();
+                    && !net.runelite.client.plugins.microbot.util.mouse.BotEventGuard.isSynthetic()
+                     && overlay != null && overlay.acceptsMouse(e.getPoint())) e.consume();
             return e;
         }
         @Override
         public MouseEvent mouseDragged(MouseEvent e)
         {
             if (shouldBlockCanvasInput(e) || javax.swing.SwingUtilities.isEventDispatchThread()
-                    && overlay != null && overlay.acceptsMouse(e.getPoint())) e.consume();
+                    && !net.runelite.client.plugins.microbot.util.mouse.BotEventGuard.isSynthetic()
+                     && overlay != null && overlay.acceptsMouse(e.getPoint())) e.consume();
             return e;
         }
         @Override

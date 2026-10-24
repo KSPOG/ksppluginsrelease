@@ -57,7 +57,7 @@ public class AutoLoginScript extends KspManagedScript
         {
             try
             {
-                if (!active || net.runelite.client.plugins.microbot.kspsupport.KspBreakService.shouldPause() || Thread.currentThread().isInterrupted())
+                if (!active || net.runelite.client.plugins.microbot.kspaccountbuilder.KspAccountBuilderPauseGate.isPaused() || Thread.currentThread().isInterrupted())
                 {
                     return;
                 }

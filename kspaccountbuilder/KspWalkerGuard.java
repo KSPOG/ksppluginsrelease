@@ -127,7 +127,7 @@ public final class KspWalkerGuard
 
     public static void clearActiveWalker(String reason)
     {
-        if (Rs2Walker.getCurrentTarget() != null)
+        if (activeWalkerKey != null && Rs2Walker.getCurrentTarget() != null)
         {
             Rs2Walker.clearWalkingRoute(reason != null ? reason : "ksp_account_builder_clear_walker");
         }

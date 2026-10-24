@@ -72,7 +72,7 @@ public class KSPAccountBuilderOverlay extends OverlayPanel
         if (!plugin.mayRenderOverlay() || !hudVisible) return null;
         // One cinematic layout: anchored to the actual RuneLite chatbox.
         // The old 1130x405 viewport HUD is intentionally no longer used.
-        if (config.cinematicHud())
+        if (config.cinematicHud() && config.hudFitChatbox())
         {
             Rectangle chat = findChatboxBounds();
             if (chat == null) return null;
@@ -115,6 +115,7 @@ public class KSPAccountBuilderOverlay extends OverlayPanel
             setMovable(!config.lockHudPosition());
             chatboxAnchored = false;
         }
+        if (config.cinematicHud()) return cinematic.render(graphics);
         if (!config.cinematicHud()) return renderOriginalPanel(graphics);
 
         Graphics2D g = (Graphics2D) graphics.create();

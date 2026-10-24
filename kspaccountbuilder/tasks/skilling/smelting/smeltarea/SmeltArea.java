@@ -26,6 +26,36 @@ public enum SmeltArea
         return areas[ThreadLocalRandom.current().nextInt(areas.length)];
     }
 
+    /**
+     * Select the furnace with the shortest approximate initial walking distance.
+     * Preserve the existing randomArea() API for callers that require randomness.
+     * This is a coordinate-distance heuristic, not a WebWalker route estimate.
+     */
+    public static SmeltArea nearestArea(WorldPoint playerLocation)
+    {
+        if (playerLocation == null)
+        {
+            return SMELT_AREA_EDGEVILLE_FURNACE;
+        }
+
+        SmeltArea nearest = SMELT_AREA_EDGEVILLE_FURNACE;
+        long shortestDistance = Long.MAX_VALUE;
+        for (SmeltArea candidate : values())
+        {
+            WorldArea bounds = candidate.worldArea;
+            long centerX = (long) bounds.getX() + bounds.getWidth() / 2;
+            long centerY = (long) bounds.getY() + bounds.getHeight() / 2;
+            long distance = Math.abs((long) playerLocation.getX() - centerX)
+                    + Math.abs((long) playerLocation.getY() - centerY);
+            if (distance < shortestDistance)
+            {
+                shortestDistance = distance;
+                nearest = candidate;
+            }
+        }
+        return nearest;
+    }
+
     public WorldArea toWorldArea()
     {
         return worldArea;

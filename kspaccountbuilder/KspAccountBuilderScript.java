@@ -894,7 +894,7 @@ public class KspAccountBuilderScript extends KspManagedScript
                 BarLevels bar = resolveSingleSkillTarget(KspTrainSingleSkillTask.SMELTING).getValue(BarLevels.class);
                 if (selectedSmeltingArea == null)
                 {
-                    selectedSmeltingArea = SmeltArea.randomArea();
+                    selectedSmeltingArea = SmeltArea.nearestArea(getSafePlayerLocation());
                     log.info("[KSP Account Builder] Selected smelting furnace for task: {}", selectedSmeltingArea.getDisplayName());
                 }
                 return smeltScript.run(selectedSmeltingArea, bar == null ? resolveSmeltingFallbackBar() : bar, bar == null);
@@ -1509,6 +1509,17 @@ public class KspAccountBuilderScript extends KspManagedScript
             BuilderTask requested = orderedTaskAt(orderedIndex);
             if (requested != null && requested != excluded && hasResourcesForTaskSelection(requested))
                 return requested;
+        }
+        // When Melee becomes unavailable because food is depleted, prioritize
+        // affordable GE resupply over switching to an unrelated training task.
+        // Ordered-queue selection above retains priority when another queued
+        // task is ready; forced single-skill mode uses its own recovery path.
+        if (excluded == BuilderTask.MELEE
+                && Buy.isMeleeFoodBuyMissing()
+                && hasResourcesForTaskSelection(BuilderTask.GE_BUY))
+        {
+            debug("Prioritizing GE_BUY to replenish melee food before resuming training");
+            return BuilderTask.GE_BUY;
         }
         return selectTaskWithSupportFallback(excluded, true, false);
     }

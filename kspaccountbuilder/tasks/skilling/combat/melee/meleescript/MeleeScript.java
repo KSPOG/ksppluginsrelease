@@ -174,6 +174,21 @@ public class MeleeScript extends KspManagedScript {
                     return;
                 }
 
+                // Emergency safety takes priority over loot, equipment changes and new attacks.
+                // An actively fighting player must not wait for combat to end before retreating
+                // when food is exhausted and HP is already dangerously low.
+                if (requiresCombatFood(stage) && this.getFoodCountInInventory() <= 0) {
+                    int currentHp = Microbot.getClient().getBoostedSkillLevel(Skill.HITPOINTS);
+                    int maxHp = Microbot.getClient().getRealSkillLevel(Skill.HITPOINTS);
+                    if (currentHp > 0 && maxHp > 0
+                            && (long) currentHp * 3L <= (long) maxHp * 2L) {
+                        this.state = CombatState.BANKING;
+                        this.setStatus("Emergency retreat: low HP and no food");
+                        this.handleBanking(stage);
+                        return;
+                    }
+                }
+
                 // Ground loot is time-sensitive. Pick owned drops before inventory cleanup so
                 // burying a previous bone can never delay a fresh owned drop.
                 boolean looted = this.lootOwnDrops(stage);
@@ -383,7 +398,7 @@ public class MeleeScript extends KspManagedScript {
             int maxHp = Microbot.getClient().getRealSkillLevel(Skill.HITPOINTS);
             if (!MeleeBankPolicy.needsFoodBank(currentHp, maxHp, noFoodObservedForMs,
                     Rs2Player.isAnimating() || this.isActivelyFighting(stage))) {
-                KspTaskDebug.throttled(log, this.debugLogging, "Melee", "no-food-confirmation", 1_000L,
+                KspTaskDebug.throttled(log, this.debugLogging, "Melee", "no-food-confirmation", 15_000L,
                         "No food bank required yet | hp={}/{} noFoodMs={} animating={} activelyFighting={} emptySlots={}",
                         currentHp, maxHp, noFoodObservedForMs,
                         Rs2Player.isAnimating(), this.isActivelyFighting(stage),
@@ -453,18 +468,22 @@ public class MeleeScript extends KspManagedScript {
         }
 
         Food bankFood = getBestFoodAvailableInBank();
-        int missingFood = Math.max(0, TARGET_FOOD_COUNT - getFoodCountInInventory());
+        // Hill Giants require a long dungeon-to-bank journey. Carry more food per trip
+        // while preserving inventory space for loot and keeping other stages unchanged.
+        int missingFood = Math.max(0,
+                (stage.primaryNpc == NPC.HILL_GIANT ? 10 : TARGET_FOOD_COUNT)
+                        - getFoodCountInInventory());
 
         if (bankFood != null && missingFood > 0) {
             if (!isBankInventoryActionPending()) {
                 int before = Rs2Inventory.emptySlotCount();
-                if (Rs2Bank.withdrawX(bankFood.getItemId(), missingFood)) markBankInventoryAction(before);
+                if (Rs2Bank.withdrawX(bankFood.getItemId(), Math.min(missingFood, Math.max(0, Rs2Bank.count(bankFood.getItemId()))))) markBankInventoryAction(before);
             }
             return;
         }
 
-        if (bankFood == null && missingFood > 0 && requiresCombatFood(stage)) {
-            setStatus("Waiting for 5 Trout/Salmon");
+        if (bankFood == null && this.getFoodCountInInventory() <= 0 && requiresCombatFood(stage)) {
+            setStatus("Waiting for Trout/Salmon: no food in bank or inventory");
             return;
         }
 
@@ -1191,7 +1210,7 @@ public class MeleeScript extends KspManagedScript {
     }
 
     private boolean shouldHealNow(int currentHp, int maxHp) {
-        int healThreshold = (int)Math.ceil((double)maxHp * 0.28);
+        int healThreshold = (maxHp * 2) / 3;
         return currentHp <= healThreshold;
     }
 

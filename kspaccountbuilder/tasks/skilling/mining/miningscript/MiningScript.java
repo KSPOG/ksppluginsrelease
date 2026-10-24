@@ -433,7 +433,7 @@ public class MiningScript extends KspManagedScript
 
         if (KspWalkerGuard.walkToDestination(
                 "Mining:target-area",
-                targetArea::getRandomPoint,
+                () -> targetArea == Areas.IRON_VARROCK_WEST ? new WorldPoint(3177, 3369, 0) : targetArea.getRandomPoint(),
                 area::contains,
                 3,
                 WEB_WALK_COOLDOWN_MS))
