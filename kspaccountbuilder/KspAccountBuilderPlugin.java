@@ -317,7 +317,7 @@ public class KspAccountBuilderPlugin extends Plugin
                 configManager.setConfiguration(KspAccountBuilderConfig.CONFIG_GROUP, "runAccountBuilder", false);
                 return;
             case "skip": script.requestManualSkip(); return;
-            case "settings": case "settings-close": renderer.openSettings(); return;
+            case "settings": case "settings-header": case "settings-close": renderer.openSettings(); return;
             case "queuetip": renderer.openQueue(); return;
             case "queue-close": renderer.openQueue(); return;
             case "setting:block":
