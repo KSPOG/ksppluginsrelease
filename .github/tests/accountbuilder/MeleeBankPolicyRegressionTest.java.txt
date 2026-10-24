@@ -1,0 +1,45 @@
+package net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.combat.melee.meleescript;
+
+/** Dependency-free regression cases for the Melee bank state machine. */
+public final class MeleeBankPolicyRegressionTest
+{
+    private static int assertions;
+
+    private static void check(boolean success, String message)
+    {
+        assertions++;
+        if (!success) throw new AssertionError(message);
+    }
+
+    public static void main(String[] args)
+    {
+        check(!MeleeBankPolicy.needsOptionalGearBank(true, true),
+                "Already armed players must not bank just to inspect other gear");
+        check(!MeleeBankPolicy.needsOptionalGearBank(true, false),
+                "Existing weapon and no bank weapon must not bank");
+        check(!MeleeBankPolicy.needsOptionalGearBank(false, false),
+                "Missing gear without a known replacement must not cause a speculative bank walk");
+        check(MeleeBankPolicy.needsOptionalGearBank(false, true),
+                "Truly missing weapon with a known available replacement can be banked");
+        check(!MeleeBankPolicy.needsFoodBank(31, 32, 10000L, false),
+                "Missing food at nearly full health must not cause a bank trip");
+        check(!MeleeBankPolicy.needsFoodBank(17, 32, 10000L, false),
+                "Above the 50 percent reserve is not an immediate resupply request");
+        check(MeleeBankPolicy.needsFoodBank(16, 32, 2500L, false),
+                "Bank at or below 50 percent with no food for 2.5 seconds");
+        check(MeleeBankPolicy.needsFoodBank(13, 32, 3000L, false),
+                "Confirmed depleted food and low HP require restocking");
+        check(!MeleeBankPolicy.needsFoodBank(13, 32, 2499L, false),
+                "Transient missing-food readings must not trigger a trip");
+        check(!MeleeBankPolicy.needsFoodBank(13, 32, 10000L, true),
+                "Do not interrupt live combat/animation to bank");
+        check(!MeleeBankPolicy.needsFoodBank(0, 32, 10000L, false),
+                "Dead player uses death handling, not a food bank trip");
+        check(!MeleeBankPolicy.needsFoodBank(13, 0, 10000L, false),
+                "Unknown max HP is not a confirmed condition");
+        check(!MeleeBankPolicy.needsFoodBank(40, 99, 10000L, false),
+                "Guard scaled HP correctly for higher-level accounts");
+
+        System.out.println("PASS: " + assertions + " Melee bank policy regression checks");
+    }
+}
