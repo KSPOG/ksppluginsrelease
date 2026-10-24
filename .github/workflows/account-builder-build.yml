@@ -5,6 +5,7 @@ on:
     paths:
       - 'kspaccountbuilder/**'
       - 'kspsupport/**'
+      - '.github/tests/accountbuilder/**'
       - '.github/workflows/account-builder-build.yml'
   push:
     branches:
@@ -13,6 +14,7 @@ on:
     paths:
       - 'kspaccountbuilder/**'
       - 'kspsupport/**'
+      - '.github/tests/accountbuilder/**'
       - '.github/workflows/account-builder-build.yml'
   workflow_dispatch:
 
