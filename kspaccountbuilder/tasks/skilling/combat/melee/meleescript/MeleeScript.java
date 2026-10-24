@@ -56,7 +56,6 @@ public class MeleeScript extends KspManagedScript {
     private static final int TARGET_FOOD_COUNT = Buy.MELEE_TARGET_FOOD_COUNT;
     private static final int CHICKEN_TARGET_COMBAT_STAT_LEVEL = 15;
     private static final int LOOT_RADIUS = 12;
-    private static final long NO_FOOD_CONFIRMATION_MS = 2_500L;
     private static final long ACTION_DISPATCH_TIMEOUT_MS = 1_500L;
     private static final long LOOT_PICKUP_RECOVERY_MS = 900L;
     private static final long BONE_BURY_RECOVERY_MS = 1_200L;
@@ -150,9 +149,20 @@ public class MeleeScript extends KspManagedScript {
                         Rs2Bank.isOpen());
 
                 if (!this.gearCheckedAtBank && !this.isActivelyFighting(stage)) {
-                    this.state = CombatState.BANKING;
-                    this.handleBanking(stage);
-                    return;
+                    // Startup equipment inspection is OPTIONAL. The previous
+                    // unconditional bank visit removed an already equipped
+                    // player from the combat area on every fresh Melee run.
+                    if (this.shouldVisitBankForMissingWeapon()) {
+                        this.state = CombatState.BANKING;
+                        this.debug("Banking for known missing usable weapon | area={} hp={}",
+                                stage.area.getDisplayName(),
+                                Microbot.getClient().getBoostedSkillLevel(Skill.HITPOINTS));
+                        this.handleBanking(stage);
+                        return;
+                    }
+                    this.gearCheckedAtBank = true;
+                    this.debug("Skipping optional startup gear bank | area={} usableWeapon={}",
+                            stage.area.getDisplayName(), this.hasCurrentTaskWeaponEquippedOrInInventory());
                 }
                 if (this.needsWarriorFoodRestock(stage)) {
                     this.state = CombatState.BANKING;
@@ -369,21 +379,20 @@ public class MeleeScript extends KspManagedScript {
             this.lastConfirmedFoodAtMs = System.currentTimeMillis();
         } else if (requiresCombatFood(stage)) {
             long noFoodObservedForMs = System.currentTimeMillis() - this.lastConfirmedFoodAtMs;
-            if (Rs2Player.isAnimating()
-                    || this.isActivelyFighting(stage)
-                    || noFoodObservedForMs < NO_FOOD_CONFIRMATION_MS) {
+            int currentHp = Microbot.getClient().getBoostedSkillLevel(Skill.HITPOINTS);
+            int maxHp = Microbot.getClient().getRealSkillLevel(Skill.HITPOINTS);
+            if (!MeleeBankPolicy.needsFoodBank(currentHp, maxHp, noFoodObservedForMs,
+                    Rs2Player.isAnimating() || this.isActivelyFighting(stage))) {
                 KspTaskDebug.throttled(log, this.debugLogging, "Melee", "no-food-confirmation", 1_000L,
-                        "Delaying no-food bank decision | observedForMs={} animating={} activelyFighting={} inventoryEmptySlots={}",
-                        noFoodObservedForMs,
-                        Rs2Player.isAnimating(),
-                        this.isActivelyFighting(stage),
+                        "No food bank required yet | hp={}/{} noFoodMs={} animating={} activelyFighting={} emptySlots={}",
+                        currentHp, maxHp, noFoodObservedForMs,
+                        Rs2Player.isAnimating(), this.isActivelyFighting(stage),
                         Rs2Inventory.emptySlotCount());
                 return false;
             }
 
-            this.debug("Banking after confirmed no-food state | observedForMs={} area={}",
-                    noFoodObservedForMs,
-                    stage.area.getDisplayName());
+            this.debug("Banking for confirmed low-health/no-food | hp={}/{} noFoodMs={} area={}",
+                    currentHp, maxHp, noFoodObservedForMs, stage.area.getDisplayName());
             return this.shouldBankForNoFood(stage);
         }
         if (Rs2Inventory.isFull() && this.projectedFreeSlotsAfterBury() <= 0) {
@@ -1070,6 +1079,27 @@ public class MeleeScript extends KspManagedScript {
             }
         }
         return best == null ? null : best.getDisplayName();
+    }
+
+    /**
+     * Check gear only when the player genuinely lacks a usable weapon AND
+     * the previously observed bank inventory contains a usable replacement.
+     * No bank visit is needed solely to inspect optional armour upgrades.
+     */
+    private boolean shouldVisitBankForMissingWeapon() {
+        boolean usableWeaponPresent = this.hasCurrentTaskWeaponEquippedOrInInventory();
+        if (usableWeaponPresent) return false;
+
+        int attackLevel = this.getSkillLevel(Skill.ATTACK);
+        boolean bankWeaponKnown = false;
+        for (Weapons weapon : Weapons.values()) {
+            if (attackLevel >= weapon.getRequiredAttackLevel()
+                    && Rs2Bank.count(weapon.getDisplayName()) > 0) {
+                bankWeaponKnown = true;
+                break;
+            }
+        }
+        return MeleeBankPolicy.needsOptionalGearBank(usableWeaponPresent, bankWeaponKnown);
     }
 
     private boolean hasCurrentTaskWeaponEquippedOrInInventory() {
