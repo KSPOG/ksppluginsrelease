@@ -40,6 +40,29 @@ final class KspAccountBuilderHudMath
                 (double) completedSeconds / (double) targetSeconds));
     }
 
+    /**
+     * Height of the original 1395x482 cinematic reference at the requested
+     * pixel width. Round up so the original artwork cannot be clipped.
+     * This also defines the geometry used by reference HUD hitboxes.
+     */
+    static int referenceHeight(int width)
+    {
+        if (width <= 0) return 0;
+        return (int) Math.min(Integer.MAX_VALUE,
+                ((long) width * 482L + 1395L - 1L) / 1395L);
+    }
+
+    /**
+     * Width which fits the reference image within a hard vertical limit.
+     * Unlike stretching height separately, this preserves its aspect ratio.
+     */
+    static int referenceWidthForHeight(int height)
+    {
+        if (height <= 0) return 0;
+        return (int) Math.min(Integer.MAX_VALUE,
+                (long) height * 1395L / 482L);
+    }
+
     static int scaledCoordinate(int coordinate, double scale)
     {
         if (!Double.isFinite(scale) || scale <= 0) return -1;
