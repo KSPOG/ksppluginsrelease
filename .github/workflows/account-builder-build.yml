@@ -148,6 +148,26 @@ jobs:
           javac --release 11 -d /tmp/ksp-accountbuilder-tests/bin /tmp/ksp-accountbuilder-tests/src/*.java
           java -cp /tmp/ksp-accountbuilder-tests/bin net.runelite.client.plugins.microbot.kspaccountbuilder.HudAndQueueRegressionTest
 
+      - name: Verify Melee banking requires a real reason
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT='release/kspaccountbuilder/tasks/skilling/combat/melee/meleescript'
+          mkdir -p /tmp/ksp-melee-bank-tests/src /tmp/ksp-melee-bank-tests/bin
+          cp "$ROOT/MeleeBankPolicy.java" /tmp/ksp-melee-bank-tests/src/
+          cp release/.github/tests/accountbuilder/MeleeBankPolicyRegressionTest.java.txt /tmp/ksp-melee-bank-tests/src/MeleeBankPolicyRegressionTest.java
+          javac --release 11 -d /tmp/ksp-melee-bank-tests/bin /tmp/ksp-melee-bank-tests/src/*.java
+          java -cp /tmp/ksp-melee-bank-tests/bin net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.combat.melee.meleescript.MeleeBankPolicyRegressionTest
+          python3 - <<'PY'
+          from pathlib import Path
+          code = Path('release/kspaccountbuilder/tasks/skilling/combat/melee/meleescript/MeleeScript.java').read_text()
+          assert 'this.shouldVisitBankForMissingWeapon()' in code
+          assert 'MeleeBankPolicy.needsFoodBank(' in code
+          assert 'Banking for known missing usable weapon' in code
+          assert 'Banking for confirmed low-health/no-food' in code
+          print('PASS: live MeleeScript integrates both guarded bank policies')
+          PY
+
       - name: Install KSP Account Builder sources into Hub
         shell: bash
         run: |
