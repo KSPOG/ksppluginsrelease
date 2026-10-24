@@ -368,8 +368,315 @@ final class KspCinematicHudRenderer
      * Native-resolution chatbox compositor. Every shape, image and glyph is
      * rendered at its final pixel coordinates; no 500x174 bitmap scaling.
      */
+
+    /** Original reference is used as the real, offline HUD skin.
+     *  The scene, statistics, task strip and controls are live and interactive;
+     *  the image is never used as a stand-alone static mockup.
+     */
+    private volatile boolean referenceHudActive;
+
+    private void paintReferenceBackedHud(Graphics2D target, int width, int height,
+                                         BufferedImage reference)
+    {
+        referenceHudActive = true;
+        final int refW = 1395, refH = 482;
+        Graphics2D g = (Graphics2D) target.create();
+        try
+        {
+            g.scale(width / (double) refW, height / (double) refH);
+            g.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY);
+            g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BICUBIC);
+            g.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
+            g.drawImage(reference, 0, 0, null);
+
+            // Remove the example runtime from the source skin using a clean
+            // patch of the *same* textured header, then draw the real value.
+            g.drawImage(reference, 968, 8, 1174, 55,
+                    730, 8, 936, 55, null);
+            g.setFont(new Font("Serif", Font.PLAIN, 22));
+            alignRight(g, "Runtime: " + time(script.getRuntimeSeconds()), 1169, 43, IVORY);
+
+            // Reference window controls and navigation remain raster-exact.
+            hot("collapse", 1180, 9, 68, 49);
+            hot("settings", 1250, 9, 64, 49);
+            hot("close", 1316, 9, 70, 49);
+            String[] names = {"Status", "Skills", "Quests", "Items", "Settings"};
+            for (int i = 0; i < names.length; i++)
+            {
+                int yy = 75 + 62 * i;
+                hot("nav:" + names[i], 15, yy, 190, 57);
+                if (names[i].equals(currentPage) && !"Skills".equals(currentPage))
+                {
+                    Paint old = g.getPaint();
+                    g.setPaint(new GradientPaint(22, yy, new Color(194, 133, 13),
+                            22, yy + 50, new Color(66, 44, 9)));
+                    g.fillRoundRect(23, yy + 3, 178, 49, 5, 5);
+                    g.setPaint(old);
+                    g.setColor(BRIGHT);
+                    g.drawRoundRect(23, yy + 3, 178, 49, 5, 5);
+                    g.setFont(new Font("Serif", Font.BOLD, 24));
+                    label(g, names[i], 75, yy + 35, IVORY);
+                }
+            }
+
+            if (settingsOpen || "Settings".equals(currentPage))
+                paintReferenceSettings(g, reference);
+            else if ("Skills".equals(currentPage))
+                paintReferenceSkill(g, reference);
+            else
+                paintReferencePage(g, reference);
+
+            // Match the actual reference footer artwork; only hit boxes are
+            // added, so dragging/clicking still invokes the existing engine.
+            hot("pause", 14, 405, 241, 68);
+            hot("resume", 261, 405, 222, 68);
+            hot("stop", 490, 405, 231, 68);
+            hot("skip", 727, 405, 240, 68);
+            hot("settings", 976, 405, 220, 68);
+            hot("nav:Queue", 1202, 405, 184, 68);
+            if (script.isManualPaused())
+            {
+                g.setColor(new Color(4, 11, 13, 135));
+                g.fillRoundRect(266, 409, 209, 59, 6, 6);
+            }
+            else
+            {
+                g.setColor(new Color(4, 11, 13, 125));
+                g.fillRoundRect(20, 409, 228, 59, 6, 6);
+            }
+        }
+        finally
+        {
+            g.dispose();
+        }
+        // Mouse hitboxes are defined in reference coordinates but RuneLite's
+        // input event uses the final *physical* chatbox pixels.
+        Map<String, Rectangle> resized = new LinkedHashMap<>();
+        for (Map.Entry<String, Rectangle> entry : paintingHitboxes.entrySet())
+        {
+            Rectangle rect = entry.getValue();
+            resized.put(entry.getKey(), new Rectangle(
+                    (int) Math.round(rect.x * width / (double) refW),
+                    (int) Math.round(rect.y * height / (double) refH),
+                    Math.max(1, (int) Math.round(rect.width * width / (double) refW)),
+                    Math.max(1, (int) Math.round(rect.height * height / (double) refH))));
+        }
+        paintingHitboxes.clear();
+        paintingHitboxes.putAll(resized);
+    }
+
+    private void paintReferenceSkill(Graphics2D g, BufferedImage reference)
+    {
+        String task = safe(script.getCurrentTaskName(), "Idle");
+        String kind = resolveKind(task);
+        String activity = safe(script.getOverlayTaskDetail(), "Waiting for task");
+
+        // The original reference is the exact panel frame; replace only the
+        // skill-dependent artwork inside its gilded picture opening.
+        Shape oldClip = g.getClip();
+        g.clipRect(226, 82, 712, 238);
+        BufferedImage scene = sceneArtwork(kind);
+        if (scene != null && scene.getWidth() > 0 && scene.getHeight() > 0)
+        {
+            double ratio = Math.max(712.0 / scene.getWidth(), 238.0 / scene.getHeight());
+            int dw = (int) Math.ceil(scene.getWidth() * ratio);
+            int dh = (int) Math.ceil(scene.getHeight() * ratio);
+            g.drawImage(scene, 226 + (712 - dw) / 2,
+                    82 + (238 - dh) / 2, dw, dh, null);
+        }
+        else
+        {
+            g.setColor(new Color(16, 34, 30));
+            g.fillRect(226, 82, 712, 238);
+        }
+        g.setClip(oldClip);
+        Paint old = g.getPaint();
+        g.setPaint(new GradientPaint(228, 81, new Color(4, 12, 16, 232),
+                228, 175, new Color(4, 12, 16, 0)));
+        g.fillRect(228, 81, 704, 99);
+        g.setPaint(old);
+
+        // Gold-framed skill badge, heading and action as in the reference.
+        medal(g, 275, 123, kind, 41);
+        g.setFont(new Font("Serif", Font.BOLD, 35));
+        ellipsis(g, displayKind(kind), 339, 112, 580, BRIGHT);
+        g.setFont(new Font("SansSerif", Font.PLAIN, 25));
+        ellipsis(g, activity, 340, 143, 575, IVORY);
+
+        // Live task progress replaces the reference's example queue numbers.
+        g.setColor(new Color(6, 17, 22, 248));
+        g.fillRoundRect(232, 319, 695, 69, 8, 8);
+        g.setColor(GOLD);
+        g.setStroke(new BasicStroke(1.4f));
+        g.drawRoundRect(231, 319, 696, 69, 8, 8);
+        medal(g, 272, 353, kind, 25);
+        g.setFont(new Font("Serif", Font.BOLD, 21));
+        ellipsis(g, "Current Task: " + activity, 331, 347, 575, IVORY);
+        double taskProgress = Double.NaN;
+        String progressLabel = "Automatic";
+        if (script.hasOrderedQueue())
+        {
+            List<KspAccountBuilderTaskQueue.Entry> entries = script.getOrderedQueueSnapshot();
+            int index = script.getOrderedQueuePosition() - 1;
+            if (index >= 0 && index < entries.size())
+            {
+                long target = entries.get(index).durationSeconds;
+                long elapsed = script.isOrderedQueueComplete() ? target
+                        : script.getOrderedElapsedSeconds();
+                taskProgress = KspAccountBuilderHudMath.taskDurationProgress(elapsed, target);
+                progressLabel = elapsed + " / " + target;
+                if (Double.isFinite(taskProgress))
+                    progressLabel += String.format(Locale.ROOT, " (%.1f%%)", taskProgress * 100);
+            }
+        }
+        drawBar(g, 331, 357, 574, 24, taskProgress, TASK_GREEN);
+        g.setFont(new Font("SansSerif", Font.BOLD, 19));
+        alignRight(g, progressLabel, 892, 375, IVORY);
+        hot("tasktip", 232, 320, 695, 68);
+
+        paintReferenceStats(g, reference, kind);
+    }
+
+    private void paintReferenceStats(Graphics2D g, BufferedImage reference, String kind)
+    {
+        // Clear fixed sample content while retaining the reference's actual
+        // four-corner gilded outside border and button/scene artwork.
+        g.setColor(new Color(7, 17, 21, 251));
+        g.fillRoundRect(951, 77, 423, 310, 4, 4);
+        g.setColor(new Color(112, 80, 17));
+        g.drawRoundRect(952, 78, 421, 309, 5, 5);
+        g.setColor(GOLD);
+        g.drawRoundRect(955, 81, 415, 302, 5, 5);
+
+        Client c = Microbot.getClient();
+        Skill skill = skillFor(kind);
+        boolean valid = c != null && skill != null
+                && c.getGameState() == GameState.LOGGED_IN;
+        int level = 0, xp = 0, target = 0;
+        long gained = 0, hourly = 0, remaining = -1L;
+        double progress = Double.NaN;
+        if (valid)
+        {
+            try
+            {
+                level = c.getRealSkillLevel(skill);
+                xp = c.getSkillExperience(skill);
+                valid = level > 0 && xp >= 0;
+                if (valid)
+                {
+                    int floor = Experience.getXpForLevel(Math.min(99, level));
+                    target = level >= 99 ? floor : Experience.getXpForLevel(level + 1);
+                    progress = KspAccountBuilderHudMath.levelProgress(
+                            xp, floor, target, level >= 99);
+                    long now = System.currentTimeMillis();
+                    long runId = script.getStartedAtMillis();
+                    if (skill != observedSkill || xp < observedXp || observedSince == 0
+                            || runId != observedRuntimeStart)
+                    {
+                        observedSkill = skill;
+                        observedRuntimeStart = runId;
+                        observedXp = xp;
+                        observedSince = now;
+                    }
+                    gained = Math.max(0L, (long) xp - observedXp);
+                    long elapsed = Math.max(0L, now - observedSince);
+                    if (elapsed >= 60000L)
+                        hourly = KspAccountBuilderHudMath.hourlyXp(gained, elapsed);
+                    remaining = level >= 99 ? 0 : Math.max(0, target - xp);
+                }
+            }
+            catch (RuntimeException ex) { valid = false; }
+        }
+
+        medal(g, 1007, 120, kind, 41);
+        g.setFont(new Font("Serif", Font.BOLD, 32));
+        ellipsis(g, valid ? "Level " + level : "Level —", 1057, 112, 294, IVORY);
+
+        drawBar(g, 1062, 126, 289, 27, progress, XP_BLUE);
+        g.setFont(new Font("SansSerif", Font.BOLD, 17));
+        alignRight(g, valid ? String.format(Locale.ROOT, "%,d / %,d", xp, target)
+                : "XP unavailable", 1344, 146, IVORY);
+
+        g.setColor(new Color(70, 72, 69, 140));
+        g.drawLine(962, 167, 1360, 167);
+        g.setFont(new Font("SansSerif", Font.PLAIN, 21));
+        String[] statLabels = {"⚔ XP Gained:", "▥ XP/Hour:",
+                "◷ Time to Level:", "◆ " + activityCounter(kind) + ":"};
+        String[] statValues = {
+                valid ? String.format(Locale.ROOT, "%,d", gained) : "—",
+                hourly > 0 ? String.format(Locale.ROOT, "%,d", hourly) : "Calculating",
+                !valid ? "—" : remaining == 0 ? "Max level"
+                        : hourly > 0 ? time(KspAccountBuilderHudMath.etaSeconds(remaining, hourly))
+                        : "Calculating",
+                "—"
+        };
+        for (int i = 0; i < 4; i++)
+        {
+            int yy = 191 + i * 29;
+            ellipsis(g, statLabels[i], 979, yy, 245, IVORY);
+            alignRight(g, statValues[i], 1353, yy, IVORY);
+        }
+        g.setColor(new Color(140, 125, 93, 160));
+        g.drawLine(965, 309, 1360, 309);
+        g.setFont(new Font("SansSerif", Font.PLAIN, 21));
+        label(g, "☕  Break Timer:", 979, 343, IVORY);
+        alignRight(g, script.isBreakActive() ? time(script.getBreakTimeRemainingSeconds())
+                : script.isAnyBreakActive() ? "Active"
+                : time(script.getTimeUntilBreakSeconds()), 1353, 343, IVORY);
+        label(g, "☷  Queue Position:", 979, 372, IVORY);
+        alignRight(g, script.hasOrderedQueue()
+                ? script.getOrderedQueuePosition() + " / " + script.getOrderedQueueSize()
+                : "Automatic", 1353, 372, IVORY);
+        hot("xptip", 958, 83, 407, 224);
+        hot("queuetip", 958, 309, 407, 77);
+    }
+
+    private void paintReferencePage(Graphics2D g, BufferedImage reference)
+    {
+        g.setColor(new Color(7, 17, 21, 248));
+        g.fillRoundRect(223, 77, 1152, 311, 5, 5);
+        g.setColor(GOLD);
+        g.drawRoundRect(223, 77, 1152, 311, 5, 5);
+        g.setFont(new Font("Serif", Font.BOLD, 33));
+        label(g, currentPage, 247, 122, BRIGHT);
+        g.setFont(new Font("SansSerif", Font.PLAIN, 23));
+        String task = safe(script.getCurrentTaskName(), "Idle");
+        String detail = safe(script.getOverlayTaskDetail(), "Waiting");
+        ellipsis(g, "Task: " + task.replace('_', ' '), 249, 174, 1058, IVORY);
+        ellipsis(g, "Action: " + detail, 249, 213, 1058, IVORY);
+        label(g, "Runtime: " + time(script.getRuntimeSeconds()), 249, 252, IVORY);
+        label(g, "Queue: " + (script.hasOrderedQueue()
+                ? script.getOrderedQueuePosition() + "/" + script.getOrderedQueueSize()
+                : "Automatic"), 249, 291, IVORY);
+        label(g, "Additional configuration is available in the RuneLite sidebar.",
+                249, 346, MUTED);
+    }
+
+    private void paintReferenceSettings(Graphics2D g, BufferedImage reference)
+    {
+        g.setColor(new Color(7, 17, 21, 251));
+        g.fillRoundRect(223, 77, 1152, 310, 5, 5);
+        g.setColor(GOLD);
+        g.drawRoundRect(223, 77, 1152, 310, 5, 5);
+        g.setFont(new Font("Serif", Font.BOLD, 32));
+        label(g, "HUD Settings", 247, 121, BRIGHT);
+        g.setFont(new Font("SansSerif", Font.PLAIN, 21));
+        toggle(g, "setting:block", 245, 145, config.blockGameInput(), "Block game input");
+        toggle(g, "setting:tooltips", 245, 209, config.hudTooltips(), "Show tooltips");
+        toggle(g, "setting:animation", 725, 145, config.showSkillAnimations(), "Skill animations");
+        toggle(g, "setting:lock", 725, 209, config.lockHudPosition(), "Lock overlay");
+        uiButton(g, "settings-close", 1248, 92, 90, 43, "×", RAISED);
+    }
+
     private void paintChatboxHd(Graphics2D g, int w, int h)
     {
+        BufferedImage reference = KspClassicReferenceSkin.get();
+        if (reference != null)
+        {
+            paintReferenceBackedHud(g, w, h, reference);
+            return;
+        }
+        // Safe fallback if an older loader excludes the bundled skin.
         final int p = Math.max(3, h / 65);
         final int gap = Math.max(3, h / 65);
         final int header = Math.max(28, h / 8);
