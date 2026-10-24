@@ -584,19 +584,22 @@ final class KspCinematicHudRenderer
         alignRight(g, valid ? briefXp(xp) + "/" + briefXp(next) : "—",
                 right, y + headingHeight + 14, MUTED);
         drawBar(g, left, barY, w - 18, 7, progress, XP_BLUE);
-        int rowStart = barY + 22;
-        int step = Math.max(13, (h - (rowStart - y) - 9) / 4);
-        g.setFont(new Font("SansSerif", Font.PLAIN, Math.max(10, Math.min(12, h / 12))));
-        // Separate icon/label and value zones to prevent overlap.
-        int valueWidth = Math.max(57, w / 2);
+        // Match the reference's six individually labelled telemetry rows.
+        // Compact labels when the live chatbox height is constrained.
+        int rowStart = barY + 16;
+        int step = Math.max(11, (h - (rowStart - y) - 8) / 6);
+        g.setFont(new Font("SansSerif", Font.PLAIN, Math.max(9, Math.min(11, h / 14))));
+        int valueWidth = Math.max(59, w / 2);
         int captionWidth = w - valueWidth - 18;
-        String[] captions = {"⚔ XP gained", "◷ Next level", "☕ Break", "☷ Queue"};
+        String[] captions = {"⚔ XP Gained", "⚔ XP / Hour", "◷ To Level",
+                "✦ " + activityCounter(kind), "☕ Break", "☷ Queue"};
         String[] values = {
-                rate > 0 ? String.format(Locale.ROOT, "%,d/h", rate)
-                        : "+" + String.format(Locale.ROOT, "%,d", gained),
+                String.format(Locale.ROOT, "%,d", gained),
+                rate > 0 ? String.format(Locale.ROOT, "%,d", rate) : "Calculating",
                 !valid ? "—" : remaining == 0 ? "Max level"
                         : rate > 0 ? time(KspAccountBuilderHudMath.etaSeconds(remaining, rate))
                         : "Calculating",
+                "—",
                 script.isBreakActive() ? time(script.getBreakTimeRemainingSeconds())
                         : script.isAnyBreakActive() ? "Active"
                         : time(script.getTimeUntilBreakSeconds()),
@@ -614,8 +617,8 @@ final class KspCinematicHudRenderer
             while (value.length() > 1 && fm.stringWidth(value) > valueWidth)
                 value = value.substring(0, value.length() - 1);
             alignRight(g, value, right, yy, IVORY);
-            if (i == 1)
-                rule(g, left, yy + 4, right, yy + 4);
+            if (i == 3 && yy + 3 < y + h - 5)
+                rule(g, left, yy + 3, right, yy + 3);
         }
     }
 
