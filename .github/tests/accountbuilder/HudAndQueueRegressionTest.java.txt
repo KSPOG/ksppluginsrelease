@@ -43,6 +43,22 @@ public final class HudAndQueueRegressionTest
                 "task progress avoids overflow");
         check(KspAccountBuilderHudMath.scaledCoordinate(75, .75) == 100, "scaled hit coordinate");
         check(KspAccountBuilderHudMath.scaledCoordinate(75, 0) == -1, "invalid scale");
+        check(KspAccountBuilderHudMath.referenceHeight(1395) == 482,
+                "reference dimensions stay exact");
+        check(KspAccountBuilderHudMath.referenceHeight(772) == 267,
+                "wider chatbox extends height instead of vertically squeezing artwork");
+        check(KspAccountBuilderHudMath.referenceHeight(0) == 0,
+                "empty size does not produce a HUD");
+        check(KspAccountBuilderHudMath.referenceWidthForHeight(242) == 700,
+                "height-limited fallback preserves source ratio");
+        for (int width = 170; width <= 1500; width += 17)
+        {
+            int height = KspAccountBuilderHudMath.referenceHeight(width);
+            check(height * 1395L >= width * 482L,
+                    "never crop original reference at width " + width);
+            check((height - 1L) * 1395L < width * 482L,
+                    "height is the smallest matching value at width " + width);
+        }
         check(KspAccountBuilderTaskQueue.parse("").isEmpty(), "empty queue preserves auto mode");
         String queue = KspAccountBuilderTaskQueue.append("", "WOODCUTTING", 300);
         queue = KspAccountBuilderTaskQueue.append(queue, "MINING", 600);
