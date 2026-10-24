@@ -444,6 +444,7 @@ final class KspCinematicHudRenderer
                 g.setColor(new Color(4, 11, 13, 125));
                 g.fillRoundRect(20, 409, 228, 59, 6, 6);
             }
+            paintReferenceTooltip(g, width, height);
         }
         finally
         {
@@ -463,6 +464,78 @@ final class KspCinematicHudRenderer
         }
         paintingHitboxes.clear();
         paintingHitboxes.putAll(resized);
+    }
+
+    /** Contextual tooltips in the reference skin's own logical space. */
+    private void paintReferenceTooltip(Graphics2D g, int actualW, int actualH)
+    {
+        if (!config.hudTooltips() || hover == null || hover.isEmpty()
+                || hoverPoint == null || actualW <= 0 || actualH <= 0) return;
+        List<String> messages = new ArrayList<>();
+        String heading;
+        if ("xptip".equals(hover))
+        {
+            heading = "Skill progress";
+            Skill skill = skillFor(resolveKind(script.getCurrentTaskName()));
+            Client client = Microbot.getClient();
+            if (client != null && skill != null && client.getGameState() == GameState.LOGGED_IN)
+            {
+                int level = client.getRealSkillLevel(skill);
+                int xp = client.getSkillExperience(skill);
+                int next = level >= 99 ? xp : Experience.getXpForLevel(level + 1);
+                messages.add("Level " + level + "  ·  " + String.format(Locale.ROOT, "%,d XP", xp));
+                messages.add("Remaining: " + String.format(Locale.ROOT, "%,d XP",
+                        Math.max(0, next - xp)));
+            }
+            else messages.add("Skill data unavailable");
+        }
+        else if ("tasktip".equals(hover))
+        {
+            heading = "Current task";
+            messages.add(safe(script.getCurrentTaskName(), "Idle").replace('_', ' '));
+            messages.add(safe(script.getOverlayTaskDetail(), "Waiting for task"));
+            if (script.hasOrderedQueue())
+                messages.add("Queue " + script.getOrderedQueuePosition()
+                        + "/" + script.getOrderedQueueSize());
+        }
+        else if ("queuetip".equals(hover))
+        {
+            heading = "Breaks and queue";
+            messages.add("Break: " + (script.isAnyBreakActive() ? "Active"
+                    : time(script.getTimeUntilBreakSeconds())));
+            messages.add("Queue: " + (script.hasOrderedQueue()
+                    ? script.getOrderedQueuePosition() + "/" + script.getOrderedQueueSize()
+                    : "Automatic"));
+        }
+        else if (hover.startsWith("nav:"))
+        {
+            heading = hover.substring(4);
+            messages.add("Open " + heading);
+        }
+        else if ("pause".equals(hover) && script.isManualPaused())
+        {
+            heading = "Paused";
+            messages.add("Resume to continue the current task");
+        }
+        else if ("skip".equals(hover) && !script.canSkipTask())
+        {
+            heading = "Task skipping unavailable";
+            messages.add("The current task cannot be skipped safely");
+        }
+        else return;
+
+        int width = 305;
+        int height = 47 + messages.size() * 26;
+        int px = (int) (hoverPoint.x * 1395.0 / actualW);
+        int py = (int) (hoverPoint.y * 482.0 / actualH);
+        int x = Math.max(7, Math.min(1395 - width - 7, px + 24));
+        int y = Math.max(6, Math.min(482 - height - 6, py - height - 12));
+        ornamentalFrame(g, x, y, width, height);
+        g.setFont(new Font("Serif", Font.BOLD, 23));
+        ellipsis(g, heading, x + 12, y + 30, width - 24, BRIGHT);
+        g.setFont(new Font("SansSerif", Font.PLAIN, 19));
+        for (int i = 0; i < messages.size(); i++)
+            ellipsis(g, messages.get(i), x + 12, y + 60 + i * 26, width - 24, IVORY);
     }
 
     private void paintReferenceSkill(Graphics2D g, BufferedImage reference)
