@@ -37,8 +37,10 @@ public final class MeleeBankPolicyRegressionTest
                 "Dead player uses death handling, not a food bank trip");
         check(!MeleeBankPolicy.needsFoodBank(13, 0, 10000L, false),
                 "Unknown max HP is not a confirmed condition");
-        check(!MeleeBankPolicy.needsFoodBank(40, 99, 10000L, false),
-                "Guard scaled HP correctly for higher-level accounts");
+        check(!MeleeBankPolicy.needsFoodBank(50, 99, 10000L, false),
+                "Above half HP on higher-level accounts must not bank");
+        check(MeleeBankPolicy.needsFoodBank(49, 99, 10000L, false),
+                "Below half HP on higher-level accounts should request food");
 
         System.out.println("PASS: " + assertions + " Melee bank policy regression checks");
     }
