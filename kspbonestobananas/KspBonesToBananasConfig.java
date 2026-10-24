@@ -93,7 +93,7 @@ public interface KspBonesToBananasConfig extends Config, KspBreakConfig {
 
     @Range(min = 10, max = 180)
     @ConfigItem(keyName = "geOfferTimeoutSeconds", name = "GE offer timeout",
-            description = "Abort and retry a stalled GE offer after this many seconds.", position = 9)
+            description = "Attempt to modify the price of a stalled GE offer after this many seconds.", position = 9)
     default int geOfferTimeoutSeconds() { return 35; }
 
     @Range(min = 1, max = 30)
