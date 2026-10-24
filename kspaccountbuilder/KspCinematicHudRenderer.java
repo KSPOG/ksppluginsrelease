@@ -377,8 +377,10 @@ final class KspCinematicHudRenderer
         final int top = header + gap;
         final int bottom = h - footer - gap;
         final int bodyH = Math.max(35, bottom - top - gap);
-        final int navW = Math.max(78, Math.min(110, (int) (w * 0.14)));
-        final int statsW = Math.max(175, (int) (w * 0.30));
+        // Reference main HUD proportions: navigation 12%, skill scene 54%,
+        // telemetry 25%, with the remaining width used for gilded gutters.
+        final int navW = Math.max(76, Math.min(114, (int) (w * 0.12)));
+        final int statsW = Math.max(175, (int) (w * 0.25));
         final int navX = p;
         final int sceneX = navX + navW + gap;
         final int sceneW = Math.max(80, w - sceneX - statsW - gap - p);
@@ -439,19 +441,26 @@ final class KspCinematicHudRenderer
                 g.fillRect(sceneX + 3, top + 3, sceneW - 6, bodyH - 6);
             }
             g.setClip(oldClip);
-            g.setColor(new Color(4, 9, 13, 220));
-            g.fillRoundRect(sceneX + 5, top + 5, sceneW - 10, 37, 5, 5);
+            // Reference scene: transparent title area over the illustration,
+            // with gold inset edges instead of an opaque rectangular banner.
+            g.setPaint(new GradientPaint(sceneX, top + 5,
+                    new Color(3, 9, 12, 235), sceneX, top + 53,
+                    new Color(3, 9, 12, 0)));
+            g.fillRect(sceneX + 5, top + 5, sceneW - 10, 48);
+            g.setPaint(new Color(255, 255, 255, 255));
             // The original reference uses a skill medallion and a two-line
             // title, never a plain text label over the scene.
             medal(g, sceneX + 24, top + 24, kind, 17);
-            g.setFont(new Font("Serif", Font.BOLD, Math.max(12, bodyH / 10)));
+            g.setFont(new Font("Serif", Font.BOLD, Math.max(15, bodyH / 8)));
             ellipsis(g, displayKind(kind), sceneX + 48, top + 21,
                     sceneW - 54, BRIGHT);
             g.setFont(new Font("SansSerif", Font.PLAIN, Math.max(10, bodyH / 13)));
             ellipsis(g, safe(script.getOverlayTaskDetail(), task), sceneX + 48, top + 34,
                     sceneW - 54, IVORY);
             g.setColor(new Color(4, 9, 13, 225));
-            g.fillRoundRect(sceneX + 5, bottom - 32, sceneW - 10, 27, 5, 5);
+            g.fillRoundRect(sceneX + 5, bottom - 34, sceneW - 10, 29, 5, 5);
+            g.setColor(GOLD);
+            g.drawRoundRect(sceneX + 5, bottom - 34, sceneW - 10, 29, 5, 5);
             g.setFont(new Font("SansSerif", Font.PLAIN, Math.max(10, bodyH / 12)));
             ellipsis(g, (script.isManualPaused() ? "PAUSED · " : "")
                     + safe(script.getOverlayTaskDetail(), "Idle"),
@@ -467,7 +476,7 @@ final class KspCinematicHudRenderer
                                     : script.getOrderedElapsedSeconds(),
                             entries.get(index).durationSeconds);
             }
-            drawBar(g, sceneX + 10, bottom - 6, sceneW - 20, 4, progress, TASK_GREEN);
+            drawBar(g, sceneX + 10, bottom - 10, sceneW - 20, 6, progress, TASK_GREEN);
             paintChatboxStatsHd(g, statsX, top, statsW, bodyH, kind);
         }
         else
