@@ -419,6 +419,21 @@ final class KspCinematicHudRenderer
                 }
             }
 
+            // The screenshot's source selection is Skills. Clear that fixed
+            // highlight whenever another page is active so only one tab is
+            // selected, while retaining the original gilded navigation frame.
+            if (!"Skills".equals(currentPage))
+            {
+                g.setColor(new Color(8, 23, 31));
+                g.fillRoundRect(24, 140, 177, 51, 5, 5);
+                g.setColor(new Color(116, 127, 123));
+                g.drawRoundRect(24, 140, 177, 51, 5, 5);
+                g.setColor(GOLD);
+                g.drawRoundRect(26, 142, 173, 47, 5, 5);
+                g.setFont(new Font("Serif", Font.BOLD, 24));
+                label(g, "▥  Skills", 46, 174, IVORY);
+            }
+
             if (settingsOpen || "Settings".equals(currentPage))
                 paintReferenceSettings(g, reference);
             else if ("Skills".equals(currentPage))
@@ -577,7 +592,7 @@ final class KspCinematicHudRenderer
         ellipsis(g, activity, 340, 143, 575, IVORY);
 
         // Live task progress replaces the reference's example queue numbers.
-        g.setColor(new Color(6, 17, 22, 248));
+        g.setColor(new Color(6, 17, 22, 255));
         g.fillRoundRect(232, 319, 695, 69, 8, 8);
         g.setColor(GOLD);
         g.setStroke(new BasicStroke(1.4f));
@@ -614,7 +629,7 @@ final class KspCinematicHudRenderer
     {
         // Clear fixed sample content while retaining the reference's actual
         // four-corner gilded outside border and button/scene artwork.
-        g.setColor(new Color(7, 17, 21, 251));
+        g.setColor(new Color(7, 17, 21, 255));
         g.fillRoundRect(951, 77, 423, 310, 4, 4);
         g.setColor(new Color(112, 80, 17));
         g.drawRoundRect(952, 78, 421, 309, 5, 5);
@@ -706,7 +721,7 @@ final class KspCinematicHudRenderer
 
     private void paintReferencePage(Graphics2D g, BufferedImage reference)
     {
-        g.setColor(new Color(7, 17, 21, 248));
+        g.setColor(new Color(7, 17, 21, 255));
         g.fillRoundRect(223, 77, 1152, 311, 5, 5);
         g.setColor(GOLD);
         g.drawRoundRect(223, 77, 1152, 311, 5, 5);
@@ -727,7 +742,7 @@ final class KspCinematicHudRenderer
 
     private void paintReferenceSettings(Graphics2D g, BufferedImage reference)
     {
-        g.setColor(new Color(7, 17, 21, 251));
+        g.setColor(new Color(7, 17, 21, 255));
         g.fillRoundRect(223, 77, 1152, 310, 5, 5);
         g.setColor(GOLD);
         g.drawRoundRect(223, 77, 1152, 310, 5, 5);
