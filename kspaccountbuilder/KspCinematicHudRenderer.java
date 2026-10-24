@@ -373,12 +373,12 @@ final class KspCinematicHudRenderer
         final int p = Math.max(3, h / 65);
         final int gap = Math.max(3, h / 65);
         final int header = Math.max(28, h / 8);
-        final int footer = Math.max(26, h / 6);
+        final int footer = Math.max(30, h / 6);
         final int top = header + gap;
         final int bottom = h - footer - gap;
         final int bodyH = Math.max(35, bottom - top - gap);
-        final int navW = Math.max(65, Math.min(92, (int) (w * 0.12)));
-        final int statsW = Math.max(145, (int) (w * 0.29));
+        final int navW = Math.max(78, Math.min(110, (int) (w * 0.14)));
+        final int statsW = Math.max(175, (int) (w * 0.30));
         final int navX = p;
         final int sceneX = navX + navW + gap;
         final int sceneW = Math.max(80, w - sceneX - statsW - gap - p);
@@ -440,22 +440,22 @@ final class KspCinematicHudRenderer
             }
             g.setClip(oldClip);
             g.setColor(new Color(4, 9, 13, 220));
-            g.fillRoundRect(sceneX + 5, top + 5, sceneW - 10, 32, 5, 5);
+            g.fillRoundRect(sceneX + 5, top + 5, sceneW - 10, 37, 5, 5);
             // The original reference uses a skill medallion and a two-line
             // title, never a plain text label over the scene.
-            medal(g, sceneX + 22, top + 21, kind, 14);
+            medal(g, sceneX + 24, top + 24, kind, 17);
             g.setFont(new Font("Serif", Font.BOLD, Math.max(12, bodyH / 10)));
-            ellipsis(g, displayKind(kind), sceneX + 42, top + 19,
-                    sceneW - 48, BRIGHT);
+            ellipsis(g, displayKind(kind), sceneX + 48, top + 21,
+                    sceneW - 54, BRIGHT);
             g.setFont(new Font("SansSerif", Font.PLAIN, Math.max(10, bodyH / 13)));
-            ellipsis(g, task.replace('_', ' '), sceneX + 42, top + 31,
-                    sceneW - 48, IVORY);
+            ellipsis(g, safe(script.getOverlayTaskDetail(), task), sceneX + 48, top + 34,
+                    sceneW - 54, IVORY);
             g.setColor(new Color(4, 9, 13, 225));
-            g.fillRoundRect(sceneX + 5, bottom - 27, sceneW - 10, 20, 5, 5);
+            g.fillRoundRect(sceneX + 5, bottom - 32, sceneW - 10, 27, 5, 5);
             g.setFont(new Font("SansSerif", Font.PLAIN, Math.max(10, bodyH / 12)));
             ellipsis(g, (script.isManualPaused() ? "PAUSED · " : "")
                     + safe(script.getOverlayTaskDetail(), "Idle"),
-                    sceneX + 10, bottom - 13, sceneW - 20, IVORY);
+                    sceneX + 10, bottom - 18, sceneW - 20, IVORY);
             double progress = Double.NaN;
             if (script.hasOrderedQueue())
             {
@@ -560,33 +560,54 @@ final class KspCinematicHudRenderer
             }
             catch (RuntimeException ex) { valid = false; }
         }
-        int left = x + 7, right = x + w - 7;
+        // Miniature of the reference's hierarchical stats card. Use rows
+        // sized from the available height rather than squeezing long strings
+        // into the same baseline as the navigation and XP bar.
+        int left = x + 9, right = x + w - 9;
+        int headingHeight = Math.max(19, h / 6);
+        int barY = y + headingHeight + 22;
         g.setFont(new Font("Serif", Font.BOLD, Math.max(12, h / 9)));
-        ellipsis(g, displayKind(kind), left, y + 17, w - 14, BRIGHT);
-        g.setFont(new Font("SansSerif", Font.PLAIN, Math.max(10, h / 11)));
-        medal(g, x + 20, y + 17, kind, 12);
-        label(g, valid ? "Level " + level : "XP unavailable", left + 28, y + 33, IVORY);
+        medal(g, x + 22, y + 19, kind, 13);
+        ellipsis(g, displayKind(kind), x + 43, y + 20, w - 51, BRIGHT);
+        g.setFont(new Font("SansSerif", Font.BOLD, 11));
+        label(g, valid ? "Level " + level : "XP unavailable", left, y + headingHeight + 14, IVORY);
+        g.setFont(new Font("SansSerif", Font.PLAIN, 10));
         alignRight(g, valid ? briefXp(xp) + "/" + briefXp(next) : "—",
-                right, y + 33, MUTED);
-        drawBar(g, left, y + 39, w - 14, 7, progress, XP_BLUE);
-        int lineY = y + Math.max(58, h / 2);
-        int step = Math.max(12, (h - (lineY - y) - 8) / 4);
-        label(g, "⚔ XP +" + String.format(Locale.ROOT, "%,d", gained), left, lineY, IVORY);
-        alignRight(g, rate > 0 ? String.format(Locale.ROOT, "%,d/h", rate) : "—/h",
-                right, lineY, IVORY);
-        label(g, "◷ Next:", left, lineY + step, MUTED);
-        alignRight(g, !valid ? "—" : remaining == 0 ? "Max level"
-                : rate > 0 ? time(KspAccountBuilderHudMath.etaSeconds(remaining, rate))
-                        : "Calculating", right, lineY + step, IVORY);
-        label(g, "◷ Break:", left, lineY + step * 2, MUTED);
-        alignRight(g, script.isBreakActive() ? time(script.getBreakTimeRemainingSeconds())
-                : script.isAnyBreakActive() ? "Active"
+                right, y + headingHeight + 14, MUTED);
+        drawBar(g, left, barY, w - 18, 7, progress, XP_BLUE);
+        int rowStart = barY + 22;
+        int step = Math.max(13, (h - (rowStart - y) - 9) / 4);
+        g.setFont(new Font("SansSerif", Font.PLAIN, Math.max(10, Math.min(12, h / 12))));
+        // Separate icon/label and value zones to prevent overlap.
+        int valueWidth = Math.max(57, w / 2);
+        int captionWidth = w - valueWidth - 18;
+        String[] captions = {"⚔ XP gained", "◷ Next level", "☕ Break", "☷ Queue"};
+        String[] values = {
+                rate > 0 ? String.format(Locale.ROOT, "%,d/h", rate)
+                        : "+" + String.format(Locale.ROOT, "%,d", gained),
+                !valid ? "—" : remaining == 0 ? "Max level"
+                        : rate > 0 ? time(KspAccountBuilderHudMath.etaSeconds(remaining, rate))
+                        : "Calculating",
+                script.isBreakActive() ? time(script.getBreakTimeRemainingSeconds())
+                        : script.isAnyBreakActive() ? "Active"
                         : time(script.getTimeUntilBreakSeconds()),
-                right, lineY + step * 2, IVORY);
-        label(g, "☷ Queue:", left, lineY + step * 3, MUTED);
-        alignRight(g, script.hasOrderedQueue()
-                ? script.getOrderedQueuePosition() + "/" + script.getOrderedQueueSize()
-                : "Automatic", right, lineY + step * 3, IVORY);
+                script.hasOrderedQueue()
+                        ? script.getOrderedQueuePosition() + "/" + script.getOrderedQueueSize()
+                        : "Automatic"
+        };
+        for (int i = 0; i < captions.length; i++)
+        {
+            int yy = rowStart + i * step;
+            if (yy > y + h - 7) break;
+            ellipsis(g, captions[i], left, yy, captionWidth, MUTED);
+            String value = values[i];
+            FontMetrics fm = g.getFontMetrics();
+            while (value.length() > 1 && fm.stringWidth(value) > valueWidth)
+                value = value.substring(0, value.length() - 1);
+            alignRight(g, value, right, yy, IVORY);
+            if (i == 1)
+                rule(g, left, yy + 4, right, yy + 4);
+        }
     }
 
     private void paintChatbox(Graphics2D g)
