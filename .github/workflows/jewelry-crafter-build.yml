@@ -64,6 +64,11 @@ jobs:
             rm -rf "$ROOT/$component"
             cp -R "release/$component" "$ROOT/$component"
           done
+          # Compile the furnace tests through Gradle's existing RuneLite
+          # test classpath (the plugin artifact is not a fat API jar).
+          TEST_DIR="hub/src/test/java/net/runelite/client/plugins/microbot/kspjewelrycrafter"
+          mkdir -p "$TEST_DIR"
+          cp release/.github/tests/jewelrycrafter/src/test/java/net/runelite/client/plugins/microbot/kspjewelrycrafter/JewelryFurnaceLocationTest.java "$TEST_DIR/"
 
       - name: Include shared KSP support in Jewellery Crafter source set
         shell: python
@@ -88,23 +93,21 @@ jobs:
           chmod +x gradlew
           ./gradlew clean build -PpluginList=KspJewelryCrafterPlugin --stacktrace --no-daemon
 
-      - name: Run furnace location JUnit tests
+      - name: Verify five furnace location JUnit tests passed
         shell: bash
         run: |
           set -euo pipefail
-          PLUGIN_JAR="$(find hub/build/libs -maxdepth 1 -name 'KspJewelryCrafterPlugin-*.jar' -type f -print -quit)"
-          test -n "$PLUGIN_JAR"
-          curl --fail --location --silent --show-error --retry 3 \
-            https://repo.maven.apache.org/maven2/org/junit/platform/junit-platform-console-standalone/1.10.2/junit-platform-console-standalone-1.10.2.jar \
-            -o /tmp/junit-platform-console-standalone.jar
-          TEST_DIR=/tmp/ksp-jewelrycrafter-tests
-          mkdir -p "$TEST_DIR"
-          javac --release 11 -cp "/tmp/junit-platform-console-standalone.jar:$PLUGIN_JAR" -d "$TEST_DIR" \
-            release/.github/tests/jewelrycrafter/src/test/java/net/runelite/client/plugins/microbot/kspjewelrycrafter/JewelryFurnaceLocationTest.java
-          java -jar /tmp/junit-platform-console-standalone.jar execute \
-            --class-path "$PLUGIN_JAR:$TEST_DIR" \
-            --select-class net.runelite.client.plugins.microbot.kspjewelrycrafter.JewelryFurnaceLocationTest \
-            --details summary
+          python3 - <<'PY'
+          from pathlib import Path
+          import xml.etree.ElementTree as ET
+          reports = list(Path('hub/build/test-results/test').rglob('*JewelryFurnaceLocationTest*.xml'))
+          assert reports, 'Gradle did not execute JewelryFurnaceLocationTest'
+          cases = [x for path in reports for x in ET.parse(path).iter('testcase')]
+          assert len(cases) == 5, f'Expected 5 tests, found {len(cases)}'
+          problems = [x.attrib.get('name') for x in cases if any(y.tag in ('failure', 'error', 'skipped') for y in x)]
+          assert not problems, f'Furnace test failures or skips: {problems}'
+          print('PASS: all 5 Jewellery Crafter furnace tests executed and passed')
+          PY
 
       - name: Upload Jewellery Crafter JAR
         uses: actions/upload-artifact@v4
