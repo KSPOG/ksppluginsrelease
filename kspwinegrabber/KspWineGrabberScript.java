@@ -50,6 +50,7 @@ public class KspWineGrabberScript extends KspBreakAwareScript
     private static final long ACTION_INTERVAL_MS = 1400L;
     private static final long LOOP_INTERVAL_MS = 200L;
     private static final long CAST_CONFIRMATION_MS = 4500L;
+    private static final long PRICE_REFRESH_MS = 30_000L;
 
     @Inject private KspWineGrabberPlugin plugin;
 
@@ -57,9 +58,12 @@ public class KspWineGrabberScript extends KspBreakAwareScript
     private volatile String status = "Starting";
     private volatile long startedAtMs;
     private volatile long collected;
+    private volatile int wineGePrice;
+    private volatile int lawRuneGePrice;
     private volatile boolean stopped;
 
     private long nextActionAt;
+    private long lastPriceRefreshAt;
     private long pendingCastAt;
     private int beforeCastCount;
     private int ladderFailures;
@@ -83,6 +87,9 @@ public class KspWineGrabberScript extends KspBreakAwareScript
     {
         startedAtMs = System.currentTimeMillis();
         collected = 0L;
+        wineGePrice = 0;
+        lawRuneGePrice = 0;
+        lastPriceRefreshAt = 0L;
         stopped = false;
         awaitingCast = false;
         nextActionAt = pendingCastAt = 0L;
@@ -103,6 +110,7 @@ public class KspWineGrabberScript extends KspBreakAwareScript
                     return;
                 }
 
+                refreshPricesIfNeeded();
                 process();
             }
             catch (Exception ex)
@@ -152,8 +160,27 @@ public class KspWineGrabberScript extends KspBreakAwareScript
                 fail("33 Magic is required to cast Telekinetic Grab. Current Magic: " + skills[1] + ".");
                 return;
             }
+            // If all required supplies are already on the account and there is
+            // room to collect wine, avoid a needless bank trip and bank lookup.
+            // The open-bank check remains the fallback for genuinely missing gear/runes.
+            if (canStartWithoutBank())
+            {
+                if (Rs2Bank.isOpen())
+                {
+                    status = "Closing bank - all supplies already available";
+                    Rs2Bank.closeBank();
+                    retryAfter(700L);
+                    return;
+                }
+
+                state = gearEquipped() ? State.TO_TEMPLE : State.EQUIPPING;
+                status = gearEquipped() ? "Supplies ready - going to temple"
+                        : "Equipping supplies already in inventory";
+                return;
+            }
+
             state = State.BANKING;
-            status = "Checking inventory, equipment and bank";
+            status = "Checking missing supplies at bank";
             return;
         }
 
@@ -320,6 +347,15 @@ public class KspWineGrabberScript extends KspBreakAwareScript
         return false; // One bank action per tick; verify before withdrawing the next item.
     }
 
+    private boolean canStartWithoutBank()
+    {
+        return !Rs2Inventory.isFull()
+                && Rs2Inventory.itemQuantity(LAW_RUNE_ID) > 0
+                && (Rs2Equipment.isWearing(STAFF_ID) || Rs2Inventory.contains(STAFF_ID))
+                && (Rs2Equipment.isWearing(ROBE_TOP_ID) || Rs2Inventory.contains(ROBE_TOP_ID))
+                && (Rs2Equipment.isWearing(ROBE_BOTTOM_ID) || Rs2Inventory.contains(ROBE_BOTTOM_ID));
+    }
+
     private boolean anyGearInInventory()
     {
         return Rs2Inventory.contains(STAFF_ID)
@@ -471,7 +507,7 @@ public class KspWineGrabberScript extends KspBreakAwareScript
 
         if (wine == null)
         {
-            status = "Waiting for upstairs wine respawn";
+            status = "Waiting";
             retryAfter(850L);
             return;
         }
@@ -620,6 +656,39 @@ public class KspWineGrabberScript extends KspBreakAwareScript
         }
     }
 
+    /**
+     * Retrieve RuneLite's live GE guide prices no more than once every 30 seconds.
+     * Price lookup does not block collection when market data is unavailable.
+     */
+    private void refreshPricesIfNeeded()
+    {
+        long now = System.currentTimeMillis();
+        if (lastPriceRefreshAt > 0 && now - lastPriceRefreshAt < PRICE_REFRESH_MS)
+        {
+            return;
+        }
+
+        lastPriceRefreshAt = now;
+        wineGePrice = readGePrice(WINE_ID);
+        lawRuneGePrice = readGePrice(LAW_RUNE_ID);
+    }
+
+    private int readGePrice(int id)
+    {
+        try
+        {
+            long price = Microbot.getClientThread()
+                    .runOnClientThreadOptional(() -> (long) Microbot.getItemManager().getItemPrice(id))
+                    .orElse(0L);
+            return (int) Math.max(0L, Math.min(Integer.MAX_VALUE, price));
+        }
+        catch (RuntimeException ex)
+        {
+            log.debug("Could not read GE guide price for item {}", id, ex);
+            return 0;
+        }
+    }
+
     private void retryAfter(long millis)
     {
         nextActionAt = System.currentTimeMillis() + millis;
@@ -670,5 +739,30 @@ public class KspWineGrabberScript extends KspBreakAwareScript
     {
         long runtime = getRuntimeMs();
         return runtime <= 0 ? 0 : Math.round(collected * 3600000.0 / runtime);
+    }
+
+    public boolean hasPriceData()
+    {
+        return wineGePrice > 0 && lawRuneGePrice > 0;
+    }
+
+    /**
+     * Estimated net GP from successful grabs at current guide prices.
+     * Telekinetic Grab uses one law rune per wine with Staff of air equipped.
+     * Failed casts, fees and price slippage cannot be inferred from the count.
+     */
+    public long getEstimatedProfit()
+    {
+        if (!hasPriceData())
+        {
+            return 0L;
+        }
+        return collected * ((long) wineGePrice - lawRuneGePrice);
+    }
+
+    public long getEstimatedProfitPerHour()
+    {
+        long runtime = getRuntimeMs();
+        return runtime <= 0L ? 0L : Math.round(getEstimatedProfit() * 3_600_000.0 / runtime);
     }
 }
