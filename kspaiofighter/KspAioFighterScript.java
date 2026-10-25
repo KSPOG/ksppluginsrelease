@@ -87,6 +87,7 @@ public class KspAioFighterScript extends KspBreakAwareScript
     private static final long NPC_ATTACK_ACK_MS = 1_100L;
     private static final long EMPTY_LOOT_SCAN_INTERVAL_MS = 180L;
     private static final long EMPTY_ALCH_SCAN_INTERVAL_MS = 180L;
+    private static final long COMBAT_ALCH_FAILURE_RETRY_MS = 1_000L;
 	private static final int START_CAMERA_PITCH = 280;
 	private static final int START_CAMERA_ZOOM = 377;
 
@@ -137,6 +138,7 @@ public class KspAioFighterScript extends KspBreakAwareScript
     private boolean fightingThisLoop;
     private long attackPendingUntilMs;
     private long lastEmptyAlchScanMs;
+    private long lastCombatAlchFailureMs;
     private String cachedLootConfig = null;
     private Set<String> cachedLootNames = Set.of();
     // Hidden RuneLite config getters are not free. Cache immutable tile
@@ -181,6 +183,7 @@ public class KspAioFighterScript extends KspBreakAwareScript
         actionThrottle.reset();
         attackPendingUntilMs = 0L;
         lastEmptyAlchScanMs = 0L;
+        lastCombatAlchFailureMs = 0L;
         cachedLootConfig = null;
         cachedLootNames = Set.of();
         areaTileSnapshot = null;
@@ -2423,6 +2426,12 @@ public class KspAioFighterScript extends KspBreakAwareScript
             setStatus("waiting for high alch to finish");
             return true;
         }
+        if (decision == KspAioFighterHighAlchGate.Decision.COOLDOWN)
+        {
+            // A confirmed cast should not prevent normal combat during
+            // the remaining cooldown.
+            return false;
+        }
 
         // The profitability predicate performs item-price lookups. When it
         // found nothing last pass, avoid repeating it on every 100ms cycle.
@@ -2450,6 +2459,34 @@ public class KspAioFighterScript extends KspBreakAwareScript
             return false;
         }
 
+        boolean combatActive = Rs2Player.isInCombat() || Rs2Combat.inCombat();
+        boolean spellReady = getLevel(Skill.MAGIC) >= 55 && hasHighAlchRunes(1)
+                && Rs2Magic.canCast(Rs2Spells.HIGH_LEVEL_ALCHEMY);
+
+        // In combat, bypass generic Rs2Magic.alch's tab/setup delays.
+        // No check for "not animating" or "not interacting with an NPC":
+        // High Alchemy is usable between attacks.
+        if (combatActive && spellReady)
+        {
+            if (lastCombatAlchFailureMs > 0L
+                    && now - lastCombatAlchFailureMs < COMBAT_ALCH_FAILURE_RETRY_MS)
+                return false;
+
+            int before = Rs2Inventory.itemQuantity(item.getId());
+            setStatus("combat high alch " + item.getName());
+            if (!castHighAlchDuringCombat(item))
+            {
+                lastCombatAlchFailureMs = System.currentTimeMillis();
+                return false;
+            }
+
+            lastCombatAlchFailureMs = 0L;
+            highAlchGate.dispatched(item.getId(), before, magicXp, System.currentTimeMillis());
+            confirmHighAlchWarning(item);
+            return true;
+        }
+
+        // Explorer's ring still works without runes, including in combat.
         if (Rs2ExplorersRing.hasRing() && Rs2ExplorersRing.hasCharges())
         {
             setStatus("high alching " + item.getName() + " with Explorer's ring");
@@ -2460,16 +2497,10 @@ public class KspAioFighterScript extends KspBreakAwareScript
                 Rs2ExplorersRing.closeInterface();
                 return true;
             }
-            // If the ring UI cannot cast, allow ordinary High Alchemy below.
         }
 
-        if (getLevel(Skill.MAGIC) < 55 || !hasHighAlchRunes(1)
-                || !Rs2Magic.canCast(Rs2Spells.HIGH_LEVEL_ALCHEMY))
-        {
-            // The normal restocking flow will acquire missing runes.
-            // Never silently cast Low Alch when "High alch loot" is enabled.
+        if (!spellReady)
             return false;
-        }
 
         int before = Rs2Inventory.itemQuantity(item.getId());
         setStatus("high alching " + item.getName());
@@ -2477,16 +2508,36 @@ public class KspAioFighterScript extends KspBreakAwareScript
         // The shorter built-in interaction delays improve responsiveness;
         // the single-flight gate enforces the spell cooldown separately.
         Rs2Magic.alch(item, 60, 130);
-        if (item.getHaPrice() > Rs2Settings.getMinimumItemValueAlchemyWarning())
-        {
-            sleepUntil(() -> Rs2Widget.hasWidget("Proceed to cast High Alchemy on it"), 1_200);
-            if (Rs2Widget.hasWidget("Proceed to cast High Alchemy on it"))
-            {
-                Rs2Keyboard.keyPress('1');
-            }
-        }
+        confirmHighAlchWarning(item);
         highAlchGate.dispatched(item.getId(), before, magicXp, System.currentTimeMillis());
         return true;
+    }
+
+    /**
+     * Cast between combat attacks without waiting for the fighting animation
+     * or active NPC interaction to end. Confirm spell selection before item
+     * interaction to prevent accidental ordinary item actions.
+     */
+    private boolean castHighAlchDuringCombat(Rs2ItemModel item)
+    {
+        if (item == null || !Rs2Magic.quickCast(Rs2Spells.HIGH_LEVEL_ALCHEMY))
+            return false;
+
+        if (!sleepUntil(() -> Microbot.getClientThread()
+                .runOnClientThreadOptional(() -> Microbot.getClient().isWidgetSelected())
+                .orElse(false), 1_500))
+            return false;
+
+        return Rs2Inventory.interact(item, "cast");
+    }
+
+    private void confirmHighAlchWarning(Rs2ItemModel item)
+    {
+        if (item == null || item.getHaPrice() <= Rs2Settings.getMinimumItemValueAlchemyWarning())
+            return;
+        sleepUntil(() -> Rs2Widget.hasWidget("Proceed to cast High Alchemy on it"), 1_200);
+        if (Rs2Widget.hasWidget("Proceed to cast High Alchemy on it"))
+            Rs2Keyboard.keyPress('1');
     }
 
 	private List<String> getConfiguredNpcNames() { return csv(config.npcNames()); }
