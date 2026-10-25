@@ -9,7 +9,7 @@ Plugin: KspAccountBuilderPlugin
 - Milestones 1-4: VERIFIED in earlier agent checkpoints. Original acceptance evidence must be reconciled before the final PR; do not infer that live integration passed.
 - Milestone 5 - Progression and GE economy: IN PROGRESS.
 - Milestone 6 - Controlled live UI/log integration acceptance: PENDING.
-- Milestone 7 - Focused pull request, reviews, CI and merge: PENDING.
+- Milestone 7 - Regression and CI PR #371: MERGED into dev; final runtime acceptance and subsequent fix PRs remain PENDING.
 
 ## Milestone 5 - Required acceptance
 
@@ -100,3 +100,37 @@ Status: OPEN - observed on the running older DevLoader class generation; candida
 - The route comparator considered a Varrock Teleport bank leg, but the observed execution involved Lumbridge. Do not label the Varrock proposal an executed teleport. Whether the Lumbridge bank visit was necessary remains unverified.
 - Acceptance: verify exit portal recognition and inventory/bank state, avoid unintended mine-to-bank or bank-to-task detours, prevent teleport resource purchases without a beneficial destination, bound transport retry latency, and verify correct eventual return to Aubury without repeated NPC/object clicks.
 - Add focused regression tests for confirmed source-level defects; validate in the running client only after a controlled safe deployment boundary. Preserve active gameplay and all existing artwork.
+
+## 2026-10-25 - Verified regression and CI merge
+- PR #371 merged into KSPOG/ksppluginsrelease:dev at 53bc82d916bc133fa1675b96c7be8c8dc0272738.
+- GitHub Actions run 40185148188 passed compilation, all nine JUnit regression suites, PNG artwork verification and JAR upload.
+- The merge changed nine regression tests, this tracker and the CI workflow; no Account Builder runtime Java or artwork changed.
+- DevLoader refresh uses per-unit production-source fingerprints; this merge did not alter the Account Builder runtime fingerprint.
+- Milestone 5 remains IN PROGRESS: confirm Crafting chisel and uncut-gem withdrawals, correct economy-aware buying/selling and task selection, avoid needless Melee and Rune Essence banking/teleportation, and prevent object/NPC click spam.
+- Milestone 6 remains PENDING: confirm loaded code generation and collect controlled live UI/log evidence for Crafting, GE, Melee, Rune Essence, Mining, interaction acknowledgement, pause/resume and progression.
+- The live Microbot client must not be stopped or hot-reloaded during an active task. Implement subsequent fixes on this isolated branch and validate before creating the next PR.
+
+## 2026-10-25 - Crafting batch withdrawal planner fix (development only)
+- Confirmed source-level defect: CraftingScript.resolveWithdrawAmount used only remaining bank stock to recalculate the desired inventory count after each partial withdrawal. A batch with 20 uncut sapphires already withdrawn and seven remaining in the bank incorrectly computed a desired total of seven and stopped early.
+- Added CraftingWithdrawalPolicy to account for the existing inventory, remaining bank stock, reusable chisel slot and jewellery ingredient batch requirements. CraftingScript now uses this policy and only treats a zero planned withdrawal as ready if the ingredient minimum is already in inventory.
+- Added CraftingWithdrawalPolicyTest with ten focused regression cases; updated GitHub Actions to require all ten JUnit suites. CI verification, plugin compilation and controlled live Crafting acceptance are still PENDING.
+- User-reported failure to withdraw chisel and uncut gems is not considered fully resolved solely by this partial-batch fix. Check bank withdraw mode, recipe selection, inventory acknowledgement, GE resupply and live UI at a safe handoff.
+- Preserve active Microbot gameplay; do not merge this runtime change into dev until safe to refresh DevLoader.
+
+
+## 2026-10-25 - Live-reload safety gate and transport investigation
+- PR #372 is OPEN with successful workflow run 40187347514: Account Builder compilation, ten JUnit suites, artwork validation and JAR upload passed. Do not record live Crafting acceptance as passed.
+- VERIFIED deployment blocker: DevLoader refreshUnit unloads and stops the existing active plugin, creates a new classloader and starts a fresh plugin instance. Account Builder startup calls resetRuntimeState(), clearing currentTask, breakActive, pendingTask and activity-switch state, then schedules a fresh break.
+- A logged-out automated break is NOT a safe reload boundary. The running client retained MINING with breakActive=true and activityTimer paused at 715 seconds. Hold PR #372 merge until Account Builder is inactive at a verified handoff or a tested state-preserving refresh mechanism exists.
+- Milestone 5 remains IN PROGRESS: investigate reported Melee/Rune Essence bank-for-teleport-and-return loops, Crafting chisel/uncut-gem readiness, GE supply purchasing and task-selection decisions. Distinguish actual teleports from WebWalker route comparisons.
+- Milestone 6 remains PENDING: capture controlled live UI and log evidence for Crafting, task switching, teleport choice, NPC/object interaction acknowledgements, and pause/resume.
+- Newly scoped interaction investigation: isolate repeated NPC/object click dispatch from actions still pending acknowledgement; add bounded retry tests once a cause is confirmed.
+- Do not reload, stop, resume or otherwise interfere with the active Microbot client during investigation.
+
+
+## 2026-10-25 - Melee bank fallback acknowledgement
+- Confirmed: an unsuccessful direct bank-open dispatched bank walking without recording a pending action; subsequent ticks could send overlapping commands.
+- Added MeleeBankOpenDispatcher to acknowledge both direct and fallback attempts including exceptions, plus five JUnit cases.
+- This scoped patch does not establish or fix the separate teleport-rune acquisition and return-trip cause.
+- Milestone 5 remains IN PROGRESS and Milestone 6 live acceptance remains PENDING.
+- CI-passing PR #372 stays unmerged while active DevLoader reload resets current task, break and runtime state.

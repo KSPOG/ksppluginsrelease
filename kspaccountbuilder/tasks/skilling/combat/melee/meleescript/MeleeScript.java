@@ -433,8 +433,10 @@ public class MeleeScript extends KspManagedScript {
 
         if (!Rs2Bank.isOpen()) {
             if (isWorldActionPending("open-bank")) return;
-            if (Rs2Bank.openBank()) markWorldAction("open-bank");
-            else Rs2Bank.walkToBankAndUseBank();
+            MeleeBankOpenDispatcher.dispatch(
+                    Rs2Bank::openBank,
+                    () -> Rs2Bank.walkToBankAndUseBank(),
+                    () -> markWorldAction("open-bank"));
             return;
         }
 
