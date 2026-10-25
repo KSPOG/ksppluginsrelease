@@ -28,9 +28,20 @@ final class KspAioFighterHighAlchGate
 
     Decision inspect(int currentQuantity, int currentMagicXp, long now)
     {
+        return inspect(currentQuantity, currentMagicXp, now, false);
+    }
+
+    /**
+     * Combat magic can award Magic XP even if the alchemy spell did not
+     * succeed. During combat, only disappearance of the selected inventory
+     * item confirms that an alch was actually applied.
+     */
+    Decision inspect(int currentQuantity, int currentMagicXp, long now, boolean inCombat)
+    {
         if (pending)
         {
-            if (currentQuantity < quantityBefore || currentMagicXp > magicXpBefore)
+            if (currentQuantity < quantityBefore
+                    || (!inCombat && currentMagicXp > magicXpBefore))
             {
                 pending = false;
                 attempts = 0;
