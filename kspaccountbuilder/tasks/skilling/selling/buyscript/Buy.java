@@ -49,6 +49,7 @@ public final class Buy
     public static final String THREAD_NAME = "Thread";
     public static final String NEEDLE_NAME = "Needle";
     public static final String GOLD_BAR_NAME = "Gold bar";
+    public static final String SILVER_BAR_NAME = "Silver bar";
     public static final String RING_MOULD_NAME = "Ring mould";
     public static final String NECKLACE_MOULD_NAME = "Necklace mould";
     public static final String CHISEL_NAME = "Chisel";
@@ -178,6 +179,9 @@ public final class Buy
     public static boolean isJewelleryBuyMissingInBank()
     {
         return Rs2Bank.count(GOLD_BAR_NAME) <= 0
+                || (Microbot.getClient() != null
+                    && Microbot.getClient().getRealSkillLevel(Skill.CRAFTING) >= 23
+                    && !hasNamedItemAnywhere(SILVER_BAR_NAME))
                 || Rs2Bank.count(RING_MOULD_NAME) <= 0
                 || Rs2Bank.count(NECKLACE_MOULD_NAME) <= 0
                 || Rs2Bank.count(CHISEL_NAME) <= 0
