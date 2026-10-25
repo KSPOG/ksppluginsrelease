@@ -25,7 +25,7 @@ import net.runelite.client.ui.overlay.OverlayManager;
 )
 public class KspWineGrabberPlugin extends Plugin
 {
-    public static final String VERSION = "0.1.0";
+    public static final String VERSION = "0.1.1";
 
     @Inject private PluginManager pluginManager;
     @Inject private OverlayManager overlayManager;

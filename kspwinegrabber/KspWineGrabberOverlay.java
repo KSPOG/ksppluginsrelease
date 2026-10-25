@@ -31,7 +31,7 @@ public class KspWineGrabberOverlay extends OverlayPanel
         }
 
         panelComponent.getChildren().clear();
-        panelComponent.setPreferredSize(new Dimension(235, 120));
+        panelComponent.setPreferredSize(new Dimension(270, 120));
         panelComponent.setBackgroundColor(new Color(0, 0, 0, 185));
         panelComponent.getChildren().add(TitleComponent.builder()
                 .text("KSP Wine Grabber")
@@ -40,8 +40,12 @@ public class KspWineGrabberOverlay extends OverlayPanel
 
         addLine("Status:", script.getStatus());
         addLine("Time:", formatTime(script.getRuntimeMs()));
-        addLine("Collected:", String.format("%,d", script.getCollected()));
-        addLine("Wines/hour:", String.format("%,d", script.getWinesPerHour()));
+        addLine("Collected:", String.format("%,d (%,d ph)",
+                script.getCollected(), script.getWinesPerHour()));
+        addLine("Profit:", script.hasPriceData()
+                ? formatGp(script.getEstimatedProfit()) + " ("
+                        + formatGp(script.getEstimatedProfitPerHour()) + " ph)"
+                : "N/A (N/A ph)");
         return super.render(graphics);
     }
 
@@ -51,6 +55,25 @@ public class KspWineGrabberOverlay extends OverlayPanel
                 .left(key)
                 .right(value)
                 .build());
+    }
+
+    private String formatGp(long amount)
+    {
+        long abs = amount == Long.MIN_VALUE ? Long.MAX_VALUE : Math.abs(amount);
+        String sign = amount < 0L ? "-" : "";
+        if (abs >= 1_000_000_000L)
+        {
+            return sign + String.format("%.2fB", abs / 1_000_000_000.0);
+        }
+        if (abs >= 1_000_000L)
+        {
+            return sign + String.format("%.2fM", abs / 1_000_000.0);
+        }
+        if (abs >= 1_000L)
+        {
+            return sign + String.format("%.1fK", abs / 1_000.0);
+        }
+        return String.format("%,d", amount);
     }
 
     private String formatTime(long millis)
