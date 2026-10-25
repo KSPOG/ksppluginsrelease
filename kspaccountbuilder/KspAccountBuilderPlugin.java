@@ -48,7 +48,7 @@ import net.runelite.client.ui.NavigationButton;
 @SuppressWarnings("unused")
 public class KspAccountBuilderPlugin extends Plugin
 {
-    public static final String VERSION = "1.9.59";
+    public static final String VERSION = "1.9.60";
 
     @Inject
     private KspAccountBuilderScript script;
