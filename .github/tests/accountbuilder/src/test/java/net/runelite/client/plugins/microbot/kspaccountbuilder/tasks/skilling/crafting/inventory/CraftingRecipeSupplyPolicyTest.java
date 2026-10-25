@@ -1,6 +1,7 @@
 package net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.crafting.inventory;
 
 import java.util.Map;
+import net.runelite.client.plugins.microbot.kspaccountbuilder.KspProgressionPolicy;
 import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -94,6 +95,27 @@ class CraftingRecipeSupplyPolicyTest
         assertEquals(1, CraftingBankPlan.targetAmount(jewellery, jewellery.getTool(), 0, 1));
         assertEquals(13, CraftingBankPlan.targetAmount(jewellery, jewellery.getIngredients()[1], 0, 100));
         assertEquals(13, CraftingBankPlan.targetAmount(jewellery, jewellery.getIngredients()[2], 0, 100));
+    }
+
+    @Test
+    void plannerPrioritizesSellingWhenSuppliesAreUnaffordable()
+    {
+        int selling = KspProgressionPolicy.priority("GE_SELL", 1, 200, true, false);
+        int mining = KspProgressionPolicy.priority("MINING", 10, 200, true, false);
+        assertTrue(selling > mining);
+        assertTrue(KspProgressionPolicy.priority("GE_BUY", 1, 5000, true, true) > mining);
+        assertTrue(KspProgressionPolicy.priority("MINING", 1, 5000, false, false)
+                > KspProgressionPolicy.priority("GE_BUY", 1, 5000, false, false));
+    }
+
+    @Test
+    void plannerKeepsUsefulTrainingAboveSpeculativeSelling()
+    {
+        int fishing = KspProgressionPolicy.priority("FISHING", 9, 25000, false, false);
+        int selling = KspProgressionPolicy.priority("GE_SELL", 1, 25000, false, false);
+        assertTrue(fishing > selling);
+        assertTrue(KspProgressionPolicy.priority("MINING", 1, 20000, false, false)
+                > KspProgressionPolicy.priority("MINING", 50, 20000, false, false));
     }
 
     @Test
