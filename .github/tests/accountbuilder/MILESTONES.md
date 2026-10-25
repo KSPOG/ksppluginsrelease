@@ -116,3 +116,21 @@ Status: OPEN - observed on the running older DevLoader class generation; candida
 - Added CraftingWithdrawalPolicyTest with ten focused regression cases; updated GitHub Actions to require all ten JUnit suites. CI verification, plugin compilation and controlled live Crafting acceptance are still PENDING.
 - User-reported failure to withdraw chisel and uncut gems is not considered fully resolved solely by this partial-batch fix. Check bank withdraw mode, recipe selection, inventory acknowledgement, GE resupply and live UI at a safe handoff.
 - Preserve active Microbot gameplay; do not merge this runtime change into dev until safe to refresh DevLoader.
+
+
+## 2026-10-25 - Live-reload safety gate and transport investigation
+- PR #372 is OPEN with successful workflow run 40187347514: Account Builder compilation, ten JUnit suites, artwork validation and JAR upload passed. Do not record live Crafting acceptance as passed.
+- VERIFIED deployment blocker: DevLoader refreshUnit unloads and stops the existing active plugin, creates a new classloader and starts a fresh plugin instance. Account Builder startup calls resetRuntimeState(), clearing currentTask, breakActive, pendingTask and activity-switch state, then schedules a fresh break.
+- A logged-out automated break is NOT a safe reload boundary. The running client retained MINING with breakActive=true and activityTimer paused at 715 seconds. Hold PR #372 merge until Account Builder is inactive at a verified handoff or a tested state-preserving refresh mechanism exists.
+- Milestone 5 remains IN PROGRESS: investigate reported Melee/Rune Essence bank-for-teleport-and-return loops, Crafting chisel/uncut-gem readiness, GE supply purchasing and task-selection decisions. Distinguish actual teleports from WebWalker route comparisons.
+- Milestone 6 remains PENDING: capture controlled live UI and log evidence for Crafting, task switching, teleport choice, NPC/object interaction acknowledgements, and pause/resume.
+- Newly scoped interaction investigation: isolate repeated NPC/object click dispatch from actions still pending acknowledgement; add bounded retry tests once a cause is confirmed.
+- Do not reload, stop, resume or otherwise interfere with the active Microbot client during investigation.
+
+
+## 2026-10-25 - Melee bank fallback acknowledgement
+- Confirmed: an unsuccessful direct bank-open dispatched bank walking without recording a pending action; subsequent ticks could send overlapping commands.
+- Added MeleeBankOpenDispatcher to acknowledge both direct and fallback attempts including exceptions, plus five JUnit cases.
+- This scoped patch does not establish or fix the separate teleport-rune acquisition and return-trip cause.
+- Milestone 5 remains IN PROGRESS and Milestone 6 live acceptance remains PENDING.
+- CI-passing PR #372 stays unmerged while active DevLoader reload resets current task, break and runtime state.
