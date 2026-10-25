@@ -94,7 +94,20 @@ final class KspAioFighterEquipmentPanel extends PluginPanel
         refreshAreaStatus();
         refreshAutomationState();
         // Populate saved item sprites in the background as soon as the client is ready.
-        if (Microbot.isLoggedIn())
+        preloadSelectedItemSprites();
+    }
+
+    @Override
+    public void addNotify()
+    {
+        super.addNotify();
+        // The plugin may have been enabled before the player logged in.
+        preloadSelectedItemSprites();
+    }
+
+    private void preloadSelectedItemSprites()
+    {
+        if (!index.isLoaded() && Microbot.isLoggedIn())
         {
             index.ensureLoaded(success -> SwingUtilities.invokeLater(() -> {
                 if (success) refreshSlots();
