@@ -136,6 +136,11 @@ public class KspAioFighterScript extends KspBreakAwareScript
     private long attackPendingUntilMs;
     private String cachedLootConfig = null;
     private Set<String> cachedLootNames = Set.of();
+    // Hidden RuneLite config getters are not free. Cache immutable tile
+    // coordinates briefly so each nearby NPC/loot predicate does not trigger
+    // another six ConfigManager lookups.
+    private static final long AREA_CONFIG_CACHE_MS = 200L;
+    private volatile AreaTileSnapshot areaTileSnapshot;
 	private volatile long runGeneration = 0L;
 
 	@Inject
@@ -174,6 +179,7 @@ public class KspAioFighterScript extends KspBreakAwareScript
         attackPendingUntilMs = 0L;
         cachedLootConfig = null;
         cachedLootNames = Set.of();
+        areaTileSnapshot = null;
 		mainScheduledFuture = scheduledExecutorService.scheduleWithFixedDelay(() -> loop(generation), 0, 100, TimeUnit.MILLISECONDS);
 		return true;
 	}
@@ -184,6 +190,7 @@ public class KspAioFighterScript extends KspBreakAwareScript
 		loopRunning.set(false);
         highAlchGate.reset();
         actionThrottle.reset();
+        areaTileSnapshot = null;
 		super.shutdown();
 	}
 
@@ -1356,7 +1363,7 @@ public class KspAioFighterScript extends KspBreakAwareScript
 
 	private WorldPoint getSafeSpot()
 	{
-		return new WorldPoint(getHiddenConfigInt("safeSpotX"), getHiddenConfigInt("safeSpotY"), getHiddenConfigInt("safeSpotPlane"));
+        return getAreaTiles().safeSpot;
 	}
 
 	private WorldPoint getAttackAreaCenterFromTiles()
@@ -1371,15 +1378,42 @@ public class KspAioFighterScript extends KspBreakAwareScript
 		return new WorldPoint((tile1.getX() + tile2.getX()) / 2, (tile1.getY() + tile2.getY()) / 2, tile1.getPlane());
 	}
 
-	private WorldPoint getAttackAreaTile1()
-	{
-		return new WorldPoint(getHiddenConfigInt("attackAreaTile1X"), getHiddenConfigInt("attackAreaTile1Y"), getHiddenConfigInt("attackAreaTile1Plane"));
-	}
+	private WorldPoint getAttackAreaTile1() { return getAreaTiles().tile1; }
+    private WorldPoint getAttackAreaTile2() { return getAreaTiles().tile2; }
 
-	private WorldPoint getAttackAreaTile2()
-	{
-		return new WorldPoint(getHiddenConfigInt("attackAreaTile2X"), getHiddenConfigInt("attackAreaTile2Y"), getHiddenConfigInt("attackAreaTile2Plane"));
-	}
+    private AreaTileSnapshot getAreaTiles()
+    {
+        long now = System.currentTimeMillis();
+        AreaTileSnapshot snapshot = areaTileSnapshot;
+        if (snapshot != null && now - snapshot.readAtMs < AREA_CONFIG_CACHE_MS)
+            return snapshot;
+
+        AreaTileSnapshot refreshed = new AreaTileSnapshot(
+                new WorldPoint(getHiddenConfigInt("safeSpotX"), getHiddenConfigInt("safeSpotY"),
+                        getHiddenConfigInt("safeSpotPlane")),
+                new WorldPoint(getHiddenConfigInt("attackAreaTile1X"), getHiddenConfigInt("attackAreaTile1Y"),
+                        getHiddenConfigInt("attackAreaTile1Plane")),
+                new WorldPoint(getHiddenConfigInt("attackAreaTile2X"), getHiddenConfigInt("attackAreaTile2Y"),
+                        getHiddenConfigInt("attackAreaTile2Plane")), now);
+        areaTileSnapshot = refreshed;
+        return refreshed;
+    }
+
+    private static final class AreaTileSnapshot
+    {
+        final WorldPoint safeSpot;
+        final WorldPoint tile1;
+        final WorldPoint tile2;
+        final long readAtMs;
+
+        AreaTileSnapshot(WorldPoint safeSpot, WorldPoint tile1, WorldPoint tile2, long readAtMs)
+        {
+            this.safeSpot = safeSpot;
+            this.tile1 = tile1;
+            this.tile2 = tile2;
+            this.readAtMs = readAtMs;
+        }
+    }
 
 	private int getHiddenConfigInt(String key)
 	{
