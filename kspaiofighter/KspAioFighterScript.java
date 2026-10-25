@@ -2005,6 +2005,16 @@ public class KspAioFighterScript extends KspBreakAwareScript
 
 
 	private boolean isActivelyFightingForLoot()
+    {
+        // Loot and attack guards may request the same state several times
+        // during a single fighter cycle. Cache the expensive NPC-cache query.
+        if (combatCheckedThisLoop) return fightingThisLoop;
+        combatCheckedThisLoop = true;
+        fightingThisLoop = detectActiveCombatForLoot();
+        return fightingThisLoop;
+    }
+
+    private boolean detectActiveCombatForLoot()
 	{
 		Actor interacting = Rs2Player.getInteracting();
 		if (interacting != null
@@ -2157,9 +2167,11 @@ public class KspAioFighterScript extends KspBreakAwareScript
 	{
 		// Do not block looting only because the player is still flagged as interacting.
 		// After an NPC dies that flag can linger for a few ticks, which caused the visible loot delay.
-		if (!isLootingEnabled() || Rs2Inventory.isFull() || isActivelyFightingForLoot())
+        boolean full = Rs2Inventory.isFull();
+        boolean fighting = !full && isActivelyFightingForLoot();
+		if (!isLootingEnabled() || full || fighting)
 		{
-			if (Rs2Inventory.isFull() || isActivelyFightingForLoot())
+			if (full || fighting)
 			{
 				clearPendingLoot();
 			}
@@ -2255,21 +2267,35 @@ public class KspAioFighterScript extends KspBreakAwareScript
 		pendingLootUntilMs = 0L;
 	}
 
-	private Rs2TileItemModel findNextLoot()
-	{
-		Set<String> configuredNames = getLootNameNeedles();
-		int searchRadius = Math.max(1, config.attackRadius());
-		return Microbot.getRs2TileItemCache().query()
-				.fromWorldView()
-				.where(item -> item != null)
-				.where(item -> !item.isDespawned())
-				.where(Rs2TileItemModel::isLootAble)
-				.where(this::matchesLootOwnership)
-				.where(this::canStoreLoot)
-				.where(item -> matchesConfiguredLoot(item, configuredNames))
-				.within(searchRadius)
-				.nearestOnClientThread(searchRadius);
-	}
+    private Rs2TileItemModel findNextLoot()
+    {
+        if (lootCheckedThisLoop) return lootFoundThisLoop;
+        lootCheckedThisLoop = true;
+
+        // When the scene contains no selected ground loot, avoid probing the
+        // entire tile-item cache on every 100ms tick. A fresh item is still
+        // picked up on the next scan (within 180ms).
+        if (!actionThrottle.ready(KspAioFighterActionThrottle.Action.EMPTY_LOOT_SCAN,
+                System.currentTimeMillis(), EMPTY_LOOT_SCAN_INTERVAL_MS))
+            return null;
+
+        Set<String> configuredNames = getLootNameNeedles();
+        int searchRadius = Math.max(1, config.attackRadius());
+        lootFoundThisLoop = Microbot.getRs2TileItemCache().query()
+                .fromWorldView()
+                .where(item -> item != null)
+                .where(item -> !item.isDespawned())
+                .where(Rs2TileItemModel::isLootAble)
+                .where(this::matchesLootOwnership)
+                .where(this::canStoreLoot)
+                .where(item -> matchesConfiguredLoot(item, configuredNames))
+                .within(searchRadius)
+                .nearestOnClientThread(searchRadius);
+
+        if (lootFoundThisLoop != null)
+            actionThrottle.invalidate(KspAioFighterActionThrottle.Action.EMPTY_LOOT_SCAN);
+        return lootFoundThisLoop;
+    }
 
 	private boolean matchesLootOwnership(Rs2TileItemModel item) { return !lootOwnOnly() || item.isOwned(); }
 
@@ -2314,10 +2340,16 @@ public class KspAioFighterScript extends KspBreakAwareScript
 
 	private Set<String> getLootNameNeedles()
 	{
-		return new HashSet<>(csv(config.itemsToLoot()).stream()
-				.map(this::normalizeLootName)
-				.filter(name -> !name.isEmpty())
-				.collect(Collectors.toSet()));
+        String raw = config.itemsToLoot();
+        if (raw == null) raw = "";
+        if (raw.equals(cachedLootConfig)) return cachedLootNames;
+        cachedLootConfig = raw;
+        cachedLootNames = new HashSet<>(csv(raw).stream()
+                .map(this::normalizeLootName)
+                .filter(name -> !name.isEmpty())
+                .collect(Collectors.toSet()));
+        actionThrottle.invalidate(KspAioFighterActionThrottle.Action.EMPTY_LOOT_SCAN);
+        return cachedLootNames;
 	}
 
 	private boolean lootOwnOnly() { return config.lootOwnership() == KspLootOwnership.LOOT_OWN; }
