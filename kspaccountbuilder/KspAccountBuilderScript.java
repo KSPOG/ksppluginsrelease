@@ -1666,22 +1666,33 @@ public class KspAccountBuilderScript extends KspManagedScript
 
     private BuilderTask selectTaskWithSupportFallback(BuilderTask excluded, boolean requireResources, boolean includeUnavailable)
     {
-        long regularMask = 0L, supportMask = 0L;
-        int regularWeight = 0, supportWeight = 0;
-        int[] weights = new int[BuilderTask.values().length];
+        // Rank eligible tasks based on progression and verified economy state,
+        // instead of picking a random activity whenever a task completes.
+        // Explicit ordered queues and single-skill overrides are resolved
+        // before this method and are never replaced by this planner.
+        boolean missingSupplies = Buy.hasAnyGeBuyRequirementMissing();
+        boolean affordableSupplies = missingSupplies && buyScript.canAffordMissingBuys();
+        long coins = getAvailableCoins();
+        BuilderTask best = null;
+        int bestScore = Integer.MIN_VALUE;
         for (BuilderTask task : BuilderTask.values())
         {
             if (task == excluded || task == BuilderTask.TUTORIAL_ISLAND) continue;
             if (!isAllowedInSkillOnlyMode(task)) continue;
             if (!includeUnavailable && (isTaskTemporarilyDisabled(task) || isOneTimeTaskCompleted(task))) continue;
             if (requireResources && !hasResourcesForTaskSelection(task)) continue;
-            int weight = getTaskSelectionWeight(task);
-            weights[task.ordinal()] = weight;
-            if (isSupportTask(task)) { supportMask |= 1L << task.ordinal(); supportWeight += weight; }
-            else { regularMask |= 1L << task.ordinal(); regularWeight += weight; }
+            int score = KspProgressionPolicy.priority(task.name(), getTaskSkillLevel(task),
+                    coins, missingSupplies, affordableSupplies);
+            if (score > bestScore)
+            {
+                bestScore = score;
+                best = task;
+            }
         }
-        if (regularWeight > 0) return pickWeightedTask(regularMask, regularWeight, weights);
-        return supportWeight > 0 ? pickWeightedTask(supportMask, supportWeight, weights) : null;
+        if (best != null)
+            debug("Progression planner selected {} | priority={} coins={} missingSupplies={} affordable={}",
+                    best, bestScore, coins, missingSupplies, affordableSupplies);
+        return best;
     }
 
     private BuilderTask pickWeightedTask(long mask, int totalWeight, int[] weights)
@@ -1778,8 +1789,10 @@ public class KspAccountBuilderScript extends KspManagedScript
     private BuilderTask getRandomTaskExcluding(BuilderTask excluded)
     {
         if (TutorialIslandScript.isOnTutorialIsland()) return BuilderTask.TUTORIAL_ISLAND;
-        BuilderTask task = selectTask(excluded, false, false, false);
-        return task != null ? task : selectTask(excluded, false, true, true);
+        // Never dispatch an unexecutable fallback task just to fill the queue.
+        // If no task has resources, retain the scheduler's existing recovery
+        // state rather than starting a bank/GE loop for an impossible task.
+        return selectTaskWithSupportFallback(excluded, true, false);
     }
 
     private BuilderTask selectTask(BuilderTask excluded, boolean requireResources, boolean includeSupport, boolean includeUnavailable)
