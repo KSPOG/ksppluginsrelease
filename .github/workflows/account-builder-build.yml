@@ -246,7 +246,7 @@ jobs:
           assert reports, "JUnit produced no XML results"
           cases = [case for report in reports for case in ET.parse(report).iter("testcase")]
           actual = {case.attrib.get("classname", "").split(".")[-1] for case in cases}
-          expected = {"CraftingBankStallTrackerTest", "MeleeBankPolicyTest", "CraftingRecipeSupplyPolicyTest", "MiningRockRetryPolicyTest", "EssenceBankCompletionPolicyTest", "CraftingEssentialAffordabilityPolicyTest", "CraftingSupplyPriorityPolicyTest", "GeOfferCommitPolicyTest", "GeSupplyReceiptPolicyTest", "SmeltingBatchTrackerTest", "KspAccountPlayTimePolicyTest"
+          expected = {"CraftingBankStallTrackerTest", "MeleeBankPolicyTest", "CraftingRecipeSupplyPolicyTest", "MiningRockRetryPolicyTest", "EssenceBankCompletionPolicyTest", "CraftingEssentialAffordabilityPolicyTest", "CraftingSupplyPriorityPolicyTest", "GeOfferCommitPolicyTest", "GeSupplyReceiptPolicyTest", "SmeltingBatchTrackerTest", "KspAccountPlayTimePolicyTest"}
           assert expected.issubset(actual), f"Missing executed JUnit suites: {sorted(expected - actual)}"
           failures = [case for case in cases if any(node.tag in ("failure", "error", "skipped") for node in case)]
           assert not failures, f"Failed, errored or skipped test cases: {len(failures)}"
