@@ -39,9 +39,16 @@ import net.runelite.client.plugins.microbot.util.inventory.Rs2Inventory;
 import net.runelite.client.plugins.microbot.util.npc.Rs2NpcModel;
 import net.runelite.client.plugins.microbot.util.player.Rs2Player;
 import net.runelite.client.ui.overlay.OverlayManager;
+import net.runelite.client.ui.ClientToolbar;
+import net.runelite.client.ui.NavigationButton;
 
 import javax.inject.Inject;
+import javax.swing.SwingUtilities;
 import java.awt.Polygon;
+import java.awt.Color;
+import java.awt.Graphics2D;
+import java.awt.RenderingHints;
+import java.awt.image.BufferedImage;
 import java.util.ArrayList;
 import java.util.EnumMap;
 import java.util.List;
@@ -74,6 +81,8 @@ public class KspWillowChopperPlugin extends Plugin {
             "You've been awarded <col=[0-9a-f]+>(\\d+) Anima-infused bark</col>\\.");
 
     @Inject private KspWillowChopperConfig config;
+    @Inject private ConfigManager configManager;
+    @Inject private ClientToolbar clientToolbar;
     @Inject private OverlayManager overlayManager;
     @Inject private KspWillowChopperOverlay overlay;
     @Inject private KspWillowChopperScript script;
@@ -96,6 +105,8 @@ public class KspWillowChopperPlugin extends Plugin {
     private volatile KspForestryEvent currentForestryEvent = KspForestryEvent.NONE;
     private volatile boolean runtimeActive;
     private KspStrugglingSaplingEvent saplingEvent;
+    private KspWillowChopperPanel settingsPanel;
+    private NavigationButton navigationButton;
 
     @Provides
     KspWillowChopperConfig provideConfig(ConfigManager manager) {
@@ -104,6 +115,7 @@ public class KspWillowChopperPlugin extends Plugin {
 
     @Override
     protected void startUp() {
+        migrateLegacyBankSelection();
         breaks.start(config);
         runtimeActive = true;
         currentForestryEvent = KspForestryEvent.NONE;
@@ -122,6 +134,7 @@ public class KspWillowChopperPlugin extends Plugin {
         rebuildForestryHandlers();
         muleService.start(config);
         overlayManager.add(overlay);
+        addSettingsPanel();
         script.run(config);
     }
 
@@ -135,6 +148,7 @@ public class KspWillowChopperPlugin extends Plugin {
             saplingEvent = null;
 
             script.shutdown();
+            removeSettingsPanel();
             muleService.shutdown();
             ritualCircles.clear();
             saplingIngredients.clear();
@@ -145,6 +159,62 @@ public class KspWillowChopperPlugin extends Plugin {
         {
             breaks.shutdown();
         }
+    }
+
+    /**
+     * Preserve the old bankLogs=false Firemaking choice the first time a user
+     * runs a build with the new dropdown. Never overwrite an explicit mode.
+     */
+    private void migrateLegacyBankSelection() {
+        if (configManager.getConfiguration(KspWillowChopperConfig.GROUP, "mode") != null) {
+            return;
+        }
+        String legacy = configManager.getConfiguration(KspWillowChopperConfig.GROUP, "bankLogs");
+        if (legacy == null) {
+            return;
+        }
+        KspChopperMode mode = Boolean.parseBoolean(legacy)
+                ? KspChopperMode.CHOP_BANK : KspChopperMode.CHOP_BURN;
+        configManager.setConfiguration(KspWillowChopperConfig.GROUP, "mode", mode.name());
+    }
+
+    private void addSettingsPanel() {
+        if (navigationButton != null) {
+            return;
+        }
+        settingsPanel = new KspWillowChopperPanel(config, configManager, script);
+        navigationButton = NavigationButton.builder()
+                .tooltip("KSP Chopper settings")
+                .priority(9)
+                .icon(createChopperIcon())
+                .panel(settingsPanel)
+                .build();
+        clientToolbar.addNavigation(navigationButton);
+    }
+
+    private void removeSettingsPanel() {
+        if (navigationButton != null) {
+            clientToolbar.removeNavigation(navigationButton);
+            navigationButton = null;
+        }
+        settingsPanel = null;
+    }
+
+    private static BufferedImage createChopperIcon() {
+        BufferedImage icon = new BufferedImage(16, 16, BufferedImage.TYPE_INT_ARGB);
+        Graphics2D g = icon.createGraphics();
+        try {
+            g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+            g.setColor(new Color(126, 203, 117));
+            g.fillPolygon(new int[]{8, 1, 15}, new int[]{0, 11, 11}, 3);
+            g.setColor(new Color(154, 113, 74));
+            g.fillRoundRect(6, 9, 4, 7, 2, 2);
+            g.setColor(new Color(204, 221, 205));
+            g.drawLine(3, 13, 13, 13);
+        } finally {
+            g.dispose();
+        }
+        return icon;
     }
 
     /**
@@ -231,6 +301,11 @@ public class KspWillowChopperPlugin extends Plugin {
         if (!KspWillowChopperConfig.GROUP.equals(event.getGroup())) {
             return;
         }
+
+        SwingUtilities.invokeLater(() -> {
+            KspWillowChopperPanel panel = settingsPanel;
+            if (panel != null) panel.refresh();
+        });
 
         if ("enableForestry".equals(event.getKey()) || event.getKey().endsWith("Event")) {
             currentForestryEvent = KspForestryEvent.NONE;
