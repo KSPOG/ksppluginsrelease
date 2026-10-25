@@ -17,6 +17,7 @@ import net.runelite.client.plugins.microbot.util.bank.Rs2Bank;
 import net.runelite.client.plugins.microbot.util.depositbox.Rs2DepositBox;
 import net.runelite.client.plugins.microbot.util.equipment.Rs2Equipment;
 import net.runelite.client.plugins.microbot.util.inventory.Rs2Inventory;
+import net.runelite.client.plugins.microbot.util.inventory.InteractOrder;
 import net.runelite.client.plugins.microbot.util.keyboard.Rs2Keyboard;
 import net.runelite.client.plugins.microbot.util.player.Rs2Player;
 import net.runelite.client.plugins.microbot.util.widget.Rs2Widget;
@@ -76,6 +77,7 @@ public class KspWillowChopperScript extends KspBreakAwareScript {
         IDLE,
         CHOPPING,
         BANKING,
+        DROPPING,
         GETTING_TINDERBOX,
         CREATING_FIRE,
         BURNING,
@@ -93,6 +95,7 @@ public class KspWillowChopperScript extends KspBreakAwareScript {
     private volatile String status = "Idle";
     private volatile boolean sessionStarted;
     private volatile KspTree activeTree = KspTree.WILLOW;
+    private volatile KspChopperMode activeMode = KspChopperMode.CHOP_BANK;
     private volatile boolean campfireNearby;
     private volatile boolean burningActive;
     private volatile boolean burnBatchActive;
@@ -122,6 +125,7 @@ public class KspWillowChopperScript extends KspBreakAwareScript {
 
     private int resourcesChopped;
     private int resourcesBanked;
+    private int resourcesDropped;
     private int resourcesBurned;
     private int campfiresLit;
     private int lastResourceCount = -1;
@@ -131,6 +135,7 @@ public class KspWillowChopperScript extends KspBreakAwareScript {
     private long lastTreeClickMillis;
     private long lastTreeProgressMillis;
     private long lastBankAttemptMillis;
+    private long lastDropAttemptMillis;
     private long lastTinderboxAttemptMillis;
     private long lastFireAttemptMillis;
     private long burnCommandMillis;
@@ -146,6 +151,7 @@ public class KspWillowChopperScript extends KspBreakAwareScript {
 
         runtimeConfig = config;
         activeTree = safeTree(config.tree());
+        activeMode = config.mode() == null ? KspChopperMode.CHOP_BANK : config.mode();
         state = RuntimeState.CHOPPING;
         status = "Starting";
         sessionStarted = true;
@@ -173,6 +179,7 @@ public class KspWillowChopperScript extends KspBreakAwareScript {
 
         resourcesChopped = 0;
         resourcesBanked = 0;
+        resourcesDropped = 0;
         resourcesBurned = 0;
         campfiresLit = 0;
         lastResourceCount = Rs2Inventory.count(activeTree.getResourceId());
@@ -182,6 +189,7 @@ public class KspWillowChopperScript extends KspBreakAwareScript {
         lastTreeClickMillis = 0L;
         lastTreeProgressMillis = 0L;
         lastBankAttemptMillis = 0L;
+        lastDropAttemptMillis = 0L;
         lastTinderboxAttemptMillis = 0L;
         lastFireAttemptMillis = 0L;
         burnCommandMillis = 0L;
@@ -212,6 +220,15 @@ public class KspWillowChopperScript extends KspBreakAwareScript {
 
             KspTree selected = safeTree(config.tree());
             if (selected != activeTree) switchTree(selected);
+            KspChopperMode selectedMode = config.mode() == null ? KspChopperMode.CHOP_BANK : config.mode();
+            if (selectedMode != activeMode) {
+                activeMode = selectedMode;
+                finishBurnBatch();
+                resetActionLatches();
+                lastDropAttemptMillis = 0L;
+                state = RuntimeState.CHOPPING;
+                status = "Mode changed to " + selectedMode;
+            }
 
             trackResourceChanges();
 
@@ -248,8 +265,19 @@ public class KspWillowChopperScript extends KspBreakAwareScript {
                 return;
             }
 
-            if (config.bankLogs()) tickBankMode();
-            else tickBurnMode();
+            switch (activeMode) {
+                case CHOP_BANK:
+                    tickBankMode();
+                    break;
+                case CHOP_BURN:
+                    tickBurnMode();
+                    break;
+                case CHOP_DROP:
+                    tickDropMode();
+                    break;
+                default:
+                    throw new IllegalStateException("Unexpected resource mode: " + activeMode);
+            }
         } catch (Exception ex) {
             state = RuntimeState.ERROR;
             status = "Error - check logs";
@@ -275,10 +303,54 @@ public class KspWillowChopperScript extends KspBreakAwareScript {
         chopSelectedTree(false, null);
     }
 
+    /**
+     * Drop only this tree's resource, never the player's axe, tinderbox or
+     * unrelated inventory. If the inventory contains no selected resource,
+     * pause rather than repeatedly clicking or discarding other items.
+     */
+    private void tickDropMode() {
+        burningActive = false;
+        burnBatchActive = false;
+        burnCommandIssued = false;
+        campfireNearby = false;
+        fireBurnedOutSignal = false;
+        clearActiveCampfireTarget();
+
+        if (!Rs2Inventory.isFull()) {
+            state = RuntimeState.CHOPPING;
+            chopSelectedTree(false, null);
+            return;
+        }
+
+        int resourceId = activeTree.getResourceId();
+        int before = Rs2Inventory.count(resourceId);
+        if (before <= 0) {
+            state = RuntimeState.PAUSED;
+            status = "Inventory full: no " + activeTree.getResourceName() + " to drop";
+            clearActiveTreeTarget();
+            return;
+        }
+
+        state = RuntimeState.DROPPING;
+        long now = System.currentTimeMillis();
+        if (now - lastDropAttemptMillis < 1500L) {
+            status = "Dropping " + activeTree.getResourceName();
+            return;
+        }
+
+        clearActiveTreeTarget();
+        lastDropAttemptMillis = now;
+        status = "Dropping " + activeTree.getResourceName();
+        Rs2Inventory.dropAmount(activeTree.getResourceName(), before, InteractOrder.EFFICIENT_ROW);
+        int after = Rs2Inventory.count(resourceId);
+        resourcesDropped += Math.max(0, before - after);
+        lastResourceCount = after;
+    }
+
     private void tickBurnMode() {
         if (!activeTree.isCampfireBurnable()) {
             state = RuntimeState.PAUSED;
-            status = activeTree.getResourceName() + " cannot be burned; enable Bank resources";
+            status = activeTree.getResourceName() + " cannot be burned; select Chop & Bank or Chop & Drop";
             clearActiveTreeTarget();
             return;
         }
@@ -680,7 +752,7 @@ public class KspWillowChopperScript extends KspBreakAwareScript {
 
         KspWillowChopperConfig config = runtimeConfig;
         if (config == null) return false;
-        if (!config.bankLogs() && activeTree.isCampfireBurnable() && burnBatchActive) return false;
+        if (config.mode() == KspChopperMode.CHOP_BURN && activeTree.isCampfireBurnable() && burnBatchActive) return false;
 
         return hasAxe()
                 && Rs2Player.getRealSkillLevel(Skill.WOODCUTTING) >= activeTree.getWoodcuttingLevel();
@@ -737,7 +809,7 @@ public class KspWillowChopperScript extends KspBreakAwareScript {
         KspWillowChopperConfig config = runtimeConfig;
         if (!sessionStarted
                 || config == null
-                || config.bankLogs()
+                || config.mode() != KspChopperMode.CHOP_BURN
                 || !activeTree.isCampfireBurnable()
                 || !burnBatchActive
                 || !Microbot.isLoggedIn()
@@ -1174,6 +1246,8 @@ public class KspWillowChopperScript extends KspBreakAwareScript {
             if (state == RuntimeState.BURNING || state == RuntimeState.CREATING_FIRE) {
                 resourcesBurned += lost;
                 lastBurnProgressMillis = System.currentTimeMillis();
+            } else if (state == RuntimeState.DROPPING) {
+                resourcesDropped += lost;
             }
         }
 
@@ -1325,6 +1399,7 @@ public class KspWillowChopperScript extends KspBreakAwareScript {
     }
     public int getResourcesChopped() { return resourcesChopped; }
     public int getResourcesBanked() { return resourcesBanked; }
+    public int getResourcesDropped() { return resourcesDropped; }
     public int getResourcesBurned() { return resourcesBurned; }
     public int getCampfiresLit() { return campfiresLit; }
     public int getCurrentResourceCount() { return Rs2Inventory.count(activeTree.getResourceId()); }
