@@ -86,6 +86,7 @@ public class KspAioFighterScript extends KspBreakAwareScript
     private static final long NPC_SEARCH_INTERVAL_MS = 350L;
     private static final long NPC_ATTACK_ACK_MS = 1_100L;
     private static final long EMPTY_LOOT_SCAN_INTERVAL_MS = 180L;
+    private static final long EMPTY_ALCH_SCAN_INTERVAL_MS = 180L;
 	private static final int START_CAMERA_PITCH = 280;
 	private static final int START_CAMERA_ZOOM = 377;
 
@@ -135,6 +136,7 @@ public class KspAioFighterScript extends KspBreakAwareScript
     private boolean combatCheckedThisLoop;
     private boolean fightingThisLoop;
     private long attackPendingUntilMs;
+    private long lastEmptyAlchScanMs;
     private String cachedLootConfig = null;
     private Set<String> cachedLootNames = Set.of();
     // Hidden RuneLite config getters are not free. Cache immutable tile
@@ -178,6 +180,7 @@ public class KspAioFighterScript extends KspBreakAwareScript
         highAlchGate.reset();
         actionThrottle.reset();
         attackPendingUntilMs = 0L;
+        lastEmptyAlchScanMs = 0L;
         cachedLootConfig = null;
         cachedLootNames = Set.of();
         areaTileSnapshot = null;
@@ -2294,6 +2297,7 @@ public class KspAioFighterScript extends KspBreakAwareScript
 		pendingLootSceneY = localPoint.getSceneY();
 		pendingLootWorldViewId = localPoint.getWorldView();
 		pendingLootUntilMs = System.currentTimeMillis() + LOOT_PICKUP_RECOVERY_MS;
+        lastEmptyAlchScanMs = 0L;
 	}
 
 	private void clearPendingLoot()
@@ -2420,11 +2424,20 @@ public class KspAioFighterScript extends KspBreakAwareScript
             return true;
         }
 
+        // The profitability predicate performs item-price lookups. When it
+        // found nothing last pass, avoid repeating it on every 100ms cycle.
+        // The 180ms interval still picks up newly looted items promptly.
+        if (lastEmptyAlchScanMs > 0L
+                && now - lastEmptyAlchScanMs < EMPTY_ALCH_SCAN_INTERVAL_MS)
+            return false;
+
         List<Rs2ItemModel> profitable = Rs2Inventory.getList(Rs2ItemModel::isHaProfitable);
         if (profitable.isEmpty())
         {
+            lastEmptyAlchScanMs = now;
             return false;
         }
+        lastEmptyAlchScanMs = 0L;
 
         Rs2ItemModel item = profitable.stream()
                 .filter(candidate -> candidate.getId() > 0)
