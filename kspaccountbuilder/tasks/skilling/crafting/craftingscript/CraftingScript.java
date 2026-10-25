@@ -44,6 +44,7 @@ public class CraftingScript extends KspManagedScript
     private static final long LEATHER_PROGRESS_TIMEOUT_MS = 4_800L;
     private static final long GEM_START_TIMEOUT_MS = 3_000L;
     private static final long GEM_PROGRESS_TIMEOUT_MS = 4_800L;
+    private static final long FURNACE_PROGRESS_TIMEOUT_MS = 5_500L;
     private static final long ACTION_DISPATCH_TIMEOUT_MS = 1_500L;
 
     private volatile CraftingState state = CraftingState.WAITING;
@@ -58,6 +59,9 @@ public class CraftingScript extends KspManagedScript
     private boolean expectingXpDrop;
     private boolean leatherBatchActive;
     private boolean gemBatchActive;
+    private boolean furnaceBatchActive;
+    private int lastFurnaceMetalCount = -1;
+    private long lastFurnaceProgressAtMs;
     private int lastUncutGemCount = -1;
     private long lastGemProgressAtMs;
     private boolean gemCombinationPending;
@@ -104,7 +108,7 @@ public class CraftingScript extends KspManagedScript
                 return;
             }
 
-            if (isLeatherBatchActive() || isGemBatchActive()) return;
+            if (isLeatherBatchActive() || isGemBatchActive() || isFurnaceBatchActive()) return;
 
             // Finish any open production dialogue before selecting a new recipe,
             // walking to a bank, or dispatching another inventory Use click.
@@ -258,6 +262,7 @@ public class CraftingScript extends KspManagedScript
         expectingXpDrop = false;
         clearLeatherBatch();
         clearGemBatch();
+        clearFurnaceBatch();
         gemCombinationPending = false;
 
         if (!Rs2Bank.isOpen())
@@ -449,6 +454,19 @@ public class CraftingScript extends KspManagedScript
         }
     }
 
+    private Ingredient getFurnaceMetal(CraftInventory recipe)
+    {
+        for (Ingredient ingredient : recipe.getIngredients())
+        {
+            if ("Silver bar".equals(ingredient.getItemName())
+                    || "Gold bar".equals(ingredient.getItemName()))
+            {
+                return ingredient;
+            }
+        }
+        return null;
+    }
+
     private void craftAtFurnace(CraftInventory recipe)
     {
         if (isCraftingProductionWidgetOpen(recipe))
@@ -457,24 +475,34 @@ public class CraftingScript extends KspManagedScript
             return;
         }
 
-        if (isProductionActionPending(recipe)) return;
-        if (isWorldActionPending("furnace") || !canStartAction()) return;
+        if (isProductionActionPending(recipe)
+                || isWorldActionPending("furnace") || !canStartAction()) return;
 
         Rs2TileObjectModel furnace = findFurnace();
         if (furnace == null)
         {
-            Microbot.status = "Waiting for " + selectedFurnaceArea.getDisplayName();
-            if (KspLiveScene.interact("Furnace", Rs2Player.getWorldLocation(), FURNACE_SEARCH_RADIUS, "Smelt")) {
-                lastActionAtMs = System.currentTimeMillis();
-                markWorldAction("furnace");
-            }
+            Microbot.status = "Waiting for furnace near " + selectedFurnaceArea.getDisplayName();
             return;
         }
 
-        Microbot.status = "Crafting " + targetLevel.getDisplayName();
-        if (furnace.click("Smelt")) {
-            lastActionAtMs = System.currentTimeMillis();
-            markWorldAction("furnace");
+        Ingredient metal = getFurnaceMetal(recipe);
+        if (metal == null || inventoryCount(metal) <= 0)
+        {
+            Microbot.status = "Missing metal bars for " + recipe.getProductName();
+            return;
+        }
+
+        // Jewellery production requires USING a bar on a furnace, not the
+        // furnace's Smelt action (which opens ore smelting instead).
+        Microbot.status = "Using " + metal.getItemName()
+                + " on furnace for " + recipe.getProductName();
+        boolean dispatched = Rs2Inventory.useUnNotedItemOnObject(metal.getItemName(), furnace);
+        lastActionAtMs = System.currentTimeMillis();
+        markWorldAction("furnace");
+        if (!dispatched)
+        {
+            debug("Failed bar-on-furnace interaction | recipe={} metal={} furnace={}",
+                    recipe, metal.getItemName(), furnace.getId());
         }
     }
 
@@ -518,6 +546,13 @@ public class CraftingScript extends KspManagedScript
             lastLeatherCount = inventoryCount(getFirstConsumable(recipe));
             lastLeatherProgressAtMs = lastActionAtMs;
         }
+        if (recipe.requiresFurnace())
+        {
+            Ingredient metal = getFurnaceMetal(recipe);
+            furnaceBatchActive = metal != null;
+            lastFurnaceMetalCount = metal == null ? -1 : inventoryCount(metal);
+            lastFurnaceProgressAtMs = lastActionAtMs;
+        }
     }
 
     private boolean isGemBatchActive()
@@ -552,6 +587,53 @@ public class CraftingScript extends KspManagedScript
         gemBatchActive = false;
         lastUncutGemCount = -1;
         lastGemProgressAtMs = 0L;
+    }
+
+    private boolean isFurnaceBatchActive()
+    {
+        if (!furnaceBatchActive) return false;
+        Ingredient metal = getFurnaceMetal(targetRecipe);
+        if (metal == null || !targetRecipe.requiresFurnace() || Rs2Bank.isOpen())
+        {
+            clearFurnaceBatch();
+            return false;
+        }
+
+        int count = inventoryCount(metal);
+        if (count <= 0)
+        {
+            clearFurnaceBatch();
+            return false;
+        }
+
+        long now = System.currentTimeMillis();
+        if (count < lastFurnaceMetalCount)
+        {
+            lastFurnaceMetalCount = count;
+            lastFurnaceProgressAtMs = now;
+            return true;
+        }
+
+        if (Rs2Player.isAnimating())
+        {
+            lastFurnaceProgressAtMs = now;
+            return true;
+        }
+
+        if (now - lastFurnaceProgressAtMs < FURNACE_PROGRESS_TIMEOUT_MS)
+        {
+            return true;
+        }
+
+        clearFurnaceBatch();
+        return false;
+    }
+
+    private void clearFurnaceBatch()
+    {
+        furnaceBatchActive = false;
+        lastFurnaceMetalCount = -1;
+        lastFurnaceProgressAtMs = 0L;
     }
 
     private boolean isLeatherBatchActive()
@@ -600,14 +682,14 @@ public class CraftingScript extends KspManagedScript
         if (recipe == null || Rs2Bank.isOpen()) return false;
         if (recipe.requiresFurnace())
         {
-            return Rs2Widget.isGoldCraftingWidgetOpen()
-                    || Rs2Widget.isSilverCraftingWidgetOpen()
-                    || Rs2Widget.findWidget(recipe.getProductName(), null, false) != null;
+            return "Tiara".equals(recipe.getProductName())
+                    ? Rs2Widget.isSilverCraftingWidgetOpen()
+                    : Rs2Widget.isGoldCraftingWidgetOpen();
         }
 
-        return Rs2Widget.isProductionWidgetOpen()
-                || Rs2Widget.findWidget(recipe.getProductName(), null, false) != null
-                || Rs2Widget.findWidget(targetLevel.getDisplayName(), null, false) != null;
+        // Only act inside a real production interface, never a similarly
+        // named bank/inventory widget (e.g. cut Sapphire or uncut Sapphire).
+        return Rs2Widget.isProductionWidgetOpen();
     }
 
     private boolean isProductionActionPending(CraftInventory recipe)
@@ -753,6 +835,7 @@ public class CraftingScript extends KspManagedScript
         state = CraftingState.WAITING;
         clearLeatherBatch();
         clearGemBatch();
+        clearFurnaceBatch();
         gemCombinationPending = false;
         gemCombinationAtMs = 0L;
         clearProductionAction();
