@@ -21,6 +21,7 @@ import net.runelite.client.plugins.microbot.Script;
 import net.runelite.client.plugins.microbot.api.tileobject.models.Rs2TileObjectModel;
 import net.runelite.client.plugins.microbot.globval.enums.InterfaceTab;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.KspBankMode;
+import net.runelite.client.plugins.microbot.kspaccountbuilder.KspEquipmentActionGuard;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.KspTaskDebug;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.KspWalkerGuard;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.ksputil.KspBankWidgetHelper;
@@ -123,6 +124,7 @@ public class MiningScript extends KspManagedScript
     private long lastBankActionAtMs;
     private long pendingBankInventoryActionAtMs;
     private int pendingBankInventoryEmptySlots = -1;
+    private final KspEquipmentActionGuard equipmentGuard = new KspEquipmentActionGuard();
 
     public void setDebugLogging(boolean debugLogging) { this.debugLogging = debugLogging; }
 
@@ -301,7 +303,7 @@ public class MiningScript extends KspManagedScript
             return false;
         }
 
-        if (canEquip && Rs2Inventory.hasItem(active) && !Rs2Equipment.isWearing(active))
+        if (canEquip && Rs2Inventory.hasItem(active, true) && !Rs2Equipment.isWearing(active))
         {
             if (Rs2Bank.isOpen())
             {
@@ -310,10 +312,20 @@ public class MiningScript extends KspManagedScript
                 markBankAction();
                 return false;
             }
-
+            KspEquipmentActionGuard.Decision decision = equipmentGuard.inspect(
+                    active, false, System.currentTimeMillis());
+            if (decision == KspEquipmentActionGuard.Decision.COOLDOWN)
+            {
+                Microbot.status = "Unable to equip pickaxe: " + active
+                        + " (retrying after cooldown)";
+                return false;
+            }
+            if (decision == KspEquipmentActionGuard.Decision.WAIT) return false;
+            equipmentGuard.dispatched(active, System.currentTimeMillis());
             Rs2Inventory.wield(active);
             return false;
         }
+        if (Rs2Equipment.isWearing(active)) equipmentGuard.inspect(active, true, System.currentTimeMillis());
 
         if (Rs2Bank.isOpen())
         {
@@ -1156,6 +1168,7 @@ public class MiningScript extends KspManagedScript
         lastBankActionAtMs = 0L;
         pendingBankInventoryActionAtMs = 0L;
         pendingBankInventoryEmptySlots = -1;
+        equipmentGuard.reset();
         startingTargetRockInitialized = false;
         initializedSelectionBand = -1;
         randomMidTierRock = null;
