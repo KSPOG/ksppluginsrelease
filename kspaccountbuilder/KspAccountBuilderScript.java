@@ -113,7 +113,8 @@ public class KspAccountBuilderScript extends KspManagedScript
     private static final String BLUE_GOBLIN_MAIL = "Blue goblin mail";
     private static final String ORANGE_GOBLIN_MAIL = "Orange goblin mail";
     private static final int CHICKEN_TARGET_COMBAT_STAT_LEVEL = 15;
-    private static final long PLAY_TIME_READ_RETRY_MS = TimeUnit.SECONDS.toMillis(1);
+    private static final long PLAY_TIME_READ_RETRY_MS = TimeUnit.SECONDS.toMillis(5);
+    private static final long PLAY_TIME_REFRESH_INTERVAL_MS = TimeUnit.SECONDS.toMillis(30);
     private static final long BREAK_LOGOUT_COMBAT_GRACE_MS = TimeUnit.SECONDS.toMillis(11);
     private static final long TASK_SWITCH_ACTION_COOLDOWN_MS = 500L;
     private static final long TASK_SWITCH_DISPATCH_TIMEOUT_MS = 1_500L;
@@ -418,6 +419,9 @@ public class KspAccountBuilderScript extends KspManagedScript
                 return;
             }
             refreshAccountIdentity();
+            // Sync independently of the active task. Early returns during GE,
+            // breaks, quests and resource recovery must not starve this read.
+            sampleAccountPlayTime();
             if (handleExperienceLampInterruption())
             {
                 updateWindowTitle();
@@ -468,7 +472,6 @@ public class KspAccountBuilderScript extends KspManagedScript
             sampleOrderedElapsed();
             runAccountBuilderCycle();
             if (shuttingDown) return;
-            sampleAccountPlayTime();
             maybeLogStatus();
         }
         catch (Exception ex)
@@ -2405,7 +2408,18 @@ public class KspAccountBuilderScript extends KspManagedScript
         long elapsed = Math.max(0L, clock - startedAtMillis - runtimePausedTotalMs);
         return TimeUnit.MILLISECONDS.toSeconds(elapsed);
     }
-    public long getAccountPlayTimeSeconds() { return TimeUnit.MILLISECONDS.toSeconds(accountPlayTimeCache.getPlayTimeMillis(currentAccountHashSnapshot)); }
+    public long getAccountPlayTimeSeconds()
+    {
+        return hasVerifiedAccountPlayTime()
+                ? TimeUnit.MILLISECONDS.toSeconds(accountPlayTimeCache.getPlayTimeMillis(currentAccountHashSnapshot))
+                : -1L;
+    }
+
+    public boolean hasVerifiedAccountPlayTime()
+    {
+        return accountPlayTimeCache != null && currentAccountHashSnapshot != 0L
+                && accountPlayTimeCache.hasAuthoritativePlayTimeThisSession(currentAccountHashSnapshot);
+    }
 
     public long getTimeUntilBreakSeconds()
     {
@@ -2531,28 +2545,29 @@ public class KspAccountBuilderScript extends KspManagedScript
                     "Waiting to read account play time | reason=account-hash-unavailable");
             return false;
         }
-        if (accountHash == synchronizedPlayTimeAccountHash) return true;
-        if (accountPlayTimeCache.hasAuthoritativePlayTimeThisSession(accountHash))
-        {
-            synchronizedPlayTimeAccountHash = accountHash;
-            nextPlayTimeReadAtMillis = 0L;
-            return true;
-        }
+        // Re-read after login and periodically thereafter. The first varc
+        // snapshot may be zero until the Account Summary screen updates it.
+        // A single stale read must never permanently stop synchronization.
         if (!isReadyAfterLoginHandoff()) return false;
         long now = System.currentTimeMillis();
         if (now < nextPlayTimeReadAtMillis) return false;
-        log.info("[KSP Builder] Reading authoritative account play time varc | accountHash={}", Long.toUnsignedString(accountHash));
         long playTimeMillis = TradeUnlock.readPlayTimeMillis();
-        if (playTimeMillis < 0L)
+        if (!KspAccountPlayTimePolicy.isVerifiedReading(playTimeMillis))
         {
             nextPlayTimeReadAtMillis = now + PLAY_TIME_READ_RETRY_MS;
-            log.info("[KSP Builder] Account play-time read failed; retrying in {} seconds", TimeUnit.MILLISECONDS.toSeconds(PLAY_TIME_READ_RETRY_MS));
+            KspTaskDebug.throttled(log, true, "Builder", "play-time-varc-uninitialized",
+                    30_000L, "Account Summary play-time varc not yet populated | value={} accountHash={} retrySeconds={}",
+                    playTimeMillis, Long.toUnsignedString(accountHash),
+                    TimeUnit.MILLISECONDS.toSeconds(PLAY_TIME_READ_RETRY_MS));
             return false;
         }
+
         accountPlayTimeCache.synchronizePlayTimeMillis(accountHash, playTimeMillis);
         synchronizedPlayTimeAccountHash = accountHash;
-        nextPlayTimeReadAtMillis = 0L;
-        log.info("[KSP Builder] Synchronized account play time | accountHash={} minutes={}", Long.toUnsignedString(accountHash), TimeUnit.MILLISECONDS.toMinutes(playTimeMillis));
+        nextPlayTimeReadAtMillis = now + PLAY_TIME_REFRESH_INTERVAL_MS;
+        KspTaskDebug.throttled(log, true, "Builder", "play-time-synchronized",
+                60_000L, "Synchronized account play time | accountHash={} minutes={}",
+                Long.toUnsignedString(accountHash), TimeUnit.MILLISECONDS.toMinutes(playTimeMillis));
         return true;
     }
 
