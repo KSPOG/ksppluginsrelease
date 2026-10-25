@@ -45,12 +45,10 @@ public class SmeltScript extends KspManagedScript
     private static final int WEB_WALK_COOLDOWN_MS = 1_000;
     private static final long TARGET_INTERACTION_TIMEOUT_MS = 8_000L;
     private static final int PRODUCTION_ACTION_START_TIMEOUT_MS = 1_500;
-    private static final long SMELTING_BATCH_STALL_TIMEOUT_MS = 5_000L;
 
     private long lastWebWalkAtMs;
     private long bankInteractionSentAt;
     private long furnaceInteractionSentAt;
-    private long lastSmeltAnimationAtMs;
     private long pendingProductionActionAtMs;
     private String pendingProductionActionKey;
     private SmeltArea targetArea = SmeltArea.SMELT_AREA_EDGEVILLE_FURNACE;
@@ -58,9 +56,7 @@ public class SmeltScript extends KspManagedScript
     private boolean debugLogging;
     private boolean walkingToTargetArea;
     private boolean progressiveSmelting = true;
-    private boolean smeltingBatchActive;
-    private int smeltingBatchRemainingCycles;
-    private long smeltingBatchLastProgressAtMs;
+    private final SmeltingBatchTracker smeltingBatch = new SmeltingBatchTracker();
 
     public void setDebugLogging(boolean debugLogging) { this.debugLogging = debugLogging; }
 
@@ -84,7 +80,30 @@ public class SmeltScript extends KspManagedScript
             if (KspAccountBuilderPauseGate.isPaused() || !super.run() || !Microbot.isLoggedIn()) return;
             if (isSmeltingBatchActive(targetBar))
             {
-                Microbot.status = "Smelting " + targetBar.getDisplayName();
+                Microbot.status = "Smelting " + targetBar.getDisplayName()
+                        + " (waiting for batch progress)";
+                return;
+            }
+
+            // If Account Builder was resumed/reloaded while the furnace was
+            // already producing, recognize the live animation and keep the
+            // current bar recipe rather than switching to the bank.
+            if (Rs2Player.isAnimating() && targetBar != null
+                    && !Rs2Bank.isOpen()
+                    && targetArea.toWorldArea().contains(Rs2Player.getWorldLocation()))
+            {
+                int cycles = getCraftableBarsFromInventory(targetBar);
+                if (cycles > 0)
+                {
+                    beginSmeltingBatch(targetBar);
+                    if (isSmeltingBatchActive(targetBar))
+                    {
+                        Microbot.status = "Recognized ongoing " + targetBar.getDisplayName() + " smelting";
+                        return;
+                    }
+                }
+                // Avoid depositing the inventory during the last bar animation.
+                Microbot.status = "Waiting for smelting animation to finish";
                 return;
             }
 
@@ -343,7 +362,8 @@ public class SmeltScript extends KspManagedScript
     {
         if (Rs2Player.isAnimating())
         {
-            lastSmeltAnimationAtMs = System.currentTimeMillis();
+            // Do not issue another furnace click on an active animation frame.
+            // The batch tracker above also handles the frames between animations.
             return;
         }
         if (Rs2Bank.isOpen())
@@ -426,35 +446,26 @@ public class SmeltScript extends KspManagedScript
 
     private void beginSmeltingBatch(BarLevels bar)
     {
-        smeltingBatchActive = true;
-        smeltingBatchRemainingCycles = getCraftableBarsFromInventory(bar);
-        smeltingBatchLastProgressAtMs = System.currentTimeMillis();
-        lastSmeltAnimationAtMs = 0L;
+        int cycles = getCraftableBarsFromInventory(bar);
+        int xp = Microbot.getClient().getSkillExperience(Skill.SMITHING);
+        smeltingBatch.begin(System.currentTimeMillis(), cycles, xp);
+        debug("Started smelting batch | bar={} availableCycles={} smithingXp={}",
+                bar, cycles, xp);
     }
 
     private boolean isSmeltingBatchActive(BarLevels bar)
     {
-        if (!smeltingBatchActive || bar == null) return false;
-        int remainingCycles = getCraftableBarsFromInventory(bar);
-        long now = System.currentTimeMillis();
-        if (Rs2Player.isAnimating())
+        if (!smeltingBatch.isTracking() || bar == null) return false;
+        int available = getCraftableBarsFromInventory(bar);
+        int xp = Microbot.getClient().getSkillExperience(Skill.SMITHING);
+        boolean animating = Rs2Player.isAnimating();
+        boolean active = smeltingBatch.observe(System.currentTimeMillis(), available, xp, animating);
+        if (!active)
         {
-            lastSmeltAnimationAtMs = now;
-            smeltingBatchLastProgressAtMs = now;
+            debug("Smelting batch ended or timed out | bar={} remainingCycles={} xp={} animating={}",
+                    bar, available, xp, animating);
         }
-        if (remainingCycles < smeltingBatchRemainingCycles)
-        {
-            smeltingBatchRemainingCycles = remainingCycles;
-            smeltingBatchLastProgressAtMs = now;
-        }
-        if (remainingCycles <= 0)
-        {
-            clearSmeltingBatch();
-            return false;
-        }
-        if (now - smeltingBatchLastProgressAtMs < SMELTING_BATCH_STALL_TIMEOUT_MS) return true;
-        clearSmeltingBatch();
-        return false;
+        return active;
     }
 
     private int getCraftableBarsFromInventory(BarLevels bar)
@@ -469,10 +480,7 @@ public class SmeltScript extends KspManagedScript
 
     private void clearSmeltingBatch()
     {
-        smeltingBatchActive = false;
-        smeltingBatchRemainingCycles = 0;
-        smeltingBatchLastProgressAtMs = 0L;
-        lastSmeltAnimationAtMs = 0L;
+        smeltingBatch.reset();
     }
 
     private boolean isProductionActionPending(String key)
@@ -579,7 +587,6 @@ public class SmeltScript extends KspManagedScript
         lastWebWalkAtMs = 0L;
         bankInteractionSentAt = 0L;
         furnaceInteractionSentAt = 0L;
-        lastSmeltAnimationAtMs = 0L;
         clearSmeltingBatch();
         clearPendingProductionAction();
         walkingToTargetArea = false;
