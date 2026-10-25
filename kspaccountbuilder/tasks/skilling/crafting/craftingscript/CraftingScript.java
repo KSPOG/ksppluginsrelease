@@ -19,6 +19,7 @@ import net.runelite.client.plugins.microbot.kspaccountbuilder.ksputil.KspBankWid
 import net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.crafting.areas.Areas;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.crafting.clevels.CraftingLevels;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.crafting.inventory.CraftInventory;
+import net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.crafting.inventory.CraftingBankPlan;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.crafting.inventory.CraftInventory.Ingredient;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.crafting.inventory.CraftInventory.RecipeType;
 import net.runelite.client.plugins.microbot.util.bank.Rs2Bank;
@@ -61,7 +62,6 @@ public class CraftingScript extends KspManagedScript
     private long lastGemProgressAtMs;
     private boolean gemCombinationPending;
     private long gemCombinationAtMs;
-    private boolean reverseGemCombine;
     private int lastLeatherCount = -1;
     private long lastLeatherProgressAtMs;
     private boolean bankInventoryReset;
@@ -71,6 +71,7 @@ public class CraftingScript extends KspManagedScript
     private String pendingWorldAction;
     private long pendingInventoryActionAtMs;
     private String pendingInventoryItem;
+    private int pendingInventoryItemId = -1;
     private int pendingInventoryBeforeCount = -1;
 
     public boolean run() { return run(CraftingLevels.LEATHER_GLOVES, true); }
@@ -113,7 +114,13 @@ public class CraftingScript extends KspManagedScript
                 return;
             }
 
-            if (this.progressiveCrafting)
+            // Freeze a viable recipe while its inventory batch is being crafted
+            // or withdrawn. Selecting a different recipe after each partial bank
+            // withdrawal used to abandon the chisel / silver-bar batch.
+            if (this.progressiveCrafting
+                    && !bankInventoryReset
+                    && !isInventoryActionPending()
+                    && !hasRequiredInventory(targetRecipe))
             {
                 selectTargetRecipe();
             }
@@ -224,15 +231,21 @@ public class CraftingScript extends KspManagedScript
 
     private boolean hasRecipeResources(CraftInventory recipe)
     {
-        return net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.crafting.inventory.CraftingRecipeSupplyPolicy.hasIngredients(
-                recipe, itemName -> Rs2Inventory.count(itemName) + Math.max(0, Rs2Bank.count(itemName)));
+        for (Ingredient ingredient : recipe.getIngredients())
+        {
+            if (inventoryCount(ingredient) + Math.max(0, bankCount(ingredient)) < ingredient.getAmount())
+            {
+                return false;
+            }
+        }
+        return true;
     }
 
     private boolean hasRequiredInventory(CraftInventory recipe)
     {
         for (Ingredient ingredient : recipe.getIngredients())
         {
-            if (Rs2Inventory.count(ingredient.getItemName()) < ingredient.getAmount())
+            if (inventoryCount(ingredient) < ingredient.getAmount())
             {
                 return false;
             }
@@ -244,6 +257,8 @@ public class CraftingScript extends KspManagedScript
     {
         expectingXpDrop = false;
         clearLeatherBatch();
+        clearGemBatch();
+        gemCombinationPending = false;
 
         if (!Rs2Bank.isOpen())
         {
@@ -288,29 +303,38 @@ public class CraftingScript extends KspManagedScript
             return;
         }
 
+        // Make the smallest fixed tooling withdrawals first, then fill the
+        // remaining slots with the correct raw material. Item IDs prevent
+        // "Sapphire" from matching "Uncut sapphire" and vice versa.
         for (Ingredient ingredient : recipe.getIngredients())
         {
-            int desired = resolveWithdrawAmount(recipe, ingredient);
-            int current = Rs2Inventory.count(ingredient.getItemName());
-            // The withdrawal target can be zero when the bank has no stock.
-            // Zero available items must not satisfy a required ingredient.
+            int current = inventoryCount(ingredient);
+            int bankAvailable = Math.max(0, bankCount(ingredient));
+            int desired = CraftingBankPlan.targetAmount(recipe, ingredient, current, bankAvailable);
             if (current >= desired && current >= ingredient.getAmount()) continue;
 
-            int amount = desired - current;
-            if (amount <= 0 || Rs2Bank.count(ingredient.getItemName()) <= 0)
+            int deficit = desired - current;
+            if (deficit <= 0 || bankAvailable <= 0 || current + bankAvailable < ingredient.getAmount())
             {
-                Microbot.status = "Missing crafting item: " + ingredient.getItemName();
+                state = CraftingState.WAITING;
+                Microbot.status = "Missing crafting supply: " + ingredient.getItemName()
+                        + " (inventory=" + current + ", bank=" + bankAvailable + ")";
+                KspTaskDebug.throttled(log, debugLogging, "Crafting", "missing-supply",
+                        10_000L, "Unable to prepare {}: {} need={} have={} bank={}",
+                        recipe, ingredient.getItemName(), ingredient.getAmount(), current, bankAvailable);
                 return;
             }
 
-            // Record every withdrawal attempt, including unsuccessful dispatches.
-            // Otherwise a false return causes another bank click every 100 ms.
-            // The existing inventory acknowledgement or timeout permits a retry.
-            if (!isInventoryActionPending())
-            {
-                withdraw(ingredient.getItemName(), amount);
-                markInventoryAction(ingredient.getItemName(), current);
-            }
+            if (isInventoryActionPending()) return;
+
+            // Rs2Bank.withdrawX opens a quantity prompt and may block while
+            // typing; acknowledge the resulting inventory change on the next
+            // tick, instead of immediately dispatching another click.
+            boolean dispatched = withdraw(ingredient, Math.min(deficit, bankAvailable));
+            markInventoryAction(ingredient, current);
+            Microbot.status = (dispatched ? "Withdrawing " : "Retrying withdrawal of ")
+                    + ingredient.getItemName() + " ("
+                    + current + "/" + desired + ")";
             return;
         }
 
@@ -320,41 +344,32 @@ public class CraftingScript extends KspManagedScript
         Rs2Bank.closeBank();
     }
 
-    private int resolveWithdrawAmount(CraftInventory recipe, Ingredient ingredient)
+    private int inventoryCount(Ingredient ingredient)
     {
-        if (ingredient.isReusable())
-        {
-            return ingredient.getAmount();
-        }
-
-        Ingredient[] ingredients = recipe.getIngredients();
-        int reusableSlots = 0;
-        int consumableTypes = 0;
-        for (Ingredient candidate : ingredients)
-        {
-            if (candidate.isReusable())
-            {
-                reusableSlots += candidate.getAmount();
-            }
-            else
-            {
-                consumableTypes++;
-            }
-        }
-
-        int bankCount = Math.max(0, Rs2Bank.count(ingredient.getItemName()));
-        if (consumableTypes == 1)
-        {
-            return Math.min(28 - reusableSlots, bankCount);
-        }
-        return Math.min(ingredient.getAmount(), bankCount);
+        return ingredient.getItemId() > 0
+                ? Rs2Inventory.count(ingredient.getItemId())
+                : Rs2Inventory.count(ingredient.getItemName(), true);
     }
 
-    private boolean withdraw(String itemName, int amount)
+    private int bankCount(Ingredient ingredient)
     {
+        return ingredient.getItemId() > 0
+                ? Rs2Bank.count(ingredient.getItemId())
+                : Rs2Bank.count(ingredient.getItemName(), true);
+    }
+
+    private boolean withdraw(Ingredient ingredient, int amount)
+    {
+        if (amount < 1) return false;
+        if (ingredient.getItemId() > 0)
+        {
+            return amount == 1
+                    ? Rs2Bank.withdrawOne(ingredient.getItemId())
+                    : Rs2Bank.withdrawX(ingredient.getItemId(), amount);
+        }
         return amount == 1
-                ? Rs2Bank.withdrawOne(itemName)
-                : Rs2Bank.withdrawX(itemName, amount);
+                ? Rs2Bank.withdrawOne(ingredient.getItemName(), true)
+                : Rs2Bank.withdrawX(ingredient.getItemName(), amount, true);
     }
 
     private boolean ensureInArea(Areas area, String walkKey)
@@ -406,17 +421,23 @@ public class CraftingScript extends KspManagedScript
                     return;
                 }
                 gemCombinationPending = false;
-                reverseGemCombine = !reverseGemCombine;
-                debug("Gem combination produced no progress; reversing item order | recipe={}", recipe);
+                debug("Gem combination timeout; retrying chisel-first | recipe={}", recipe);
             }
-            String first = reverseGemCombine ? material.getItemName() : tool.getItemName();
-            String second = reverseGemCombine ? tool.getItemName() : material.getItemName();
-            if (Rs2Inventory.combine(first, second))
+            // OSRS Chisel=1755: always select the chisel first and use it on
+            // the exact UNCut gem ID. Never reverse the pair or select a cut gem.
+            boolean dispatched = tool.getItemId() > 0 && material.getItemId() > 0
+                    ? Rs2Inventory.combine(tool.getItemId(), material.getItemId())
+                    : Rs2Inventory.combine(tool.getItemName(), material.getItemName());
+            lastActionAtMs = now;
+            markWorldAction("combine");
+            if (dispatched)
             {
-                lastActionAtMs = now;
                 gemCombinationAtMs = now;
                 gemCombinationPending = true;
-                markWorldAction("combine");
+            }
+            else
+            {
+                Microbot.status = "Gem use failed - retrying chisel on " + material.getItemName();
             }
             return;
         }
@@ -486,16 +507,15 @@ public class CraftingScript extends KspManagedScript
         if (recipe.getRecipeType() == RecipeType.GEM_CUTTING)
         {
             gemCombinationPending = false;
-            reverseGemCombine = false;
             gemBatchActive = true;
             Ingredient gem = getFirstConsumable(recipe);
-            lastUncutGemCount = gem == null ? -1 : Rs2Inventory.count(gem.getItemName(), true);
+            lastUncutGemCount = gem == null ? -1 : inventoryCount(gem);
             lastGemProgressAtMs = lastActionAtMs;
         }
         if (recipe.getRecipeType() == RecipeType.LEATHER)
         {
             leatherBatchActive = true;
-            lastLeatherCount = Rs2Inventory.count(getFirstConsumable(recipe).getItemName(), true);
+            lastLeatherCount = inventoryCount(getFirstConsumable(recipe));
             lastLeatherProgressAtMs = lastActionAtMs;
         }
     }
@@ -509,8 +529,8 @@ public class CraftingScript extends KspManagedScript
             clearGemBatch();
             return false;
         }
-        int count = Rs2Inventory.count(material.getItemName(), true);
-        if (Rs2Bank.isOpen() || count <= 0 || !Rs2Inventory.hasItem("Chisel", true))
+        int count = inventoryCount(material);
+        if (Rs2Bank.isOpen() || count <= 0 || !Rs2Inventory.hasItem(1755))
         {
             clearGemBatch();
             return false;
@@ -539,7 +559,7 @@ public class CraftingScript extends KspManagedScript
         if (!leatherBatchActive) return false;
 
         Ingredient leather = getFirstConsumable(targetRecipe);
-        int count = leather == null ? 0 : Rs2Inventory.count(leather.getItemName(), true);
+        int count = leather == null ? 0 : inventoryCount(leather);
         if (Rs2Bank.isOpen() || Rs2Player.isMoving() || count <= 0
                 || !Rs2Inventory.hasItem("Needle", true)
                 || !Rs2Inventory.hasItem("Thread", true))
@@ -642,7 +662,10 @@ public class CraftingScript extends KspManagedScript
     private boolean isInventoryActionPending()
     {
         if (pendingInventoryActionAtMs == 0L || pendingInventoryItem == null) return false;
-        if (Rs2Inventory.count(pendingInventoryItem) != pendingInventoryBeforeCount) {
+        int currentCount = pendingInventoryItemId > 0
+                ? Rs2Inventory.count(pendingInventoryItemId)
+                : Rs2Inventory.count(pendingInventoryItem, true);
+        if (currentCount != pendingInventoryBeforeCount) {
             clearInventoryAction();
             return false;
         }
@@ -651,9 +674,10 @@ public class CraftingScript extends KspManagedScript
         return false;
     }
 
-    private void markInventoryAction(String item, int beforeCount)
+    private void markInventoryAction(Ingredient item, int beforeCount)
     {
-        pendingInventoryItem = item;
+        pendingInventoryItem = item.getItemName();
+        pendingInventoryItemId = item.getItemId();
         pendingInventoryBeforeCount = beforeCount;
         pendingInventoryActionAtMs = System.currentTimeMillis();
     }
@@ -662,6 +686,7 @@ public class CraftingScript extends KspManagedScript
     {
         pendingInventoryActionAtMs = 0L;
         pendingInventoryItem = null;
+        pendingInventoryItemId = -1;
         pendingInventoryBeforeCount = -1;
     }
 
@@ -730,7 +755,6 @@ public class CraftingScript extends KspManagedScript
         clearGemBatch();
         gemCombinationPending = false;
         gemCombinationAtMs = 0L;
-        reverseGemCombine = false;
         clearProductionAction();
         pendingWorldActionAtMs = 0L;
         pendingWorldAction = null;
