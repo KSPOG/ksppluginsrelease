@@ -121,6 +121,7 @@ public class KspAioFighterScript extends KspBreakAwareScript
 	private Runnable stopPluginCallback;
 	private final AtomicBoolean loopRunning = new AtomicBoolean(false);
 	private final KspAioFighterStrongholdDialogue strongholdDialogue = new KspAioFighterStrongholdDialogue();
+    private final KspAioFighterHighAlchGate highAlchGate = new KspAioFighterHighAlchGate();
 	private volatile long runGeneration = 0L;
 
 	@Inject
@@ -154,6 +155,7 @@ public class KspAioFighterScript extends KspBreakAwareScript
 		unavailableGearThisRun.clear();
 		missingGearDialogShown.set(false);
 		strongholdDialogue.reset();
+        highAlchGate.reset();
 		mainScheduledFuture = scheduledExecutorService.scheduleWithFixedDelay(() -> loop(generation), 0, 100, TimeUnit.MILLISECONDS);
 		return true;
 	}
@@ -162,6 +164,7 @@ public class KspAioFighterScript extends KspBreakAwareScript
 	{
 		runGeneration++;
 		loopRunning.set(false);
+        highAlchGate.reset();
 		super.shutdown();
 	}
 
@@ -204,6 +207,18 @@ public class KspAioFighterScript extends KspBreakAwareScript
 
 			refreshPaintState();
 
+            // Safety first: eat if required, then immediately alch any
+            // profitable inventory item before banking, ground loot, bone
+            // burying, area movement, gear changes or NPC interactions.
+            if (healIfNeeded())
+            {
+                return;
+            }
+            if (highAlch())
+            {
+                return;
+            }
+
 			Optional<Skill> selectedSkill = selectTrainingSkill();
 			if (selectedSkill.isEmpty())
 			{
@@ -229,7 +244,6 @@ public class KspAioFighterScript extends KspBreakAwareScript
 				return;
 			}
 
-			healIfNeeded();
 			boolean looted = loot();
 
 			if (looted || shouldBlockAttackForLoot())
@@ -244,8 +258,6 @@ public class KspAioFighterScript extends KspBreakAwareScript
 			{
 				return;
 			}
-
-			highAlch();
 
 			equipGearFor(skill);
 			configureCombatStyle(skill);
@@ -989,11 +1001,11 @@ public class KspAioFighterScript extends KspBreakAwareScript
 		return staffNames != null && Rs2Equipment.isWearing(staffNames);
 	}
 
-	private void healIfNeeded()
+	private boolean healIfNeeded()
 	{
 		if (!config.useHealing() || config.foodName().trim().isEmpty())
 		{
-			return;
+			return false;
 		}
 
 		int currentHp = Rs2Player.getBoostedSkillLevel(Skill.HITPOINTS);
@@ -1001,14 +1013,16 @@ public class KspAioFighterScript extends KspBreakAwareScript
 		int healAt = Math.max(1, Math.min(maxHp - 1, Math.max(1, cachedTargetNpcMaxHit) + getConfiguredFoodHeal()));
 		if (currentHp > healAt || getConfiguredFoodCount() <= 0)
 		{
-			return;
+			return false;
 		}
 
 		String action = config.foodName().equalsIgnoreCase("Jug of wine") ? "drink" : "eat";
 		if (Rs2Inventory.interact(config.foodName(), action, true))
 		{
 			sleepUntil(() -> Rs2Player.getBoostedSkillLevel(Skill.HITPOINTS) > currentHp, 2_000);
+            return true;
 		}
+        return false;
 	}
 
 	private void drinkPotionIfUnboosted(Skill skill)
@@ -2267,43 +2281,89 @@ public class KspAioFighterScript extends KspBreakAwareScript
 
 	private boolean lootOwnOnly() { return config.lootOwnership() == KspLootOwnership.LOOT_OWN; }
 
-	private void highAlch()
-	{
-		if (!config.highAlchLoot())
-		{
-			return;
-		}
+    /**
+     * Returns true while an eligible High Alch cast is being dispatched or
+     * acknowledged so that the same loop never also loots, banks or attacks.
+     *
+     * The loop runs every 100ms: no ground-loot or task-selection branch can
+     * postpone a profitable inventory item. Use only the original
+     * Rs2ItemModel::isHaProfitable predicate to preserve profit filtering.
+     */
+    private boolean highAlch()
+    {
+        if (!config.highAlchLoot() || Rs2Bank.isOpen())
+        {
+            return false;
+        }
 
-		List<Rs2ItemModel> items = Rs2Inventory.getList(Rs2ItemModel::isHaProfitable);
-		if (items.isEmpty())
-		{
-			return;
-		}
+        long now = System.currentTimeMillis();
+        int magicXp = Microbot.getClientThread().runOnClientThreadOptional(() ->
+                Microbot.getClient().getSkillExperience(Skill.MAGIC)).orElse(0);
+        int inFlightId = highAlchGate.trackedItemId();
+        int remaining = inFlightId > 0 ? Rs2Inventory.itemQuantity(inFlightId) : 0;
+        KspAioFighterHighAlchGate.Decision decision =
+                highAlchGate.inspect(remaining, magicXp, now);
+        if (decision == KspAioFighterHighAlchGate.Decision.WAIT)
+        {
+            setStatus("waiting for high alch to finish");
+            return true;
+        }
 
-		if (Rs2ExplorersRing.hasRing() && Rs2ExplorersRing.hasCharges())
-		{
-			Rs2ExplorersRing.highAlch(items.get(0));
-			Rs2ExplorersRing.closeInterface();
-			return;
-		}
+        List<Rs2ItemModel> profitable = Rs2Inventory.getList(Rs2ItemModel::isHaProfitable);
+        if (profitable.isEmpty())
+        {
+            return false;
+        }
 
-		if (!Rs2Magic.canCast(Rs2Spells.HIGH_LEVEL_ALCHEMY))
-		{
-			return;
-		}
+        Rs2ItemModel item = profitable.stream()
+                .filter(candidate -> candidate.getId() > 0)
+                .filter(candidate -> !highAlchGate.isBackedOffItem(candidate.getId(), now))
+                .findFirst().orElse(null);
+        if (item == null)
+        {
+            // A specific item failed repeatedly; don't freeze combat or
+            // retry it every tick. Other profitable items may still proceed.
+            return false;
+        }
 
-		Rs2ItemModel item = items.get(0);
-		Rs2Magic.alch(item);
-		if (item.getHaPrice() > Rs2Settings.getMinimumItemValueAlchemyWarning())
-		{
-			sleepUntil(() -> Rs2Widget.hasWidget("Proceed to cast High Alchemy on it"), 1_200);
-			if (Rs2Widget.hasWidget("Proceed to cast High Alchemy on it"))
-			{
-				Rs2Keyboard.keyPress('1');
-			}
-		}
-		Rs2Player.waitForAnimation();
-	}
+        if (Rs2ExplorersRing.hasRing() && Rs2ExplorersRing.hasCharges())
+        {
+            setStatus("high alching " + item.getName() + " with Explorer's ring");
+            int before = Rs2Inventory.itemQuantity(item.getId());
+            if (Rs2ExplorersRing.highAlch(item))
+            {
+                highAlchGate.dispatched(item.getId(), before, magicXp, now);
+                Rs2ExplorersRing.closeInterface();
+                return true;
+            }
+            // If the ring UI cannot cast, allow ordinary High Alchemy below.
+        }
+
+        if (getLevel(Skill.MAGIC) < 55 || !hasHighAlchRunes(1)
+                || !Rs2Magic.canCast(Rs2Spells.HIGH_LEVEL_ALCHEMY))
+        {
+            // The normal restocking flow will acquire missing runes.
+            // Never silently cast Low Alch when "High alch loot" is enabled.
+            return false;
+        }
+
+        int before = Rs2Inventory.itemQuantity(item.getId());
+        setStatus("high alching " + item.getName());
+        // Rs2Magic.alch chooses High Alchemy with Magic >= 55.
+        // The shorter built-in interaction delays improve responsiveness;
+        // the single-flight gate enforces the spell cooldown separately.
+        Rs2Magic.alch(item, 60, 130);
+        if (item.getHaPrice() > Rs2Settings.getMinimumItemValueAlchemyWarning())
+        {
+            sleepUntil(() -> Rs2Widget.hasWidget("Proceed to cast High Alchemy on it"), 1_200);
+            if (Rs2Widget.hasWidget("Proceed to cast High Alchemy on it"))
+            {
+                Rs2Keyboard.keyPress('1');
+            }
+        }
+        highAlchGate.dispatched(item.getId(), before, magicXp, System.currentTimeMillis());
+        return true;
+    }
 
 	private List<String> getConfiguredNpcNames() { return csv(config.npcNames()); }
 
