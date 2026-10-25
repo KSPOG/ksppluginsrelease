@@ -1670,7 +1670,17 @@ public class KspAccountBuilderScript extends KspManagedScript
         // instead of picking a random activity whenever a task completes.
         // Explicit ordered queues and single-skill overrides are resolved
         // before this method and are never replaced by this planner.
-        boolean missingSupplies = Buy.hasAnyGeBuyRequirementMissing();
+        // The GE buyer tracks a broad future shopping list. A missing
+        // optional future upgrade alone must NOT outrank executable training.
+        // Escalate buying/selling only when the task being replaced is blocked
+        // by resources. Dedicated Melee/Crafting replenishment rules above
+        // still take priority.
+        boolean blockedTraining = excluded != null
+                && excluded != BuilderTask.GE_BUY && excluded != BuilderTask.GE_SELL
+                && newQuestScript(excluded) == null
+                && !isOneTimeTaskCompleted(excluded)
+                && !hasResourcesForTaskSelection(excluded);
+        boolean missingSupplies = blockedTraining && Buy.hasAnyGeBuyRequirementMissing();
         boolean affordableSupplies = missingSupplies && buyScript.canAffordMissingBuys();
         long coins = getAvailableCoins();
         BuilderTask best = null;
