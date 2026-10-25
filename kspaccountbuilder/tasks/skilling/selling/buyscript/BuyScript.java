@@ -379,6 +379,7 @@ public class BuyScript extends KspManagedScript {
                 || !this.hasTinderboxAnywhere()
                 || this.hasFishingBuyRequirementMissing()
                 || this.hasFishingSupplyNeed()
+                || this.hasCraftingBuyRequirementMissing()
                 || this.hasSmithingOreNeed();
     }
 
