@@ -65,6 +65,7 @@ public class KspWineGrabberScript extends KspBreakAwareScript
     private int ladderFailures;
     private int equipmentFailures;
     private int castFailures;
+    private int runeWithdrawFailures;
     private boolean awaitingCast;
 
     private enum State
@@ -85,7 +86,7 @@ public class KspWineGrabberScript extends KspBreakAwareScript
         stopped = false;
         awaitingCast = false;
         nextActionAt = pendingCastAt = 0L;
-        ladderFailures = equipmentFailures = castFailures = 0;
+        ladderFailures = equipmentFailures = castFailures = runeWithdrawFailures = 0;
         state = State.STARTING;
 
         mainScheduledFuture = scheduledExecutorService.scheduleWithFixedDelay(() ->
@@ -255,8 +256,24 @@ public class KspWineGrabberScript extends KspBreakAwareScript
 
         if (bankRunes > 0)
         {
+            if (inventoryRunes == 0 && Rs2Inventory.emptySlotCount() == 0)
+            {
+                fail("No inventory space available to withdraw Law runes.");
+                return;
+            }
             status = "Withdrawing all Law runes";
-            Rs2Bank.withdrawAll(LAW_RUNE_ID);
+            if (!Rs2Bank.withdrawAll(LAW_RUNE_ID))
+            {
+                if (++runeWithdrawFailures >= 6)
+                {
+                    fail("Repeatedly failed to withdraw Law runes from bank.");
+                    return;
+                }
+            }
+            else
+            {
+                runeWithdrawFailures = 0;
+            }
             retryAfter(800L);
             return;
         }
