@@ -223,6 +223,16 @@ public class CraftingScript extends KspManagedScript
                 targetRecipe = candidateRecipe;
                 expectingXpDrop = false;
                 bankInventoryReset = false;
+                // A different recipe invalidates the previous Make-All,
+                // inventory-use and furnace/gem progress acknowledgements.
+                clearLeatherBatch();
+                clearGemBatch();
+                clearFurnaceBatch();
+                clearProductionAction();
+                gemCombinationPending = false;
+                gemCombinationAtMs = 0L;
+                pendingWorldAction = null;
+                pendingWorldActionAtMs = 0L;
                 debug("Selected crafting recipe {} at level {}",
                         targetLevel.getDisplayName(), craftingLevel);
             }
@@ -728,8 +738,10 @@ public class CraftingScript extends KspManagedScript
     {
         if (pendingWorldActionAtMs == 0L || pendingWorldAction == null) return false;
         if (!pendingWorldAction.equals(action)) return false;
-        if (Rs2Player.isMoving() || Rs2Player.isAnimating() || Rs2Player.isInteracting()) return true;
-        if (System.currentTimeMillis() - pendingWorldActionAtMs < ACTION_DISPATCH_TIMEOUT_MS) return true;
+        // Never let a stale movement/interact flag hold an old click forever.
+        // Real production batches have their own inventory-progress guards.
+        long elapsed = System.currentTimeMillis() - pendingWorldActionAtMs;
+        if (elapsed < ACTION_DISPATCH_TIMEOUT_MS) return true;
         pendingWorldActionAtMs = 0L;
         pendingWorldAction = null;
         return false;
