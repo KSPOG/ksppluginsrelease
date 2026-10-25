@@ -2415,12 +2415,13 @@ public class KspAioFighterScript extends KspBreakAwareScript
         }
 
         long now = System.currentTimeMillis();
+        boolean combatActive = Rs2Player.isInCombat() || Rs2Combat.inCombat();
         int magicXp = Microbot.getClientThread().runOnClientThreadOptional(() ->
                 Microbot.getClient().getSkillExperience(Skill.MAGIC)).orElse(0);
         int inFlightId = highAlchGate.trackedItemId();
         int remaining = inFlightId > 0 ? Rs2Inventory.itemQuantity(inFlightId) : 0;
         KspAioFighterHighAlchGate.Decision decision =
-                highAlchGate.inspect(remaining, magicXp, now);
+                highAlchGate.inspect(remaining, magicXp, now, combatActive);
         if (decision == KspAioFighterHighAlchGate.Decision.WAIT)
         {
             setStatus("waiting for high alch to finish");
@@ -2459,7 +2460,6 @@ public class KspAioFighterScript extends KspBreakAwareScript
             return false;
         }
 
-        boolean combatActive = Rs2Player.isInCombat() || Rs2Combat.inCombat();
         boolean spellReady = getLevel(Skill.MAGIC) >= 55 && hasHighAlchRunes(1)
                 && Rs2Magic.canCast(Rs2Spells.HIGH_LEVEL_ALCHEMY);
 
