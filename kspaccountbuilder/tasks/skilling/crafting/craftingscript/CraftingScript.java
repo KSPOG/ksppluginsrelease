@@ -19,6 +19,7 @@ import net.runelite.client.plugins.microbot.kspaccountbuilder.ksputil.KspBankWid
 import net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.crafting.areas.Areas;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.crafting.clevels.CraftingLevels;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.crafting.inventory.CraftInventory;
+import net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.crafting.inventory.CraftingWithdrawalPolicy;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.crafting.inventory.CraftInventory.Ingredient;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.crafting.inventory.CraftInventory.RecipeType;
 import net.runelite.client.plugins.microbot.util.bank.Rs2Bank;
@@ -290,15 +291,16 @@ public class CraftingScript extends KspManagedScript
 
         for (Ingredient ingredient : recipe.getIngredients())
         {
-            int desired = resolveWithdrawAmount(recipe, ingredient);
             int current = Rs2Inventory.count(ingredient.getItemName());
-            // The withdrawal target can be zero when the bank has no stock.
-            // Zero available items must not satisfy a required ingredient.
-            if (current >= desired && current >= ingredient.getAmount()) continue;
-
-            int amount = desired - current;
-            if (amount <= 0 || Rs2Bank.count(ingredient.getItemName()) <= 0)
+            int bankAvailable = Math.max(0, Rs2Bank.count(ingredient.getItemName()));
+            int amount = CraftingWithdrawalPolicy.additionalToWithdraw(
+                    recipe, ingredient, current, bankAvailable);
+            if (amount <= 0)
             {
+                // A completed partial gem batch can still be crafted when the
+                // bank runs out, but a missing tool or minimum recipe amount
+                // must never be treated as ready.
+                if (current >= ingredient.getAmount()) continue;
                 Microbot.status = "Missing crafting item: " + ingredient.getItemName();
                 return;
             }
@@ -318,36 +320,6 @@ public class CraftingScript extends KspManagedScript
 
         bankInventoryReset = false;
         Rs2Bank.closeBank();
-    }
-
-    private int resolveWithdrawAmount(CraftInventory recipe, Ingredient ingredient)
-    {
-        if (ingredient.isReusable())
-        {
-            return ingredient.getAmount();
-        }
-
-        Ingredient[] ingredients = recipe.getIngredients();
-        int reusableSlots = 0;
-        int consumableTypes = 0;
-        for (Ingredient candidate : ingredients)
-        {
-            if (candidate.isReusable())
-            {
-                reusableSlots += candidate.getAmount();
-            }
-            else
-            {
-                consumableTypes++;
-            }
-        }
-
-        int bankCount = Math.max(0, Rs2Bank.count(ingredient.getItemName()));
-        if (consumableTypes == 1)
-        {
-            return Math.min(28 - reusableSlots, bankCount);
-        }
-        return Math.min(ingredient.getAmount(), bankCount);
     }
 
     private boolean withdraw(String itemName, int amount)

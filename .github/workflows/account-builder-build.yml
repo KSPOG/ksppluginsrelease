@@ -223,7 +223,7 @@ jobs:
         working-directory: hub
         run: ./gradlew clean build -PpluginList=KspAccountBuilderPlugin --stacktrace --no-daemon
 
-      - name: Run nine Account Builder JUnit regression suites
+      - name: Run ten Account Builder JUnit regression suites
         shell: bash
         run: |
           set -euo pipefail
@@ -236,7 +236,7 @@ jobs:
           test -n "${PLUGIN_JAR}"
           curl --fail --location --silent --show-error --retry 3 https://repo.maven.apache.org/maven2/org/junit/platform/junit-platform-console-standalone/1.10.2/junit-platform-console-standalone-1.10.2.jar -o "${JUNIT_JAR}"
           mapfile -t TEST_FILES < <(find "${TEST_ROOT}" -type f -name '*Test.java' | sort)
-          test "${#TEST_FILES[@]}" -eq 9
+          test "${#TEST_FILES[@]}" -eq 10
           javac --release 11 -cp "${JUNIT_JAR}:${PLUGIN_JAR}" -d "${TEST_DIR}" "${TEST_FILES[@]}"
           java -jar "${JUNIT_JAR}" execute --class-path "${PLUGIN_JAR}:${TEST_DIR}" --scan-class-path="${TEST_DIR}" --reports-dir "${REPORT_DIR}" --details summary
           python3 - <<'PY'
@@ -246,7 +246,7 @@ jobs:
           assert reports, "JUnit produced no XML results"
           cases = [case for report in reports for case in ET.parse(report).iter("testcase")]
           actual = {case.attrib.get("classname", "").split(".")[-1] for case in cases}
-          expected = {"CraftingBankStallTrackerTest", "MeleeBankPolicyTest", "CraftingRecipeSupplyPolicyTest", "MiningRockRetryPolicyTest", "EssenceBankCompletionPolicyTest", "CraftingEssentialAffordabilityPolicyTest", "CraftingSupplyPriorityPolicyTest", "GeOfferCommitPolicyTest", "GeSupplyReceiptPolicyTest"}
+          expected = {"CraftingBankStallTrackerTest", "MeleeBankPolicyTest", "CraftingRecipeSupplyPolicyTest", "MiningRockRetryPolicyTest", "EssenceBankCompletionPolicyTest", "CraftingEssentialAffordabilityPolicyTest", "CraftingSupplyPriorityPolicyTest", "GeOfferCommitPolicyTest", "GeSupplyReceiptPolicyTest", "CraftingWithdrawalPolicyTest"}
           assert expected.issubset(actual), f"Missing executed JUnit suites: {sorted(expected - actual)}"
           failures = [case for case in cases if any(node.tag in ("failure", "error", "skipped") for node in case)]
           assert not failures, f"Failed, errored or skipped test cases: {len(failures)}"

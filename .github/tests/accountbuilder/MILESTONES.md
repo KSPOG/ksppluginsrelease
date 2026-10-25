@@ -109,3 +109,10 @@ Status: OPEN - observed on the running older DevLoader class generation; candida
 - Milestone 5 remains IN PROGRESS: confirm Crafting chisel and uncut-gem withdrawals, correct economy-aware buying/selling and task selection, avoid needless Melee and Rune Essence banking/teleportation, and prevent object/NPC click spam.
 - Milestone 6 remains PENDING: confirm loaded code generation and collect controlled live UI/log evidence for Crafting, GE, Melee, Rune Essence, Mining, interaction acknowledgement, pause/resume and progression.
 - The live Microbot client must not be stopped or hot-reloaded during an active task. Implement subsequent fixes on this isolated branch and validate before creating the next PR.
+
+## 2026-10-25 - Crafting batch withdrawal planner fix (development only)
+- Confirmed source-level defect: CraftingScript.resolveWithdrawAmount used only remaining bank stock to recalculate the desired inventory count after each partial withdrawal. A batch with 20 uncut sapphires already withdrawn and seven remaining in the bank incorrectly computed a desired total of seven and stopped early.
+- Added CraftingWithdrawalPolicy to account for the existing inventory, remaining bank stock, reusable chisel slot and jewellery ingredient batch requirements. CraftingScript now uses this policy and only treats a zero planned withdrawal as ready if the ingredient minimum is already in inventory.
+- Added CraftingWithdrawalPolicyTest with ten focused regression cases; updated GitHub Actions to require all ten JUnit suites. CI verification, plugin compilation and controlled live Crafting acceptance are still PENDING.
+- User-reported failure to withdraw chisel and uncut gems is not considered fully resolved solely by this partial-batch fix. Check bank withdraw mode, recipe selection, inventory acknowledgement, GE resupply and live UI at a safe handoff.
+- Preserve active Microbot gameplay; do not merge this runtime change into dev until safe to refresh DevLoader.
