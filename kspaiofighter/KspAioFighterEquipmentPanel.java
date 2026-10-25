@@ -1,6 +1,10 @@
 package net.runelite.client.plugins.microbot.kspaiofighter;
 
 import net.runelite.api.EquipmentInventorySlot;
+import net.runelite.api.Item;
+import net.runelite.api.ItemContainer;
+import net.runelite.api.ItemComposition;
+import net.runelite.api.gameval.InventoryID;
 import net.runelite.api.coords.WorldPoint;
 import net.runelite.client.game.ItemManager;
 import net.runelite.client.plugins.microbot.Microbot;
@@ -24,6 +28,7 @@ import javax.swing.ListCellRenderer;
 import javax.swing.ListSelectionModel;
 import javax.swing.SwingConstants;
 import javax.swing.SwingUtilities;
+import javax.swing.SwingWorker;
 import javax.swing.border.EmptyBorder;
 import javax.swing.event.DocumentEvent;
 import javax.swing.event.DocumentListener;
@@ -61,6 +66,7 @@ final class KspAioFighterEquipmentPanel extends PluginPanel
     private final JComboBox<KspAioFighterGearStyle> styleSelector = new JComboBox<>(KspAioFighterGearStyle.values());
     private final Map<EquipmentInventorySlot, JButton> slotButtons = new EnumMap<>(EquipmentInventorySlot.class);
     private final JLabel gearStatus = new JLabel(" ", SwingConstants.CENTER);
+    private final JButton grabEquippedButton = new JButton("Use equipped gear");
     private final JLabel areaStatus = new JLabel("No attack area selected", SwingConstants.CENTER);
     private final JLabel automationStatus = new JLabel("Stopped - press Start when ready", SwingConstants.CENTER);
     private final JButton startButton = new JButton("Start");
@@ -165,6 +171,12 @@ final class KspAioFighterEquipmentPanel extends PluginPanel
         gearActions.add(reset);
         gearActions.add(load);
         add(gearActions);
+
+        grabEquippedButton.setToolTipText("Save the items you are wearing to the selected combat setup only");
+        grabEquippedButton.addActionListener(e -> saveCurrentlyEquippedGear());
+        JPanel captureRow = darkPanel(new FlowLayout(FlowLayout.CENTER, 2, 0));
+        captureRow.add(grabEquippedButton);
+        add(captureRow);
 
         add(sectionTitle("Attack Area"));
         JPanel areaPanel = darkPanel(new BorderLayout(4, 6));
@@ -411,6 +423,95 @@ final class KspAioFighterEquipmentPanel extends PluginPanel
         if (slot == EquipmentInventorySlot.WEAPON && item.isTwoHanded()) settings.clear(style, EquipmentInventorySlot.SHIELD);
         dialog.dispose();
         refreshSlots();
+    }
+
+    /**
+     * Capture from the live WORN item container on Microbot's client thread.
+     * A SwingWorker keeps the RuneLite UI responsive while snapshotting.
+     */
+    private void saveCurrentlyEquippedGear()
+    {
+        if (!Microbot.isLoggedIn())
+        {
+            gearStatus.setText("Log in before capturing equipment.");
+            return;
+        }
+
+        // Freeze the style at click time: switching the combo box during loading
+        // must never overwrite another style's saved equipment.
+        final KspAioFighterGearStyle style = selectedStyle();
+        grabEquippedButton.setEnabled(false);
+        gearStatus.setText("Reading equipped items for " + style + "...");
+
+        new SwingWorker<Map<EquipmentInventorySlot, String>, Void>()
+        {
+            @Override
+            protected Map<EquipmentInventorySlot, String> doInBackground()
+            {
+                return Microbot.getClientThread().invoke(() -> {
+                    ItemContainer worn = Microbot.getClient().getItemContainer(InventoryID.WORN);
+                    if (worn == null || worn.getItems() == null)
+                    {
+                        throw new IllegalStateException("Worn equipment container is unavailable");
+                    }
+
+                    EnumMap<EquipmentInventorySlot, String> snapshot =
+                            new EnumMap<>(EquipmentInventorySlot.class);
+                    Item[] items = worn.getItems();
+                    for (EquipmentInventorySlot slot : KspAioFighterEquipmentSettings.CONFIGURABLE_SLOTS)
+                    {
+                        int index = slot.getSlotIdx();
+                        if (index < 0 || index >= items.length || items[index] == null
+                                || items[index].getId() < 0)
+                        {
+                            continue;
+                        }
+
+                        ItemComposition composition = Microbot.getClient()
+                                .getItemDefinition(items[index].getId());
+                        if (composition == null || composition.getName() == null
+                                || composition.getName().isBlank())
+                        {
+                            throw new IllegalStateException("Unable to resolve equipped item in " + pretty(slot));
+                        }
+                        snapshot.put(slot, composition.getName().trim());
+                    }
+                    return snapshot;
+                });
+            }
+
+            @Override
+            protected void done()
+            {
+                grabEquippedButton.setEnabled(true);
+                try
+                {
+                    Map<EquipmentInventorySlot, String> snapshot = get();
+                    if (snapshot == null || snapshot.isEmpty())
+                    {
+                        gearStatus.setText("No equipped items found. Setup not changed.");
+                        return;
+                    }
+
+                    settings.replaceStyle(style, snapshot);
+                    if (style == selectedStyle())
+                    {
+                        refreshSlots();
+                    }
+                    gearStatus.setText("Saved " + snapshot.size() + " worn items to " + style);
+                    // The equipment index loads only item sprites; it does not
+                    // affect the authoritative names saved above.
+                    preloadSelectedItemSprites();
+                }
+                catch (Exception ex)
+                {
+                    gearStatus.setText("Could not capture worn equipment.");
+                    JOptionPane.showMessageDialog(KspAioFighterEquipmentPanel.this,
+                            "The equipment setup was not changed. " + ex.getMessage(),
+                            "AIO Fighter Equipment", JOptionPane.ERROR_MESSAGE);
+                }
+            }
+        }.execute();
     }
 
     private void resetStyle()
