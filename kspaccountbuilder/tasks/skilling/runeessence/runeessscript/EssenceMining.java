@@ -66,6 +66,7 @@ public class EssenceMining extends KspManagedScript
     private long lastMiningProgressAtMs;
     private long pendingBankActionAtMs;
     private int pendingBankEmptySlots = -1;
+    private boolean bankCloseRequested;
     private long portalSearchStartedAtMs;
     private int portalFallbackIndex = -1;
     private volatile EssenceState state = EssenceState.PREPARING;
@@ -79,6 +80,7 @@ public class EssenceMining extends KspManagedScript
         pendingWorldAction = null;
         pendingBankActionAtMs = 0L;
         pendingBankEmptySlots = -1;
+        bankCloseRequested = false;
         state = EssenceState.PREPARING;
         portalSearchStartedAtMs = 0L;
         portalFallbackIndex = -1;
@@ -136,7 +138,7 @@ public class EssenceMining extends KspManagedScript
 
         clearEssenceMiningAction();
         resetPortalSearch();
-        if (Rs2Inventory.isFull() || !hasPickaxe())
+        if (EssenceBankCompletionPolicy.shouldContinueBanking(state, Rs2Inventory.isFull(), hasPickaxe()))
         {
             bankInventory();
             return;
@@ -165,6 +167,20 @@ public class EssenceMining extends KspManagedScript
         }
 
         KspWalkerGuard.clear(WALK_KEY_BANK);
+        if (bankCloseRequested)
+        {
+            if (Rs2Bank.isOpen())
+            {
+                if (isWorldActionPending("close-bank")) return;
+                Rs2Bank.closeBank();
+                markWorldAction("close-bank");
+                return;
+            }
+            bankCloseRequested = false;
+            state = EssenceState.PREPARING;
+            status = "Rune essence banking complete";
+            return;
+        }
         if (!Rs2Bank.isOpen())
         {
             if (isWorldActionPending("open-bank")) return;
@@ -196,21 +212,18 @@ public class EssenceMining extends KspManagedScript
         if (isBankActionPending()) return;
 
         int before = Rs2Inventory.emptySlotCount();
-        boolean deposited;
-        if (Rs2Inventory.hasItem(pickaxeToKeep))
+        boolean keepPickaxe = Rs2Inventory.hasItem(pickaxeToKeep);
+        // Finish depositing before closing; one free slot is insufficient.
+        if (EssenceBankCompletionPolicy.readyToClose(before, keepPickaxe))
         {
-            deposited = Rs2Bank.depositAllExcept(pickaxeToKeep);
+            bankCloseRequested = true;
+            return;
         }
-        else
-        {
-            deposited = Rs2Bank.depositAll();
-        }
-        if (deposited) markBankAction(before);
 
-        if (!Rs2Inventory.isFull())
-        {
-            Rs2Bank.closeBank();
-        }
+        boolean deposited = keepPickaxe
+                ? Rs2Bank.depositAllExcept(pickaxeToKeep)
+                : Rs2Bank.depositAll();
+        if (deposited) markBankAction(before);
     }
 
     private void walkToAndTeleportWithAubury()
@@ -736,6 +749,9 @@ public class EssenceMining extends KspManagedScript
     @Override
     public void shutdown()
     {
+        bankCloseRequested = false;
+        pendingBankActionAtMs = 0L;
+        pendingBankEmptySlots = -1;
         clearEssenceMiningAction();
         resetPortalSearch();
         clearAuburyTeleportTransition();

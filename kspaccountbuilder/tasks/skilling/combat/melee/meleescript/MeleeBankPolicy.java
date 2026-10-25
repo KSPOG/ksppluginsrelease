@@ -11,6 +11,16 @@ final class MeleeBankPolicy
 {
     private MeleeBankPolicy() {}
 
+    static boolean inspectionSatisfied(boolean alreadySatisfied, boolean confirmedCombat)
+    {
+        return alreadySatisfied || confirmedCombat;
+    }
+
+    static boolean shouldInspectOptionalGear(boolean satisfied, boolean currentlyFighting)
+    {
+        return !satisfied && !currentlyFighting;
+    }
+
     static boolean needsOptionalGearBank(boolean usableWeaponPresent, boolean usableBankWeaponKnown)
     {
         return !usableWeaponPresent && usableBankWeaponKnown;

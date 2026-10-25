@@ -52,6 +52,7 @@ public class CraftingScript extends KspManagedScript
     private volatile Areas selectedFurnaceArea = Areas.EDGE_FURNACE;
     private boolean progressiveCrafting = true;
     private boolean debugLogging;
+    private long lastWorkerErrorLogAtMs;
     private long lastActionAtMs;
     private boolean expectingXpDrop;
     private boolean leatherBatchActive;
@@ -90,6 +91,13 @@ public class CraftingScript extends KspManagedScript
 
         mainScheduledFuture = scheduledExecutorService.scheduleWithFixedDelay(() ->
         {
+            try
+            {
+            // Track scheduled worker activity before any early-return guard.
+            // This helps distinguish a stopped worker from repeated skipped ticks.
+            KspTaskDebug.throttled(log, debugLogging, "Crafting", "worker-heartbeat", 15_000L,
+                    "worker tick | state={} paused={}", state, KspAccountBuilderPauseGate.isPaused());
+
             if (KspAccountBuilderPauseGate.isPaused() || !super.run() || !Microbot.isLoggedIn())
             {
                 return;
@@ -161,6 +169,18 @@ public class CraftingScript extends KspManagedScript
                     ? CraftingState.CRAFTING_LEATHER
                     : CraftingState.CUTTING_GEMS;
             craftFromInventory(targetRecipe);
+            }
+            catch (Exception exception)
+            {
+                // An uncaught scheduled exception would otherwise stop all future ticks.
+                // Keep the worker alive and rate-limit stack traces.
+                long now = System.currentTimeMillis();
+                if (lastWorkerErrorLogAtMs == 0L || now - lastWorkerErrorLogAtMs >= 30_000L)
+                {
+                    lastWorkerErrorLogAtMs = now;
+                    log.error("[KSP Crafting] Scheduled worker failed; retrying: state={} recipe={}", state, targetRecipe, exception);
+                }
+            }
         }, 0L, LOOP_DELAY_MS, TimeUnit.MILLISECONDS);
 
         return true;
@@ -204,16 +224,8 @@ public class CraftingScript extends KspManagedScript
 
     private boolean hasRecipeResources(CraftInventory recipe)
     {
-        for (Ingredient ingredient : recipe.getIngredients())
-        {
-            int available = Rs2Inventory.count(ingredient.getItemName())
-                    + Math.max(0, Rs2Bank.count(ingredient.getItemName()));
-            if (available < ingredient.getAmount())
-            {
-                return false;
-            }
-        }
-        return true;
+        return net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.crafting.inventory.CraftingRecipeSupplyPolicy.hasIngredients(
+                recipe, itemName -> Rs2Inventory.count(itemName) + Math.max(0, Rs2Bank.count(itemName)));
     }
 
     private boolean hasRequiredInventory(CraftInventory recipe)
@@ -239,13 +251,15 @@ public class CraftingScript extends KspManagedScript
             Microbot.status = "Walking to nearest bank";
             if (!Rs2Player.isMoving())
             {
-                if (!isWorldActionPending("open-bank") && Rs2Bank.openBank())
+                // Both bank-opening strategies share one interaction cooldown.
+                // Never bypass a pending bank click through the walking fallback.
+                if (!isWorldActionPending("open-bank"))
                 {
+                    if (!Rs2Bank.openBank())
+                    {
+                        Rs2Bank.walkToBankAndUseBank();
+                    }
                     markWorldAction("open-bank");
-                }
-                else
-                {
-                    Rs2Bank.walkToBankAndUseBank();
                 }
             }
             return;
@@ -259,7 +273,17 @@ public class CraftingScript extends KspManagedScript
 
         if (!bankInventoryReset)
         {
-            Rs2Bank.depositAll();
+            // Do not withdraw supplies until the bank has actually deposited
+            // the previous inventory. A dispatched click is not confirmation.
+            if (Rs2Inventory.emptySlotCount() < 28)
+            {
+                if (!isWorldActionPending("deposit-all"))
+                {
+                    Rs2Bank.depositAll();
+                    markWorldAction("deposit-all");
+                }
+                return;
+            }
             bankInventoryReset = true;
             return;
         }
@@ -268,7 +292,9 @@ public class CraftingScript extends KspManagedScript
         {
             int desired = resolveWithdrawAmount(recipe, ingredient);
             int current = Rs2Inventory.count(ingredient.getItemName());
-            if (current >= desired) continue;
+            // The withdrawal target can be zero when the bank has no stock.
+            // Zero available items must not satisfy a required ingredient.
+            if (current >= desired && current >= ingredient.getAmount()) continue;
 
             int amount = desired - current;
             if (amount <= 0 || Rs2Bank.count(ingredient.getItemName()) <= 0)
@@ -277,8 +303,12 @@ public class CraftingScript extends KspManagedScript
                 return;
             }
 
-            if (!isInventoryActionPending()
-                    && withdraw(ingredient.getItemName(), amount)) {
+            // Record every withdrawal attempt, including unsuccessful dispatches.
+            // Otherwise a false return causes another bank click every 100 ms.
+            // The existing inventory acknowledgement or timeout permits a retry.
+            if (!isInventoryActionPending())
+            {
+                withdraw(ingredient.getItemName(), amount);
                 markInventoryAction(ingredient.getItemName(), current);
             }
             return;
@@ -544,7 +574,10 @@ public class CraftingScript extends KspManagedScript
 
     private boolean isCraftingProductionWidgetOpen(CraftInventory recipe)
     {
-        if (recipe == null) return false;
+        // Bank item widgets must not be mistaken for Crafting production dialogs.
+        // Otherwise the script can repeatedly attempt Make-All while the bank
+        // is open instead of withdrawing its chisel and uncut gems.
+        if (recipe == null || Rs2Bank.isOpen()) return false;
         if (recipe.requiresFurnace())
         {
             return Rs2Widget.isGoldCraftingWidgetOpen()

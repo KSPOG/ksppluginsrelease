@@ -601,6 +601,21 @@ public class KspAccountBuilderPlugin extends Plugin
         }
 
         String taskName = script.getCurrentTaskName();
+
+        // The EssenceMining worker may be inside a synchronous Rs2Walker call
+        // when Aubury teleports the player into the essence mine. Cancel its
+        // obsolete surface routes from the independent game-tick callback,
+        // rather than waiting for the worker to return and notice the region.
+        // Never cancel the portal route used to leave the mine.
+        if ("RUNE_ESSENCE".equals(taskName)
+                && Microbot.getClient() != null
+                && Microbot.getClient().getLocalPlayer() != null
+                && Microbot.getClient().getLocalPlayer().getWorldLocation() != null
+                && Microbot.getClient().getLocalPlayer().getWorldLocation().getRegionID() == 11595)
+        {
+            KspWalkerGuard.clear("Rune Essence:aubury");
+            KspWalkerGuard.clear("Rune Essence:bank");
+        }
         boolean useAntiban = config.useAntiban();
         int chance = Math.max(0, Math.min(100, config.antibanChancePercent()));
         String stateKey = taskName + '|' + useAntiban + '|' + chance;

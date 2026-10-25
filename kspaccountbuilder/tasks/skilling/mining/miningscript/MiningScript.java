@@ -117,6 +117,8 @@ public class MiningScript extends KspManagedScript
     private long lastWebWalkAtMs;
     private long lastObjectInteractionAtMs;
     private long pendingObjectInteractionAtMs;
+    private long lastUnavailableRockAtMs;
+    private long lastUnavailableRockReportAtMs;
     private long lastUnderAttackAtMs;
     private long lastBankActionAtMs;
     private long pendingBankInventoryActionAtMs;
@@ -147,6 +149,8 @@ public class MiningScript extends KspManagedScript
         this.startingTargetRockInitialized = false;
         this.randomMidTierRock = null;
 
+        lastUnavailableRockAtMs = 0L;
+        lastUnavailableRockReportAtMs = 0L;
         mainScheduledFuture = scheduledExecutorService.scheduleWithFixedDelay(() ->
         {
             if (KspAccountBuilderPauseGate.isPaused() || !super.run() || !Microbot.isLoggedIn())
@@ -164,6 +168,8 @@ public class MiningScript extends KspManagedScript
             if (desiredArea != targetArea)
             {
                 targetArea = desiredArea;
+                lastUnavailableRockAtMs = 0L;
+                lastUnavailableRockReportAtMs = 0L;
                 debug("Switching mining area to {} for mining level {}", targetArea.getDisplayName(), miningLevel);
             }
 
@@ -623,6 +629,7 @@ public class MiningScript extends KspManagedScript
         if (!canStartMiningInTargetArea(now)) return;
         if (now - lastObjectInteractionAtMs < OBJECT_INTERACTION_COOLDOWN_MS) return;
 
+        if (!MiningRockRetryPolicy.shouldSearch(now, lastUnavailableRockAtMs)) return;
         Rs2TileObjectModel rock = findNearestRockInTargetArea(miningLevel);
         if (rock == null || !canStartMiningInTargetArea(now)) return;
 
@@ -734,8 +741,18 @@ public class MiningScript extends KspManagedScript
         Rs2TileObjectModel rock = findNearestMatchingRock(searchCenter, targetRock);
         if (rock == null)
         {
-            Microbot.status = "No reachable " + (targetRock != null ? targetRock.getDisplayName() : "target") + " rock found";
-            debug("No reachable {} rock found inside {}", targetRock != null ? targetRock.getDisplayName() : "target", targetArea.getDisplayName());
+            lastUnavailableRockAtMs = System.currentTimeMillis();
+            Microbot.status = "Waiting for " + (targetRock != null ? targetRock.getDisplayName() : "target") + " rocks to respawn";
+            if (MiningRockRetryPolicy.shouldReportUnavailable(lastUnavailableRockAtMs, lastUnavailableRockReportAtMs))
+            {
+                lastUnavailableRockReportAtMs = lastUnavailableRockAtMs;
+                debug("No reachable {} rock found inside {}; waiting for respawn",
+                        targetRock != null ? targetRock.getDisplayName() : "target", targetArea.getDisplayName());
+            }
+        }
+        else
+        {
+            lastUnavailableRockAtMs = 0L;
         }
 
         return rock;

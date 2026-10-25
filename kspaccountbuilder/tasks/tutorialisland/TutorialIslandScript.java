@@ -911,11 +911,23 @@ public class TutorialIslandScript extends KspManagedScript
         }
 
         KspWalkerGuard.clearActiveWalker("ksp_account_builder_survival_expert");
+
+        // This direct NPC interaction previously bypassed the tutorial's
+        // existing acknowledgement guard and could issue Talk-to repeatedly
+        // while the first click was still being processed.
+        String interactionKey = "npc:survival-expert";
+        if (isTutorialInteractionPending(interactionKey)
+                || Rs2Player.isMoving()
+                || Rs2Player.isAnimating()
+                || Rs2Player.isInteracting())
+        {
+            return false;
+        }
         if (!npc.click("Talk-to"))
         {
             return false;
         }
-
+        markTutorialInteraction(interactionKey);
         return true;
     }
 
@@ -1029,7 +1041,12 @@ public class TutorialIslandScript extends KspManagedScript
 
         if (prepareTutorialObjectInteraction(ladder, 4))
         {
-            ladder.click("Climb-down");
+            // Do not dispatch another ladder click while the previous action
+            // is awaiting movement or the tutorial's state transition.
+            if (readyForAction() && ladder.click("Climb-down"))
+            {
+                markTutorialInteraction("object:9726:Climb-down");
+            }
         }
     }
 
@@ -1077,18 +1094,38 @@ public class TutorialIslandScript extends KspManagedScript
     {
         if (Rs2Inventory.contains("Bronze bar") || Rs2Player.isAnimating()) return;
         Rs2TileObjectModel furnace = tutorialObject(ObjectID.FURNACE_10082);
-        if (!prepareTutorialObjectInteraction(furnace, 4)) return;
+        if (!prepareTutorialObjectInteraction(furnace, 4) || !readyForAction()) return;
+
+        // Avoid repeatedly using ore on the furnace while the previous
+        // interaction is being processed or the smelting animation begins.
+        if (!Rs2Inventory.hasItem(ItemID.TIN_ORE)
+                && !Rs2Inventory.hasItem(ItemID.COPPER_ORE))
+        {
+            return;
+        }
+
         int ore = Rs2Inventory.hasItem(ItemID.TIN_ORE) ? ItemID.TIN_ORE : ItemID.COPPER_ORE;
         Rs2Inventory.useItemOnObject(ore, furnace.getId());
+        markTutorialInteraction("object:furnace:smelt-bronze");
     }
 
     private void openTutorialAnvil()
     {
         if (Rs2Widget.isSmithingWidgetOpen() || Rs2Player.isAnimating()) return;
         Rs2TileObjectModel anvil = tutorialObject("Anvil");
-        if (!prepareTutorialObjectInteraction(anvil, 4)) return;
-        if (Rs2Inventory.hasItem(ItemID.BRONZE_BAR)) Rs2Inventory.useItemOnObject(ItemID.BRONZE_BAR, anvil.getId());
-        else anvil.click("Smith");
+        if (!prepareTutorialObjectInteraction(anvil, 4) || !readyForAction()) return;
+
+        // Wait for the previous interaction to be acknowledged before
+        // attempting another item-on-object or Smith interaction.
+        if (Rs2Inventory.hasItem(ItemID.BRONZE_BAR))
+        {
+            Rs2Inventory.useItemOnObject(ItemID.BRONZE_BAR, anvil.getId());
+            markTutorialInteraction("object:anvil:bronze-bar");
+        }
+        else if (anvil.click("Smith"))
+        {
+            markTutorialInteraction("object:anvil:Smith");
+        }
     }
 
     private void smithTutorialDagger()

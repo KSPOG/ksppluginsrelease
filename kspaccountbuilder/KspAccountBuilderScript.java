@@ -198,6 +198,10 @@ public class KspAccountBuilderScript extends KspManagedScript
             taskStarted = false;
             orderedComplete = true;
             manualPaused = true;
+            // The ordered queue has finished. Discard any interrupted
+            // Crafting resupply so it cannot restart a task after completion.
+            // This does not change the queue's completed or paused state.
+            pendingResupplyReturnTask = null;
             Microbot.status = "Ordered task queue completed";
             return true;
         }
@@ -209,6 +213,10 @@ public class KspAccountBuilderScript extends KspManagedScript
         orderedLastSampleMs = System.currentTimeMillis();
         pendingTask = null;
         preselectedHandoffTask = null;
+        // The ordered queue takes precedence over an interrupted Crafting
+        // resupply. Clear the continuation only after the next queued task
+        // has successfully completed its multi-tick bank handoff.
+        pendingResupplyReturnTask = null;
         Microbot.status = "Queue: " + next.name();
         return true;
     }
@@ -286,6 +294,11 @@ public class KspAccountBuilderScript extends KspManagedScript
     private boolean debugLoggingApplied;
     private volatile BuilderTask pendingTask;
     private BuilderTask preselectedHandoffTask;
+    // Remember an interrupted Crafting task across its GE resupply handoff.
+    // Set only after the Crafting-to-GE_BUY handoff actually commits, and
+    // consume only after confirmed resources permit Crafting to resume.
+    // Never override an ordered queue or forced single-skill selection.
+    private BuilderTask pendingResupplyReturnTask;
     private BuilderTask singleSkillRecoveryTask;
     private BuilderTask auditedSingleSkillTask;
     private BuilderTask pendingSingleSkillAuditTask;
@@ -356,6 +369,8 @@ public class KspAccountBuilderScript extends KspManagedScript
             syncDebugLogging(false);
             if (manualPaused)
             {
+                // Paused time must never count toward a Crafting bank stall.
+                craftingBankStallTracker.reset();
                 if (!manualPauseApplied)
                 {
                     manualPauseApplied = true;
@@ -408,6 +423,7 @@ public class KspAccountBuilderScript extends KspManagedScript
             updateWindowTitle();
             if (isAnyBreakActive() || !Microbot.isLoggedIn() || !isReadyAfterLoginHandoff())
             {
+                craftingBankStallTracker.reset();
                 maybeLogStatus();
                 return;
             }
@@ -477,6 +493,9 @@ public class KspAccountBuilderScript extends KspManagedScript
         pendingTask = null;
         preselectedHandoffTask = null;
         singleSkillRecoveryTask = null;
+        // A new plugin session must never inherit an interrupted Crafting
+        // resupply from the previous session or account.
+        pendingResupplyReturnTask = null;
         auditedSingleSkillTask = null;
         pendingSingleSkillAuditTask = null;
         singleSkillAuditBankEpoch = -1;
@@ -725,9 +744,21 @@ public class KspAccountBuilderScript extends KspManagedScript
         {
             if (!switchToTaskWithResources()) return;
         }
-        if (!isSingleSkillTaskForced() && !hasResourcesForTask(currentTask) && !switchToTaskWithResources())
+        // GE_BUY must finish reconciling, collecting and auditing its
+        // outstanding purchases even after spending the available GP.
+        // Resource eligibility determines whether GE_BUY may be started;
+        // it must not interrupt an already-running purchase transaction.
+        // Once complete, handleCompletedTask() performs the verified
+        // Crafting continuation or the normal fallback handoff.
+        // Sample every active scheduler cycle, including cycles on other tasks,
+        // so watchdog state cannot leak across completed task transitions.
+        boolean craftingStalled = isCraftingBankStalled();
+        if (!isSingleSkillTaskForced()
+                && !(currentTask == BuilderTask.GE_BUY && taskStarted)
+                && (craftingStalled || !hasResourcesForTask(currentTask))
+                && !switchToTaskWithResources())
         {
-            taskStarted = false;
+            if (!craftingStalled) taskStarted = false;
             return;
         }
         if (processOrderedTaskCompletion()) return;
@@ -803,7 +834,35 @@ public class KspAccountBuilderScript extends KspManagedScript
                 if (forced || !strongholdScript.isComplete()) return false;
                 markOneTimeComplete(KspAccountTaskCache.OneTimeTask.STRONGHOLD_OF_SECURITY);
                 return finishAndSwitch();
-            case GE_BUY: return !forced && buyScript.isComplete() && finishAndSwitch();
+            case GE_BUY:
+                if (forced || !buyScript.isComplete()) return false;
+
+                // Resume Crafting only when this GE visit was initiated by a
+                // committed Crafting resource handoff and the purchased
+                // materials are now available for an executable recipe.
+                if (pendingResupplyReturnTask == BuilderTask.CRAFTING
+                        && !isOrderedQueueActive()
+                        && !isSingleSkillTaskForced()
+                        && Microbot.getClient() != null
+                        && hasResourcesForTask(BuilderTask.CRAFTING)
+                        )
+                {
+                    // Reuse the existing multi-tick bank handoff. Its
+                    // committed transition clears pendingResupplyReturnTask;
+                    // do not directly restart the Crafting script here.
+                    preselectedHandoffTask = BuilderTask.CRAFTING;
+                    debug("GE resupply complete; returning to Crafting with verified resources");
+                    return finishAndSwitch();
+                }
+
+                // Failed or incomplete resupply must not repeatedly force
+                // Crafting or redirect the ordered task queue.
+                if (pendingResupplyReturnTask != null)
+                {
+                    debug("GE resupply did not establish usable Crafting resources; falling back to available tasks");
+                    pendingResupplyReturnTask = null;
+                }
+                return finishAndSwitch();
             case GE_SELL: return !forced && sellScript.isComplete() && finishAndSwitch();
             default: return false;
         }
@@ -1364,8 +1423,8 @@ public class KspAccountBuilderScript extends KspManagedScript
 
     private boolean hasCraftingRecipeResources(CraftInventory recipe)
     {
-        for (Ingredient ingredient : recipe.getIngredients()) if (stored(ingredient.getItemName()) < ingredient.getAmount()) return false;
-        return true;
+        return net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.crafting.inventory.CraftingRecipeSupplyPolicy.hasIngredients(
+                recipe, this::stored);
     }
 
     private boolean handleUnexpectedEssenceMineRecovery()
@@ -1434,6 +1493,52 @@ public class KspAccountBuilderScript extends KspManagedScript
     private boolean hasAnyGeBuyResourcesAvailable() { return Buy.hasAnyGeBuyRequirementMissing() && buyScript.canAffordMissingBuys(); }
     private boolean hasAnyOutdatedToolAvailable() { return hasOutdatedTool(Buy.PICKAXE_NAMES, resolveDesiredPickaxeForSellingTask()) || hasOutdatedTool(Buy.AXE_NAMES, resolveDesiredAxeForSellingTask()); }
     private boolean hasOutdatedTool(String[] tools, String desired) { for (String tool : tools) if (!tool.equalsIgnoreCase(desired) && hasAnywhere(tool)) return true; return false; }
+    // The inactivity timer is independently covered by JUnit regression tests.
+    private final CraftingBankStallTracker craftingBankStallTracker = new CraftingBankStallTracker();
+
+    private boolean isCraftingBankStalled()
+    {
+        if (currentTask != BuilderTask.CRAFTING
+                || !taskStarted
+                || manualPaused
+                || isAnyBreakActive()
+                || !Microbot.isLoggedIn()
+                || Microbot.getClient() == null
+                || !Rs2Bank.isOpen()
+                || Rs2Player.isMoving()
+                || Rs2Player.isAnimating())
+        {
+            craftingBankStallTracker.reset();
+            return false;
+        }
+
+        CraftInventory recipe = craftingScript.getTargetRecipe();
+        if (recipe == null)
+        {
+            craftingBankStallTracker.reset();
+            return false;
+        }
+
+        // Only actual inventory, XP or recipe changes prove progress.
+        // Bank stock alone does not prove a withdrawal succeeded.
+        int signature = recipe.ordinal();
+        signature = 31 * signature + Microbot.getClient().getSkillExperience(Skill.CRAFTING);
+        signature = 31 * signature + Rs2Inventory.emptySlotCount();
+        for (Ingredient ingredient : recipe.getIngredients())
+        {
+            signature = 31 * signature + Rs2Inventory.count(ingredient.getItemName(), true);
+        }
+
+        if (!craftingBankStallTracker.sample(System.currentTimeMillis(), true, signature))
+        {
+            return false;
+        }
+
+        debug("Crafting bank stalled after {} seconds without XP or inventory progress; recipe={} state={}",
+                CraftingBankStallTracker.TIMEOUT_MS / 1_000L, recipe, craftingScript.getState());
+        return true;
+    }
+
     private int stored(String itemName) { return itemName == null ? 0 : Rs2Inventory.count(itemName, true) + Math.max(0, Rs2Bank.count(itemName)); }
     private boolean hasAnywhere(String itemName) { return itemName != null && (Rs2Equipment.isWearing(itemName) || stored(itemName) > 0); }
     private String resolveDesiredPickaxeForSellingTask() { return Buy.resolveDesiredPickaxeNameForGear(); }
@@ -1467,6 +1572,23 @@ public class KspAccountBuilderScript extends KspManagedScript
         activeSingleSkillSelection = null;
         pendingRandomTaskSelection = false;
         awaitingNextActivityStart = false;
+        // Record a Crafting continuation only after the multi-tick bank
+        // handoff has successfully committed its replacement task.
+        // Never override an ordered queue or forced single-skill recovery.
+        if (currentTask == BuilderTask.CRAFTING
+                && nextTask == BuilderTask.GE_BUY
+                && !isOrderedQueueActive()
+                && !isSingleSkillTaskForced())
+        {
+            pendingResupplyReturnTask = BuilderTask.CRAFTING;
+            debug("Remembering interrupted Crafting task for post-GE resumption");
+        }
+        else if (nextTask != BuilderTask.GE_BUY)
+        {
+            // An unrelated committed task transition invalidates any
+            // previously remembered Crafting continuation.
+            pendingResupplyReturnTask = null;
+        }
         debug("Switching task from {} to {} because resources are unavailable", currentTask, nextTask);
         currentTask = nextTask;
         awaitingActivitySwitchTimerStart = canUseActivitySwitchTimer();
@@ -1497,6 +1619,10 @@ public class KspAccountBuilderScript extends KspManagedScript
         currentTask = nextTask;
         awaitingActivitySwitchTimerStart = canUseActivitySwitchTimer();
         nextActivitySwitchAtMillis = -1L;
+        // A completed random or manual task switch supersedes any previous
+        // Crafting resupply continuation. Clear this state only after the
+        // multi-tick bank handoff has successfully committed the new task.
+        pendingResupplyReturnTask = null;
         debug("Selected next task after bank cleanup | currentTask={}", currentTask);
         return true;
     }
@@ -1521,6 +1647,20 @@ public class KspAccountBuilderScript extends KspManagedScript
             debug("Prioritizing GE_BUY to replenish melee food before resuming training");
             return BuilderTask.GE_BUY;
         }
+        // Prioritize essential Crafting resupply before unrelated training.
+        // Ordered queue requests have already been evaluated above; forced
+        // single-skill mode retains its dedicated resource recovery logic.
+        if (excluded == BuilderTask.CRAFTING
+                && Microbot.getClient() != null
+                && Microbot.getClient().getRealSkillLevel(Skill.CRAFTING) >= 20
+                && (Buy.isGemCuttingSupplyMissing()
+                    || !Buy.hasNamedItemAnywhere(Buy.CHISEL_NAME))
+                && hasResourcesForTaskSelection(BuilderTask.GE_BUY))
+        {
+            debug("Prioritizing affordable GE_BUY for missing Crafting gems or chisel");
+            return BuilderTask.GE_BUY;
+        }
+
         return selectTaskWithSupportFallback(excluded, true, false);
     }
 
@@ -1627,6 +1767,10 @@ public class KspAccountBuilderScript extends KspManagedScript
     {
         if (!stopCurrentTaskForHandoff(nextTask) || !prepareForTaskSwitchAtBank()) return false;
         currentTask = nextTask;
+        // A successfully committed direct task switch supersedes any
+        // remembered Crafting resupply continuation. Do not clear this
+        // during bank preparation, as the handoff can require multiple ticks.
+        pendingResupplyReturnTask = null;
         debug("Switching task to {}", currentTask);
         return true;
     }

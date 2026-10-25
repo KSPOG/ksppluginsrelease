@@ -327,7 +327,13 @@ public abstract class SimpleQuestScript extends KspManagedScript
         {
             KspWalkerGuard.clear(key);
             KspWalkerGuard.clearActiveWalker(questName + ":reachable-npc:" + name);
-            if (!Rs2Player.isMoving())
+            // A reachable NPC may already be processing the previous Talk-to.
+            // Wait for movement, animation and interaction to finish before
+            // dispatching another click. The existing actionSent() cooldown
+            // continues to handle the initial dialogue-opening delay.
+            if (!Rs2Player.isMoving()
+                    && !Rs2Player.isAnimating()
+                    && !Rs2Player.isInteracting())
             {
                 state = QuestTaskState.INTERACTING;
                 setStatus("Talking to " + name);
@@ -350,7 +356,14 @@ public abstract class SimpleQuestScript extends KspManagedScript
             setStatus("Searching for " + name);
             return;
         }
-        if (Rs2Player.isMoving() || !npc.isReachable()) return;
+        // The fallback NPC interaction must respect an action already in
+        // progress, just like the nearby reachable-NPC branch. Otherwise the
+        // next script tick can dispatch another Talk-to during an animation
+        // or active interaction.
+        if (Rs2Player.isMoving()
+                || Rs2Player.isAnimating()
+                || Rs2Player.isInteracting()
+                || !npc.isReachable()) return;
         KspWalkerGuard.clear(key);
         state = QuestTaskState.INTERACTING;
         setStatus("Talking to " + name);
@@ -360,6 +373,15 @@ public abstract class SimpleQuestScript extends KspManagedScript
     protected void interactObject(int objectId, String action, WorldPoint destination)
     {
         if (!walkTo(action, destination, 3)) return;
+
+        // The action cooldown alone is insufficient when an object interaction
+        // takes longer than 1.2 seconds. Do not issue another click while
+        // the previous interaction is still moving or animating the player.
+        if (Rs2Player.isMoving() || Rs2Player.isAnimating() || Rs2Player.isInteracting())
+        {
+            return;
+        }
+
         state = QuestTaskState.INTERACTING;
         setStatus(action + " quest object");
         if (Rs2GameObject.interact(objectId, action)) actionSent();

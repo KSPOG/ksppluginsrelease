@@ -110,6 +110,7 @@ public final class Buy
                 || hasFishingBuyRequirementMissingInBank()
                 || isCraftingBuyMissingInBank()
                 || isJewelleryBuyMissingInBank()
+                || isGemCuttingSupplyMissing()
                 || isMeleeFoodBuyMissing()
                 || isSmithingOreBuyMissingAnywhere();
     }
@@ -148,6 +149,30 @@ public final class Buy
                 && (Rs2Bank.count(LEATHER_NAME) < leatherNeeded
                 || Rs2Bank.count(THREAD_NAME) <= 0
                 || Rs2Bank.count(NEEDLE_NAME) <= 0);
+    }
+
+    /**
+     * Gem cutting becomes available at Crafting level 20. Replenishment is
+     * unnecessary while any supported uncut gem remains in inventory or bank.
+     * The GE buyer determines which unlocked gem is affordable and accounts
+     * for outstanding offers before submitting a purchase.
+     */
+    public static boolean isGemCuttingSupplyMissing()
+    {
+        if (Microbot.getClient().getRealSkillLevel(Skill.CRAFTING) < 20)
+        {
+            return false;
+        }
+
+        int craftingLevel = Microbot.getClient().getRealSkillLevel(Skill.CRAFTING);
+
+        // Only gems for unlocked recipes can satisfy the Crafting supply
+        // requirement. For example, an uncut ruby at level 20 must not
+        // prevent purchasing sapphires that the account can actually cut.
+        return countItemAnywhere("Uncut sapphire") <= 0
+                && (craftingLevel < 27 || countItemAnywhere("Uncut emerald") <= 0)
+                && (craftingLevel < 34 || countItemAnywhere("Uncut ruby") <= 0)
+                && (craftingLevel < 43 || countItemAnywhere("Uncut diamond") <= 0);
     }
 
     public static boolean isJewelleryBuyMissingInBank()

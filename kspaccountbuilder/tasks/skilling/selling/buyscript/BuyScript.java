@@ -376,6 +376,7 @@ public class BuyScript extends KspManagedScript {
                 || !this.hasHammerAnywhere()
                 || !this.hasTinderboxAnywhere()
                 || this.hasFishingBuyRequirementMissing()
+                || this.hasFishingSupplyNeed()
                 || this.hasSmithingOreNeed();
     }
 
@@ -399,14 +400,17 @@ public class BuyScript extends KspManagedScript {
                 budget.getDetails()
         );
 
-        if (budget.hasEnoughCoins()) {
+        // Essential Crafting inputs may be affordable even when unrelated
+        // tool upgrades, fishing supplies and smithing ores are not.
+        // The GE purchase executor must apply the same affordability policy
+        // as task selection to avoid an immediate insufficient-GP handoff.
+        if (budget.hasEnoughCoins() || this.canAffordEssentialCraftingResupply()) {
             return true;
         }
 
         Microbot.status = "Not enough GP for GE Buy";
         this.complete = true;
         this.insufficientCoinsForMissingBuys = true;
-        this.bankToolsAudited = true;
         return false;
     }
 
@@ -435,6 +439,9 @@ public class BuyScript extends KspManagedScript {
         this.addFishingSupplyToBudgetIfMissing(budget, RING_MOULD_NAME);
         this.addFishingSupplyToBudgetIfMissing(budget, NECKLACE_MOULD_NAME);
         this.addFishingSupplyToBudgetIfMissing(budget, CHISEL_NAME);
+        // Budget the selected unlocked gem through the existing supply-price
+        // and pending-offer checks; never budget all gem varieties at once.
+        this.addFishingSupplyToBudgetIfMissing(budget, this.selectGemCuttingSupplyToBuy());
         this.addFishingSupplyToBudgetIfMissing(budget, TIARA_MOULD_NAME);
         this.addFishingSupplyToBudgetIfMissing(budget, BRONZE_SWORD_NAME);
         this.addFishingSupplyToBudgetIfMissing(budget, WOODEN_SHIELD_NAME);
@@ -444,6 +451,31 @@ public class BuyScript extends KspManagedScript {
 
         return budget;
     }
+
+    /**
+     * Check whether essential Crafting supplies are affordable independently
+     * of unrelated tool upgrades, fishing supplies and smithing ores.
+     * The existing GE purchase executor will still limit each submitted
+     * quantity to the coins actually available in inventory.
+     */
+    private boolean canAffordEssentialCraftingResupply() {
+        if (Microbot.getClient() == null
+                || Microbot.getClient().getRealSkillLevel(Skill.CRAFTING) < 20) return false;
+        boolean needChisel = !Buy.hasNamedItemAnywhere(CHISEL_NAME);
+        boolean needGem = Buy.isGemCuttingSupplyMissing();
+        String gem = needGem ? this.selectGemCuttingSupplyToBuy() : null;
+        int chiselPrice = needChisel && this.getGuidePrice(CHISEL_NAME) > 1
+                ? this.getAdjustedBuyPrice(CHISEL_NAME) : 0;
+        int gemPrice = gem != null && this.getGuidePrice(gem) > 1
+                ? this.getAdjustedBuyPrice(gem) : 0;
+        long coins = Math.max(0L, Rs2Bank.count(COINS_NAME))
+                + Math.max(0L, Rs2Inventory.itemQuantity(995));
+        return CraftingSupplyPriorityPolicy.chooseAffordable(
+                needChisel, this.isFishingSupplyBuyPending(CHISEL_NAME), chiselPrice,
+                gem, needGem, gem != null && this.isFishingSupplyBuyPending(gem),
+                gemPrice, coins) != null;
+    }
+
 
     public boolean canAffordMissingBuys() {
         if (!this.pendingMissingToolBuys.isEmpty()
@@ -461,7 +493,10 @@ public class BuyScript extends KspManagedScript {
         this.calculateSmithingOreNeeds();
         this.calculateCraftingNeeds();
         BuyBudget budget = this.calculateMissingBuyBudget(desiredPickaxe, desiredAxe);
-        return budget.hasEnoughCoins();
+        // Keep scheduler eligibility consistent with GE Buy execution.
+        // Essential Crafting materials must remain purchasable even when
+        // the combined cost of unrelated upgrades exceeds available GP.
+        return budget.hasEnoughCoins() || this.canAffordEssentialCraftingResupply();
     }
 
     private void addToolToBudgetIfMissing(BuyBudget budget, String itemName) {
@@ -571,7 +606,10 @@ public class BuyScript extends KspManagedScript {
             }
 
             Microbot.status = "Opening GE Bank";
+            // Throttle both direct bank clicks and the walking fallback.
+            if (Rs2Player.isMoving() || System.currentTimeMillis() - this.lastActionAtMs < Math.max(ACTION_COOLDOWN_MS, 2_000L)) return;
             if (!Rs2Bank.openBank()) Rs2Bank.walkToBankAndUseBank();
+            this.lastActionAtMs = System.currentTimeMillis();
             return;
         }
 
@@ -584,7 +622,9 @@ public class BuyScript extends KspManagedScript {
         if (!exchangeInventoryReset) {
             if (!Rs2Inventory.isEmpty()) {
                 int before = Rs2Inventory.emptySlotCount();
-                if (Rs2Bank.depositAll()) markBankInventoryAction(null, -1, before);
+                // Even unsuccessful dispatches must wait for acknowledgement or timeout.
+                Rs2Bank.depositAll();
+                markBankInventoryAction(null, -1, before);
                 return;
             }
             exchangeInventoryReset = true;
@@ -604,7 +644,8 @@ public class BuyScript extends KspManagedScript {
 
         if (needCoinsForBuying && Rs2Inventory.itemQuantity(995) <= 0 && Rs2Bank.count(COINS_NAME) > 0) {
             int before = Rs2Inventory.count(COINS_NAME);
-            if (Rs2Bank.withdrawAll(COINS_NAME)) markBankInventoryAction(COINS_NAME, before, -1);
+            Rs2Bank.withdrawAll(COINS_NAME);
+            markBankInventoryAction(COINS_NAME, before, -1);
             return;
         }
 
@@ -804,6 +845,14 @@ public class BuyScript extends KspManagedScript {
         if (this.hasCollectableFishingSupplyBuy()) {
             Microbot.status = "Collecting fishing supplies";
             this.markCompletedPendingFishingSupplyBuys();
+
+            // Completed GE offers do not guarantee that items are already
+            // available in the bank. Invalidate the previous bank snapshot
+            // before collecting so the next scheduler cycle performs a real
+            // bank audit instead of waiting indefinitely on stale stock.
+            // This is particularly important for pending chisels and gems,
+            // which must remain pending until their receipt is confirmed.
+            this.bankToolsAudited = false;
             Rs2GrandExchange.collectAllToBank();
             this.clearSatisfiedPendingFishingSupplyBuys();
             return true;
@@ -827,6 +876,7 @@ public class BuyScript extends KspManagedScript {
                 || this.getFishingSupplyQuantityToBuy(RING_MOULD_NAME) > 0
                 || this.getFishingSupplyQuantityToBuy(NECKLACE_MOULD_NAME) > 0
                 || this.getFishingSupplyQuantityToBuy(CHISEL_NAME) > 0
+                || this.getFishingSupplyQuantityToBuy(this.selectGemCuttingSupplyToBuy()) > 0
                 || this.getFishingSupplyQuantityToBuy(TIARA_MOULD_NAME) > 0
                 || this.getFishingSupplyQuantityToBuy(BRONZE_SWORD_NAME) > 0
                 || this.getFishingSupplyQuantityToBuy(WOODEN_SHIELD_NAME) > 0
@@ -834,6 +884,20 @@ public class BuyScript extends KspManagedScript {
     }
 
     private String getNextFishingSupplyToBuy() {
+        // Make a level-appropriate gem-cutting batch executable before
+        // spending the GE budget on unrelated supplies and jewellery moulds.
+        if (Microbot.getClient() != null
+                && Microbot.getClient().getRealSkillLevel(Skill.CRAFTING) >= 20) {
+            String gem = this.selectGemCuttingSupplyToBuy();
+            String essential = CraftingSupplyPriorityPolicy.choose(
+                    this.getFishingSupplyQuantityToBuy(CHISEL_NAME) > 0,
+                    this.isFishingSupplyBuyPending(CHISEL_NAME),
+                    gem,
+                    gem != null && this.getFishingSupplyQuantityToBuy(gem) > 0,
+                    gem != null && this.isFishingSupplyBuyPending(gem));
+            if (essential != null) return essential;
+        }
+
         if (this.getFishingSupplyQuantityToBuy(FISHING_BAIT_NAME) > 0
                 && !this.isFishingSupplyBuyPending(FISHING_BAIT_NAME)) {
             return FISHING_BAIT_NAME;
@@ -847,6 +911,7 @@ public class BuyScript extends KspManagedScript {
         String[] supplies = {
                 LEATHER_NAME, THREAD_NAME, NEEDLE_NAME, GOLD_BAR_NAME, RING_MOULD_NAME, NECKLACE_MOULD_NAME,
                 CHISEL_NAME, TIARA_MOULD_NAME,
+                this.selectGemCuttingSupplyToBuy(),
                 BRONZE_SWORD_NAME, WOODEN_SHIELD_NAME, SALMON_NAME
         };
 
@@ -862,6 +927,13 @@ public class BuyScript extends KspManagedScript {
     private int getFishingSupplyQuantityToBuy(String itemName) {
         if (itemName == null) {
             return 0;
+        }
+
+        // Reuse the existing supply purchase, affordability and pending-offer
+        // machinery for the single level-appropriate uncut gem selected by
+        // selectGemCuttingSupplyToBuy(). Other gem types return zero demand.
+        if (this.isUncutGemSupply(itemName)) {
+            return this.getGemCuttingSupplyQuantityToBuy(itemName);
         }
 
         if (FISHING_BAIT_NAME.equalsIgnoreCase(itemName)) {
@@ -927,6 +999,62 @@ public class BuyScript extends KspManagedScript {
         }
 
         return 0;
+    }
+
+    /**
+     * Choose one unlocked uncut gem for Crafting rather than buying every
+     * gem type. Retain an outstanding gem offer as the selected supply so a
+     * price update cannot switch the requested item during fulfilment.
+     */
+    private String selectGemCuttingSupplyToBuy() {
+        if (!Buy.isGemCuttingSupplyMissing()) {
+            return null;
+        }
+
+        for (String pendingSupply : this.pendingFishingSupplyBuys) {
+            if (this.isUncutGemSupply(pendingSupply)) {
+                return pendingSupply;
+            }
+        }
+
+        int craftingLevel = Microbot.getClient().getRealSkillLevel(Skill.CRAFTING);
+        String[] gems = { "Uncut sapphire", "Uncut emerald", "Uncut ruby", "Uncut diamond" };
+        int[] requiredLevels = { 20, 27, 34, 43 };
+        String selected = null;
+        int lowestPrice = Integer.MAX_VALUE;
+
+        for (int i = 0; i < gems.length; i++) {
+            if (craftingLevel < requiredLevels[i]) {
+                continue;
+            }
+
+            // The existing GE price resolver uses 1 GP when an item cannot
+            // be priced. Never use that placeholder to purchase gems.
+            if (this.getGuidePrice(gems[i]) <= 1) {
+                continue;
+            }
+
+            int price = this.getAdjustedBuyPrice(gems[i]);
+            if (price > 1 && price < lowestPrice) {
+                lowestPrice = price;
+                selected = gems[i];
+            }
+        }
+
+        return selected;
+    }
+
+    private boolean isUncutGemSupply(String itemName) {
+        return itemName != null
+                && (itemName.equalsIgnoreCase("Uncut sapphire")
+                || itemName.equalsIgnoreCase("Uncut emerald")
+                || itemName.equalsIgnoreCase("Uncut ruby")
+                || itemName.equalsIgnoreCase("Uncut diamond"));
+    }
+
+    private int getGemCuttingSupplyQuantityToBuy(String itemName) {
+        String selected = this.selectGemCuttingSupplyToBuy();
+        return selected != null && selected.equalsIgnoreCase(itemName) ? 13 : 0;
     }
 
     private void calculateCraftingNeeds() {
@@ -996,6 +1124,14 @@ public class BuyScript extends KspManagedScript {
         if (this.hasCollectableOreBuy()) {
             Microbot.status = "Collecting ore buys";
             this.markCompletedPendingOreBuys();
+
+            // Collect-all may also transfer completed chisels, uncut gems
+            // and other supplies alongside ores. Completed GE offers are
+            // not proof that their items have reached the bank.
+            // Invalidate the snapshot after marking completed offers so
+            // any cached quantities cannot restore the audited state.
+            // The next scheduler cycle must verify actual bank contents.
+            this.bankToolsAudited = false;
             Rs2GrandExchange.collectAllToBank();
             this.calculateSmithingOreNeeds();
             this.clearSatisfiedPendingOreBuys();
@@ -1077,6 +1213,73 @@ public class BuyScript extends KspManagedScript {
                     break;
                 }
 
+                placedOffer = true;
+                availableSlots = Rs2GrandExchange.getAvailableSlotsCount();
+                continue;
+            }
+
+            // Secure usable Crafting inputs before unrelated upgrades consume
+            // the limited GP that qualified this GE_BUY resupply handoff.
+            // Keep existing pending-offer protection and confirmed GE commits.
+            // Do not spend the remaining Crafting budget on unrelated tools,
+            // supplies or ores while an essential GE order is outstanding.
+            // handlePendingFishingSupplyBuys() remains responsible for offer
+            // synchronization and collection on subsequent scheduler ticks.
+            boolean awaitingEssentialCraftingSupply = this.isFishingSupplyBuyPending(CHISEL_NAME);
+            if (!awaitingEssentialCraftingSupply)
+            {
+                for (String pendingSupply : this.pendingFishingSupplyBuys)
+                {
+                    if (this.isUncutGemSupply(pendingSupply))
+                    {
+                        awaitingEssentialCraftingSupply = true;
+                        break;
+                    }
+                }
+            }
+            if (awaitingEssentialCraftingSupply)
+            {
+                Microbot.status = "Waiting for Crafting GE supplies";
+                break;
+            }
+
+            String essentialCraftingSupply = null;
+            if (Microbot.getClient() != null
+                    && Microbot.getClient().getRealSkillLevel(Skill.CRAFTING) >= 20) {
+                boolean needChisel = !Buy.hasNamedItemAnywhere(CHISEL_NAME);
+                boolean needGem = Buy.isGemCuttingSupplyMissing();
+                String gem = needGem ? this.selectGemCuttingSupplyToBuy() : null;
+                int chiselPrice = needChisel && this.getGuidePrice(CHISEL_NAME) > 1
+                        ? this.getAdjustedBuyPrice(CHISEL_NAME) : 0;
+                int gemPrice = gem != null && this.getGuidePrice(gem) > 1
+                        ? this.getAdjustedBuyPrice(gem) : 0;
+                essentialCraftingSupply = CraftingSupplyPriorityPolicy.chooseAffordable(
+                        needChisel, this.isFishingSupplyBuyPending(CHISEL_NAME), chiselPrice,
+                        gem, needGem, gem != null && this.isFishingSupplyBuyPending(gem),
+                        gemPrice, this.getCurrentSpendableCoins());
+                if (essentialCraftingSupply == null && (needChisel || needGem)) {
+                    Microbot.status = "No affordable Crafting essentials";
+                    break;
+                }
+            }
+
+
+            if (essentialCraftingSupply != null)
+            {
+                int essentialQuantity = this.getFishingSupplyQuantityToBuy(essentialCraftingSupply);
+                int essentialPrice = this.getAdjustedBuyPrice(essentialCraftingSupply);
+                int affordableQuantity = this.getAffordableQuantity(essentialQuantity, essentialPrice);
+                if (affordableQuantity <= 0)
+                {
+                    Microbot.status = "Not enough GP for essential Crafting supplies";
+                    this.debug("Holding unrelated GE purchases; essential Crafting supply unaffordable | item={} requested={} price={} coins={}",
+                            essentialCraftingSupply, essentialQuantity, essentialPrice, this.getCurrentSpendableCoins());
+                    break;
+                }
+                if (!this.placeFishingSupplyBuyOffer(essentialCraftingSupply, affordableQuantity))
+                {
+                    break;
+                }
                 placedOffer = true;
                 availableSlots = Rs2GrandExchange.getAvailableSlotsCount();
                 continue;
@@ -1360,6 +1563,23 @@ public class BuyScript extends KspManagedScript {
     }
 
     private boolean markPendingFishingSupplyBought(String itemName, int collectedQuantity) {
+        // A completed chisel offer is not proof that the chisel has reached
+        // the bank. Retain its pending state until the bank inventory audit
+        // confirms receipt, just as we already do for uncut gems.
+        // This also prevents another chisel order during GE collection.
+        if (CHISEL_NAME.equalsIgnoreCase(itemName)) {
+            return false;
+        }
+
+        // A completed GE offer is not proof that its items have reached the
+        // bank. Keep gem orders pending until actual inventory or bank stock
+        // satisfies the requirement. clearSatisfiedPendingFishingSupplyBuys()
+        // will release the order after that confirmation, preventing a second
+        // gem purchase during the collection-to-bank transition.
+        if (this.isUncutGemSupply(itemName)) {
+            return false;
+        }
+
         Iterator<String> iterator = this.pendingFishingSupplyBuys.iterator();
 
         while (iterator.hasNext()) {
@@ -1417,7 +1637,6 @@ public class BuyScript extends KspManagedScript {
         }
 
         this.pendingFishingSupplyBuyQuantities.remove(this.normalizeItemName(itemName));
-        this.bankToolsAudited = true;
     }
 
     private void clearSatisfiedPendingFishingSupplyBuys() {
@@ -1426,7 +1645,9 @@ public class BuyScript extends KspManagedScript {
         while (iterator.hasNext()) {
             String pendingSupply = iterator.next();
 
-            if (this.isFishingSupplyStillNeeded(pendingSupply)) {
+            // An offer or collect click cannot satisfy supply until a fresh bank audit.
+            if (!GeSupplyReceiptPolicy.canClearPending(this.bankToolsAudited,
+                    this.isFishingSupplyStillNeeded(pendingSupply))) {
                 continue;
             }
 
@@ -1496,7 +1717,6 @@ public class BuyScript extends KspManagedScript {
         }
 
         this.pendingOreBuyQuantities.remove(this.normalizeItemName(itemName));
-        this.bankToolsAudited = true;
     }
 
     private void clearSatisfiedPendingOreBuys() {
@@ -1587,6 +1807,7 @@ public class BuyScript extends KspManagedScript {
                 || itemName.equalsIgnoreCase(RING_MOULD_NAME)
                 || itemName.equalsIgnoreCase(NECKLACE_MOULD_NAME)
                 || itemName.equalsIgnoreCase(CHISEL_NAME)
+                || this.isUncutGemSupply(itemName)
                 || itemName.equalsIgnoreCase(TIARA_MOULD_NAME)
                 || itemName.equalsIgnoreCase(BRONZE_SWORD_NAME)
                 || itemName.equalsIgnoreCase(WOODEN_SHIELD_NAME)
@@ -1729,24 +1950,21 @@ public class BuyScript extends KspManagedScript {
     }
 
     private boolean waitForOfferCommit(int slotsBefore) {
-        if (slotsBefore <= 0) return true;
+        // Opening or closing the GE offer editor is not proof of an order.
+        // Only a consumed offer slot confirms that a buy/sell was committed.
+        if (slotsBefore <= 0 || !Rs2GrandExchange.isOpen()) return false;
 
-        if (sleepUntil(() ->
-                !Rs2GrandExchange.isOpen()
-                        || Rs2GrandExchange.isOfferScreenOpen()
-                        || Rs2GrandExchange.getAvailableSlotsCount() < slotsBefore, 2_000)) {
-            if (!Rs2GrandExchange.isOpen()) return false;
-            if (Rs2GrandExchange.isOfferScreenOpen()) {
-                Rs2GrandExchange.backToOverview();
-                return sleepUntil(() ->
-                        Rs2GrandExchange.isOpen()
-                                && !Rs2GrandExchange.isOfferScreenOpen(), 2_000);
-            }
-            return true;
+        if (Rs2GrandExchange.isOfferScreenOpen()) {
+            Rs2GrandExchange.backToOverview();
+            if (!sleepUntil(() -> !Rs2GrandExchange.isOpen()
+                    || !Rs2GrandExchange.isOfferScreenOpen(), 2_000)
+                    || !Rs2GrandExchange.isOpen()) return false;
         }
 
-        return Rs2GrandExchange.isOpen()
-                && Rs2GrandExchange.getAvailableSlotsCount() < slotsBefore;
+        return sleepUntil(() -> !Rs2GrandExchange.isOpen()
+                || GeOfferCommitPolicy.isCommitted(slotsBefore, Rs2GrandExchange.getAvailableSlotsCount(), Rs2GrandExchange.isOpen()), 2_000)
+                && Rs2GrandExchange.isOpen()
+                && GeOfferCommitPolicy.isCommitted(slotsBefore, Rs2GrandExchange.getAvailableSlotsCount(), Rs2GrandExchange.isOpen());
     }
 
     private long getCurrentSpendableCoins() {
@@ -1805,6 +2023,12 @@ public class BuyScript extends KspManagedScript {
 
             Rs2GrandExchange.collectAllToBank();
 
+            // This general GE collection path also collects Crafting inputs.
+            // As with handlePendingFishingSupplyBuys(), completed offers do
+            // not prove that chisels, gems or other supplies reached the bank.
+            // Force a fresh bank audit before purchase completion or another
+            // resupply decision can rely on the previous inventory snapshot.
+            this.bankToolsAudited = false;
             this.clearOwnedPendingMissingToolBuys();
             if (collectableFishingSupplyBuy) {
                 this.clearSatisfiedPendingFishingSupplyBuys();
@@ -1974,7 +2198,6 @@ public class BuyScript extends KspManagedScript {
             this.bankHasLobsterPot = true;
         }
 
-        this.bankToolsAudited = true;
     }
 
     private void returnToGrandExchangeOverview() {

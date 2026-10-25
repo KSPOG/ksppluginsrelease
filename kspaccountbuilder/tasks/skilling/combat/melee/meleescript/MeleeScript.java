@@ -133,6 +133,10 @@ public class MeleeScript extends KspManagedScript {
 
                 TrainingStage stage = this.resolveTrainingStage();
                 updateWarriorCombatXp(stage);
+                // Successful combat satisfies optional gear inspection for this run.
+                // Temporary loss of combat detection must not trigger a distant bank trip.
+                this.gearCheckedAtBank = MeleeBankPolicy.inspectionSatisfied(
+                        this.gearCheckedAtBank, this.isActivelyFighting(stage));
                 KspTaskDebug.throttled(log, this.debugLogging, "Melee", "loop", 5_000L,
                         "loop | state={} status={} area={} npc={} player={} moving={} animating={} interacting={} inCombat={} hp={}/{} bankOpen={}",
                         this.state,
@@ -148,7 +152,7 @@ public class MeleeScript extends KspManagedScript {
                         Microbot.getClient().getRealSkillLevel(Skill.HITPOINTS),
                         Rs2Bank.isOpen());
 
-                if (!this.gearCheckedAtBank && !this.isActivelyFighting(stage)) {
+                if (MeleeBankPolicy.shouldInspectOptionalGear(this.gearCheckedAtBank, this.isActivelyFighting(stage))) {
                     // Startup equipment inspection is OPTIONAL. The previous
                     // unconditional bank visit removed an already equipped
                     // player from the combat area on every fresh Melee run.
@@ -379,7 +383,15 @@ public class MeleeScript extends KspManagedScript {
     private boolean needsWarriorFoodRestock(TrainingStage stage) {
         return stage != null
                 && stage.primaryNpc == NPC.AL_KHARID_WARRIOR
-                && this.getFoodCountInInventory() <= 0;
+                && this.getFoodCountInInventory() <= 0
+                // Avoid leaving a healthy combat character merely because its food ran out.
+                // Restock proactively only when bank food is known to be available,
+                // health is at or below two thirds, and combat has ended.
+                && this.getBestFoodAvailableInBank() != null
+                && !this.isActivelyFighting(stage)
+                && Microbot.getClient().getBoostedSkillLevel(Skill.HITPOINTS) > 0
+                && (long) Microbot.getClient().getBoostedSkillLevel(Skill.HITPOINTS) * 3L
+                        <= (long) Microbot.getClient().getRealSkillLevel(Skill.HITPOINTS) * 2L;
     }
 
     private boolean shouldBank(TrainingStage stage) {
@@ -429,6 +441,17 @@ public class MeleeScript extends KspManagedScript {
         if (!KspBankMode.ensureWithdrawAsItem()
                 || KspBankWidgetHelper.closeBankTutorialOverlayIfOpen()) {
             return;
+        }
+
+        // Reaching an open bank completes the banking journey. Release any
+        // outstanding core-walker route before preparing gear and food, or a
+        // delayed route click can pull the player away from the bank again.
+        // This also covers bank routes started directly by Rs2Bank, which are
+        // not registered under a KspWalkerGuard task key.
+        if (net.runelite.client.plugins.microbot.util.walker.Rs2Walker.getCurrentTarget() != null)
+        {
+            net.runelite.client.plugins.microbot.util.walker.Rs2Walker.clearWalkingRoute(
+                    "ksp_account_builder_melee_bank_open");
         }
 
         GearPlan gearPlan = buildGearPlan();
@@ -873,8 +896,10 @@ public class MeleeScript extends KspManagedScript {
         if (pendingAttackAtMs == 0L) return false;
 
         if (Rs2Player.isMoving() || Rs2Player.isAnimating() || Rs2Player.isInteracting()) {
-            pendingAttackAtMs = 0L;
-            pendingAttackNpcIndex = -1;
+            // Movement, the attack animation and active combat acknowledge the
+            // dispatched click; they do not mean another Attack is required.
+            // Keep the dispatch pending until combat settles instead of
+            // clearing it on the first movement tick and allowing repeat clicks.
             return true;
         }
 
