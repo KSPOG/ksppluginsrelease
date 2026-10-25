@@ -88,16 +88,19 @@ jobs:
       - name: Make Gradle wrapper executable
         run: chmod +x hub/gradlew
 
-      - name: Run dependency-free High Alch responsiveness regression
+      - name: Run AIO Fighter hot-loop and High Alch regressions
         shell: bash
         run: |
           set -euo pipefail
           TEST_ROOT=/tmp/ksp-aio-highalch
           mkdir -p "$TEST_ROOT/src" "$TEST_ROOT/bin"
           cp release/kspaiofighter/KspAioFighterHighAlchGate.java "$TEST_ROOT/src/"
+          cp release/kspaiofighter/KspAioFighterActionThrottle.java "$TEST_ROOT/src/"
           cp release/.github/tests/aiofighter/KspAioFighterHighAlchGateTest.java.txt "$TEST_ROOT/src/KspAioFighterHighAlchGateTest.java"
+          cp release/.github/tests/aiofighter/KspAioFighterActionThrottleTest.java.txt "$TEST_ROOT/src/KspAioFighterActionThrottleTest.java"
           javac --release 11 -d "$TEST_ROOT/bin" "$TEST_ROOT/src/"*.java
           java -cp "$TEST_ROOT/bin" net.runelite.client.plugins.microbot.kspaiofighter.KspAioFighterHighAlchGateTest
+          java -cp "$TEST_ROOT/bin" net.runelite.client.plugins.microbot.kspaiofighter.KspAioFighterActionThrottleTest
 
       - name: Build KSP AIO Fighter
         working-directory: hub
