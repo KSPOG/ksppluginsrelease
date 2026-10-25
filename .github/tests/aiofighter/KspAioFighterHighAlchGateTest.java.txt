@@ -17,16 +17,19 @@ public final class KspAioFighterHighAlchGateTest
         gate.dispatched(1623, 3, 1_000, 100_000L);
         check(gate.inspect(3, 1_000, 100_200L) == KspAioFighterHighAlchGate.Decision.WAIT,
                 "Do not fire a second alch before acknowledgement");
-        check(gate.inspect(2, 1_000, 101_000L) == KspAioFighterHighAlchGate.Decision.WAIT,
-                "Inventory decrease acknowledges cast but still respects cooldown");
-        check(gate.inspect(2, 1_000, 102_401L) == KspAioFighterHighAlchGate.Decision.READY,
-                "Next alch should be ready after 2.4s rather than waiting for loot");
+        check(gate.inspect(2, 1_000, 101_000L) == KspAioFighterHighAlchGate.Decision.COOLDOWN,
+                "A confirmed alch must allow combat while the spell cools down");
+        check(gate.inspect(2, 1_000, 102_401L) == KspAioFighterHighAlchGate.Decision.COOLDOWN,
+                "OSRS High Alch still requires a five-tick (3s) spell cooldown");
+        check(gate.inspect(2, 1_000, 103_001L) == KspAioFighterHighAlchGate.Decision.READY,
+                "Alching should resume at the next legal 3s boundary");
 
-        gate.dispatched(1623, 2, 1_000, 103_000L);
-        check(gate.inspect(2, 1_065, 103_600L) == KspAioFighterHighAlchGate.Decision.WAIT,
-                "Magic XP increase acknowledges even if inventory snapshot lags");
-        check(gate.inspect(2, 1_065, 105_401L) == KspAioFighterHighAlchGate.Decision.READY,
-                "Confirmed cast should allow another item after cooldown");
+        gate.dispatched(1623, 2, 1_000, 104_000L);
+        check(gate.inspect(2, 1_065, 104_600L) == KspAioFighterHighAlchGate.Decision.COOLDOWN,
+                "Magic XP acknowledgement must allow combat even if inventory snapshot lags");
+        check(gate.trackedItemId() == -1, "Acknowledged cast no longer blocks combat");
+        check(gate.inspect(2, 1_065, 107_001L) == KspAioFighterHighAlchGate.Decision.READY,
+                "Confirmed cast should allow next spell after cooldown");
 
         gate.reset();
         for (int attempt = 0; attempt < 3; attempt++)
