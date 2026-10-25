@@ -406,9 +406,16 @@ final class KspAccountBuilderPanel extends PluginPanel
         status.setText(running ? (script.isBreakActive() ? "On break" : "Running") : "Stopped");
         task.setText(running ? script.getCurrentTaskName() : "-");
         runtime.setText(running ? duration(script.getRuntimeSeconds()) : "-");
-        accountPlayTime.setText(running ? duration(script.getAccountPlayTimeSeconds()) : "-");
+        // Do not display a locally counted timer as real account age while
+        // the OSRS Account Summary varc is still uninitialized.
+        long verifiedSeconds = running ? script.getAccountPlayTimeSeconds() : -1L;
+        accountPlayTime.setText(!running ? "-"
+                : verifiedSeconds < 0L ? "Syncing..."
+                : accountDuration(verifiedSeconds));
         antibanActivity.setText(running && config.useAntiban() ? plugin.getAntibanActivity() : "-");
-        accountPlayTime.setToolTipText("Total play time tracked for the active account.");
+        accountPlayTime.setToolTipText(running && verifiedSeconds < 0L
+                ? "Waiting for verified OSRS account play time. Open Account Summary and toggle Time Played to refresh the game data."
+                : "Verified OSRS account play time (as shown in Account Summary), with local elapsed-time interpolation.");
         antibanActivity.setToolTipText("Current Account Builder anti-ban activity, when enabled.");
         breakTimer.setText(running ? duration(script.getTimeUntilBreakSeconds()) : "-");
         switchTimer.setText(running ? duration(script.getTimeUntilActivitySwitchSeconds()) : "-");
@@ -453,6 +460,17 @@ final class KspAccountBuilderPanel extends PluginPanel
         target.setEnabled(!running && requested == 1 && target.getItemCount() > 0);
         quest.setEnabled(!running && requested == 2);
         updating = false;
+    }
+
+    private static String accountDuration(long seconds)
+    {
+        if (seconds < 0L) return "Syncing...";
+        long days = seconds / 86_400L;
+        long hours = (seconds / 3_600L) % 24L;
+        long minutes = (seconds / 60L) % 60L;
+        if (days > 0L) return String.format("%dd %dh %dm", days, hours, minutes);
+        if (seconds >= 3_600L) return String.format("%dh %dm", hours, minutes);
+        return String.format("%dm %ds", minutes, seconds % 60L);
     }
 
     private static String duration(long seconds)
