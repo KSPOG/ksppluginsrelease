@@ -32,6 +32,7 @@ import net.runelite.client.plugins.microbot.util.grandexchange.GrandExchangeRequ
 import net.runelite.client.plugins.microbot.util.grandexchange.GrandExchangeSlots;
 import net.runelite.client.plugins.microbot.util.grandexchange.Rs2GrandExchange;
 import net.runelite.client.plugins.microbot.util.grandexchange.models.GrandExchangeOfferDetails;
+import net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.selling.GeOfferRepricePolicy;
 import net.runelite.client.plugins.microbot.util.inventory.Rs2Inventory;
 import net.runelite.client.plugins.microbot.util.inventory.Rs2ItemModel;
 import net.runelite.client.plugins.microbot.util.player.Rs2Player;
@@ -136,6 +137,12 @@ public class BuyScript extends KspManagedScript {
     private final List<String> pendingFishingSupplyBuys = new ArrayList<>();
     private final Map<String, Integer> pendingOreBuyQuantities = new HashMap<>();
     private final Map<String, Integer> pendingFishingSupplyBuyQuantities = new HashMap<>();
+    private final GeOfferRepricePolicy buyRepricing = new GeOfferRepricePolicy();
+    private GrandExchangeSlots repricingBuySlot;
+    private int repricingBuyItemId;
+    private String repricingBuyName;
+    private long repricingBuyCancelAtMs;
+    private int repricingBuyCancelAttempts;
 
     private int requiredBronzeBars;
     private int copperOreNeeded;
@@ -214,6 +221,14 @@ public class BuyScript extends KspManagedScript {
             }
 
             this.updateDesiredToolTracking(desiredPickaxe, desiredAxe);
+
+            // A cancellation/collection must reconcile at the bank before
+            // any new offer can be posted for the outstanding quantity.
+            if (repricingBuySlot != null)
+            {
+                handleCancelledBuyOffer();
+                return;
+            }
 
             if (this.completeIfNothingMissingForBuy(desiredPickaxe, desiredAxe)) {
                 return;
@@ -299,6 +314,7 @@ public class BuyScript extends KspManagedScript {
             this.syncPendingFishingSupplyBuysFromActiveOffers();
             this.syncPendingOreBuysFromActiveOffers();
 
+            if (checkStalledBuyOffers()) return;
             this.processAvailableExchangeSlots(desiredPickaxe, desiredAxe);
 
         }, 0L, LOOP_DELAY_MS, TimeUnit.MILLISECONDS);
@@ -716,6 +732,8 @@ public class BuyScript extends KspManagedScript {
         this.pendingFishingSupplyBuyQuantities.clear();
         this.exchangeInventoryReset = false;
         this.pendingOreBuyQuantities.clear();
+        this.buyRepricing.reset();
+        clearRepricingBuyState();
     }
 
     private void calculateSmithingOreNeeds() {
@@ -1450,6 +1468,7 @@ public class BuyScript extends KspManagedScript {
 
         if (offered) {
             this.lastActionAtMs = System.currentTimeMillis();
+            registerBuyOffer(itemName, buyPrice);
             this.pendingOreBuys.add(itemName);
             this.pendingOreBuyQuantities.merge(this.normalizeItemName(itemName), quantity, Integer::sum);
         }
@@ -1485,6 +1504,7 @@ public class BuyScript extends KspManagedScript {
 
         if (offered) {
             this.lastActionAtMs = System.currentTimeMillis();
+            registerBuyOffer(itemName, buyPrice);
             this.pendingFishingSupplyBuys.add(itemName);
             this.pendingFishingSupplyBuyQuantities.merge(this.normalizeItemName(itemName), quantity, Integer::sum);
         }
@@ -1965,10 +1985,128 @@ public class BuyScript extends KspManagedScript {
 
         if (offered) {
             this.lastActionAtMs = System.currentTimeMillis();
+            registerBuyOffer(itemName, buyPrice);
             this.pendingMissingToolBuys.add(itemName);
         }
 
         return offered;
+    }
+
+    /**
+     * Track only orders placed by this BuyScript session. An active user
+     * order is not registered and is therefore never automatically altered.
+     */
+    private void registerBuyOffer(String itemName, int price)
+    {
+        GrandExchangeSlots slot = Rs2GrandExchange.findSlotForItem(itemName, false);
+        GrandExchangeOfferDetails details = slot == null ? null : Rs2GrandExchange.getOfferDetails(slot);
+        if (details == null || details.isSelling() || !details.isInProgress()) return;
+        buyRepricing.placed(details.getItemId(), price, System.currentTimeMillis());
+    }
+
+    private boolean checkStalledBuyOffers()
+    {
+        for (GrandExchangeSlots slot : Rs2GrandExchange.getActiveOfferSlots())
+        {
+            GrandExchangeOfferDetails offer = Rs2GrandExchange.getOfferDetails(slot);
+            if (offer == null || offer.isSelling() || !offer.isInProgress()) continue;
+            int newPrice = buyRepricing.candidate(offer.getItemId(), (int) Math.min(
+                    Integer.MAX_VALUE, offer.getPrice()), offer.getQuantitySold(),
+                    System.currentTimeMillis(), true);
+            if (newPrice <= 0) continue;
+            String name = offer.getItemName();
+            if (name == null || name.isBlank()) continue;
+
+            Microbot.status = "Repricing GE buy " + name + " to " + newPrice + " gp";
+            if (Rs2GrandExchange.cancelSpecificOffers(java.util.Collections.singletonList(slot), true).isEmpty())
+                return true;
+            buyRepricing.requestCancellation(offer.getItemId(), newPrice);
+            repricingBuySlot = slot;
+            repricingBuyItemId = offer.getItemId();
+            repricingBuyName = name;
+            repricingBuyCancelAtMs = System.currentTimeMillis();
+            repricingBuyCancelAttempts = 1;
+            this.lastActionAtMs = repricingBuyCancelAtMs;
+            debug("GE buy cancellation dispatched | item={} oldPrice={} newPrice={} filled={}",
+                    name, offer.getPrice(), newPrice, offer.getQuantitySold());
+            return true;
+        }
+        return false;
+    }
+
+    private void handleCancelledBuyOffer()
+    {
+        if (repricingBuySlot == null) return;
+        if (Rs2Bank.isOpen())
+        {
+            Rs2Bank.closeBank();
+            return;
+        }
+        if (!ensureGrandExchangeOpen()) return;
+        if (Rs2GrandExchange.isOfferScreenOpen())
+        {
+            returnToGrandExchangeOverview();
+            return;
+        }
+
+        GrandExchangeOfferDetails offer = Rs2GrandExchange.getOfferDetails(repricingBuySlot);
+        if (offer != null && offer.getItemId() == repricingBuyItemId && offer.isInProgress())
+        {
+            if (System.currentTimeMillis() - repricingBuyCancelAtMs >= 8_000L)
+            {
+                if (repricingBuyCancelAttempts >= 3)
+                {
+                    // Cancellation not acknowledged. Retain the original offer,
+                    // never place a duplicate for the same requested supplies.
+                    debug("GE buy cancellation not confirmed | item={} slot={}",
+                            repricingBuyName, repricingBuySlot);
+                    buyRepricing.forget(repricingBuyItemId);
+                    clearRepricingBuyState();
+                    return;
+                }
+                repricingBuyCancelAttempts++;
+                repricingBuyCancelAtMs = System.currentTimeMillis();
+                Rs2GrandExchange.cancelSpecificOffers(
+                        java.util.Collections.singletonList(repricingBuySlot), true);
+            }
+            Microbot.status = "Waiting for GE buy cancellation: " + repricingBuyName;
+            return;
+        }
+
+        boolean alreadyBought = offer != null && offer.getItemId() == repricingBuyItemId
+                && offer.getState() == net.runelite.api.GrandExchangeOfferState.BOUGHT;
+        // Collect both refunded GP and any items from partial fills. A new
+        // order must use audited stock, never the original full quantity.
+        if (!Rs2GrandExchange.collectAllToBank())
+        {
+            Microbot.status = "Collecting cancelled GE buy: " + repricingBuyName;
+            return;
+        }
+        if (alreadyBought) buyRepricing.forget(repricingBuyItemId);
+        else buyRepricing.cancellationConfirmed(repricingBuyItemId, System.currentTimeMillis());
+
+        pendingMissingToolBuys.removeIf(s -> s.equalsIgnoreCase(repricingBuyName));
+        pendingFishingSupplyBuys.removeIf(s -> s.equalsIgnoreCase(repricingBuyName));
+        pendingOreBuys.removeIf(s -> s.equalsIgnoreCase(repricingBuyName));
+        pendingFishingSupplyBuyQuantities.remove(normalizeItemName(repricingBuyName));
+        pendingOreBuyQuantities.remove(normalizeItemName(repricingBuyName));
+        bankToolsAudited = false;
+        exchangeInventoryReset = false;
+        lastActionAtMs = System.currentTimeMillis();
+        debug("GE buy repricing collected | item={} filled={} attempts={}",
+                repricingBuyName, offer == null ? -1 : offer.getQuantitySold(),
+                buyRepricing.retries(repricingBuyItemId));
+        clearRepricingBuyState();
+        Microbot.status = "Rechecking bank stock before buying remaining supplies";
+    }
+
+    private void clearRepricingBuyState()
+    {
+        repricingBuySlot = null;
+        repricingBuyItemId = 0;
+        repricingBuyName = null;
+        repricingBuyCancelAtMs = 0L;
+        repricingBuyCancelAttempts = 0;
     }
 
     private boolean waitForOfferCommit(int slotsBefore) {
@@ -2503,21 +2641,20 @@ public class BuyScript extends KspManagedScript {
     }
 
     private int getAdjustedBuyPrice(String itemName) {
+        int base;
         if (HAMMER_NAME.equalsIgnoreCase(itemName)) {
-            return HAMMER_BUY_PRICE;
+            base = HAMMER_BUY_PRICE;
+        } else if (HARPOON_NAME.equalsIgnoreCase(itemName)) {
+            base = HARPOON_BUY_PRICE;
+        } else {
+            int guidePrice = this.getGuidePrice(itemName);
+            base = guidePrice <= 0
+                    ? 1
+                    : Math.max(1, (int) (((long) guidePrice * 110L + 99L) / 100L));
         }
 
-        if (HARPOON_NAME.equalsIgnoreCase(itemName)) {
-            return HARPOON_BUY_PRICE;
-        }
-
-        int guidePrice = this.getGuidePrice(itemName);
-
-        if (guidePrice <= 0) {
-            return 1;
-        }
-
-        return Math.max(1, (int) (((long) guidePrice * 110L + 99L) / 100L));
+        int itemId = Microbot.getRs2ItemManager().getItemId(itemName);
+        return buyRepricing.priceForNewOffer(itemId, base);
     }
 
     private int getGuidePrice(String itemName) {
