@@ -32,6 +32,19 @@ public final class KspAioFighterHighAlchGateTest
                 "Confirmed cast should allow next spell after cooldown");
 
         gate.reset();
+        // Combat spells can generate Magic XP unrelated to High Alchemy.
+        // Never count an NPC damage XP drop as a confirmed alch.
+        gate.dispatched(1623, 2, 1_000, 150_000L);
+        check(gate.inspect(2, 1_065, 150_900L, true) == KspAioFighterHighAlchGate.Decision.WAIT,
+                "Combat Magic XP alone must not confirm alchemy");
+        check(gate.trackedItemId() == 1623,
+                "Unchanged inventory means combat High Alch is still pending");
+        check(gate.inspect(1, 1_065, 151_000L, true) == KspAioFighterHighAlchGate.Decision.COOLDOWN,
+                "Decreased item quantity confirms High Alch while under attack");
+        check(gate.trackedItemId() == -1,
+                "Confirmed combat cast releases the combat loop");
+
+        gate.reset();
         for (int attempt = 0; attempt < 3; attempt++)
         {
             long now = 200_000L + attempt * 6_000L;
