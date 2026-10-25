@@ -11,9 +11,9 @@ package net.runelite.client.plugins.microbot.kspaiofighter;
  */
 final class KspAioFighterHighAlchGate
 {
-    enum Decision { READY, WAIT, BACK_OFF }
+    enum Decision { READY, WAIT, COOLDOWN, BACK_OFF }
 
-    private static final long CAST_COOLDOWN_MS = 2_400L;
+    private static final long CAST_COOLDOWN_MS = 3_000L;
     private static final long ACTION_ACK_TIMEOUT_MS = 5_000L;
     private static final long FAILURE_BACKOFF_MS = 30_000L;
     private static final int MAX_ATTEMPTS = 3;
@@ -49,8 +49,10 @@ final class KspAioFighterHighAlchGate
             }
         }
         if (now < backOffUntil) return Decision.BACK_OFF;
+        // A confirmed cast is cooling down, not in-flight. Combat may
+        // continue between legal (5-tick) High Alch casts.
         if (attemptedAt > 0L && now - attemptedAt < CAST_COOLDOWN_MS)
-            return Decision.WAIT;
+            return Decision.COOLDOWN;
         return Decision.READY;
     }
 
