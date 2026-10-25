@@ -626,7 +626,7 @@ public class SellScript extends KspManagedScript
             }
             if (offer.getState() != GrandExchangeOfferState.SELLING) continue;
 
-            int nextPrice = sellRepricing.candidate(id, offer.getPrice(),
+            int nextPrice = sellRepricing.candidate(id, (int) Math.min(Integer.MAX_VALUE, offer.getPrice()),
                     offer.getQuantitySold(), System.currentTimeMillis(), false);
             if (nextPrice <= 0) continue;
             // Cancel exactly this slot, not all GE offers. The core utility
