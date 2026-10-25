@@ -11,6 +11,17 @@ Plugin: KspAccountBuilderPlugin
 - Milestone 6 - Controlled live UI/log integration acceptance: PENDING.
 - Milestone 7 - Focused pull request, reviews, CI and merge: PENDING.
 
+## Milestone 5 - Crafting rework checkpoint (2026-10-25, dev only)
+
+- [x] Implement exact-ID inventory/bank handling for Chisel (1755), uncut sapphires/emeralds/rubies/diamonds, tiara mould and silver bars.
+- [x] Correct bank planning: 1 reusable mould/chisel plus up to 27 silver bars/uncut gems, with stable targets after each withdrawal.
+- [x] Initiate furnace jewellery by using the selected metal bar on a loaded Furnace; do not use the Smelt ore interface.
+- [x] Keep the active recipe during ingredient withdrawal and production; reset stale action latches after a recipe switch.
+- [x] Add gem and furnace progress/click cooldowns, plus pure bank-plan regression cases.
+- [ ] Verify the new dev commit in Gradle + JUnit CI; record the run conclusion.
+- [ ] Observe the new code actively loaded by the live Microbot client and confirm a chisel/gem batch and a tiara/silver-bar batch yield Crafting XP.
+- [ ] Validate missing-supply handling and handoff to GE replenishment; do not claim progression acceptance until this is observed.
+
 ## Milestone 5 - Required acceptance
 
 - Crafting selects an executable recipe based on skill level and actual resources.
