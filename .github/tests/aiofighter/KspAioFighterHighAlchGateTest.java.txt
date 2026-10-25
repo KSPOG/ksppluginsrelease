@@ -32,7 +32,7 @@ public final class KspAioFighterHighAlchGateTest
         for (int attempt = 0; attempt < 3; attempt++)
         {
             long now = 200_000L + attempt * 6_000L;
-            check(gate.inspect(0, 2_000, now) == KspAioFighterHighAlchGate.Decision.READY,
+            check(gate.inspect(1, 2_000, now) == KspAioFighterHighAlchGate.Decision.READY,
                     "Retry may start after prior timeout");
             gate.dispatched(5555, 1, 2_000, now);
             check(gate.inspect(1, 2_000, now + 2_000L) == KspAioFighterHighAlchGate.Decision.WAIT,
