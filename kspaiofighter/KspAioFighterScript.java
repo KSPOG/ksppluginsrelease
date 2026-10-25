@@ -39,6 +39,7 @@ import net.runelite.client.plugins.microbot.util.bank.Rs2Bank;
 import net.runelite.client.plugins.microbot.util.camera.Rs2Camera;
 import net.runelite.client.plugins.microbot.util.combat.Rs2Combat;
 import net.runelite.client.plugins.microbot.util.equipment.Rs2Equipment;
+import net.runelite.client.plugins.microbot.util.dialogues.Rs2Dialogue;
 import net.runelite.client.plugins.microbot.util.inventory.Rs2Inventory;
 import net.runelite.client.plugins.microbot.util.inventory.Rs2ItemModel;
 import net.runelite.client.plugins.microbot.util.item.Rs2ExplorersRing;
@@ -119,6 +120,7 @@ public class KspAioFighterScript extends KspBreakAwareScript
 	private int startCameraAttempts = 0;
 	private Runnable stopPluginCallback;
 	private final AtomicBoolean loopRunning = new AtomicBoolean(false);
+	private final KspAioFighterStrongholdDialogue strongholdDialogue = new KspAioFighterStrongholdDialogue();
 	private volatile long runGeneration = 0L;
 
 	@Inject
@@ -151,6 +153,7 @@ public class KspAioFighterScript extends KspBreakAwareScript
 		lastGearBankSkill = null;
 		unavailableGearThisRun.clear();
 		missingGearDialogShown.set(false);
+		strongholdDialogue.reset();
 		mainScheduledFuture = scheduledExecutorService.scheduleWithFixedDelay(() -> loop(generation), 0, 100, TimeUnit.MILLISECONDS);
 		return true;
 	}
@@ -182,6 +185,17 @@ public class KspAioFighterScript extends KspBreakAwareScript
 			{
 				return;
 			}
+
+			// Dialogue actions take priority over combat, loot, banking and movement.
+            // Only recognized Stronghold question/answer pairs are clicked.
+            boolean handledStronghold = strongholdDialogue.tick();
+            if (handledStronghold || Rs2Dialogue.isInDialogue())
+            {
+                setStatus(handledStronghold
+                        ? strongholdDialogue.status()
+                        : "Unrecognized dialogue - waiting for manual input");
+                return;
+            }
 
 			if (!configureStartCameraIfNeeded())
 			{
