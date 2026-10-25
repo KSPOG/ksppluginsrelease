@@ -100,6 +100,21 @@ final class KspAioFighterStrongholdDialogue
         if (Rs2Dialogue.hasSelectAnOption())
         {
             String question = Rs2Dialogue.getQuestion();
+            boolean recognizedTitle = question != null
+                    && (normalize(question).contains("to pass you must answer me this")
+                        || matchQuestion(question) != null);
+            if (!recognizedTitle)
+            {
+                // Depending on the RuneLite chatbox layout, the question may
+                // be in the dialogue text rather than the option title.
+                String visibleDialogue = Rs2Dialogue.getDialogueText();
+                if (visibleDialogue != null
+                        && (normalize(visibleDialogue).contains("to pass you must answer me this")
+                            || matchQuestion(visibleDialogue) != null))
+                {
+                    question = visibleDialogue;
+                }
+            }
             boolean strongholdQuestion = question != null
                     && (normalize(question).contains("to pass you must answer me this")
                         || matchQuestion(question) != null);
