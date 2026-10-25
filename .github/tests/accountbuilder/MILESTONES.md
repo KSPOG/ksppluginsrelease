@@ -22,6 +22,16 @@ Plugin: KspAccountBuilderPlugin
 - [ ] Observe the new code actively loaded by the live Microbot client and confirm a chisel/gem batch and a tiara/silver-bar batch yield Crafting XP.
 - [ ] Validate missing-supply handling and handoff to GE replenishment; do not claim progression acceptance until this is observed.
 
+## Smelting batch continuity checkpoint (2026-10-25, dev only)
+
+- [x] Replace short animation-only smelting hold with a batch tracker that acknowledges ore consumption and Smithing XP gains.
+- [x] Recognize ongoing furnace animations after restarting or resuming the task.
+- [x] Defer inventory reset, furnace re-clicks, scheduled activity changes, breaks and ordered-queue handoffs until the current Make-All batch finishes.
+- [x] Add six deterministic regression tests covering animation gaps, delayed starts, XP observations, inactivity recovery and the final bar.
+- [ ] Confirm the latest Account Builder workflow compiles and all ten JUnit suites pass.
+- [ ] Observe actual bars and Smithing XP increasing on the live Microbot client without repeated furnace clicks or premature banking.
+- [ ] Verify recovery from a genuinely stalled furnace and switching after the final batch (live acceptance required).
+
 ## Milestone 5 - Required acceptance
 
 - Crafting selects an executable recipe based on skill level and actual resources.
