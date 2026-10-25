@@ -1,4 +1,4 @@
-# KSP Jewelry Crafter v0.1.0
+# KSP Jewelry Crafter v0.1.33
 
 Microbot jewellery crafter with live profitability filtering and automatic GE recycling.
 
@@ -20,7 +20,36 @@ Microbot jewellery crafter with live profitability filtering and automatic GE re
 - When inputs run out, crafted output is sold at the GE and the proceeds are reused to buy the next profitable recipe's inputs.
 - Missing moulds are bought once as reusable tooling.
 - GE offers time out, abort, collect to bank, and retry with progressively more aggressive prices.
-- Uses the Edgeville furnace/bank for the crafting loop and the Grand Exchange for liquidation/restocking.
+- Uses a configurable furnace and its matching bank for crafting, and the Grand Exchange for liquidation/restocking.
+
+## Furnace selection (v0.1.33)
+
+In the Jewellery Crafter plugin configuration, use the **Furnace** dropdown.
+The options are **Edgeville** (default), **Falador**, **Lumbridge** and **Al Kharid**.
+
+| Furnace | Configured furnace search area (x, y, width, height, plane) | Banking destination |
+|---|---|---|
+| Edgeville | (3106, 3496, 8, 8, 0) | Edgeville bank |
+| Falador | (2970, 3368, 7, 9, 0) | Falador west bank |
+| Lumbridge | (3221, 3252, 9, 6, 0) | Lumbridge Castle top-floor bank (plane 2) |
+| Al Kharid | (3271, 3184, 9, 5, 0) | Al Kharid bank |
+
+The three newly added furnace regions preserve the supplied area
+coordinates. The RuneLite `WorldArea` constructor orders its parameters
+as `(x, y, width, height, plane)`, not `(x, y, plane, width, height)`.
+
+Selecting a different furnace changes furnace lookup, the local bank used for
+the next inventory, and the trip back from the Grand Exchange. It does not
+change Grand Exchange pricing or purchasing behavior.
+
+Location changes are saved in RuneLite config and applied **between batches**;
+the script will not abruptly redirect a running jewellery batch.
+Lumbridge banking uses the bank upstairs; the walker must navigate the
+castle stairs. If pathfinding cannot access the upstairs bank, the
+plugin must be tested/recovered in the live client.
+
+The in-game overlay shows the currently active furnace, which may briefly
+differ from the dropdown while the current batch finishes.
 
 ## Recipe coverage
 
