@@ -4,11 +4,9 @@ import java.util.HashMap;
 import java.util.Map;
 
 /**
- * Session-owned GE offer monitoring. Only explicitly registered offers may be
- * repriced; pre-existing player offers are never touched.
- *
- * The in-game Modify Offer interface updates the price without changing
- * the original order or its partially filled quantity.
+ * Monitors only GE offers placed during this Account Builder task session.
+ * Supports in-place price modifications without resetting quantity or partial
+ * fills. A manually repriced offer is no longer managed by this policy.
  */
 public final class GeOfferRepricePolicy
 {
@@ -22,40 +20,25 @@ public final class GeOfferRepricePolicy
     public void placed(int itemId, int price, long now)
     {
         if (itemId <= 0 || price <= 0) return;
-        Offer offer = offers.get(itemId);
-        if (offer == null)
-        {
-            offer = new Offer(price);
-            offers.put(itemId, offer);
-        }
-        else if (offer.queuedPrice > 0 && offer.queuedPrice != price)
-        {
-            // Something else placed a different offer at this slot or price.
-            // Do not keep adjusting a transaction we no longer recognize.
-            offers.remove(itemId);
-            return;
-        }
-        offer.currentPrice = price;
-        offer.lastFilled = 0;
-        offer.lastProgressAt = now;
-        offer.cancelPending = false;
-        offer.queuedPrice = 0;
+        // Placement is a new order. Its expiry and caps must not inherit from
+        // the previous offer for the same item.
+        offers.put(itemId, new Offer(price, now));
     }
 
+    /**
+     * @return 0 when no change should occur; else the requested new GE price.
+     */
     public int candidate(int itemId, int observedPrice, int filled, long now, boolean buying)
     {
         Offer offer = offers.get(itemId);
-        if (offer == null || offer.cancelPending || offer.queuedPrice > 0
-                || offer.reprices >= MAX_REPRICES || observedPrice <= 0)
-            return 0;
+        if (offer == null || offer.reprices >= MAX_REPRICES || observedPrice <= 0) return 0;
 
         if (observedPrice != offer.currentPrice)
         {
-            // Respect manual pricing adjustments.
+            // User or another script changed the order. Do not override them.
             offers.remove(itemId);
             return 0;
         }
-
         if (filled > offer.lastFilled)
         {
             offer.lastFilled = filled;
@@ -66,10 +49,7 @@ public final class GeOfferRepricePolicy
         return nextPrice(offer.initialPrice, observedPrice, offer.reprices, buying);
     }
 
-    /**
-     * Called only once the live GE slot confirms the modified unit price.
-     * Existing filled quantity is left intact; only the quote/timer changes.
-     */
+    /** Only call when the live GE slot confirms the new price. */
     public void modified(int itemId, int newPrice, long now)
     {
         Offer offer = offers.get(itemId);
@@ -79,42 +59,11 @@ public final class GeOfferRepricePolicy
         offer.reprices++;
     }
 
-    /** An unsuccessful UI update must not retry every 50-100ms tick. */
+    /** Failed GUI interactions must not repeat every script tick. */
     public void defer(int itemId, long now)
     {
         Offer offer = offers.get(itemId);
         if (offer != null) offer.lastProgressAt = now;
-    }
-
-    public void requestCancellation(int itemId, int intendedPrice)
-    {
-        Offer offer = offers.get(itemId);
-        if (offer != null && intendedPrice > 0)
-        {
-            offer.cancelPending = true;
-            offer.queuedPrice = intendedPrice;
-        }
-    }
-
-    public void cancellationConfirmed(int itemId, long now)
-    {
-        Offer offer = offers.get(itemId);
-        if (offer == null || !offer.cancelPending) return;
-        offer.cancelPending = false;
-        offer.reprices++;
-        offer.lastProgressAt = now;
-    }
-
-    public int priceForNewOffer(int itemId, int fallback)
-    {
-        Offer offer = offers.get(itemId);
-        return offer == null || offer.queuedPrice <= 0 ? fallback : offer.queuedPrice;
-    }
-
-    public boolean awaitingCancellation(int itemId)
-    {
-        Offer offer = offers.get(itemId);
-        return offer != null && offer.cancelPending;
     }
 
     public void forget(int itemId) { offers.remove(itemId); }
@@ -125,36 +74,38 @@ public final class GeOfferRepricePolicy
         return offer == null ? 0 : offer.reprices;
     }
 
-    public static int nextPrice(int initial, int current, int repriceCount, boolean buying)
+    /**
+     * Five 5% steps maximum, clamped to 65% of the original sell price
+     * or 150% of the initial buy price. Price is always at least 1 GP.
+     */
+    public static int nextPrice(int initial, int current, int reprices, boolean buying)
     {
-        if (initial <= 0 || current <= 0 || repriceCount >= MAX_REPRICES) return 0;
-        // Round upward for buying, downward for selling. Always move at least
-        // one GP while respecting the signed 32-bit GE per-unit price limit.
+        if (initial <= 0 || current <= 0 || reprices >= MAX_REPRICES) return 0;
         long delta = Math.max(1L, ((long) current * PRICE_STEP_PERCENT + 99L) / 100L);
         if (buying)
         {
             long ceiling = Math.min(Integer.MAX_VALUE, ((long) initial * 150L + 99L) / 100L);
-            long newPrice = Math.min(ceiling, (long) current + delta);
-            return newPrice > current ? (int) newPrice : 0;
+            long updated = Math.min(ceiling, (long) current + delta);
+            return updated > current ? (int) updated : 0;
         }
         long floor = Math.max(1L, ((long) initial * 65L) / 100L);
-        long newPrice = Math.max(floor, (long) current - delta);
-        return newPrice < current ? (int) newPrice : 0;
+        long updated = Math.max(floor, (long) current - delta);
+        return updated < current ? (int) updated : 0;
     }
 
     private static final class Offer
     {
         final int initialPrice;
         int currentPrice;
-        int queuedPrice;
         int lastFilled;
         int reprices;
         long lastProgressAt;
-        boolean cancelPending;
 
-        Offer(int initialPrice)
+        Offer(int initialPrice, long now)
         {
             this.initialPrice = initialPrice;
+            this.currentPrice = initialPrice;
+            this.lastProgressAt = now;
         }
     }
 }
