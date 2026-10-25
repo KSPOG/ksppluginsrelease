@@ -11,47 +11,52 @@ import net.runelite.client.plugins.microbot.kspmule.KspMuleConfig;
 
 @ConfigGroup("kspjewelrycrafter")
 public interface KspJewelryCrafterConfig extends Config, KspMuleConfig, KspBreakConfig {
-    @ConfigSection(name = "Break Handler", description = "Randomized logout breaks", position = 100)
+    @ConfigSection(name = "Break Handler", description = "Randomized logout breaks", position = 101)
     String breakHandlerSection = KspBreakConfig.SECTION;
 
-    @ConfigSection(name = "Anti-ban", description = "Task-aware behavior variation that only runs in safe idle windows", position = 50)
+    @ConfigSection(name = "Anti-ban", description = "Task-aware behavior variation that only runs in safe idle windows", position = 51)
     String antibanSection = "antiban";
 
-    @ConfigSection(name = "Local Mule", description = "Automatic excess-GP transfer to KSP Trade Receiver", position = 90)
+    @ConfigSection(name = "Local Mule", description = "Automatic excess-GP transfer to KSP Trade Receiver", position = 91)
     String muleSection = KspMuleConfig.SECTION;
 
     @ConfigItem(keyName = "selectionMode", name = "Recipe selection", description = "How a profitable eligible recipe is selected", position = 0)
     default JewelrySelectionMode selectionMode() { return JewelrySelectionMode.BEST_PROFIT; }
     @ConfigItem(keyName = "fixedRecipe", name = "Fixed recipe", description = "Used only when Recipe selection is Fixed recipe", position = 1)
     default JewelryRecipe fixedRecipe() { return JewelryRecipe.GOLD_RING; }
+    @ConfigItem(keyName = "furnaceLocation", name = "Furnace",
+        description = "Choose where jewellery is crafted and banked. Location changes take effect between batches.",
+        position = 2)
+    default JewelryFurnaceLocation furnaceLocation() { return JewelryFurnaceLocation.EDGEVILLE; }
+
     @Range(min = 1, max = 1_000_000)
-    @ConfigItem(keyName = "minimumProfitPerItem", name = "Minimum profit / item", description = "Hard net-profit floor after estimated GE tax and configured price margins", position = 2)
+    @ConfigItem(keyName = "minimumProfitPerItem", name = "Minimum profit / item", description = "Hard net-profit floor after estimated GE tax and configured price margins", position = 3)
     default int minimumProfitPerItem() { return 10; }
     @Range(min = 0, max = 100)
-    @ConfigItem(keyName = "minimumRoiPercent", name = "Minimum ROI %", description = "Hard ROI floor for a recipe to be considered profitable", position = 3)
+    @ConfigItem(keyName = "minimumRoiPercent", name = "Minimum ROI %", description = "Hard ROI floor for a recipe to be considered profitable", position = 4)
     default int minimumRoiPercent() { return 1; }
     @Range(min = 0, max = 25)
-    @ConfigItem(keyName = "buyMarkupPercent", name = "GE buy markup %", description = "Markup applied to current instant-buy prices when restocking", position = 4)
+    @ConfigItem(keyName = "buyMarkupPercent", name = "GE buy markup %", description = "Markup applied to current instant-buy prices when restocking", position = 5)
     default int buyMarkupPercent() { return 2; }
     @Range(min = 0, max = 25)
-    @ConfigItem(keyName = "sellDiscountPercent", name = "GE sell discount %", description = "Discount applied to current instant-sell prices when liquidating output", position = 5)
+    @ConfigItem(keyName = "sellDiscountPercent", name = "GE sell discount %", description = "Discount applied to current instant-sell prices when liquidating output", position = 6)
     default int sellDiscountPercent() { return 2; }
     @Range(min = 1, max = 10_000)
-    @ConfigItem(keyName = "maxRestockUnits", name = "Max restock units", description = "Maximum units bought in one restock cycle", position = 6)
+    @ConfigItem(keyName = "maxRestockUnits", name = "Max restock units", description = "Maximum units bought in one restock cycle", position = 7)
     default int maxRestockUnits() { return 750; }
     @Range(min = 10, max = 100)
-    @ConfigItem(keyName = "capitalUsagePercent", name = "Capital usage %", description = "Maximum percentage of spendable coins committed to one restock", position = 7)
+    @ConfigItem(keyName = "capitalUsagePercent", name = "Capital usage %", description = "Maximum percentage of spendable coins committed to one restock", position = 8)
     default int capitalUsagePercent() { return 90; }
     @Range(min = 0, max = 100_000_000)
-    @ConfigItem(keyName = "reserveCoins", name = "Reserve coins", description = "Coins never committed to input restocking", position = 8)
+    @ConfigItem(keyName = "reserveCoins", name = "Reserve coins", description = "Coins never committed to input restocking", position = 9)
     default int reserveCoins() { return 10_000; }
     @Range(min = 15, max = 300)
-    @ConfigItem(keyName = "offerTimeoutSeconds", name = "GE offer timeout", description = "Abort and retry an unfilled plugin offer after this many seconds", position = 9)
+    @ConfigItem(keyName = "offerTimeoutSeconds", name = "GE offer timeout", description = "Abort and retry an unfilled plugin offer after this many seconds", position = 10)
     default int offerTimeoutSeconds() { return 60; }
     @Range(min = 0, max = 10)
-    @ConfigItem(keyName = "maxOfferRetries", name = "Max GE retries", description = "Maximum repricing retries for a buy or sell before re-evaluating", position = 10)
+    @ConfigItem(keyName = "maxOfferRetries", name = "Max GE retries", description = "Maximum repricing retries for a buy or sell before re-evaluating", position = 11)
     default int maxOfferRetries() { return 4; }
-    @ConfigItem(keyName = "showOverlay", name = "Show overlay", description = "Show status, membership, recipe and live profitability", position = 11)
+    @ConfigItem(keyName = "showOverlay", name = "Show overlay", description = "Show status, membership, recipe and live profitability", position = 12)
     default boolean showOverlay() { return true; }
 
     @ConfigItem(keyName = "customAntiban", name = "Custom anti-ban", description = "Enable Jewellery Crafter's safe, task-aware humanization layer", position = 0, section = antibanSection)
