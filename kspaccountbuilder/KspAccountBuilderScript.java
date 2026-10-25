@@ -191,6 +191,11 @@ public class KspAccountBuilderScript extends KspManagedScript
             return false;
         if (orderedElapsedMillis < orderedEntries.get(orderedIndex).durationSeconds * 1000L)
             return false;
+        if (isSmeltingBusy())
+        {
+            Microbot.status = "Finishing smelting batch before next queued task";
+            return true;
+        }
         BuilderTask next = orderedTaskAt(orderedIndex + 1);
         if (next == null)
         {
@@ -580,7 +585,9 @@ public class KspAccountBuilderScript extends KspManagedScript
         if (sharedBreakActive) return;
         if (config.doBreaks())
         {
-            if (!breakActive && now >= nextBreakAtMillis) startBreak(now);
+            // Breaks may begin once the currently active furnace Make-All
+            // batch has reached its terminal state, not between two bars.
+            if (!breakActive && now >= nextBreakAtMillis && !isSmeltingBusy()) startBreak(now);
             if (breakActive) handleBreak(now);
             if (breakActive) return;
         }
@@ -680,8 +687,19 @@ public class KspAccountBuilderScript extends KspManagedScript
         nextActivitySwitchAtMillis = -1L;
     }
 
+    private boolean isSmeltingBusy()
+    {
+        return taskStarted && currentTask == BuilderTask.SMELTING
+                && smeltScript != null && smeltScript.isSmeltingInProgress();
+    }
+
     private boolean isSafeToStartActivitySwitch()
     {
+        if (isSmeltingBusy())
+        {
+            Microbot.status = "Finishing smelting batch before activity switch";
+            return false;
+        }
         if (Rs2Walker.getCurrentTarget() != null || Rs2Player.isMoving() || Rs2Player.isInteracting() || Rs2Dialogue.isInDialogue())
         {
             KspTaskDebug.throttled(log, debugEnabled, "Builder", "activity-switch-travel-deferral", 5_000L,
@@ -756,9 +774,7 @@ public class KspAccountBuilderScript extends KspManagedScript
         // The final ores may disappear before the last smithing animation
         // completes. Do not interpret that temporary zero-resource snapshot
         // as permission to terminate an active Make-All furnace batch.
-        boolean smeltingInProgress = taskStarted
-                && currentTask == BuilderTask.SMELTING
-                && smeltScript.isSmeltingInProgress();
+        boolean smeltingInProgress = isSmeltingBusy();
         if (!isSingleSkillTaskForced()
                 && !(currentTask == BuilderTask.GE_BUY && taskStarted)
                 && !smeltingInProgress
