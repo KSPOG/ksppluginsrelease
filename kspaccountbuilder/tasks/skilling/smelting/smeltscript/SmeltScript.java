@@ -90,6 +90,7 @@ public class SmeltScript extends KspManagedScript
             // current bar recipe rather than switching to the bank.
             if (Rs2Player.isAnimating() && targetBar != null
                     && !Rs2Bank.isOpen()
+                    && Rs2Player.getWorldLocation() != null
                     && targetArea.toWorldArea().contains(Rs2Player.getWorldLocation()))
             {
                 int cycles = getCraftableBarsFromInventory(targetBar);
@@ -592,6 +593,21 @@ public class SmeltScript extends KspManagedScript
         walkingToTargetArea = false;
         KspWalkerGuard.clear("Smelting:target-area");
         super.shutdown();
+    }
+
+    /**
+     * Guard the parent task scheduler against switching activities while the
+     * final ore is still being processed. On resume, a furnace animation can
+     * identify work that predates this script's in-memory batch snapshot.
+     */
+    public boolean isSmeltingInProgress()
+    {
+        if (!isRunning()) return false;
+        if (smeltingBatch.isTracking()) return true;
+        WorldPoint player = Rs2Player.getWorldLocation();
+        return player != null && targetBar != null && !Rs2Bank.isOpen()
+                && targetArea.toWorldArea().contains(player)
+                && Rs2Player.isAnimating();
     }
 
     public SmeltArea getTargetArea() { return targetArea; }
