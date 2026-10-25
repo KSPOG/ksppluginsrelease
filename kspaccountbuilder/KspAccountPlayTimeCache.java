@@ -131,8 +131,10 @@ public class KspAccountPlayTimeCache
 
     public synchronized void synchronizePlayTimeMillis(long accountHash, long playTimeMillis)
     {
-        if (accountHash == 0L || playTimeMillis < 0L)
+        if (accountHash == 0L || !KspAccountPlayTimePolicy.isVerifiedReading(playTimeMillis))
         {
+            // Zero is an uninitialized varc, not authoritative 0 minutes
+            // of account age. Keep the existing cache and retry later.
             return;
         }
 
@@ -143,9 +145,11 @@ public class KspAccountPlayTimeCache
 
         if (accountHash == activeAccountHash && activeAccountKey != null)
         {
-            if (activePlayTimeMillis != playTimeMillis)
+            long reconciled = KspAccountPlayTimePolicy.reconcile(
+                    activePlayTimeMillis, playTimeMillis);
+            if (activePlayTimeMillis != reconciled)
             {
-                activePlayTimeMillis = playTimeMillis;
+                activePlayTimeMillis = reconciled;
                 dirty = true;
             }
             lastSampleAtMillis = System.currentTimeMillis();
@@ -153,9 +157,11 @@ public class KspAccountPlayTimeCache
         else
         {
             Long current = playTimeByAccount.get(accountKey);
-            if (current == null || current.longValue() != playTimeMillis)
+            long reconciled = KspAccountPlayTimePolicy.reconcile(
+                    current == null ? -1L : current.longValue(), playTimeMillis);
+            if (current == null || current.longValue() != reconciled)
             {
-                playTimeByAccount.put(accountKey, playTimeMillis);
+                playTimeByAccount.put(accountKey, reconciled);
                 dirty = true;
             }
         }
