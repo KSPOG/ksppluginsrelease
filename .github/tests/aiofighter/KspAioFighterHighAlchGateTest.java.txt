@@ -1,0 +1,58 @@
+package net.runelite.client.plugins.microbot.kspaiofighter;
+
+/** Dependency-free regression for instant, single-flight High Alchemy. */
+public final class KspAioFighterHighAlchGateTest
+{
+    private static void check(boolean condition, String message)
+    {
+        if (!condition) throw new AssertionError(message);
+    }
+
+    public static void main(String[] args)
+    {
+        KspAioFighterHighAlchGate gate = new KspAioFighterHighAlchGate();
+        check(gate.inspect(0, 1_000, 100_000L) == KspAioFighterHighAlchGate.Decision.READY,
+                "First eligible item must cast immediately");
+
+        gate.dispatched(1623, 3, 1_000, 100_000L);
+        check(gate.inspect(3, 1_000, 100_200L) == KspAioFighterHighAlchGate.Decision.WAIT,
+                "Do not fire a second alch before acknowledgement");
+        check(gate.inspect(2, 1_000, 101_000L) == KspAioFighterHighAlchGate.Decision.WAIT,
+                "Inventory decrease acknowledges cast but still respects cooldown");
+        check(gate.inspect(2, 1_000, 102_401L) == KspAioFighterHighAlchGate.Decision.READY,
+                "Next alch should be ready after 2.4s rather than waiting for loot");
+
+        gate.dispatched(1623, 2, 1_000, 103_000L);
+        check(gate.inspect(2, 1_065, 103_600L) == KspAioFighterHighAlchGate.Decision.WAIT,
+                "Magic XP increase acknowledges even if inventory snapshot lags");
+        check(gate.inspect(2, 1_065, 105_401L) == KspAioFighterHighAlchGate.Decision.READY,
+                "Confirmed cast should allow another item after cooldown");
+
+        gate.reset();
+        for (int attempt = 0; attempt < 3; attempt++)
+        {
+            long now = 200_000L + attempt * 6_000L;
+            check(gate.inspect(0, 2_000, now) == KspAioFighterHighAlchGate.Decision.READY,
+                    "Retry may start after prior timeout");
+            gate.dispatched(5555, 1, 2_000, now);
+            check(gate.inspect(1, 2_000, now + 2_000L) == KspAioFighterHighAlchGate.Decision.WAIT,
+                    "Failed cast must not be spam-clicked");
+        }
+        long failureTime = 217_000L;
+        check(gate.inspect(1, 2_000, failureTime) == KspAioFighterHighAlchGate.Decision.BACK_OFF,
+                "Three failed casts should back off");
+        check(gate.isBackedOffItem(5555, failureTime), "Backoff should target failed item only");
+        check(!gate.isBackedOffItem(6666, failureTime),
+                "Other eligible items should not be blocked");
+        check(gate.inspect(1, 2_000, failureTime + 29_000L) == KspAioFighterHighAlchGate.Decision.BACK_OFF,
+                "Maintain 30s failure backoff");
+        check(gate.inspect(1, 2_000, failureTime + 30_100L) == KspAioFighterHighAlchGate.Decision.READY,
+                "Recover after failure cooldown");
+
+        gate.reset();
+        check(gate.trackedItemId() == -1, "Reset clears in-flight work");
+        check(gate.inspect(0, 2_000, 300_000L) == KspAioFighterHighAlchGate.Decision.READY,
+                "Restart must not inherit cooldown");
+        System.out.println("PASS: High Alch priority gate, acknowledgement, cooldown, and bounded retries");
+    }
+}
