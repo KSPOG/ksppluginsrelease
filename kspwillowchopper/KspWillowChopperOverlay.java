@@ -56,13 +56,13 @@ public class KspWillowChopperOverlay extends OverlayPanel {
 
             KspTree tree = script.getActiveTree();
             addLine("Tree:", tree.toString(), ACTIVE);
-            addLine("Mode:", config.bankLogs() ? "Bank resources" : "Burn logs", ACTIVE);
+            addLine("Mode:", config.mode().toString(), ACTIVE);
             addLine("State:", prettyState(script.getState()), ACTIVE);
             addLine("Status:", script.getStatus(), ACTIVE);
             addLine("Resource:", tree.getResourceName(), VALUE);
             addLine("Inventory:", String.valueOf(script.getCurrentResourceCount()), VALUE);
 
-            if (!config.bankLogs() && tree.isCampfireBurnable()) {
+            if (config.mode() == KspChopperMode.CHOP_BURN && tree.isCampfireBurnable()) {
                 String campfire = script.isBurningActive()
                         ? "Burning"
                         : (script.isCampfireNearby() ? "Nearby" : "None");
@@ -88,8 +88,10 @@ public class KspWillowChopperOverlay extends OverlayPanel {
             addLine("Runtime:", formatDuration(elapsedMs), VALUE);
             addLine("Items chopped:", format(chopped) + " (" + formatRate(chopped, hours) + "/h)", VALUE);
 
-            if (config.bankLogs()) {
+            if (config.mode() == KspChopperMode.CHOP_BANK) {
                 addLine("Items banked:", format(script.getResourcesBanked()), GOOD);
+            } else if (config.mode() == KspChopperMode.CHOP_DROP) {
+                addLine("Items dropped:", format(script.getResourcesDropped()), GOOD);
             } else if (tree.isCampfireBurnable()) {
                 addLine("Logs burned:", format(script.getResourcesBurned()), GOOD);
                 addLine("Campfires lit:", format(script.getCampfiresLit()), VALUE);
@@ -98,7 +100,7 @@ public class KspWillowChopperOverlay extends OverlayPanel {
             addLine("WC Lv:", formatLevel(script.getWoodcuttingLevel(), script.getWoodcuttingLevelsGained()), VALUE);
             addLine("FM Lv:", formatLevel(script.getFiremakingLevel(), script.getFiremakingLevelsGained()), VALUE);
             addLine("WC XP:", format(wcXp) + " (" + formatRate(wcXp, hours) + "/h)", VALUE);
-            if (!config.bankLogs() || fmXp > 0) {
+            if (config.mode() == KspChopperMode.CHOP_BURN || fmXp > 0) {
                 addLine("FM XP:", format(fmXp) + " (" + formatRate(fmXp, hours) + "/h)", VALUE);
             }
 
