@@ -3,6 +3,7 @@ package net.runelite.client.plugins.microbot.kspaiofighter;
 import net.runelite.api.EquipmentInventorySlot;
 import net.runelite.api.coords.WorldPoint;
 import net.runelite.client.game.ItemManager;
+import net.runelite.client.plugins.microbot.Microbot;
 import net.runelite.client.ui.ColorScheme;
 import net.runelite.client.ui.PluginPanel;
 import net.runelite.client.util.AsyncBufferedImage;
@@ -92,6 +93,13 @@ final class KspAioFighterEquipmentPanel extends PluginPanel
         refreshSlots();
         refreshAreaStatus();
         refreshAutomationState();
+        // Populate saved item sprites in the background as soon as the client is ready.
+        if (Microbot.isLoggedIn())
+        {
+            index.ensureLoaded(success -> SwingUtilities.invokeLater(() -> {
+                if (success) refreshSlots();
+            }));
+        }
     }
 
     private void buildUi()
@@ -193,7 +201,14 @@ final class KspAioFighterEquipmentPanel extends PluginPanel
     private void addSlot(JPanel panel, EquipmentInventorySlot slot, int x, int y)
     {
         JButton button = new JButton();
-        button.setPreferredSize(new Dimension(68, 54));
+        button.setPreferredSize(new Dimension(68, 62));
+        button.setFont(button.getFont().deriveFont(9f));
+        button.setMargin(new Insets(2, 2, 2, 2));
+        button.setHorizontalAlignment(SwingConstants.CENTER);
+        button.setVerticalAlignment(SwingConstants.CENTER);
+        button.setHorizontalTextPosition(SwingConstants.CENTER);
+        button.setVerticalTextPosition(SwingConstants.BOTTOM);
+        button.setIconTextGap(0);
         button.setToolTipText(pretty(slot));
         button.addActionListener(e -> openPicker(slot));
         slotButtons.put(slot, button);
@@ -210,9 +225,26 @@ final class KspAioFighterEquipmentPanel extends PluginPanel
         KspAioFighterGearStyle style = selectedStyle();
         for (Map.Entry<EquipmentInventorySlot, JButton> entry : slotButtons.entrySet())
         {
-            String name = settings.get(style, entry.getKey());
-            entry.getValue().setText(shortName(name.isBlank() ? pretty(entry.getKey()) : name));
-            entry.getValue().setToolTipText(name.isBlank() ? pretty(entry.getKey()) + ": empty" : pretty(entry.getKey()) + ": " + name);
+            EquipmentInventorySlot slot = entry.getKey();
+            JButton button = entry.getValue();
+            String name = settings.get(style, slot);
+            button.setIcon(null);
+            button.setText(name.isBlank() ? pretty(slot) : shortName(name));
+            button.setToolTipText(name.isBlank() ? pretty(slot) + ": empty" : pretty(slot) + ": " + name);
+
+            // The selected item belongs to this equipment slot for this gear style.
+            // AsyncBufferedImage.addTo(JButton) repaints when its sprite finishes loading.
+            if (!name.isBlank() && index.isLoaded())
+            {
+                for (KspAioFighterEquipmentItem item : index.itemsFor(slot))
+                {
+                    if (name.equalsIgnoreCase(item.getName()))
+                    {
+                        itemManager.getImage(item.getId()).addTo(button);
+                        break;
+                    }
+                }
+            }
         }
         gearStatus.setText("Editing: " + style);
     }
@@ -284,7 +316,7 @@ final class KspAioFighterEquipmentPanel extends PluginPanel
                 JOptionPane.showMessageDialog(this, "Log in and try Load items again.", "AIO Fighter Equipment", JOptionPane.ERROR_MESSAGE);
                 return;
             }
-            gearStatus.setText("Equipment database ready.");
+            refreshSlots();
             if (next != null) next.run();
         }));
     }
@@ -397,7 +429,7 @@ final class KspAioFighterEquipmentPanel extends PluginPanel
     private static String shortName(String value)
     {
         if (value == null || value.isBlank()) return "Empty";
-        return value.length() <= 11 ? value : value.substring(0, 10) + "…";
+        return value.length() <= 9 ? value : value.substring(0, 8) + "…";
     }
 
     private static boolean valid(WorldPoint point) { return point != null && point.getX() > 0 && point.getY() > 0; }
