@@ -92,15 +92,17 @@ class GeOfferCommitPolicyTest {
     {
         GeOfferRepricePolicy tracker = new GeOfferRepricePolicy();
         tracker.placed(1002, 300, 1_000L);
+        int current = 300;
         for (int i = 0; i < GeOfferRepricePolicy.MAX_REPRICES; i++)
         {
-            int candidate = tracker.candidate(1002, 300 + i, 0, 100_000L + i * 100_000L, true);
-            // Drive the actual quote from each prior modification.
-            if (candidate <= 0) break;
-            tracker.modified(1002, candidate, 100_000L + i * 100_000L);
-            if (i < GeOfferRepricePolicy.MAX_REPRICES - 1)
-                assertEquals(i + 1, tracker.retries(1002));
+            long now = 100_000L + i * 100_000L;
+            int candidate = tracker.candidate(1002, current, 0, now, true);
+            assertTrue(candidate > current);
+            tracker.modified(1002, candidate, now);
+            current = candidate;
+            assertEquals(i + 1, tracker.retries(1002));
         }
+        assertEquals(0, tracker.candidate(1002, current, 0, 700_000L, true));
         tracker.placed(1002, 300, 700_000L);
         assertEquals(0, tracker.retries(1002));
         tracker.modified(1002, 315, 800_000L);
