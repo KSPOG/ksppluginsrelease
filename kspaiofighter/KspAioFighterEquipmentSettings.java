@@ -69,6 +69,33 @@ final class KspAioFighterEquipmentSettings
         syncRuntimeGearList(style);
     }
 
+    /**
+     * Replace exactly one selected gear setup with a snapshot of worn equipment.
+     * Empty slots are cleared; other combat styles are never modified.
+     * The legacy CSV compatibility mirror is synchronized once after the batch.
+     */
+    void replaceStyle(KspAioFighterGearStyle style, Map<EquipmentInventorySlot, String> equipped)
+    {
+        if (style == null || equipped == null)
+        {
+            throw new IllegalArgumentException("Gear style and equipment snapshot are required");
+        }
+
+        for (EquipmentInventorySlot slot : CONFIGURABLE_SLOTS)
+        {
+            String name = equipped.get(slot);
+            if (name == null || name.isBlank())
+            {
+                configManager.unsetConfiguration(KspAioFighterConfig.GROUP, key(style, slot));
+            }
+            else
+            {
+                configManager.setConfiguration(KspAioFighterConfig.GROUP, key(style, slot), name.trim());
+            }
+        }
+        syncRuntimeGearList(style);
+    }
+
     Map<EquipmentInventorySlot, String> equipmentFor(KspAioFighterGearStyle style)
     {
         EnumMap<EquipmentInventorySlot, String> result = new EnumMap<>(EquipmentInventorySlot.class);
