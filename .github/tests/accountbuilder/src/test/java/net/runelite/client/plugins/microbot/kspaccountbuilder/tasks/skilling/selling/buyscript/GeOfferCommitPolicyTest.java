@@ -56,21 +56,27 @@ class GeOfferCommitPolicyTest {
         assertEquals(105, tracker.candidate(1755, 100, 3, 190_000L, true));
     }
 
-    @Test void cancellationWaitsAndResumesWithOnlyNewPrice()
+    @Test void inPlaceModifyPreservesProgressAndSchedulesNextReprice()
     {
         GeOfferRepricePolicy tracker = new GeOfferRepricePolicy();
         tracker.placed(2355, 200, 1_000L);
         int higher = tracker.candidate(2355, 200, 0, 100_000L, true);
         assertEquals(210, higher);
-        tracker.requestCancellation(2355, higher);
-        assertTrue(tracker.awaitingCancellation(2355));
-        assertEquals(0, tracker.candidate(2355, 200, 0, 200_000L, true));
-        tracker.cancellationConfirmed(2355, 200_000L);
+        tracker.modified(2355, higher, 100_000L);
         assertEquals(1, tracker.retries(2355));
-        assertEquals(210, tracker.priceForNewOffer(2355, 200));
-        tracker.placed(2355, 210, 202_000L);
-        assertEquals(0, tracker.candidate(2355, 210, 0, 211_000L, true));
-        assertEquals(221, tracker.candidate(2355, 210, 0, 300_000L, true));
+        assertEquals(0, tracker.candidate(2355, 210, 0, 101_000L, true));
+        assertEquals(0, tracker.candidate(2355, 210, 3, 102_000L, true));
+        assertEquals(221, tracker.candidate(2355, 210, 3, 200_000L, true));
+    }
+
+    @Test void failedModifyIsDeferredInsteadOfClickedRepeatedly()
+    {
+        GeOfferRepricePolicy tracker = new GeOfferRepricePolicy();
+        tracker.placed(2355, 200, 1_000L);
+        assertEquals(210, tracker.candidate(2355, 200, 0, 100_000L, true));
+        tracker.defer(2355, 100_000L);
+        assertEquals(0, tracker.candidate(2355, 200, 0, 150_000L, true));
+        assertEquals(210, tracker.candidate(2355, 200, 0, 190_000L, true));
     }
 
     @Test void doesNotTouchUnknownOrManuallyRepricedOffer()
@@ -79,17 +85,27 @@ class GeOfferCommitPolicyTest {
         assertEquals(0, tracker.candidate(1001, 250, 0, 1_000_000L, false));
         tracker.placed(1001, 250, 1_000L);
         assertEquals(0, tracker.candidate(1001, 247, 0, 1_000_000L, false));
-        assertEquals(250, tracker.priceForNewOffer(1001, 250));
+        assertEquals(0, tracker.retries(1001));
     }
 
-    @Test void resetDropsQueuedPricesFromPriorSession()
+    @Test void newPlacementAndResetClearPreviousOfferLimits()
     {
         GeOfferRepricePolicy tracker = new GeOfferRepricePolicy();
         tracker.placed(1002, 300, 1_000L);
-        tracker.requestCancellation(1002, 285);
-        tracker.cancellationConfirmed(1002, 1_000L);
-        assertEquals(285, tracker.priceForNewOffer(1002, 300));
+        for (int i = 0; i < GeOfferRepricePolicy.MAX_REPRICES; i++)
+        {
+            int candidate = tracker.candidate(1002, 300 + i, 0, 100_000L + i * 100_000L, true);
+            // Drive the actual quote from each prior modification.
+            if (candidate <= 0) break;
+            tracker.modified(1002, candidate, 100_000L + i * 100_000L);
+            if (i < GeOfferRepricePolicy.MAX_REPRICES - 1)
+                assertEquals(i + 1, tracker.retries(1002));
+        }
+        tracker.placed(1002, 300, 700_000L);
+        assertEquals(0, tracker.retries(1002));
+        tracker.modified(1002, 315, 800_000L);
         tracker.reset();
-        assertEquals(300, tracker.priceForNewOffer(1002, 300));
+        assertEquals(0, tracker.candidate(1002, 315, 0, 1_000_000L, true));
     }
+
 }
