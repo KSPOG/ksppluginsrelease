@@ -9,7 +9,7 @@ Plugin: KspAccountBuilderPlugin
 - Milestones 1-4: VERIFIED in earlier agent checkpoints. Original acceptance evidence must be reconciled before the final PR; do not infer that live integration passed.
 - Milestone 5 - Progression and GE economy: IN PROGRESS.
 - Milestone 6 - Controlled live UI/log integration acceptance: PENDING.
-- Milestone 7 - Focused pull request, reviews, CI and merge: PENDING.
+- Milestone 7 - Regression and CI PR #371: MERGED into dev; final runtime acceptance and subsequent fix PRs remain PENDING.
 
 ## Milestone 5 - Required acceptance
 
@@ -100,3 +100,12 @@ Status: OPEN - observed on the running older DevLoader class generation; candida
 - The route comparator considered a Varrock Teleport bank leg, but the observed execution involved Lumbridge. Do not label the Varrock proposal an executed teleport. Whether the Lumbridge bank visit was necessary remains unverified.
 - Acceptance: verify exit portal recognition and inventory/bank state, avoid unintended mine-to-bank or bank-to-task detours, prevent teleport resource purchases without a beneficial destination, bound transport retry latency, and verify correct eventual return to Aubury without repeated NPC/object clicks.
 - Add focused regression tests for confirmed source-level defects; validate in the running client only after a controlled safe deployment boundary. Preserve active gameplay and all existing artwork.
+
+## 2026-10-25 - Verified regression and CI merge
+- PR #371 merged into KSPOG/ksppluginsrelease:dev at 53bc82d916bc133fa1675b96c7be8c8dc0272738.
+- GitHub Actions run 40185148188 passed compilation, all nine JUnit regression suites, PNG artwork verification and JAR upload.
+- The merge changed nine regression tests, this tracker and the CI workflow; no Account Builder runtime Java or artwork changed.
+- DevLoader refresh uses per-unit production-source fingerprints; this merge did not alter the Account Builder runtime fingerprint.
+- Milestone 5 remains IN PROGRESS: confirm Crafting chisel and uncut-gem withdrawals, correct economy-aware buying/selling and task selection, avoid needless Melee and Rune Essence banking/teleportation, and prevent object/NPC click spam.
+- Milestone 6 remains PENDING: confirm loaded code generation and collect controlled live UI/log evidence for Crafting, GE, Melee, Rune Essence, Mining, interaction acknowledgement, pause/resume and progression.
+- The live Microbot client must not be stopped or hot-reloaded during an active task. Implement subsequent fixes on this isolated branch and validate before creating the next PR.
