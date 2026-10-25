@@ -15,7 +15,7 @@ public final class SmeltingBatchTracker
     private static final long INACTIVITY_TIMEOUT_MS = 12_000L;
     private static final long FINAL_ANIMATION_GRACE_MS = 1_500L;
 
-    private boolean tracking;
+    private volatile boolean tracking;
     private boolean sawActivity;
     private int previousCycles;
     private int previousXp;
