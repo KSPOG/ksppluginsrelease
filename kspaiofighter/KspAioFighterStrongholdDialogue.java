@@ -17,6 +17,8 @@ import java.util.Locale;
 final class KspAioFighterStrongholdDialogue
 {
     private static final long ACTION_INTERVAL_MS = 750L;
+    private static final long ANSWER_RETRY_MS = 3_500L;
+    private static final int MAX_ANSWER_ATTEMPTS = 3;
     private static final long RECOGNIZED_CONTINUE_WINDOW_MS = 30_000L;
 
     private static final List<QuestionRule> QUESTIONS = Arrays.asList(
@@ -58,6 +60,8 @@ final class KspAioFighterStrongholdDialogue
     private long lastActionMillis;
     private long lastRecognizedMillis;
     private boolean waitingForResponse;
+    private String lastQuestion = "";
+    private int answerAttempts;
     private String status = "";
 
     String status()
@@ -70,6 +74,8 @@ final class KspAioFighterStrongholdDialogue
         lastActionMillis = 0L;
         lastRecognizedMillis = 0L;
         waitingForResponse = false;
+        lastQuestion = "";
+        answerAttempts = 0;
         status = "";
     }
 
@@ -100,6 +106,13 @@ final class KspAioFighterStrongholdDialogue
 
             if (strongholdQuestion)
             {
+                String signature = normalize(question);
+                if (!signature.equals(lastQuestion))
+                {
+                    lastQuestion = signature;
+                    answerAttempts = 0;
+                    waitingForResponse = false;
+                }
                 QuestionRule rule = matchQuestion(question);
                 if (rule == null)
                 {
@@ -117,11 +130,22 @@ final class KspAioFighterStrongholdDialogue
                     return true;
                 }
 
-                status = "Stronghold question recognized";
-                if (now - lastActionMillis >= ACTION_INTERVAL_MS)
+                if (answerAttempts >= MAX_ANSWER_ATTEMPTS)
+                {
+                    status = "Stronghold response did not advance - manual action required";
+                    return true;
+                }
+
+                status = waitingForResponse
+                        ? "Waiting for Stronghold answer response"
+                        : "Stronghold question recognized";
+                // Avoid re-clicking a question on every 100ms fighter tick.
+                if ((!waitingForResponse && now - lastActionMillis >= ACTION_INTERVAL_MS)
+                        || (waitingForResponse && now - lastActionMillis >= ANSWER_RETRY_MS))
                 {
                     if (Rs2Dialogue.clickOption(true, answer))
                     {
+                        answerAttempts++;
                         lastActionMillis = now;
                         lastRecognizedMillis = now;
                         waitingForResponse = true;
