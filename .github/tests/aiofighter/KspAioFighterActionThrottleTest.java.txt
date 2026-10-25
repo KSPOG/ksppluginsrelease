@@ -1,0 +1,43 @@
+package net.runelite.client.plugins.microbot.kspaiofighter;
+
+/** Standalone Java 11 tests for low-allocation AIO Fighter hot-loop gates. */
+public final class KspAioFighterActionThrottleTest
+{
+    private static void check(boolean result, String message)
+    {
+        if (!result) throw new AssertionError(message);
+    }
+
+    public static void main(String[] args)
+    {
+        KspAioFighterActionThrottle throttle = new KspAioFighterActionThrottle();
+        KspAioFighterActionThrottle.Action npc = KspAioFighterActionThrottle.Action.NPC_SEARCH;
+        KspAioFighterActionThrottle.Action gear = KspAioFighterActionThrottle.Action.GEAR_CHECK;
+        KspAioFighterActionThrottle.Action loot = KspAioFighterActionThrottle.Action.EMPTY_LOOT_SCAN;
+        KspAioFighterActionThrottle.Action style = KspAioFighterActionThrottle.Action.COMBAT_STYLE;
+
+        check(throttle.ready(npc, 1_000L, 350L), "First attack search must be immediate");
+        check(!throttle.ready(npc, 1_100L, 350L), "Do not spam NPC searches every 100ms");
+        check(throttle.ready(npc, 1_350L, 350L), "Search resumes when due");
+        check(throttle.ready(gear, 1_100L, 700L), "Gear check is independent of NPC scans");
+        check(!throttle.ready(gear, 1_400L, 700L), "Equipment check should not run on each loop");
+        check(throttle.ready(gear, 1_800L, 700L), "Gear check resumes when due");
+
+        check(throttle.ready(loot, 1_000L, 180L), "Initial loot search must be immediate");
+        check(!throttle.ready(loot, 1_100L, 180L), "Empty loot scan should be throttled");
+        throttle.invalidate(loot);
+        check(throttle.ready(loot, 1_101L, 180L), "Loot scan invalidation must be immediate");
+
+        check(throttle.ready(style, 10_000L, 800L), "Initial style check must be immediate");
+        check(!throttle.ready(style, 10_100L, 800L), "Style check is too frequent");
+        throttle.invalidate(style);
+        check(throttle.ready(style, 10_101L, 800L), "Training skill switch forces immediate style verification");
+
+        throttle.reset();
+        check(throttle.ready(npc, 10_110L, 350L), "Restart clears previous NPC delay");
+        check(throttle.ready(gear, 10_110L, 700L), "Restart clears previous equipment delay");
+        check(throttle.ready(style, 10_110L, 800L), "Restart clears previous style delay");
+
+        System.out.println("PASS: independent AIO Fighter throttle gates, cooldowns, reconfiguration and restart");
+    }
+}
