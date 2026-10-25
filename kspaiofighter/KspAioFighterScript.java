@@ -96,6 +96,7 @@ public class KspAioFighterScript extends KspBreakAwareScript
 	private String lastTargetNpcName = "-";
 	private WorldPoint lastTargetNpcLocation;
 	private String lastAction = "Starting";
+    private String lastPublishedStatus = "";
 	private String lastError = "-";
 	private long lastTargetUpdateMs = 0L;
 	private long lastErrorMs = 0L;
@@ -444,10 +445,14 @@ public class KspAioFighterScript extends KspBreakAwareScript
 
 	private void setStatus(String message)
 	{
-        // Avoid unnecessary status churn from the 100ms scheduler.
-        if (message != null && message.equals(lastAction)) return;
+        // Avoid repeated allocations and global status writes from a 100ms loop.
+        // Still restore our status if another plugin has changed Microbot.status.
+        if (message != null && message.equals(lastAction)
+                && lastPublishedStatus.equals(Microbot.status)) return;
 		lastAction = message;
-		Microbot.status = "KSP AIO Fighter: " + message;
+        String rendered = "KSP AIO Fighter: " + message;
+        lastPublishedStatus = rendered;
+        if (!rendered.equals(Microbot.status)) Microbot.status = rendered;
 	}
 
 	private void handleGoalsReached()
