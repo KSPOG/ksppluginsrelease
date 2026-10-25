@@ -41,6 +41,7 @@ import net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.com
 import net.runelite.client.plugins.microbot.util.equipment.Rs2Equipment;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.selling.buyscript.BuyScript;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.selling.gearea.GEArea;
+import net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.selling.GeOfferRepricePolicy;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.selling.sell.SellList;
 import net.runelite.client.plugins.microbot.util.bank.Rs2Bank;
 import net.runelite.client.plugins.microbot.util.grandexchange.GrandExchangeAction;
@@ -119,6 +120,11 @@ public class SellScript extends KspManagedScript
     private int pendingOfferItemId;
     private String pendingOfferItemName;
     private long pendingOfferStartedNs;
+    private final GeOfferRepricePolicy sellRepricing = new GeOfferRepricePolicy();
+    private GrandExchangeSlots repricingSlot;
+    private int repricingItemId;
+    private long repricingCancelAtMs;
+    private int repricingCancelAttempts;
 
     private Boolean tradeRestrictionUnlockedCache;
     private long lastTradeRestrictionCheckAtMs;
@@ -153,6 +159,12 @@ public class SellScript extends KspManagedScript
 
     private void tick()
     {
+        if (repricingSlot != null)
+        {
+            if (!ensureGeOverview()) return;
+            handleCancelledSellOffer();
+            return;
+        }
         // Gear ranking is shared by bank checks, inventory checks and the
         // SellList filter; only compute it once per scheduler tick.
         outdatedMeleeGearCache = null;
@@ -464,6 +476,7 @@ public class SellScript extends KspManagedScript
             return;
         }
         if (!ensureGeOverview()) return;
+        if (checkStalledSellOffers()) return;
 
         if (hasCompletedSellOffers())
         {
@@ -516,7 +529,7 @@ public class SellScript extends KspManagedScript
             return;
         }
 
-        int price = getAdjustedSellPrice(item);
+        int price = sellRepricing.priceForNewOffer(itemId, getAdjustedSellPrice(item));
         Microbot.status = "Selling " + quantity + " x " + item.getName() + " @ " + price;
         GrandExchangeRequest request = GrandExchangeRequest.builder()
                 .action(GrandExchangeAction.SELL)
@@ -550,6 +563,7 @@ public class SellScript extends KspManagedScript
         pendingOfferItemId = itemId;
         pendingOfferItemName = item.getName();
         pendingOfferStartedNs = System.nanoTime();
+        sellRepricing.placed(itemId, price, System.currentTimeMillis());
     }
 
     private void advancePendingOffer()
@@ -586,6 +600,108 @@ public class SellScript extends KspManagedScript
             recoverGeState("offer registration timeout");
             clearPendingOffer();
         }
+    }
+
+    /**
+     * Check only offers this script placed; never touch an unrelated user
+     * offer or one with a manually changed price. Completed offers and
+     * partial progress reset their individual repricing timers.
+     */
+    private boolean checkStalledSellOffers()
+    {
+        for (GrandExchangeSlots slot : GrandExchangeSlots.values())
+        {
+            GrandExchangeOffer offer = clientValue(() ->
+            {
+                GrandExchangeOffer[] offers = Microbot.getClient().getGrandExchangeOffers();
+                return offers != null && slot.ordinal() < offers.length
+                        ? offers[slot.ordinal()] : null;
+            }, null);
+            if (offer == null) continue;
+            int id = offer.getItemId();
+            if (offer.getState() == GrandExchangeOfferState.SOLD)
+            {
+                sellRepricing.forget(id);
+                continue;
+            }
+            if (offer.getState() != GrandExchangeOfferState.SELLING) continue;
+
+            int nextPrice = sellRepricing.candidate(id, offer.getPrice(),
+                    offer.getQuantitySold(), System.currentTimeMillis(), false);
+            if (nextPrice <= 0) continue;
+            // Cancel exactly this slot, not all GE offers. The core utility
+            // also requests collection of both unsold items and sale proceeds.
+            Microbot.status = "Repricing GE sale " + id + " to " + nextPrice + " gp";
+            if (Rs2GrandExchange.cancelSpecificOffers(java.util.Collections.singletonList(slot), true).isEmpty())
+                return true;
+            sellRepricing.requestCancellation(id, nextPrice);
+            repricingSlot = slot;
+            repricingItemId = id;
+            repricingCancelAtMs = System.currentTimeMillis();
+            repricingCancelAttempts = 1;
+            debug("GE sell repricing dispatched | item={} slot={} oldPrice={} nextPrice={} sold={}",
+                    id, slot, offer.getPrice(), nextPrice, offer.getQuantitySold());
+            return true;
+        }
+        return false;
+    }
+
+    private void handleCancelledSellOffer()
+    {
+        if (repricingSlot == null) return;
+        GrandExchangeSlots slot = repricingSlot;
+        GrandExchangeOffer offer = clientValue(() ->
+        {
+            GrandExchangeOffer[] offers = Microbot.getClient().getGrandExchangeOffers();
+            return offers != null && slot.ordinal() < offers.length
+                    ? offers[slot.ordinal()] : null;
+        }, null);
+
+        if (offer != null && offer.getItemId() == repricingItemId
+                && offer.getState() == GrandExchangeOfferState.SELLING)
+        {
+            if (System.currentTimeMillis() - repricingCancelAtMs >= 8_000L)
+            {
+                if (repricingCancelAttempts >= 3)
+                {
+                    // Safe failure: keep existing sale alive. No repeated
+                    // cancellation clicks or duplicate sell placements.
+                    debug("GE sell cancellation not confirmed | item={} slot={}", repricingItemId, slot);
+                    sellRepricing.forget(repricingItemId);
+                    repricingSlot = null;
+                    repricingItemId = 0;
+                    return;
+                }
+                repricingCancelAttempts++;
+                repricingCancelAtMs = System.currentTimeMillis();
+                Rs2GrandExchange.cancelSpecificOffers(java.util.Collections.singletonList(slot), true);
+            }
+            Microbot.status = "Waiting for GE sell cancellation";
+            return;
+        }
+
+        // An offer might have sold entirely while cancellation was in
+        // flight. Never re-post a fully completed transaction.
+        boolean completed = offer != null && offer.getItemId() == repricingItemId
+                && offer.getState() == GrandExchangeOfferState.SOLD;
+        if (!Rs2GrandExchange.collectAllToBank())
+        {
+            Microbot.status = "Collecting cancelled GE sell stock";
+            return;
+        }
+        if (completed) sellRepricing.forget(repricingItemId);
+        else sellRepricing.cancellationConfirmed(repricingItemId, System.currentTimeMillis());
+
+        debug("GE sell repricing collected | item={} completed={} attempts={}",
+                repricingItemId, completed, sellRepricing.retries(repricingItemId));
+        repricingSlot = null;
+        repricingItemId = 0;
+        repricingCancelAtMs = 0L;
+        repricingCancelAttempts = 0;
+        bankInventoryPrepared = false;
+        state = SellState.RESTOCKING_FROM_BANK;
+        // Bank audit and withdrawal will determine the actual unsold amount;
+        // a partial fill must not recreate the original full order.
     }
 
     private boolean ensureGeOverview()
@@ -1114,6 +1230,11 @@ public class SellScript extends KspManagedScript
         completeAfterBankClose = false;
         clearBankAction();
         clearPendingOffer();
+        sellRepricing.reset();
+        repricingSlot = null;
+        repricingItemId = 0;
+        repricingCancelAtMs = 0L;
+        repricingCancelAttempts = 0;
         blockedSellItems.clear();
         failedBankWithdrawals.clear();
         skippedBankWithdrawals.clear();
