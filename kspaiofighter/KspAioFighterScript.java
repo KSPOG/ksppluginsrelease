@@ -80,6 +80,12 @@ public class KspAioFighterScript extends KspBreakAwareScript
 	private static final int ATTACK_AREA_WALK_DISTANCE = 0;
 	private static final long LOOT_PICKUP_RECOVERY_MS = 900L;
 	private static final long BONE_BURY_RECOVERY_MS = 1_200L;
+    private static final long GEAR_CHECK_INTERVAL_MS = 700L;
+    private static final long COMBAT_STYLE_INTERVAL_MS = 800L;
+    private static final long POTION_CHECK_INTERVAL_MS = 2_500L;
+    private static final long NPC_SEARCH_INTERVAL_MS = 350L;
+    private static final long NPC_ATTACK_ACK_MS = 1_100L;
+    private static final long EMPTY_LOOT_SCAN_INTERVAL_MS = 180L;
 	private static final int START_CAMERA_PITCH = 280;
 	private static final int START_CAMERA_ZOOM = 377;
 
@@ -122,6 +128,14 @@ public class KspAioFighterScript extends KspBreakAwareScript
 	private final AtomicBoolean loopRunning = new AtomicBoolean(false);
 	private final KspAioFighterStrongholdDialogue strongholdDialogue = new KspAioFighterStrongholdDialogue();
     private final KspAioFighterHighAlchGate highAlchGate = new KspAioFighterHighAlchGate();
+    private final KspAioFighterActionThrottle actionThrottle = new KspAioFighterActionThrottle();
+    private boolean lootCheckedThisLoop;
+    private Rs2TileItemModel lootFoundThisLoop;
+    private boolean combatCheckedThisLoop;
+    private boolean fightingThisLoop;
+    private long attackPendingUntilMs;
+    private String cachedLootConfig = null;
+    private Set<String> cachedLootNames = Set.of();
 	private volatile long runGeneration = 0L;
 
 	@Inject
@@ -156,6 +170,10 @@ public class KspAioFighterScript extends KspBreakAwareScript
 		missingGearDialogShown.set(false);
 		strongholdDialogue.reset();
         highAlchGate.reset();
+        actionThrottle.reset();
+        attackPendingUntilMs = 0L;
+        cachedLootConfig = null;
+        cachedLootNames = Set.of();
 		mainScheduledFuture = scheduledExecutorService.scheduleWithFixedDelay(() -> loop(generation), 0, 100, TimeUnit.MILLISECONDS);
 		return true;
 	}
@@ -165,6 +183,7 @@ public class KspAioFighterScript extends KspBreakAwareScript
 		runGeneration++;
 		loopRunning.set(false);
         highAlchGate.reset();
+        actionThrottle.reset();
 		super.shutdown();
 	}
 
@@ -184,6 +203,9 @@ public class KspAioFighterScript extends KspBreakAwareScript
 
 		try
 		{
+            lootCheckedThisLoop = false;
+            lootFoundThisLoop = null;
+            combatCheckedThisLoop = false;
 			if (!Microbot.isLoggedIn() || !super.run())
 			{
 				return;
@@ -230,6 +252,9 @@ public class KspAioFighterScript extends KspBreakAwareScript
 			if (currentTrainingSkill != skill)
 			{
 				currentTrainingSkill = skill;
+                actionThrottle.invalidate(KspAioFighterActionThrottle.Action.GEAR_CHECK);
+                actionThrottle.invalidate(KspAioFighterActionThrottle.Action.COMBAT_STYLE);
+                actionThrottle.invalidate(KspAioFighterActionThrottle.Action.POTION_CHECK);
 				Microbot.log("KSP AIO Fighter training " + skill.getName());
 			}
 
@@ -412,6 +437,8 @@ public class KspAioFighterScript extends KspBreakAwareScript
 
 	private void setStatus(String message)
 	{
+        // Avoid unnecessary status churn from the 100ms scheduler.
+        if (message != null && message.equals(lastAction)) return;
 		lastAction = message;
 		Microbot.status = "KSP AIO Fighter: " + message;
 	}
@@ -1027,6 +1054,8 @@ public class KspAioFighterScript extends KspBreakAwareScript
 
 	private void drinkPotionIfUnboosted(Skill skill)
 	{
+        if (!actionThrottle.ready(KspAioFighterActionThrottle.Action.POTION_CHECK,
+                System.currentTimeMillis(), POTION_CHECK_INTERVAL_MS)) return;
 		if (!config.usePotions() || Rs2Player.getBoostedSkillLevel(skill) > Rs2Player.getRealSkillLevel(skill))
 		{
 			return;
@@ -1434,6 +1463,8 @@ public class KspAioFighterScript extends KspBreakAwareScript
 
 	private void equipGearFor(Skill skill)
 	{
+        if (!actionThrottle.ready(KspAioFighterActionThrottle.Action.GEAR_CHECK,
+                System.currentTimeMillis(), GEAR_CHECK_INTERVAL_MS)) return;
 		List<String> gearItems = getGearList(skill);
 		if (gearItems.isEmpty())
 		{
@@ -1755,6 +1786,8 @@ public class KspAioFighterScript extends KspBreakAwareScript
 
 	private void configureCombatStyle(Skill skill)
 	{
+        if (!actionThrottle.ready(KspAioFighterActionThrottle.Action.COMBAT_STYLE,
+                System.currentTimeMillis(), COMBAT_STYLE_INTERVAL_MS)) return;
 		if (skill == Skill.MAGIC)
 		{
 			if (Rs2Magic.getCurrentAutoCastSpell() != config.magicSpell())
@@ -1893,8 +1926,15 @@ public class KspAioFighterScript extends KspBreakAwareScript
 	{
 		if (Rs2Player.isInCombat() || Rs2Player.isInteracting())
 		{
+            attackPendingUntilMs = 0L;
 			return;
 		}
+        long now = System.currentTimeMillis();
+        // Allow the first NPC click to resolve before attempting another.
+        // Existing attacks/combat detection still take precedence.
+        if (now < attackPendingUntilMs
+                || !actionThrottle.ready(KspAioFighterActionThrottle.Action.NPC_SEARCH,
+                        now, NPC_SEARCH_INTERVAL_MS)) return;
 
 		if (shouldBlockAttackForLoot())
 		{
@@ -1938,6 +1978,7 @@ public class KspAioFighterScript extends KspBreakAwareScript
 		// KspAccountBuilder melee combat does not keep turning the camera at every target.
 		// Keep the AccountBuilder start-camera angle stable and let npc.click resolve the attack.
 		npc.click("Attack");
+        attackPendingUntilMs = System.currentTimeMillis() + NPC_ATTACK_ACK_MS;
 		setStatus("attacking " + npc.getName());
 	}
 
