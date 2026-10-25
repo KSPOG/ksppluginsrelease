@@ -223,6 +223,37 @@ jobs:
         working-directory: hub
         run: ./gradlew clean build -PpluginList=KspAccountBuilderPlugin --stacktrace --no-daemon
 
+      - name: Run nine Account Builder JUnit regression suites
+        shell: bash
+        run: |
+          set -euo pipefail
+          TEST_ROOT=release/.github/tests/accountbuilder/src/test/java
+          TEST_DIR=/tmp/ksp-accountbuilder-junit/classes
+          REPORT_DIR=/tmp/ksp-accountbuilder-junit/reports
+          JUNIT_JAR=/tmp/ksp-accountbuilder-junit/junit-platform-console-standalone-1.10.2.jar
+          mkdir -p "${TEST_DIR}" "${REPORT_DIR}"
+          PLUGIN_JAR=$(find hub/build/libs -maxdepth 1 -type f -name 'KspAccountBuilderPlugin-*.jar' -print -quit)
+          test -n "${PLUGIN_JAR}"
+          curl --fail --location --silent --show-error --retry 3 https://repo.maven.apache.org/maven2/org/junit/platform/junit-platform-console-standalone/1.10.2/junit-platform-console-standalone-1.10.2.jar -o "${JUNIT_JAR}"
+          mapfile -t TEST_FILES < <(find "${TEST_ROOT}" -type f -name '*Test.java' | sort)
+          test "${#TEST_FILES[@]}" -eq 9
+          javac --release 11 -cp "${JUNIT_JAR}:${PLUGIN_JAR}" -d "${TEST_DIR}" "${TEST_FILES[@]}"
+          java -jar "${JUNIT_JAR}" execute --class-path "${PLUGIN_JAR}:${TEST_DIR}" --scan-class-path="${TEST_DIR}" --reports-dir "${REPORT_DIR}" --details summary
+          python3 - <<'PY'
+          from pathlib import Path
+          import xml.etree.ElementTree as ET
+          reports = list(Path("/tmp/ksp-accountbuilder-junit/reports").rglob("*.xml"))
+          assert reports, "JUnit produced no XML results"
+          cases = [case for report in reports for case in ET.parse(report).iter("testcase")]
+          actual = {case.attrib.get("classname", "").split(".")[-1] for case in cases}
+          expected = {"CraftingBankStallTrackerTest", "MeleeBankPolicyTest", "CraftingRecipeSupplyPolicyTest", "MiningRockRetryPolicyTest", "EssenceBankCompletionPolicyTest", "CraftingEssentialAffordabilityPolicyTest", "CraftingSupplyPriorityPolicyTest", "GeOfferCommitPolicyTest", "GeSupplyReceiptPolicyTest"}
+          assert expected.issubset(actual), f"Missing executed JUnit suites: {sorted(expected - actual)}"
+          failures = [case for case in cases if any(node.tag in ("failure", "error", "skipped") for node in case)]
+          assert not failures, f"Failed, errored or skipped test cases: {len(failures)}"
+          assert len(cases) >= 9, f"Expected at least nine executed tests, got {len(cases)}"
+          print(f"PASS: {len(cases)} JUnit cases executed across all {len(expected)} Account Builder regression suites")
+          PY
+
       - name: Show produced JAR
         if: success()
         shell: bash
