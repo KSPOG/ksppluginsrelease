@@ -408,10 +408,9 @@ public class KspAioFighterScript extends KspBreakAwareScript
 		}
 		lastPaintRefreshMs = now;
 
-		if (currentTrainingSkill == null || getLevel(currentTrainingSkill) >= getTarget(currentTrainingSkill))
-		{
-			currentTrainingSkill = selectTrainingSkill().orElse(currentTrainingSkill);
-		}
+		// Overlay refresh is read-only with respect to the training planner.
+        // The main loop owns skill transitions and invalidates gear/style
+        // cooldowns when the selected skill actually changes.
 
 		Actor interacting = null;
 		try
