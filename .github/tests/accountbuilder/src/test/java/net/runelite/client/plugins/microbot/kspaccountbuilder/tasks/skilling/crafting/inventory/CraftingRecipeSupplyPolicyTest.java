@@ -58,6 +58,45 @@ class CraftingRecipeSupplyPolicyTest
     }
 
     @Test
+    void craftingItemIdsResolveChiselUncutGemsAndTiaraBars()
+    {
+        assertEquals(1755, CraftInventory.CUT_SAPPHIRE.getTool().getItemId());
+        assertEquals(1623, CraftInventory.CUT_SAPPHIRE.getIngredients()[1].getItemId());
+        assertEquals(1621, CraftInventory.CUT_EMERALD.getIngredients()[1].getItemId());
+        assertEquals(1619, CraftInventory.CUT_RUBY.getIngredients()[1].getItemId());
+        assertEquals(1617, CraftInventory.CUT_DIAMOND.getIngredients()[1].getItemId());
+        assertEquals(5523, CraftInventory.TIARA.getTool().getItemId());
+        assertEquals(2355, CraftInventory.TIARA.getIngredients()[1].getItemId());
+    }
+
+    @Test
+    void bankTargetsRemainStableAfterWithdrawal()
+    {
+        CraftInventory recipe = CraftInventory.TIARA;
+        CraftInventory.Ingredient mould = recipe.getIngredients()[0];
+        CraftInventory.Ingredient bars = recipe.getIngredients()[1];
+        assertEquals(1, CraftingBankPlan.targetAmount(recipe, mould, 0, 1));
+        assertEquals(27, CraftingBankPlan.targetAmount(recipe, bars, 0, 100));
+        assertEquals(27, CraftingBankPlan.targetAmount(recipe, bars, 10, 90));
+        assertEquals(27, CraftingBankPlan.targetAmount(recipe, bars, 27, 73));
+        assertEquals(8, CraftingBankPlan.targetAmount(recipe, bars, 0, 8));
+        assertEquals(8, CraftingBankPlan.targetAmount(recipe, bars, 8, 0));
+    }
+
+    @Test
+    void chiselAndGemsFitAndMixedJewelleryReservesBothIngredients()
+    {
+        CraftInventory gems = CraftInventory.CUT_SAPPHIRE;
+        assertEquals(1, CraftingBankPlan.targetAmount(gems, gems.getTool(), 0, 1));
+        assertEquals(27, CraftingBankPlan.targetAmount(gems, gems.getIngredients()[1], 0, 200));
+
+        CraftInventory jewellery = CraftInventory.SAPPHIRE_RING;
+        assertEquals(1, CraftingBankPlan.targetAmount(jewellery, jewellery.getTool(), 0, 1));
+        assertEquals(13, CraftingBankPlan.targetAmount(jewellery, jewellery.getIngredients()[1], 0, 100));
+        assertEquals(13, CraftingBankPlan.targetAmount(jewellery, jewellery.getIngredients()[2], 0, 100));
+    }
+
+    @Test
     void nullAndEmptySupplyAreRejected()
     {
         assertFalse(CraftingRecipeSupplyPolicy.hasIngredients(null, name -> 1));
