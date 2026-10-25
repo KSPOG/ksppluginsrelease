@@ -2,6 +2,7 @@ package net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.cr
 
 import java.util.Map;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.KspProgressionPolicy;
+import net.runelite.client.plugins.microbot.kspaccountbuilder.KspEquipmentActionGuard;
 import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -116,6 +117,28 @@ class CraftingRecipeSupplyPolicyTest
         assertTrue(fishing > selling);
         assertTrue(KspProgressionPolicy.priority("MINING", 1, 20000, false, false)
                 > KspProgressionPolicy.priority("MINING", 50, 20000, false, false));
+    }
+
+    @Test
+    void skillingEquipmentActionsWaitForAckAndCoolDown()
+    {
+        KspEquipmentActionGuard guard = new KspEquipmentActionGuard();
+        assertEquals(KspEquipmentActionGuard.Decision.TRY,
+                guard.inspect("Rune axe", false, 100_000L));
+        guard.dispatched("Rune axe", 100_000L);
+        assertEquals(KspEquipmentActionGuard.Decision.WAIT,
+                guard.inspect("Rune axe", false, 100_800L));
+        assertEquals(KspEquipmentActionGuard.Decision.TRY,
+                guard.inspect("Rune axe", false, 102_000L));
+        guard.dispatched("Rune axe", 102_000L);
+        guard.dispatched("Rune axe", 104_000L);
+        assertEquals(KspEquipmentActionGuard.Decision.COOLDOWN,
+                guard.inspect("Rune axe", false, 105_600L));
+        assertEquals(KspEquipmentActionGuard.Decision.TRY,
+                guard.inspect("Rune axe", false, 134_100L));
+        assertEquals(KspEquipmentActionGuard.Decision.ALREADY_EQUIPPED,
+                guard.inspect("Rune axe", true, 134_200L));
+        assertEquals(0, guard.getAttempts());
     }
 
     @Test
