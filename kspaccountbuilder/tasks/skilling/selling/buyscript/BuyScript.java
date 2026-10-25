@@ -78,6 +78,7 @@ public class BuyScript extends KspManagedScript {
     private static final String THREAD_NAME = Buy.THREAD_NAME;
     private static final String NEEDLE_NAME = Buy.NEEDLE_NAME;
     private static final String GOLD_BAR_NAME = Buy.GOLD_BAR_NAME;
+    private static final String SILVER_BAR_NAME = Buy.SILVER_BAR_NAME;
     private static final String RING_MOULD_NAME = Buy.RING_MOULD_NAME;
     private static final String NECKLACE_MOULD_NAME = Buy.NECKLACE_MOULD_NAME;
     private static final String CHISEL_NAME = Buy.CHISEL_NAME;
@@ -116,6 +117,7 @@ public class BuyScript extends KspManagedScript {
     private boolean bankHasNeedle;
     private int leatherNeeded;
     private int bankGoldBarCount;
+    private int bankSilverBarCount;
     private boolean bankHasRingMould;
     private boolean bankHasNecklaceMould;
     private boolean bankHasChisel;
@@ -436,6 +438,7 @@ public class BuyScript extends KspManagedScript {
         this.addFishingSupplyToBudgetIfMissing(budget, THREAD_NAME);
         this.addFishingSupplyToBudgetIfMissing(budget, NEEDLE_NAME);
         this.addFishingSupplyToBudgetIfMissing(budget, GOLD_BAR_NAME);
+        this.addFishingSupplyToBudgetIfMissing(budget, SILVER_BAR_NAME);
         this.addFishingSupplyToBudgetIfMissing(budget, RING_MOULD_NAME);
         this.addFishingSupplyToBudgetIfMissing(budget, NECKLACE_MOULD_NAME);
         this.addFishingSupplyToBudgetIfMissing(budget, CHISEL_NAME);
@@ -559,6 +562,7 @@ public class BuyScript extends KspManagedScript {
         this.bankThreadCount = Math.max(0, Rs2Bank.count(THREAD_NAME));
         this.bankHasNeedle = Rs2Bank.count(NEEDLE_NAME) > 0;
         this.bankGoldBarCount = Math.max(0, Rs2Bank.count(GOLD_BAR_NAME));
+        this.bankSilverBarCount = Math.max(0, Rs2Bank.count(SILVER_BAR_NAME, true));
         this.bankHasRingMould = Rs2Bank.count(RING_MOULD_NAME) > 0;
         this.bankHasNecklaceMould = Rs2Bank.count(NECKLACE_MOULD_NAME) > 0;
         this.bankHasChisel = Rs2Bank.count(CHISEL_NAME) > 0;
@@ -873,6 +877,7 @@ public class BuyScript extends KspManagedScript {
                 || this.getFishingSupplyQuantityToBuy(THREAD_NAME) > 0
                 || this.getFishingSupplyQuantityToBuy(NEEDLE_NAME) > 0
                 || this.getFishingSupplyQuantityToBuy(GOLD_BAR_NAME) > 0
+                || this.getFishingSupplyQuantityToBuy(SILVER_BAR_NAME) > 0
                 || this.getFishingSupplyQuantityToBuy(RING_MOULD_NAME) > 0
                 || this.getFishingSupplyQuantityToBuy(NECKLACE_MOULD_NAME) > 0
                 || this.getFishingSupplyQuantityToBuy(CHISEL_NAME) > 0
@@ -909,7 +914,7 @@ public class BuyScript extends KspManagedScript {
         }
 
         String[] supplies = {
-                LEATHER_NAME, THREAD_NAME, NEEDLE_NAME, GOLD_BAR_NAME, RING_MOULD_NAME, NECKLACE_MOULD_NAME,
+                LEATHER_NAME, THREAD_NAME, NEEDLE_NAME, SILVER_BAR_NAME, GOLD_BAR_NAME, RING_MOULD_NAME, NECKLACE_MOULD_NAME,
                 CHISEL_NAME, TIARA_MOULD_NAME,
                 this.selectGemCuttingSupplyToBuy(),
                 BRONZE_SWORD_NAME, WOODEN_SHIELD_NAME, SALMON_NAME
@@ -961,6 +966,17 @@ public class BuyScript extends KspManagedScript {
 
         if (GOLD_BAR_NAME.equalsIgnoreCase(itemName)) {
             return this.bankGoldBarCount <= 0 ? this.getGoldBarsToBuy() : 0;
+        }
+
+        if (SILVER_BAR_NAME.equalsIgnoreCase(itemName)) {
+            // Do not buy silver for a locked recipe or when this account has
+            // neither the mould nor a plan to craft tiaras. Replenish a
+            // single usable batch instead of an unlimited speculative order.
+            if (Microbot.getClient() == null
+                    || Microbot.getClient().getRealSkillLevel(Skill.CRAFTING) < 23
+                    || !this.bankHasTiaraMould) return 0;
+            int owned = this.bankSilverBarCount + Rs2Inventory.count(SILVER_BAR_NAME, true);
+            return owned > 0 ? 0 : 27;
         }
 
         if (RING_MOULD_NAME.equalsIgnoreCase(itemName)) {
@@ -1071,6 +1087,8 @@ public class BuyScript extends KspManagedScript {
 
     private boolean hasJewelleryBuyRequirementMissing() {
         return this.bankGoldBarCount <= 0
+                || (Microbot.getClient() != null && Microbot.getClient().getRealSkillLevel(Skill.CRAFTING) >= 23
+                    && this.bankHasTiaraMould && this.bankSilverBarCount <= 0)
                 || !this.bankHasRingMould
                 || !this.bankHasNecklaceMould
                 || !this.bankHasChisel
@@ -1618,6 +1636,8 @@ public class BuyScript extends KspManagedScript {
             this.bankHasNeedle = true;
         } else if (GOLD_BAR_NAME.equalsIgnoreCase(itemName)) {
             this.bankGoldBarCount += quantity;
+        } else if (SILVER_BAR_NAME.equalsIgnoreCase(itemName)) {
+            this.bankSilverBarCount += quantity;
         } else if (RING_MOULD_NAME.equalsIgnoreCase(itemName)) {
             this.bankHasRingMould = true;
         } else if (NECKLACE_MOULD_NAME.equalsIgnoreCase(itemName)) {
@@ -1804,6 +1824,7 @@ public class BuyScript extends KspManagedScript {
                 || itemName.equalsIgnoreCase(THREAD_NAME)
                 || itemName.equalsIgnoreCase(NEEDLE_NAME)
                 || itemName.equalsIgnoreCase(GOLD_BAR_NAME)
+                || itemName.equalsIgnoreCase(SILVER_BAR_NAME)
                 || itemName.equalsIgnoreCase(RING_MOULD_NAME)
                 || itemName.equalsIgnoreCase(NECKLACE_MOULD_NAME)
                 || itemName.equalsIgnoreCase(CHISEL_NAME)
