@@ -7,9 +7,8 @@ import java.util.Map;
  * Session-owned GE offer monitoring. Only explicitly registered offers may be
  * repriced; pre-existing player offers are never touched.
  *
- * The client cannot edit an active offer's price directly. Callers must abort
- * the exact GE slot, confirm cancellation, collect all returned inventory or
- * coins, and then place a new offer for the still-required quantity.
+ * The in-game Modify Offer interface updates the price without changing
+ * the original order or its partially filled quantity.
  */
 public final class GeOfferRepricePolicy
 {
@@ -65,6 +64,26 @@ public final class GeOfferRepricePolicy
         }
         if (now - offer.lastProgressAt < STALL_MS) return 0;
         return nextPrice(offer.initialPrice, observedPrice, offer.reprices, buying);
+    }
+
+    /**
+     * Called only once the live GE slot confirms the modified unit price.
+     * Existing filled quantity is left intact; only the quote/timer changes.
+     */
+    public void modified(int itemId, int newPrice, long now)
+    {
+        Offer offer = offers.get(itemId);
+        if (offer == null || newPrice <= 0) return;
+        offer.currentPrice = newPrice;
+        offer.lastProgressAt = now;
+        offer.reprices++;
+    }
+
+    /** An unsuccessful UI update must not retry every 50-100ms tick. */
+    public void defer(int itemId, long now)
+    {
+        Offer offer = offers.get(itemId);
+        if (offer != null) offer.lastProgressAt = now;
     }
 
     public void requestCancellation(int itemId, int intendedPrice)
