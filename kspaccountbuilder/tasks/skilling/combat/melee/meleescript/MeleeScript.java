@@ -57,6 +57,8 @@ public class MeleeScript extends KspManagedScript {
     private static final int CHICKEN_TARGET_COMBAT_STAT_LEVEL = 15;
     private static final int LOOT_RADIUS = 12;
     private static final long ACTION_DISPATCH_TIMEOUT_MS = 1_500L;
+    private static final long EQUIPMENT_RETRY_DELAY_MS = 1_500L;
+    private static final int EQUIPMENT_MAX_RETRIES = 3;
     private static final long LOOT_PICKUP_RECOVERY_MS = 900L;
     private static final long BONE_BURY_RECOVERY_MS = 1_200L;
     private static final WorldPoint CHICKEN_WALK_TARGET = new WorldPoint(3177, 3298, 0);
@@ -88,6 +90,12 @@ public class MeleeScript extends KspManagedScript {
     private String pendingWorldAction;
     private long pendingBankActionAtMs;
     private int pendingBankInventoryCount = -1;
+    private String pendingBankItem;
+    private int pendingBankItemBefore = -1;
+    private String pendingEquipItem;
+    private long pendingEquipAtMs;
+    private int pendingEquipAttempts;
+    private String equipFailureItem;
     private int pendingLootId = -1;
     private int pendingLootSceneX = -1;
     private int pendingLootSceneY = -1;
@@ -118,6 +126,11 @@ public class MeleeScript extends KspManagedScript {
         this.pendingSellHandoff = false;
         this.gearCheckedAtBank = false;
         this.bankingInventoryPrepared = false;
+        this.pendingEquipItem = null;
+        this.pendingEquipAtMs = 0L;
+        this.pendingEquipAttempts = 0;
+        this.equipFailureItem = null;
+        this.pendingBankItem = null;
         this.lastWarriorCombatXpAtMs = 0L;
         this.lastWarriorCombatXp = -1;
         this.forcedCombatArea = forcedCombatArea;
@@ -479,12 +492,14 @@ public class MeleeScript extends KspManagedScript {
         for (String desiredItem : gearPlan.desiredItems) {
             if (desiredItem == null
                     || Rs2Equipment.isWearing(desiredItem)
-                    || Rs2Inventory.hasItem(desiredItem)) continue;
+                    || Rs2Inventory.hasItem(desiredItem, true)) continue;
 
-            if (Rs2Bank.count(desiredItem) > 0) {
+            if (Rs2Bank.count(desiredItem, true) > 0) {
                 if (!isBankInventoryActionPending()) {
                     int before = Rs2Inventory.emptySlotCount();
-                    if (Rs2Bank.withdrawOne(desiredItem)) markBankInventoryAction(before);
+                    int beforeItem = Rs2Inventory.count(desiredItem, true);
+                    if (Rs2Bank.withdrawOne(desiredItem, true))
+                        markBankInventoryAction(before, desiredItem, beforeItem);
                 }
                 return;
             }
@@ -500,7 +515,10 @@ public class MeleeScript extends KspManagedScript {
         if (bankFood != null && missingFood > 0) {
             if (!isBankInventoryActionPending()) {
                 int before = Rs2Inventory.emptySlotCount();
-                if (Rs2Bank.withdrawX(bankFood.getItemId(), Math.min(missingFood, Math.max(0, Rs2Bank.count(bankFood.getItemId()))))) markBankInventoryAction(before);
+                int amount = Math.min(missingFood, Math.max(0, Rs2Bank.count(bankFood.getItemId())));
+                if (amount > 0 && Rs2Bank.withdrawX(bankFood.getItemId(), amount))
+                    markBankInventoryAction(before, bankFood.getDisplayName(),
+                            Rs2Inventory.count(bankFood.getItemId()));
             }
             return;
         }
@@ -521,16 +539,46 @@ public class MeleeScript extends KspManagedScript {
             return true;
         }
 
+        if (pendingEquipItem != null) {
+            if (Rs2Equipment.isWearing(pendingEquipItem)) {
+                debug("Confirmed equipped item {}", pendingEquipItem);
+                pendingEquipItem = null;
+                pendingEquipAttempts = 0;
+                pendingEquipAtMs = 0L;
+            } else if (System.currentTimeMillis() - pendingEquipAtMs < EQUIPMENT_RETRY_DELAY_MS) {
+                setStatus("Waiting for equipped item " + pendingEquipItem);
+                return true;
+            }
+        }
+
         GearPlan gearPlan = buildGearPlan();
         for (String desiredItem : gearPlan.desiredItems) {
             if (desiredItem == null
                     || Rs2Equipment.isWearing(desiredItem)
-                    || !Rs2Inventory.hasItem(desiredItem)) continue;
+                    || !Rs2Inventory.hasItem(desiredItem, true)) continue;
+
+            if (!desiredItem.equalsIgnoreCase(pendingEquipItem)) {
+                pendingEquipAttempts = 0;
+                pendingEquipItem = desiredItem;
+            }
+            if (pendingEquipAttempts >= EQUIPMENT_MAX_RETRIES) {
+                equipFailureItem = desiredItem;
+                setStatus("Equipment action failed: " + desiredItem + " (manual check needed)");
+                KspTaskDebug.throttled(log, true, "Melee", "equip-failed-" + desiredItem,
+                        10_000L, "Unable to confirm equipment after {} attempts: {}",
+                        pendingEquipAttempts, desiredItem);
+                return true; // Never run off with an incomplete selected loadout.
+            }
 
             setStatus("Equipping " + desiredItem);
+            pendingEquipAttempts++;
+            pendingEquipAtMs = System.currentTimeMillis();
             Rs2Inventory.wield(desiredItem);
-            return true;
+            return true; // Wait for actual equipment-state acknowledgement.
         }
+        pendingEquipItem = null;
+        pendingEquipAttempts = 0;
+        equipFailureItem = null;
         return false;
     }
 
@@ -927,19 +975,27 @@ public class MeleeScript extends KspManagedScript {
 
     private boolean isBankInventoryActionPending() {
         if (pendingBankActionAtMs == 0L) return false;
-        if (Rs2Inventory.emptySlotCount() != pendingBankInventoryCount) {
+        boolean itemChanged = pendingBankItem != null
+                && Rs2Inventory.count(pendingBankItem, true) != pendingBankItemBefore;
+        if (itemChanged || Rs2Inventory.emptySlotCount() != pendingBankInventoryCount
+                || System.currentTimeMillis() - pendingBankActionAtMs >= ACTION_DISPATCH_TIMEOUT_MS) {
             pendingBankActionAtMs = 0L;
             pendingBankInventoryCount = -1;
+            pendingBankItem = null;
+            pendingBankItemBefore = -1;
             return false;
         }
-        if (System.currentTimeMillis() - pendingBankActionAtMs < ACTION_DISPATCH_TIMEOUT_MS) return true;
-        pendingBankActionAtMs = 0L;
-        pendingBankInventoryCount = -1;
-        return false;
+        return true;
     }
 
     private void markBankInventoryAction(int beforeEmptySlots) {
+        markBankInventoryAction(beforeEmptySlots, null, -1);
+    }
+
+    private void markBankInventoryAction(int beforeEmptySlots, String item, int beforeCount) {
         pendingBankInventoryCount = beforeEmptySlots;
+        pendingBankItem = item;
+        pendingBankItemBefore = beforeCount;
         pendingBankActionAtMs = System.currentTimeMillis();
     }
 
@@ -1263,6 +1319,12 @@ public class MeleeScript extends KspManagedScript {
         this.pendingWorldAction = null;
         this.pendingBankActionAtMs = 0L;
         this.pendingBankInventoryCount = -1;
+        this.pendingBankItem = null;
+        this.pendingBankItemBefore = -1;
+        this.pendingEquipItem = null;
+        this.pendingEquipAtMs = 0L;
+        this.pendingEquipAttempts = 0;
+        this.equipFailureItem = null;
         this.gearCheckedAtBank = false;
         this.bankingInventoryPrepared = false;
         this.lastWarriorCombatXpAtMs = 0L;
