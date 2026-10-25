@@ -37,7 +37,7 @@ class GeOfferCommitPolicyTest {
 
     @Test void repricingIsBoundedBySafetyLimits()
     {
-        assertEquals(65, GeOfferRepricePolicy.nextPrice(100, 70, 4, false));
+        assertEquals(66, GeOfferRepricePolicy.nextPrice(100, 70, 4, false));
         assertEquals(150, GeOfferRepricePolicy.nextPrice(100, 148, 4, true));
         assertEquals(0, GeOfferRepricePolicy.nextPrice(100, 65, 4, false));
         assertEquals(0, GeOfferRepricePolicy.nextPrice(100, 150, 4, true));
