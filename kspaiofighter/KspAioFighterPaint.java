@@ -51,6 +51,38 @@ public class KspAioFighterPaint extends Overlay
 	private static final Color WARNING = new Color(255, 155, 63, 255);
 	private static final Color TEXT_SHADOW = new Color(0, 0, 0, 220);
 
+    private static final Font TITLE_FONT = new Font(Font.SERIF, Font.BOLD, 21);
+    private static final Font ROW_FONT = new Font(Font.SERIF, Font.BOLD, 13);
+    private static final BasicStroke STROKE_1 = new BasicStroke(1f);
+    private static final BasicStroke STROKE_2 = new BasicStroke(2f);
+    private static final BasicStroke STROKE_3 = new BasicStroke(3f);
+    private static final Color PAINT_C1 = new Color(10, 8, 6, 180);
+    private static final Color PAINT_C2 = new Color(32, 28, 22, 245);
+    private static final Color PAINT_C3 = new Color(61, 48, 30, 236);
+    private static final Color PAINT_C4 = new Color(5, 4, 3, 190);
+    private static final Color PAINT_C5 = new Color(115, 86, 42, 205);
+    private static final Color PAINT_C6 = new Color(20, 110, 70, 245);
+    private static final Color PAINT_C7 = new Color(15, 12, 8, 220);
+    private static final Color PAINT_C8 = new Color(92, 78, 61, 245);
+    private static final Color PAINT_C9 = new Color(24, 21, 17, 245);
+    private static final Color PAINT_C10 = new Color(18, 14, 9, 230);
+    private static final Color PAINT_C11 = new Color(10, 8, 6, 210);
+    private static final Color PAINT_C12 = new Color(98, 83, 61, 230);
+    private static final Color PAINT_C13 = new Color(218, 210, 190, 255);
+    private static final Color PAINT_C14 = new Color(85, 46, 22, 255);
+    private static final Color PAINT_C15 = new Color(230, 224, 199, 255);
+    private static final Color PAINT_C16 = new Color(235, 190, 138, 255);
+    private static final Color PAINT_C17 = new Color(120, 65, 32, 255);
+    private static final Color PAINT_C18 = new Color(225, 222, 210, 255);
+    private static final Color PAINT_C19 = new Color(205, 136, 48, 255);
+    private static final Color PAINT_C20 = new Color(115, 70, 25, 255);
+    private static final Color PAINT_C21 = new Color(224, 128, 72, 255);
+    private static final Color PAINT_C22 = new Color(255, 205, 135, 255);
+    private static final Color PAINT_C23 = new Color(207, 167, 80, 255);
+    private static final Color PAINT_C24 = new Color(209, 158, 54, 255);
+    private static final Color PAINT_C25 = new Color(54, 116, 172, 255);
+    private Dimension cachedCanvasDimensions;
+
 	private final KspAioFighterConfig config;
 	private final KspAioFighterScript script;
 
@@ -84,7 +116,10 @@ public class KspAioFighterPaint extends Overlay
 		int y = Math.max(0, canvasHeight - CHATBOX_ANCHOR_HEIGHT - TITLE_OVERHANG);
 
 		drawPaint(graphics, x, y, width, height);
-		return new Dimension(width, height);
+        if (cachedCanvasDimensions == null
+                || cachedCanvasDimensions.width != width || cachedCanvasDimensions.height != height)
+            cachedCanvasDimensions = new Dimension(width, height);
+		return cachedCanvasDimensions;
 	}
 
 	private void drawPaint(Graphics2D graphics, int x, int y, int width, int height)
@@ -114,24 +149,24 @@ public class KspAioFighterPaint extends Overlay
 		g.fillRoundRect(x + 3, y + 2, width - 7, height - 5, 12, 12);
 
 		g.setColor(STONE_DARK);
-		g.setStroke(new BasicStroke(3f));
+		g.setStroke(STROKE_3);
 		g.drawRoundRect(x + 3, y + 2, width - 8, height - 6, 12, 12);
 
 		g.setColor(STONE_LIGHT);
-		g.setStroke(new BasicStroke(1f));
+		g.setStroke(STROKE_1);
 		g.drawRoundRect(x + 7, y + 6, width - 16, height - 14, 9, 9);
 
 		g.setColor(BRONZE);
-		g.setStroke(new BasicStroke(2f));
+		g.setStroke(STROKE_2);
 		g.drawRoundRect(x + 10, y + 9, width - 22, height - 20, 7, 7);
 
 		g.setColor(BRONZE_LIGHT);
-		g.setStroke(new BasicStroke(1f));
+		g.setStroke(STROKE_1);
 		g.drawRoundRect(x + 13, y + 12, width - 28, height - 26, 5, 5);
 
 		g.setPaint(new GradientPaint(x, y + TITLE_HEIGHT, INNER_TOP, x, y + height - FRAME, INNER_BOTTOM));
 		g.fillRoundRect(x + 19, y + TITLE_HEIGHT + 4, width - 38, height - TITLE_HEIGHT - 21, 5, 5);
-		g.setColor(new Color(10, 8, 6, 180));
+		g.setColor(PAINT_C1);
 		g.drawRoundRect(x + 19, y + TITLE_HEIGHT + 4, width - 39, height - TITLE_HEIGHT - 22, 5, 5);
 
 		drawCorner(g, x + 13, y + 13, true, true);
@@ -145,13 +180,13 @@ public class KspAioFighterPaint extends Overlay
 
 	private void drawTitle(Graphics2D g, int x, int y, int width)
 	{
-		g.setPaint(new GradientPaint(x, y + 12, new Color(32, 28, 22, 245), x, y + TITLE_HEIGHT + 5, new Color(61, 48, 30, 236)));
+		g.setPaint(new GradientPaint(x, y + 12, PAINT_C2, x, y + TITLE_HEIGHT + 5, PAINT_C3));
 		g.fillRoundRect(x + 74, y + 3, width - 148, TITLE_HEIGHT + 2, 8, 8);
 		g.setColor(BRONZE_LIGHT);
-		g.setStroke(new BasicStroke(1f));
+		g.setStroke(STROKE_1);
 		g.drawRoundRect(x + 75, y + 4, width - 150, TITLE_HEIGHT, 8, 8);
 
-		Font titleFont = new Font(Font.SERIF, Font.BOLD, 21);
+		Font titleFont = TITLE_FONT;
 		FontMetrics fm = g.getFontMetrics(titleFont);
 		String title = "KSP AIO Fighter";
 		int titleX = x + (width - fm.stringWidth(title)) / 2;
@@ -163,8 +198,8 @@ public class KspAioFighterPaint extends Overlay
 
 	private void drawRows(Graphics2D g, int x, int y, int width, int height)
 	{
-		Font labelFont = new Font(Font.SERIF, Font.BOLD, 13);
-		Font valueFont = new Font(Font.SERIF, Font.BOLD, 13);
+		Font labelFont = ROW_FONT;
+		Font valueFont = ROW_FONT;
 		FontMetrics valueMetrics = g.getFontMetrics(valueFont);
 
 		int rowTop = y + TITLE_HEIGHT + 24;
@@ -199,9 +234,9 @@ public class KspAioFighterPaint extends Overlay
 	{
 		g.setPaint(new GradientPaint(x, y - 13, ROW_TOP, x, y + 4, ROW_BOTTOM));
 		g.fillRoundRect(x, y - 15, width, ROW_HEIGHT - 2, 6, 6);
-		g.setColor(new Color(5, 4, 3, 190));
+		g.setColor(PAINT_C4);
 		g.drawRoundRect(x, y - 15, width, ROW_HEIGHT - 3, 6, 6);
-		g.setColor(new Color(115, 86, 42, 205));
+		g.setColor(PAINT_C5);
 		g.drawLine(x + ICON_SIZE + 10, y + 2, x + width - 7, y + 2);
 		drawSmallDiamond(g, x - 4, y - 7);
 		drawSmallDiamond(g, x + width - 4, y - 7);
@@ -245,7 +280,7 @@ public class KspAioFighterPaint extends Overlay
 		gem.lineTo(cx, y + 12);
 		gem.lineTo(cx - 7, y + 6);
 		gem.closePath();
-		g.setColor(new Color(20, 110, 70, 245));
+		g.setColor(PAINT_C6);
 		g.fill(gem);
 		g.setColor(BRONZE_LIGHT);
 		g.draw(gem);
@@ -253,12 +288,12 @@ public class KspAioFighterPaint extends Overlay
 
 	private void drawBottomCompass(Graphics2D g, int cx, int cy)
 	{
-		g.setColor(new Color(15, 12, 8, 220));
+		g.setColor(PAINT_C7);
 		g.fillOval(cx - 14, cy - 14, 28, 28);
 		g.setColor(BRONZE_LIGHT);
-		g.setStroke(new BasicStroke(2f));
+		g.setStroke(STROKE_2);
 		g.drawOval(cx - 13, cy - 13, 26, 26);
-		g.setStroke(new BasicStroke(1f));
+		g.setStroke(STROKE_1);
 		g.drawLine(cx, cy - 18, cx, cy + 18);
 		g.drawLine(cx - 18, cy, cx + 18, cy);
 		g.setColor(GOLD);
@@ -273,12 +308,12 @@ public class KspAioFighterPaint extends Overlay
 
 	private void drawMinimizeButton(Graphics2D g, int x, int y)
 	{
-		g.setPaint(new GradientPaint(x, y, new Color(92, 78, 61, 245), x, y + 19, new Color(24, 21, 17, 245)));
+		g.setPaint(new GradientPaint(x, y, PAINT_C8, x, y + 19, PAINT_C9));
 		g.fillRoundRect(x, y, 22, 19, 5, 5);
 		g.setColor(BRONZE_LIGHT);
 		g.drawRoundRect(x, y, 21, 18, 5, 5);
 		g.setColor(GOLD);
-		g.setStroke(new BasicStroke(2f));
+		g.setStroke(STROKE_2);
 		g.drawLine(x + 6, y + 10, x + 16, y + 10);
 	}
 
@@ -290,7 +325,7 @@ public class KspAioFighterPaint extends Overlay
 		diamond.lineTo(x + 4, y + 8);
 		diamond.lineTo(x, y + 4);
 		diamond.closePath();
-		g.setColor(new Color(18, 14, 9, 230));
+		g.setColor(PAINT_C10);
 		g.fill(diamond);
 		g.setColor(BRONZE_LIGHT);
 		g.draw(diamond);
@@ -298,9 +333,9 @@ public class KspAioFighterPaint extends Overlay
 
 	private void drawIcon(Graphics2D g, int x, int y, int type)
 	{
-		g.setColor(new Color(10, 8, 6, 210));
+		g.setColor(PAINT_C11);
 		g.fillOval(x - 1, y - 1, ICON_SIZE + 2, ICON_SIZE + 2);
-		g.setColor(new Color(98, 83, 61, 230));
+		g.setColor(PAINT_C12);
 		g.fillOval(x, y, ICON_SIZE, ICON_SIZE);
 		g.setColor(BRONZE_LIGHT);
 		g.drawOval(x, y, ICON_SIZE, ICON_SIZE);
@@ -340,18 +375,18 @@ public class KspAioFighterPaint extends Overlay
 
 	private void drawSwordIcon(Graphics2D g, int x, int y, int size)
 	{
-		g.setColor(new Color(218, 210, 190, 255));
-		g.setStroke(new BasicStroke(2f));
+		g.setColor(PAINT_C13);
+		g.setStroke(STROKE_2);
 		g.drawLine(x, y + size, x + size, y);
 		g.setColor(BRONZE_LIGHT);
 		g.drawLine(x + 3, y + size - 2, x + size - 2, y + 3);
-		g.setColor(new Color(85, 46, 22, 255));
+		g.setColor(PAINT_C14);
 		g.drawLine(x + 1, y + size - 5, x + 5, y + size - 1);
 	}
 
 	private void drawClockIcon(Graphics2D g, int x, int y, int size)
 	{
-		g.setColor(new Color(230, 224, 199, 255));
+		g.setColor(PAINT_C15);
 		g.drawOval(x, y, size, size);
 		g.drawLine(x + size / 2, y + size / 2, x + size / 2, y + 2);
 		g.drawLine(x + size / 2, y + size / 2, x + size - 2, y + size / 2);
@@ -359,16 +394,16 @@ public class KspAioFighterPaint extends Overlay
 
 	private void drawStrengthIcon(Graphics2D g, int x, int y)
 	{
-		g.setColor(new Color(235, 190, 138, 255));
+		g.setColor(PAINT_C16);
 		g.fillOval(x + 1, y + 5, 7, 7);
 		g.fillRoundRect(x + 5, y + 2, 8, 5, 5, 5);
-		g.setColor(new Color(120, 65, 32, 255));
+		g.setColor(PAINT_C17);
 		g.drawArc(x + 2, y, 10, 12, 200, 140);
 	}
 
 	private void drawTargetIcon(Graphics2D g, int x, int y, int size)
 	{
-		g.setColor(new Color(225, 222, 210, 255));
+		g.setColor(PAINT_C18);
 		g.drawOval(x, y, size, size);
 		g.drawOval(x + 3, y + 3, size - 6, size - 6);
 		g.drawLine(x + size / 2, y - 1, x + size / 2, y + size + 1);
@@ -377,9 +412,9 @@ public class KspAioFighterPaint extends Overlay
 
 	private void drawBagIcon(Graphics2D g, int x, int y)
 	{
-		g.setColor(new Color(205, 136, 48, 255));
+		g.setColor(PAINT_C19);
 		g.fillRoundRect(x + 1, y + 5, 10, 8, 5, 5);
-		g.setColor(new Color(115, 70, 25, 255));
+		g.setColor(PAINT_C20);
 		g.drawArc(x + 2, y, 8, 8, 0, 180);
 		g.setColor(GOLD);
 		g.drawLine(x + 4, y + 7, x + 9, y + 7);
@@ -387,15 +422,15 @@ public class KspAioFighterPaint extends Overlay
 
 	private void drawFoodIcon(Graphics2D g, int x, int y)
 	{
-		g.setColor(new Color(224, 128, 72, 255));
+		g.setColor(PAINT_C21);
 		g.fillOval(x + 1, y + 2, 12, 7);
-		g.setColor(new Color(255, 205, 135, 255));
+		g.setColor(PAINT_C22);
 		g.drawArc(x, y, 12, 10, 20, 130);
 	}
 
 	private void drawInventoryIcon(Graphics2D g, int x, int y)
 	{
-		g.setColor(new Color(207, 167, 80, 255));
+		g.setColor(PAINT_C23);
 		g.drawRect(x, y, 10, 10);
 		g.drawLine(x + 5, y, x + 5, y + 10);
 		g.drawLine(x, y + 5, x + 10, y + 5);
@@ -403,10 +438,10 @@ public class KspAioFighterPaint extends Overlay
 
 	private void drawFlagIcon(Graphics2D g, int x, int y)
 	{
-		g.setColor(new Color(209, 158, 54, 255));
+		g.setColor(PAINT_C24);
 		g.drawLine(x, y, x, y + 12);
 		g.fillRect(x + 1, y + 1, 8, 5);
-		g.setColor(new Color(54, 116, 172, 255));
+		g.setColor(PAINT_C25);
 		g.fillRect(x + 3, y + 2, 5, 3);
 	}
 
@@ -526,17 +561,20 @@ public class KspAioFighterPaint extends Overlay
 
 	private String trim(String value, FontMetrics metrics, int maxWidth)
 	{
-		if (value == null || metrics.stringWidth(value) <= maxWidth)
-		{
-			return value;
-		}
-		String ellipsis = "...";
-		int end = value.length();
-		while (end > 0 && metrics.stringWidth(value.substring(0, end) + ellipsis) > maxWidth)
-		{
-			end--;
-		}
-		return value.substring(0, Math.max(0, end)) + ellipsis;
+        if (value == null || metrics.stringWidth(value) <= maxWidth) return value;
+        String ellipsis = "...";
+        // Binary search prevents hundreds of intermediate substrings for
+        // long item lists/attack-area values on every overlay frame.
+        int low = 0, high = value.length();
+        while (low < high)
+        {
+            int mid = (low + high + 1) >>> 1;
+            if (metrics.stringWidth(value.substring(0, mid) + ellipsis) <= maxWidth)
+                low = mid;
+            else
+                high = mid - 1;
+        }
+        return value.substring(0, low) + ellipsis;
 	}
 
 	private String formatDuration(long durationMs)
