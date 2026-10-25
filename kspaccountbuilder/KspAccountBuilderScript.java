@@ -753,8 +753,15 @@ public class KspAccountBuilderScript extends KspManagedScript
         // Sample every active scheduler cycle, including cycles on other tasks,
         // so watchdog state cannot leak across completed task transitions.
         boolean craftingStalled = isCraftingBankStalled();
+        // The final ores may disappear before the last smithing animation
+        // completes. Do not interpret that temporary zero-resource snapshot
+        // as permission to terminate an active Make-All furnace batch.
+        boolean smeltingInProgress = taskStarted
+                && currentTask == BuilderTask.SMELTING
+                && smeltScript.isSmeltingInProgress();
         if (!isSingleSkillTaskForced()
                 && !(currentTask == BuilderTask.GE_BUY && taskStarted)
+                && !smeltingInProgress
                 && (craftingStalled || !hasResourcesForTask(currentTask))
                 && !switchToTaskWithResources())
         {
