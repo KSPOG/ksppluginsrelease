@@ -1,5 +1,6 @@
 package net.runelite.client.plugins.microbot.kspsupport;
 
+import java.util.function.BooleanSupplier;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ThreadLocalRandom;
@@ -7,7 +8,10 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import net.runelite.api.GameState;
 import net.runelite.api.gameval.InterfaceID;
+import javax.swing.SwingUtilities;
+import javax.swing.UIManager;
 import net.runelite.client.plugins.Plugin;
+import net.runelite.client.ui.ClientUI;
 import net.runelite.client.plugins.microbot.Microbot;
 import net.runelite.client.plugins.microbot.breakhandler.BreakHandlerScript;
 import net.runelite.client.plugins.microbot.util.combat.Rs2Combat;
@@ -26,8 +30,12 @@ public final class KspBreakService
     private static final String AUTO_LOGIN = "net.runelite.client.plugins.microbot.accountselector.AutoLoginPlugin";
     private static final String BREAK_HANDLER = "net.runelite.client.plugins.microbot.breakhandler.BreakHandlerPlugin";
     private static final long COMBAT_GRACE_MS = 11_000;
+    private static final String TITLE_OWNER_KEY = "ksp.break.windowTitleOwner";
+    private static final String TITLE_BASE_KEY = "ksp.break.windowTitleBase";
+    private static final String BREAK_TITLE_SUFFIX = " - Breaking for: ";
     private volatile ScheduledExecutorService timer;
     private volatile KspBreakConfig config;
+    private volatile BooleanSupplier automationActive = () -> true;
     private volatile long generation;
     private long nextBreakAt, lastTick, lastCombatAt, breakEndsAt, duration, lastActionAt;
     private int world;
@@ -36,7 +44,14 @@ public final class KspBreakService
 
     public synchronized void start(KspBreakConfig settings)
     {
+        start(settings, () -> true);
+    }
+
+    /** Only accumulate active time, and take breaks, while this plugin is automating. */
+    public synchronized void start(KspBreakConfig settings, BooleanSupplier isAutomationActive)
+    {
         shutdown();
+        automationActive = java.util.Objects.requireNonNull(isAutomationActive, "isAutomationActive");
         config = settings;
         enabled = settings.doBreaks();
         lastTick = System.currentTimeMillis();
@@ -59,6 +74,7 @@ public final class KspBreakService
         if (timer == null) return;
         try { tick(System.currentTimeMillis()); }
         catch (Exception ex) { log.warn("KSP break timer failed; will retry", ex); }
+        finally { if (pauseOwned) updateWindowTitle(); }
     }
 
     private void tick(long now)
@@ -78,6 +94,13 @@ public final class KspBreakService
         if (!pauseOwned)
         {
             if (!enabled) return;
+            // Do not let an idle but enabled plugin interrupt another active script.
+            // The configured interval counts only time spent running this automation.
+            if (!automationActive.getAsBoolean())
+            {
+                nextBreakAt += elapsed;
+                return;
+            }
             if (!Microbot.isLoggedIn() || shouldPause())
             {
                 nextBreakAt += elapsed;
@@ -98,6 +121,8 @@ public final class KspBreakService
             loggedOut = false;
             lastActionAt = 0;
             if (generation != run) return;
+            log.info("KSP logout break started | remainingUntilBreakMs={} durationMs={}",
+                    Math.max(0L, nextBreakAt - now), duration);
             Rs2Walker.setTarget(null);
         }
         if (generation != run || !pauseOwned) return;
@@ -174,13 +199,68 @@ public final class KspBreakService
             Microbot.pauseAllScripts.compareAndSet(true, false);
             pauseOwned = false;
             ACTIVE_BREAKS.decrementAndGet();
+            restoreWindowTitle();
         }
+    }
+
+    /** UIManager provides a title owner shared even across source-loader classloaders. */
+    private void updateWindowTitle()
+    {
+        long remaining = breakEndsAt > 0L
+                ? Math.max(0L, breakEndsAt - System.currentTimeMillis()) : duration;
+        long totalSeconds = (remaining + 999L) / 1000L;
+        String clock = totalSeconds >= 3600L
+                ? String.format("%02d:%02d:%02d", totalSeconds / 3600L, (totalSeconds / 60L) % 60L, totalSeconds % 60L)
+                : String.format("%02d:%02d", totalSeconds / 60L, totalSeconds % 60L);
+        SwingUtilities.invokeLater(() -> {
+            if (!pauseOwned) return;
+            synchronized (UIManager.getDefaults())
+            {
+                try
+                {
+                    if (UIManager.get(TITLE_OWNER_KEY) != this)
+                    {
+                        String currentTitle = ClientUI.getFrame().getTitle();
+                        int suffix = currentTitle.indexOf(BREAK_TITLE_SUFFIX);
+                        String baseTitle = suffix >= 0 ? currentTitle.substring(0, suffix) : currentTitle;
+                        UIManager.put(TITLE_BASE_KEY, baseTitle);
+                        UIManager.put(TITLE_OWNER_KEY, this);
+                    }
+                    String base = (String) UIManager.get(TITLE_BASE_KEY);
+                    if (base != null) ClientUI.getFrame().setTitle(base + BREAK_TITLE_SUFFIX + clock);
+                }
+                catch (RuntimeException ex) { log.debug("Unable to update break window title", ex); }
+            }
+        });
+    }
+
+    private void restoreWindowTitle()
+    {
+        SwingUtilities.invokeLater(() -> {
+            synchronized (UIManager.getDefaults())
+            {
+                if (UIManager.get(TITLE_OWNER_KEY) != this) return;
+                try
+                {
+                    String base = (String) UIManager.get(TITLE_BASE_KEY);
+                    if (base != null && ClientUI.getFrame().getTitle().contains(BREAK_TITLE_SUFFIX))
+                        ClientUI.getFrame().setTitle(base);
+                }
+                catch (RuntimeException ex) { log.debug("Unable to restore break window title", ex); }
+                finally
+                {
+                    UIManager.put(TITLE_OWNER_KEY, null);
+                    UIManager.put(TITLE_BASE_KEY, null);
+                }
+            }
+        });
     }
 
     public synchronized void shutdown()
     {
         generation++;
         config = null;
+        automationActive = () -> true;
         if (timer != null) { timer.shutdownNow(); timer = null; }
         releasePause();
     }
