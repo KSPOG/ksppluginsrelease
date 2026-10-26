@@ -283,6 +283,7 @@ public class KspAccountBuilderScript extends KspManagedScript
 
     private volatile BuilderTask currentTask;
     private volatile boolean breakActive;
+    private boolean breakScheduleEnabled;
     private long startedAtMillis;
     private boolean taskStarted;
     private long nextBreakAtMillis;
@@ -498,6 +499,7 @@ public class KspAccountBuilderScript extends KspManagedScript
         currentTask = null;
         taskStarted = false;
         breakActive = false;
+        breakScheduleEnabled = false;
         pendingTask = null;
         preselectedHandoffTask = null;
         singleSkillRecoveryTask = null;
@@ -585,12 +587,28 @@ public class KspAccountBuilderScript extends KspManagedScript
         long now = System.currentTimeMillis();
         if (Microbot.isLoggedIn() && Rs2Combat.inCombat()) lastCombatObservedAtMillis = now;
         updateSharedBreakState(now);
-        if (sharedBreakActive) return;
-        if (config.doBreaks())
+        // A disabled schedule has no due date (-1). Never interpret that sentinel
+        // as an expired deadline when the user enables breaks during a session.
+        boolean breaksEnabled = config.doBreaks();
+        if (breaksEnabled != breakScheduleEnabled)
         {
+            if (breaksEnabled) scheduleNextBreak();
+            else
+            {
+                nextBreakAtMillis = -1L;
+                breakEndsAtMillis = -1L;
+                breakScheduleEnabled = false;
+                if (breakActive) cancelBreakAfterDisable(now);
+            }
+            debug("Break setting changed | enabled={} nextBreakAtMillis={}", breaksEnabled, nextBreakAtMillis);
+        }
+        if (sharedBreakActive) return;
+        if (breaksEnabled)
+        {
+            if (!breakActive && nextBreakAtMillis <= 0L) scheduleNextBreak();
             // Breaks may begin once the currently active furnace Make-All
             // batch has reached its terminal state, not between two bars.
-            if (!breakActive && now >= nextBreakAtMillis && !isSmeltingBusy()) startBreak(now);
+            if (!breakActive && nextBreakAtMillis > 0L && now >= nextBreakAtMillis && !isSmeltingBusy()) startBreak(now);
             if (breakActive) handleBreak(now);
             if (breakActive) return;
         }
@@ -623,6 +641,18 @@ public class KspAccountBuilderScript extends KspManagedScript
             pendingTask = null;
             awaitNextActivityStart();
         }
+    }
+
+    private void cancelBreakAfterDisable(long now)
+    {
+        breakActive = false;
+        breakLogoutRequested = false;
+        breakCombatWaitLogged = false;
+        breakEndsAtMillis = -1L;
+        resumeActivitySwitchTimer(now);
+        debug("Cancelled active break because Do Breaks was disabled");
+        startAutoLoginHelper();
+        if (!Microbot.isLoggedIn()) attemptLoginAfterBreak();
     }
 
     private void startBreak(long now)
@@ -2106,9 +2136,12 @@ public class KspAccountBuilderScript extends KspManagedScript
 
     private void scheduleNextBreak()
     {
-        if (!config.doBreaks()) { nextBreakAtMillis = -1L; breakEndsAtMillis = -1L; return; }
-        long delayMinutes = randomMinutes(config.breakAfterMinMinutes(), config.breakAfterMaxMinutes());
+        breakScheduleEnabled = config != null && config.doBreaks();
+        if (!breakScheduleEnabled) { nextBreakAtMillis = -1L; breakEndsAtMillis = -1L; return; }
+        long delayMinutes = Math.max(5L,
+                randomMinutes(Math.max(5, config.breakAfterMinMinutes()), Math.max(5, config.breakAfterMaxMinutes())));
         nextBreakAtMillis = System.currentTimeMillis() + TimeUnit.MINUTES.toMillis(delayMinutes);
+        debug("Scheduled next logout break | delayMinutes={} nextBreakAtMillis={}", delayMinutes, nextBreakAtMillis);
     }
 
     private void scheduleNextActivitySwitch()
@@ -2323,6 +2356,9 @@ public class KspAccountBuilderScript extends KspManagedScript
     {
         try
         {
+            // A separate KSP break timer owns the title during its own logout break.
+            // Do not overwrite its countdown every account-builder scheduler cycle.
+            if (javax.swing.UIManager.get("ksp.break.windowTitleOwner") != null) return;
             if (!breakActive) { ClientUI.getFrame().setTitle(originalWindowTitle); return; }
             ClientUI.getFrame().setTitle(originalWindowTitle + " - Breaking for: " + formatBreakDuration(getBreakTimeRemainingSeconds()));
         }
@@ -2471,6 +2507,7 @@ public class KspAccountBuilderScript extends KspManagedScript
         catch (Exception ex) { log.warn("Account Builder experience lamp shutdown failed", ex); }
         taskStarted = false;
         breakActive = false;
+        breakScheduleEnabled = false;
         startedAtMillis = 0L;
         nextBreakAtMillis = -1L;
         breakEndsAtMillis = -1L;
