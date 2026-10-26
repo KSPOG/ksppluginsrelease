@@ -22,7 +22,7 @@ import net.runelite.client.ui.overlay.OverlayManager;
 )
 public class KspF2pCluePlugin extends Plugin
 {
-    public static final String VERSION = "0.1.2";
+    public static final String VERSION = "0.1.3";
     @Inject private KspF2pClueConfig config;
     @Inject private KspF2pClueScript script;
     @Inject private KspF2pClueOverlay overlay;
