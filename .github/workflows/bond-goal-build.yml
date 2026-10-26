@@ -1,0 +1,83 @@
+name: Build KSP Bond Goal
+
+on:
+  push:
+    branches:
+      - dev
+    paths:
+      - 'kspbondgoal/**'
+      - '.github/tests/bondgoal/**'
+      - '.github/workflows/bond-goal-build.yml'
+  pull_request:
+    paths:
+      - 'kspbondgoal/**'
+      - '.github/tests/bondgoal/**'
+      - '.github/workflows/bond-goal-build.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: bond-goal-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Test and compile KspBondGoalPlugin
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - name: Checkout KSP plugin sources
+        uses: actions/checkout@v4
+        with:
+          path: release
+
+      - name: Checkout latest Microbot Hub
+        uses: actions/checkout@v4
+        with:
+          repository: chsami/Microbot-Hub
+          ref: main
+          path: hub
+
+      - name: Set up Java 11
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '11'
+          cache: gradle
+          cache-dependency-path: hub/**/*.gradle*
+
+      - name: Run Bond Goal persistence regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          TEST_ROOT=/tmp/ksp-bond-goal-test
+          mkdir -p "$TEST_ROOT/src" "$TEST_ROOT/bin"
+          cp release/kspbondgoal/BondCoinState.java "$TEST_ROOT/src/"
+          cp release/.github/tests/bondgoal/BondCoinStateTest.java.txt "$TEST_ROOT/src/BondCoinStateTest.java"
+          javac --release 11 -d "$TEST_ROOT/bin" "$TEST_ROOT/src/"*.java
+          java -cp "$TEST_ROOT/bin" net.runelite.client.plugins.microbot.kspbondgoal.BondCoinStateTest
+
+      - name: Install Bond Goal source in Microbot Hub
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="hub/src/main/java/net/runelite/client/plugins/microbot"
+          rm -rf "$ROOT/kspbondgoal"
+          cp -R release/kspbondgoal "$ROOT/kspbondgoal"
+
+      - name: Build KSP Bond Goal
+        working-directory: hub
+        run: |
+          chmod +x gradlew
+          ./gradlew clean build -PpluginList=KspBondGoalPlugin --stacktrace --no-daemon
+
+      - name: Upload compiled Bond Goal JAR
+        uses: actions/upload-artifact@v4
+        with:
+          name: KspBondGoalPlugin-${{ github.sha }}
+          path: hub/build/libs/KspBondGoalPlugin-*.jar
+          if-no-files-found: error
+          retention-days: 7
