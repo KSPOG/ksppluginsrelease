@@ -34,7 +34,7 @@ public class KspBondGoalPlugin extends Plugin
     private static final int COINS = 995;
     private static final int OLD_SCHOOL_BOND = 13190;
     private static final int REFRESH_TICKS = 10;
-    private static final String COIN_SNAPSHOT_KEY = "lastKnownCoinsV1_";
+    private static final String COIN_SNAPSHOT_KEY = BondCoinState.STORAGE_KEY_PREFIX;
 
     @Inject
     private Client client;
@@ -339,7 +339,7 @@ public class KspBondGoalPlugin extends Plugin
         {
             clearAccountSession();
             activeAccountHash = hash;
-            activeSnapshotKey = COIN_SNAPSHOT_KEY + Long.toUnsignedString(hash);
+            activeSnapshotKey = BondCoinState.keyForAccount(hash);
             String stored = configManager.getConfiguration(KspBondGoalConfig.GROUP, activeSnapshotKey);
             coinState = BondCoinState.deserialize(stored);
             lastSavedCoinSnapshot = stored;
