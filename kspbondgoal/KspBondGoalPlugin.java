@@ -93,9 +93,12 @@ public class KspBondGoalPlugin extends Plugin
         // Removing our injected instance by identity alone cannot remove
         // those old v1.0.2/v1.0.3 overlays. OverlayManager.removeIf
         // also rebuilds render layers so stale panels disappear immediately.
-        overlayManager.removeIf(existing -> BondGoalOverlayLifecycle.removeOnStartup(
-            existing.getClass().getName()));
-        overlayManager.add(overlay);
+        synchronized (overlayManager)
+        {
+            overlayManager.removeIf(existing -> BondGoalOverlayLifecycle.removeOnStartup(
+                existing.getClass().getName()));
+            overlayManager.add(overlay);
+        }
         tradeLimits.ensureLoaded(this::refreshSnapshot);
 
         // Source-loaded plugins may be started from the Swing/AWT thread. Client container
