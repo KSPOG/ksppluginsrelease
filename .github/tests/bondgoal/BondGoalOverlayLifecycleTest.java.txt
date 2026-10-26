@@ -1,0 +1,42 @@
+package net.runelite.client.plugins.microbot.kspbondgoal;
+
+/** Tests source-loader overlays from several plugin versions/classloaders. */
+public final class BondGoalOverlayLifecycleTest
+{
+    private static final String BOND_GOAL_OVERLAY =
+        "net.runelite.client.plugins.microbot.kspbondgoal.KspBondGoalOverlay";
+
+    private static void verify(boolean actual, String message)
+    {
+        if (!actual) throw new AssertionError(message);
+    }
+
+    public static void main(String[] args)
+    {
+        // Equal binary names from different classloaders are NOT equal
+        // Class objects. The stable name must match across versions.
+        String staleV102 = new String(BOND_GOAL_OVERLAY);
+        String staleV103 = new String(BOND_GOAL_OVERLAY);
+        verify(BondGoalOverlayLifecycle.removeOnStartup(staleV102),
+            "Start must remove obsolete v1.0.2 panel");
+        verify(BondGoalOverlayLifecycle.removeOnStartup(staleV103),
+            "Start must remove obsolete v1.0.3 panel");
+        verify(!BondGoalOverlayLifecycle.removeOnStartup(
+            "net.runelite.client.plugins.microbot.kspwiregrabber.KspWireGrabberOverlay"),
+            "Unrelated plugins must never be touched");
+        verify(!BondGoalOverlayLifecycle.removeOnStartup(null),
+            "Null overlay names are not Bond Goal");
+
+        // After a new plugin starts, a delayed old-plugin shutdown
+        // may arrive. It must not remove the new plugin's overlay.
+        verify(!BondGoalOverlayLifecycle.removeOnShutdown(staleV102, false),
+            "An obsolete plugin may not remove the current owner's overlay");
+        verify(BondGoalOverlayLifecycle.removeOnShutdown(BOND_GOAL_OVERLAY, true),
+            "Disabling Bond Goal must remove the plugin-owned overlay");
+        verify(!BondGoalOverlayLifecycle.removeOnShutdown(
+            "net.runelite.client.plugins.microbot.kspaiofighter.KspAioFighterPaint", true),
+            "Shutdown must not remove another plugin's overlay");
+
+        System.out.println("PASS: duplicate cleanup on startup and owner-safe shutdown");
+    }
+}
