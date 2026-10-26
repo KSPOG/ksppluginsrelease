@@ -484,6 +484,24 @@ public class KspWillowChopperScript extends KspBreakAwareScript {
         clearActiveTreeTarget();
         burnBatchActive = true;
 
+        // Redwood cutting takes place on elevated guild scaffolding; avoid
+        // trying to light a campfire on a platform where firemaking is blocked.
+        if (activeMode.isProgressive() && activeTree == KspTree.REDWOOD) {
+            WorldPoint player = Rs2Player.getWorldLocation();
+            if (player != null && player.getPlane() > 0
+                    && findCampfire(player, 15) == null) {
+                state = RuntimeState.CREATING_FIRE;
+                status = "Returning to ground to burn redwood logs";
+                long now = System.currentTimeMillis();
+                if (!Rs2Player.isMoving()
+                        && now - lastProgressiveWalkAttemptMillis >= 12_000L) {
+                    lastProgressiveWalkAttemptMillis = now;
+                    Rs2Walker.walkTo(new WorldPoint(1570, 3492, 0), 7);
+                }
+                return;
+            }
+        }
+
         if (burnCommandIssued) {
             long now = System.currentTimeMillis();
             if (resourceCount <= 0) {
