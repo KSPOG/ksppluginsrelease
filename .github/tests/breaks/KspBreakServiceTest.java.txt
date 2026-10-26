@@ -11,6 +11,8 @@ import net.runelite.client.config.ConfigManager;
 import net.runelite.client.config.ConfigDescriptor;
 import net.runelite.client.config.ConfigProfile;
 import java.util.concurrent.TimeUnit;
+import java.util.function.BooleanSupplier;
+import javax.swing.UIManager;
 import net.runelite.api.Client;
 import net.runelite.api.GameState;
 import net.runelite.api.Player;
@@ -82,7 +84,25 @@ public final class KspBreakServiceTest
             check((long)get(service,"nextBreakAt") == 100_500, "freeze play timer during external pause");
             service.shutdown();
             check(Microbot.pauseAllScripts.get(), "shutdown must preserve external pause");
+            Microbot.pauseAllScripts.set(false);
+            set(service, "config", config); set(service, "enabled", true);
+            set(service, "nextBreakAt", 100_000L); set(service, "lastTick", 100_000L);
+            set(service, "automationActive", (BooleanSupplier) () -> false);
+            tick(service, 101_000L);
+            check(!Microbot.pauseAllScripts.get(), "idle automation must never initiate a break");
+            check((long)get(service, "nextBreakAt") == 101_000L, "idle time must not count toward a break");
+            set(service, "automationActive", (BooleanSupplier) () -> true);
+            UIManager.put("ksp.accountbuilder.runtime.owner.v1", new Object());
+            try
+            {
+                tick(service, 102_000L);
+                check(!Microbot.pauseAllScripts.get(), "Account Builder owns the logout schedule");
+                check((long)get(service, "nextBreakAt") == 102_000L, "foreign break pauses countdown");
+            }
+            finally { UIManager.put("ksp.accountbuilder.runtime.owner.v1", null); }
+            service.shutdown();
             set(service,"config",config); set(service,"enabled",true);
+            set(service, "nextBreakAt", 100_500L); set(service, "lastTick", 100_000L);
             Microbot.pauseAllScripts.set(false);
             combat.when(Rs2Combat::inCombat).thenReturn(true);
             tick(service, 101_000);
@@ -128,6 +148,6 @@ public final class KspBreakServiceTest
             service.shutdown();
             check(!Microbot.pauseAllScripts.get(),"stop releases owned pause");
         }
-        System.out.println("PASS: 22 config descriptors, defaults, range normalization, external pause ownership, combat grace, logout retries, offline duration, missing profile, preserved world, login throttling, welcome screen, resume and shutdown");
+        System.out.println("PASS: 22 config descriptors, defaults, range normalization, idle/Account Builder break isolation, external pause ownership, combat grace, logout retries, offline duration, missing profile, preserved world, login throttling, welcome screen, resume and shutdown");
     }
 }
