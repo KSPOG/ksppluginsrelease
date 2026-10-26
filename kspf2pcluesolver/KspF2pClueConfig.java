@@ -25,4 +25,7 @@ public interface KspF2pClueConfig extends Config
 
     @ConfigItem(keyName = "openCaskets", name = "Open beginner caskets", description = "Open completed beginner reward caskets", position = 4)
     default boolean openCaskets() { return true; }
+
+    @ConfigItem(keyName = "debugLogging", name = "Detailed clue logging", description = "Log 30-second diagnostic snapshots and important interaction results to client.log", position = 5)
+    default boolean debugLogging() { return true; }
 }
