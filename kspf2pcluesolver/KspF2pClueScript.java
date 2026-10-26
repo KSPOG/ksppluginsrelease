@@ -495,6 +495,20 @@ public final class KspF2pClueScript extends Script
 
         if (Rs2Inventory.hasItem(name) && step.kind == BeginnerClueCatalog.Kind.EMOTE)
         {
+            if (Rs2Bank.isOpen())
+            {
+                status = "Closing bank before equipping " + name;
+                Rs2Bank.closeBank();
+                delay(ACTION_GAP);
+                return;
+            }
+            if (Rs2GrandExchange.isOpen())
+            {
+                status = "Closing GE before equipping " + name;
+                Rs2GrandExchange.closeExchange();
+                delay(ACTION_GAP);
+                return;
+            }
             if (now < nextRequiredItemActionAt) return;
             if (neededItemAttempts >= 3)
             {
