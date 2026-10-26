@@ -269,6 +269,10 @@ public final class KspF2pClueScript extends Script
             return;
         }
 
+        // Resolve NPC dialogue before banking, buying, movement or emotes.
+        // This avoids abandoning Charlie's request or Reldo's confirmation.
+        if (handleClueConversation(now)) return;
+
         for (String name : step.requiredItems)
         {
             if (!hasNeededItem(name, step.kind == BeginnerClueCatalog.Kind.EMOTE))
@@ -288,10 +292,6 @@ public final class KspF2pClueScript extends Script
             delay(ACTION_GAP);
             return;
         }
-        // Conversations are processed by the shared state machine below,
-        // before resuming NPC actions (no clicking the clue to advance chats).
-        if (handleClueConversation(now)) return;
-
         switch (step.kind)
         {
             case NPC:
@@ -746,18 +746,33 @@ public final class KspF2pClueScript extends Script
             delay(1_500);
             return;
         }
-        if (Rs2Dialogue.isInDialogue())
+        if (Rs2Dialogue.hasSelectAnOption() || Rs2Dialogue.hasContinue()
+            || Rs2Dialogue.isInDialogue())
         {
-            status = "Waiting for dialogue to advance";
-            Rs2Dialogue.clickOption("Yes", "Here you go", "I have it", "Give");
-            delay(ACTION_GAP);
+            handleClueConversation(System.currentTimeMillis());
             return;
         }
+        long now = System.currentTimeMillis();
+        if (now < nextNpcTalkAt) return;
+        if (npcTalkAttempts >= 5)
+        {
+            status = "NPC clue interaction stalled after 5 attempts; manual review";
+            return;
+        }
+        if (Rs2Npc.getNpc(step.npc, true) == null)
+        {
+            status = "Waiting for clue NPC: " + step.npc;
+            return;
+        }
+        conversationNpc = step.npc;
         status = step.label;
-        if (Rs2Npc.getNpc(step.npc, true) != null)
-            Rs2Npc.interact(Rs2Npc.getNpc(step.npc, true), "Talk-to");
-        delay(2_000);
-        requestClueVerification();
+        boolean interacted = Rs2Npc.interact(step.npc, "Talk-to");
+        npcTalkAttempts++;
+        nextNpcTalkAt = now + 5_000L;
+        log.info("[KSP Clue] NPC clue talk | npc={} clicked={} attempt={}/5 step={}",
+            step.npc, interacted, npcTalkAttempts, lastStepKey);
+        delay(1_600L);
+        if (interacted) requestClueVerification();
     }
 
     private void handleDig(WorldPoint spot)
@@ -792,9 +807,20 @@ public final class KspF2pClueScript extends Script
         }
         if (Rs2Npc.getNpc("Uri", true) != null)
         {
+            long now = System.currentTimeMillis();
+            if (now < nextNpcTalkAt) return;
+            if (npcTalkAttempts >= 5)
+            {
+                status = "Uri interaction stalled after 5 attempts; manual review";
+                return;
+            }
+            conversationNpc = "Uri";
             status = "Talking to Uri";
-            boolean clicked = Rs2Npc.interact(Rs2Npc.getNpc("Uri", true), "Talk-to");
-            diagnostic("Uri interaction clicked=" + clicked);
+            boolean clicked = Rs2Npc.interact("Uri", "Talk-to");
+            npcTalkAttempts++;
+            nextNpcTalkAt = now + 5_000L;
+            log.info("[KSP Clue] Uri talk | clicked={} attempt={}/5 step={}",
+                clicked, npcTalkAttempts, lastStepKey);
             if (clicked) requestClueVerification();
             delay(2_000);
             return;
@@ -1107,6 +1133,7 @@ public final class KspF2pClueScript extends Script
             }
             // Name-based interaction avoids NPC model binary incompatibility
             // between Microbot-Hub and the 2.6.43 client.
+            conversationNpc = "Reldo";
             boolean clicked = Rs2Npc.interact("Reldo", "Talk-to");
             reldoAttempts++;
             nextReldoActionAt = now + RELDO_INTERACT_COOLDOWN_MS;
