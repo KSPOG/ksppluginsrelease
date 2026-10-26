@@ -943,14 +943,22 @@ public final class KspF2pClueScript extends Script
                 return true;
             }
 
-            boolean selected = Rs2Dialogue.keyPressForDialogueOption(chosenIndex + 1);
-            if (!selected && chosenIndex < options.size())
-                selected = Rs2Widget.clickWidget(options.get(chosenIndex));
+            // Alternate between game-bound dialogue hotkeys and direct
+            // widget clicks if a menu remains visible after a successful
+            // keypress. This catches clients with blocked keyboard events.
+            boolean useWidget = conversationAttempts % 2 == 1;
+            boolean selected = useWidget
+                ? Rs2Widget.clickWidget(options.get(chosenIndex))
+                : Rs2Dialogue.keyPressForDialogueOption(chosenIndex + 1);
+            if (!selected)
+                selected = useWidget
+                    ? Rs2Dialogue.keyPressForDialogueOption(chosenIndex + 1)
+                    : Rs2Widget.clickWidget(options.get(chosenIndex));
             conversationAttempts++;
             nextConversationAt = now + 2_500L;
-            log.info("[KSP Clue] Dialogue selection | step={} npc={} option={}/{} label='{}' success={} attempt={}/4",
+            log.info("[KSP Clue] Dialogue selection | step={} npc={} option={}/{} label='{}' method={} success={} attempt={}/4",
                 lastStepKey, conversationNpc, chosenIndex + 1, options.size(),
-                chosenText, selected, conversationAttempts);
+                chosenText, useWidget ? "widget" : "hotkey", selected, conversationAttempts);
             status = selected ? "Clue dialogue: " + chosenText : "Dialogue selection failed: " + chosenText;
             delay(1_100L);
             return true;
