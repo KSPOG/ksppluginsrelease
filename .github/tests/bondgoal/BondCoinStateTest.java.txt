@@ -1,0 +1,63 @@
+package net.runelite.client.plugins.microbot.kspbondgoal;
+
+/** Pure Java 11 regression for account-bound last-known GP persistence. */
+public final class BondCoinStateTest
+{
+    private static void check(boolean condition, String message)
+    {
+        if (!condition) throw new AssertionError(message);
+    }
+
+    public static void main(String[] args)
+    {
+        BondCoinState empty = BondCoinState.empty();
+        check(!empty.isInventoryKnown() && !empty.isBankKnown(), "Unknown GP is not a confirmed zero");
+        check(empty.currentCoins(true) == 0L, "Unknown balance displays zero until first observation");
+
+        BondCoinState observed = empty.observedInventory(2_000L).observedBank(1_234_567L);
+        check(observed.isBankKnown() && observed.isInventoryKnown(), "Both containers observed");
+        check(observed.currentCoins(true) == 1_236_567L, "Current GP includes both known stacks");
+        check(observed.currentCoins(false) == 2_000L, "Bank toggle excludes cached bank GP");
+
+        String stored = observed.serialize();
+        BondCoinState restored = BondCoinState.deserialize(stored);
+        check(restored.isBankKnown(), "Known bank status survives restart");
+        check(restored.currentCoins(true) == 1_236_567L,
+                "Logout/restart round trip must preserve last known current coins");
+        BondCoinState nextLogin = restored.observedInventory(2_500L);
+        check(nextLogin.getBankCoins() == 1_234_567L, "Live inventory update must not clear saved bank GP");
+        check(nextLogin.currentCoins(true) == 1_237_067L,
+                "Live inventory recomputes combined coins without re-opening bank");
+
+        // A genuinely open and empty bank is an authoritative zero, not unknown.
+        BondCoinState bankEmptied = nextLogin.observedBank(0L);
+        check(bankEmptied.isBankKnown(), "A true zero bank stack stays known");
+        check(bankEmptied.currentCoins(true) == 2_500L, "Zero bank replaces outdated GP");
+        check(BondCoinState.deserialize(bankEmptied.serialize()).isBankKnown(),
+                "Confirmed zero should survive another restart");
+
+        BondCoinState pendingInventory = BondCoinState.deserialize(
+                BondCoinState.empty().observedBank(99_999L).serialize());
+        check(!pendingInventory.isInventoryKnown(), "Missing inventory must remain unknown");
+        check(pendingInventory.currentCoins(true) == 99_999L,
+                "Do not erase saved bank GP when inventory has not yet loaded");
+
+        check(!BondCoinState.deserialize("").isBankKnown(), "Empty storage is unknown");
+        check(!BondCoinState.deserialize("v1:1:-3:1:8").isBankKnown(), "Reject negative balance");
+        check(!BondCoinState.deserialize("v1:1:foo:1:8").isBankKnown(), "Reject corrupt balance");
+        check(!BondCoinState.deserialize("v2:1:4:1:8").isBankKnown(), "Reject unknown schema version");
+        check(!BondCoinState.deserialize("v1:1:4:1:1000000000000").isBankKnown(),
+                "Reject unrealistic/corrupt bank values");
+
+        String accountOne = BondCoinState.keyForAccount(123456789L);
+        String accountTwo = BondCoinState.keyForAccount(987654321L);
+        check(!accountOne.equals(accountTwo), "Cache key must be different for each account");
+        check(accountOne.startsWith("lastKnownCoinsV1_"), "Saved key uses internal prefix");
+        boolean rejected = false;
+        try { BondCoinState.keyForAccount(0L); }
+        catch (IllegalArgumentException expected) { rejected = true; }
+        check(rejected, "Never persist to a shared account-zero key");
+
+        System.out.println("PASS: GP persistence, bank refresh, true zero, corrupt data and account isolation");
+    }
+}
