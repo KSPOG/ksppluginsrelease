@@ -63,8 +63,12 @@ public final class KspF2pClueScript extends Script
     private long nextClueBankCheckAt, nextClueWithdrawAt, nextDiagnosticAt, nextReldoActionAt;
     private long nextRequiredItemActionAt;
     private int clueWithdrawAttempts, neededItemAttempts, reldoAttempts;
-    private int reldoDialogueAttempts;
-    private String lastReldoOptionMenu = "";
+    // Shared conversation state for ALL NPC/clue dialogue, not Reldo only.
+    private int conversationAttempts;
+    private long nextConversationAt, nextNpcTalkAt;
+    private String lastConversationFrame = "";
+    private String conversationNpc = "";
+    private int npcTalkAttempts;
     private boolean hadClueInInventory, verifyStepAfterAction, coinsWithdrawnForStep;
     private String lastNeededAttemptItem = "";
     private String previousStatus = "";
@@ -90,8 +94,10 @@ public final class KspF2pClueScript extends Script
         nextActionAt = nextReadAt = nextBankAt = 0;
         nextClueBankCheckAt = nextClueWithdrawAt = nextDiagnosticAt = nextReldoActionAt = 0;
         nextRequiredItemActionAt = 0;
-        clueWithdrawAttempts = neededItemAttempts = reldoAttempts = reldoDialogueAttempts = 0;
-        lastReldoOptionMenu = "";
+        clueWithdrawAttempts = neededItemAttempts = reldoAttempts = 0;
+        conversationAttempts = npcTalkAttempts = 0;
+        nextConversationAt = nextNpcTalkAt = 0L;
+        lastConversationFrame = conversationNpc = "";
         hadClueInInventory = verifyStepAfterAction = clueWidgetPending = coinsWithdrawnForStep = false;
         previousStatus = "";
         lastNeededAttemptItem = "";
@@ -282,27 +288,9 @@ public final class KspF2pClueScript extends Script
             delay(ACTION_GAP);
             return;
         }
-        // Reldo owns its dialogue from start to finish. The generic
-        // continue handler must not intercept his yes/no confirmation.
-        if (step.kind == BeginnerClueCatalog.Kind.HOT_COLD)
-        {
-            handleHotCold();
-            return;
-        }
-        if (Rs2Dialogue.hasContinue())
-        {
-            status = "Continuing dialogue";
-            Rs2Dialogue.clickContinue();
-            delay(ACTION_GAP);
-            return;
-        }
-        if (step.kind == BeginnerClueCatalog.Kind.CHARLIE && Rs2Dialogue.isInDialogue())
-        {
-            status = "Handing item to Charlie";
-            Rs2Dialogue.clickOption("Yes", "Here you go", "I have it", "Give");
-            delay(ACTION_GAP);
-            return;
-        }
+        // Conversations are processed by the shared state machine below,
+        // before resuming NPC actions (no clicking the clue to advance chats).
+        if (handleClueConversation(now)) return;
 
         switch (step.kind)
         {
@@ -310,7 +298,7 @@ public final class KspF2pClueScript extends Script
             case CHARLIE: handleNpc(); break;
             case EMOTE: handleEmote(); break;
             case DIG: handleDig(step.destination); break;
-            case HOT_COLD: handleHotCold(); break; // handled above while dialogue is open
+            case HOT_COLD: handleHotCold(); break;
             default: status = "Unsupported clue"; break;
         }
     }
@@ -471,8 +459,10 @@ public final class KspF2pClueScript extends Script
         neededItemAttempts = 0;
         lastNeededAttemptItem = "";
         nextRequiredItemActionAt = 0;
-        reldoAttempts = reldoDialogueAttempts = 0;
-        lastReldoOptionMenu = "";
+        reldoAttempts = 0;
+        conversationAttempts = npcTalkAttempts = 0;
+        lastConversationFrame = conversationNpc = "";
+        nextConversationAt = nextNpcTalkAt = 0L;
         nextReldoActionAt = 0;
         nextReadAt = System.currentTimeMillis() + READ_GAP;
         log.info("[KSP Clue] New step | kind={} key={} label={} target={} requirements={}",
@@ -962,27 +952,11 @@ public final class KspF2pClueScript extends Script
             }
 
             long now = System.currentTimeMillis();
-            // Selection menus take precedence over NPC/player continuations.
-            // In particular Reldo asks "Yes, I do." / "No, I don't."
-            if (Rs2Dialogue.hasSelectAnOption())
+            // All conversation prompts are resolved by handleClueConversation
+            // in tick(); it handles Yes/No, clue options and Continue alike.
+            if (Rs2Dialogue.hasSelectAnOption() || Rs2Dialogue.hasContinue() || Rs2Dialogue.isInDialogue())
             {
-                handleReldoOptions(now);
-                return;
-            }
-            if (Rs2Dialogue.hasContinue())
-            {
-                if (now < nextReldoActionAt) return;
-                status = "Advancing Reldo conversation";
-                Rs2Dialogue.clickContinue();
-                nextReldoActionAt = now + 2_000L;
-                diagnostic("Reldo dialogue: clicked Continue");
-                delay(1_100L);
-                return;
-            }
-            if (Rs2Dialogue.isInDialogue())
-            {
-                status = "Waiting for Reldo dialogue widgets";
-                delay(1_200);
+                handleClueConversation(now);
                 return;
             }
 
@@ -1011,18 +985,15 @@ public final class KspF2pClueScript extends Script
             delay(1_500);
             return;
         }
-        if (reldoAttempts > 0 || reldoDialogueAttempts > 0)
+        if (reldoAttempts > 0)
         {
             log.info("[KSP Clue] Strange device obtained from Reldo, beginning hot/cold step");
-            reldoAttempts = reldoDialogueAttempts = 0;
-            lastReldoOptionMenu = "";
+            reldoAttempts = 0;
             nextReldoActionAt = 0;
         }
-        if (Rs2Dialogue.hasContinue())
+        if (Rs2Dialogue.hasSelectAnOption() || Rs2Dialogue.hasContinue() || Rs2Dialogue.isInDialogue())
         {
-            status = "Closing Reldo dialogue after receiving device";
-            Rs2Dialogue.clickContinue();
-            delay(1_100L);
+            handleClueConversation(System.currentTimeMillis());
             return;
         }
         if (hotColdAreaIndex >= BeginnerClueCatalog.HOT_COLD_CENTERS.length)
