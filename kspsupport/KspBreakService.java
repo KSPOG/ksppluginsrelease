@@ -96,7 +96,11 @@ public final class KspBreakService
             if (!enabled) return;
             // Do not let an idle but enabled plugin interrupt another active script.
             // The configured interval counts only time spent running this automation.
-            if (!automationActive.getAsBoolean())
+            // Account Builder owns the client while its runtime is registered.
+            // Its independent break schedule must not be pre-empted by another
+            // installed (possibly background/idle) KSP plugin's timer.
+            if (!automationActive.getAsBoolean()
+                    || UIManager.get("ksp.accountbuilder.runtime.owner.v1") != null)
             {
                 nextBreakAt += elapsed;
                 return;
