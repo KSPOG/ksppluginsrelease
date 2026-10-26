@@ -10,6 +10,7 @@ import net.runelite.api.ItemContainer;
 import net.runelite.api.events.GameStateChanged;
 import net.runelite.api.events.GameTick;
 import net.runelite.api.events.ItemContainerChanged;
+import net.runelite.client.plugins.microbot.util.bank.Rs2Bank;
 import net.runelite.api.gameval.InventoryID;
 import net.runelite.client.callback.ClientThread;
 import net.runelite.client.config.ConfigManager;
@@ -28,11 +29,12 @@ import net.runelite.client.ui.overlay.OverlayManager;
 )
 public class KspBondGoalPlugin extends Plugin
 {
-    static final String VERSION = "1.0.2";
+    static final String VERSION = "1.0.3";
 
     private static final int COINS = 995;
     private static final int OLD_SCHOOL_BOND = 13190;
     private static final int REFRESH_TICKS = 10;
+    private static final String COIN_SNAPSHOT_KEY = "lastKnownCoinsV1_";
 
     @Inject
     private Client client;
@@ -47,6 +49,9 @@ public class KspBondGoalPlugin extends Plugin
     private KspBondGoalConfig config;
 
     @Inject
+    private ConfigManager configManager;
+
+    @Inject
     private KspBondGoalOverlay overlay;
 
     @Inject
@@ -57,8 +62,11 @@ public class KspBondGoalPlugin extends Plugin
     private volatile BondGoalSnapshot snapshot = BondGoalSnapshot.empty();
     private volatile boolean running;
 
-    private long cachedBankCoins;
-    private boolean bankKnown;
+    private BondCoinState coinState = BondCoinState.empty();
+    private long activeAccountHash;
+    private String activeSnapshotKey;
+    private String lastSavedCoinSnapshot;
+    private boolean bankFreshThisSession;
     private int tickCounter;
     private long lastPositiveBondPrice;
 
@@ -73,8 +81,7 @@ public class KspBondGoalPlugin extends Plugin
     {
         tradeLimits = new BondTradeLimitService();
         advisor = new BondActivityAdvisor(client, itemManager, config, tradeLimits);
-        cachedBankCoins = 0;
-        bankKnown = false;
+        clearAccountSession();
         tickCounter = 0;
         lastPositiveBondPrice = 0;
         running = true;
@@ -89,13 +96,6 @@ public class KspBondGoalPlugin extends Plugin
             if (!running)
             {
                 return;
-            }
-
-            ItemContainer bank = client.getItemContainer(InventoryID.BANK);
-            if (bank != null)
-            {
-                cachedBankCoins = countItem(bank, COINS);
-                bankKnown = true;
             }
 
             refreshSnapshotOnClientThread();
@@ -117,8 +117,7 @@ public class KspBondGoalPlugin extends Plugin
             limitService.close();
         }
 
-        cachedBankCoins = 0;
-        bankKnown = false;
+        clearAccountSession();
     }
 
     @Subscribe
@@ -134,26 +133,38 @@ public class KspBondGoalPlugin extends Plugin
             tickCounter = 0;
             refreshSnapshot();
         }
+        else if (activeAccountHash == 0L && client.getGameState() == GameState.LOGGED_IN)
+        {
+            // Some client builds expose the account hash a few ticks after
+            // LOGGED_IN. Recover a saved balance as soon as it is available.
+            refreshSnapshot();
+        }
     }
 
     @Subscribe
     public void onItemContainerChanged(ItemContainerChanged event)
     {
-        if (!running)
+        if (!running || client.getGameState() != GameState.LOGGED_IN
+            || !ensureAccountLoaded())
         {
             return;
         }
 
         if (event.getContainerId() == InventoryID.BANK)
         {
-            cachedBankCoins = countItem(event.getItemContainer(), COINS);
-            bankKnown = true;
-            refreshSnapshot();
+            // Ignore stale/unloaded bank containers emitted during login or
+            // world hopping. Only a visible bank confirms the live bank GP.
+            if (Rs2Bank.isOpen() && event.getItemContainer() != null)
+            {
+                observeBank(event.getItemContainer());
+            }
         }
-        else if (event.getContainerId() == InventoryID.INV)
+        else if (event.getContainerId() == InventoryID.INV
+            && event.getItemContainer() != null)
         {
-            refreshSnapshot();
+            observeInventory(event.getItemContainer());
         }
+        refreshSnapshot();
     }
 
     @Subscribe
@@ -162,18 +173,27 @@ public class KspBondGoalPlugin extends Plugin
         GameState state = event.getGameState();
         if (state == GameState.LOGIN_SCREEN || state == GameState.HOPPING)
         {
-            // Prevent a previous account's bank cache being shown after account changes.
-            cachedBankCoins = 0;
-            bankKnown = false;
+            // The values were saved when observed, so release the in-memory
+            // account reference without modifying the persistent balance.
+            // Never show the previous account's GP after a character switch.
+            clearAccountSession();
             snapshot = BondGoalSnapshot.empty();
+        }
+        else if (state == GameState.LOGGED_IN && running)
+        {
+            refreshSnapshot();
         }
     }
 
     @Subscribe
     public void onConfigChanged(ConfigChanged event)
     {
-        if (KspBondGoalConfig.GROUP.equals(event.getGroup()))
+        if (KspBondGoalConfig.GROUP.equals(event.getGroup())
+            && (event.getKey() == null
+                || !event.getKey().startsWith(COIN_SNAPSHOT_KEY)))
         {
+            // Writes to our internal snapshot key must not recursively
+            // trigger another expensive advisor/GE-price refresh.
             refreshSnapshot();
         }
     }
@@ -186,6 +206,11 @@ public class KspBondGoalPlugin extends Plugin
     KspBondGoalConfig getConfig()
     {
         return config;
+    }
+
+    boolean isBankBalanceCached()
+    {
+        return config.includeBankCoins() && coinState.isBankKnown() && !bankFreshThisSession;
     }
 
     boolean areTradeLimitsReady()
@@ -245,14 +270,27 @@ public class KspBondGoalPlugin extends Plugin
             snapshot = BondGoalSnapshot.empty();
             return;
         }
-
-        long inventoryCoins = countItem(client.getItemContainer(InventoryID.INV), COINS);
-        long currentCoins = inventoryCoins;
-
-        if (config.includeBankCoins() && bankKnown)
+        if (!ensureAccountLoaded())
         {
-            currentCoins += cachedBankCoins;
+            snapshot = BondGoalSnapshot.empty();
+            return;
         }
+
+        ItemContainer inventory = client.getItemContainer(InventoryID.INV);
+        if (inventory != null)
+        {
+            observeInventory(inventory);
+        }
+
+        // Fresh bank data is authoritative, including a true 0 GP stack.
+        // If the bank is not open, keep the saved last-known amount.
+        if (Rs2Bank.isOpen())
+        {
+            ItemContainer bank = client.getItemContainer(InventoryID.BANK);
+            if (bank != null) observeBank(bank);
+        }
+
+        long currentCoins = coinState.currentCoins(config.includeBankCoins());
 
         int override = config.bondPriceOverride();
         long fetchedBondPrice = override > 0 ? override : itemManager.getItemPrice(OLD_SCHOOL_BOND);
@@ -280,10 +318,69 @@ public class KspBondGoalPlugin extends Plugin
             target,
             currentCoins,
             remaining,
-            bankKnown,
+            coinState.isBankKnown(),
             progress,
             activities
         );
+    }
+
+    /**
+     * Save by immutable account hash, never character name. Plain RuneLite
+     * config survives plugin reloads, logout, client restarts, and world hops.
+     * A zero/unknown account hash must never share a global coin snapshot.
+     */
+    private boolean ensureAccountLoaded()
+    {
+        if (client.getGameState() != GameState.LOGGED_IN) return false;
+        long hash = client.getAccountHash();
+        if (hash == 0L) return false;
+
+        if (activeAccountHash != hash)
+        {
+            clearAccountSession();
+            activeAccountHash = hash;
+            activeSnapshotKey = COIN_SNAPSHOT_KEY + Long.toUnsignedString(hash);
+            String stored = configManager.getConfiguration(KspBondGoalConfig.GROUP, activeSnapshotKey);
+            coinState = BondCoinState.deserialize(stored);
+            lastSavedCoinSnapshot = stored;
+        }
+        return true;
+    }
+
+    private void observeInventory(ItemContainer inventory)
+    {
+        if (inventory == null) return;
+        updateCoinState(coinState.observedInventory(countItem(inventory, COINS)));
+    }
+
+    private void observeBank(ItemContainer bank)
+    {
+        if (bank == null) return;
+        bankFreshThisSession = true;
+        updateCoinState(coinState.observedBank(countItem(bank, COINS)));
+    }
+
+    private void updateCoinState(BondCoinState newState)
+    {
+        coinState = newState;
+        if (activeSnapshotKey == null) return;
+        String serialized = newState.serialize();
+        if (!serialized.equals(lastSavedCoinSnapshot))
+        {
+            // Avoid writing to ConfigManager every game tick. A changed
+            // inventory/bank balance is persisted immediately after receipt.
+            lastSavedCoinSnapshot = serialized;
+            configManager.setConfiguration(KspBondGoalConfig.GROUP, activeSnapshotKey, serialized);
+        }
+    }
+
+    private void clearAccountSession()
+    {
+        activeAccountHash = 0L;
+        activeSnapshotKey = null;
+        lastSavedCoinSnapshot = null;
+        bankFreshThisSession = false;
+        coinState = BondCoinState.empty();
     }
 
     private static long countItem(ItemContainer container, int itemId)
@@ -294,9 +391,11 @@ public class KspBondGoalPlugin extends Plugin
         }
 
         long count = 0;
-        for (Item item : container.getItems())
+        Item[] items = container.getItems();
+        if (items == null) return 0;
+        for (Item item : items)
         {
-            if (item.getId() == itemId && item.getQuantity() > 0)
+            if (item != null && item.getId() == itemId && item.getQuantity() > 0)
             {
                 count += item.getQuantity();
             }
