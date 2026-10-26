@@ -287,6 +287,7 @@ public class KspAccountBuilderScript extends KspManagedScript
     private long startedAtMillis;
     private boolean taskStarted;
     private long nextBreakAtMillis;
+    private long lastBreakClockSampleAtMillis;
     private long breakEndsAtMillis;
     private long nextActivitySwitchAtMillis;
     private long pausedActivitySwitchRemainingMillis;
@@ -363,6 +364,7 @@ public class KspAccountBuilderScript extends KspManagedScript
         applyAntibanSettings();
         captureOriginalWindowTitle();
         startedAtMillis = System.currentTimeMillis();
+        lastBreakClockSampleAtMillis = startedAtMillis;
         scheduleNextBreak();
         mainScheduledFuture = scheduledExecutorService.scheduleWithFixedDelay(this::runLoop, 0, LOOP_DELAY_MS, TimeUnit.MILLISECONDS);
         return true;
@@ -372,6 +374,9 @@ public class KspAccountBuilderScript extends KspManagedScript
     {
         try
         {
+            // Even when the base Script refuses to run during a shared pause or
+            // logout, keep its break deadline aligned with actual active time.
+            updateBreakRuntimeClock();
             if (shuttingDown || !super.run() || shuttingDown) return;
             syncDebugLogging(false);
             if (manualPaused)
@@ -500,6 +505,7 @@ public class KspAccountBuilderScript extends KspManagedScript
         taskStarted = false;
         breakActive = false;
         breakScheduleEnabled = false;
+        lastBreakClockSampleAtMillis = 0L;
         pendingTask = null;
         preselectedHandoffTask = null;
         singleSkillRecoveryTask = null;
@@ -579,6 +585,19 @@ public class KspAccountBuilderScript extends KspManagedScript
         Microbot.status = currentTask == null ? "Experience lamp complete" : "Resuming " + currentTask;
         debug("Experience lamp complete; resuming task | currentTask={}", currentTask);
         return true;
+    }
+
+    private void updateBreakRuntimeClock()
+    {
+        long now = System.currentTimeMillis();
+        long elapsed = lastBreakClockSampleAtMillis > 0L
+                ? Math.max(0L, now - lastBreakClockSampleAtMillis) : 0L;
+        lastBreakClockSampleAtMillis = now;
+        // Manual pause is already compensated for on Resume; do not double-add it.
+        if (elapsed == 0L || manualPaused || config == null || !config.doBreaks()
+                || breakActive || nextBreakAtMillis <= 0L) return;
+        if (!Microbot.isLoggedIn() || Microbot.pauseAllScripts.get() || isSharedBreakHandlerActive())
+            nextBreakAtMillis += elapsed;
     }
 
     private void processTimers()
@@ -2141,6 +2160,7 @@ public class KspAccountBuilderScript extends KspManagedScript
         long delayMinutes = Math.max(5L,
                 randomMinutes(Math.max(5, config.breakAfterMinMinutes()), Math.max(5, config.breakAfterMaxMinutes())));
         nextBreakAtMillis = System.currentTimeMillis() + TimeUnit.MINUTES.toMillis(delayMinutes);
+        lastBreakClockSampleAtMillis = System.currentTimeMillis();
         debug("Scheduled next logout break | delayMinutes={} nextBreakAtMillis={}", delayMinutes, nextBreakAtMillis);
     }
 
@@ -2508,6 +2528,7 @@ public class KspAccountBuilderScript extends KspManagedScript
         taskStarted = false;
         breakActive = false;
         breakScheduleEnabled = false;
+        lastBreakClockSampleAtMillis = 0L;
         startedAtMillis = 0L;
         nextBreakAtMillis = -1L;
         breakEndsAtMillis = -1L;
