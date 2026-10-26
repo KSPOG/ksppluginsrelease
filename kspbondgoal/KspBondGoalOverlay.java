@@ -34,7 +34,9 @@ public class KspBondGoalOverlay extends OverlayPanel
     @Override
     public Dimension render(Graphics2D graphics)
     {
-        if (!Microbot.isLoggedIn())
+        // The UI manager may retain an overlay during an interrupted
+        // disable/hot reload. Never paint an instance whose plugin stopped.
+        if (!plugin.isRunning() || !Microbot.isLoggedIn())
         {
             return null;
         }
