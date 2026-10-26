@@ -10,6 +10,13 @@ package net.runelite.client.plugins.microbot.kspbondgoal;
 final class BondCoinState
 {
     private static final String VERSION = "v1";
+    static final String STORAGE_KEY_PREFIX = "lastKnownCoinsV1_";
+
+    static String keyForAccount(long accountHash)
+    {
+        if (accountHash == 0L) throw new IllegalArgumentException("Account hash is not available");
+        return STORAGE_KEY_PREFIX + Long.toUnsignedString(accountHash);
+    }
     private static final long MAX_GP = 100_000_000_000L;
 
     private final boolean inventoryKnown;
