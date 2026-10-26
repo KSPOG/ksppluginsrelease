@@ -43,7 +43,11 @@ public final class KspF2pClueScript extends Script
     private static final int CLUE_ID = ItemID.TRAIL_CLUE_BEGINNER;
     private static final int COINS = ItemID.COINS;
     private static final long ACTION_GAP = 1_000L;
-    private static final long READ_GAP = 6_000L;
+    private static final long READ_GAP = 4_000L;
+    private static final long CLUE_BANK_REFRESH_MS = 45_000L;
+    private static final long BANK_RETRY_MS = 4_000L;
+    private static final long RELDO_INTERACT_COOLDOWN_MS = 8_000L;
+    private static final long DIAGNOSTIC_INTERVAL_MS = 30_000L;
     private static final WorldPoint GE = new WorldPoint(3164, 3487, 0);
 
     private volatile String status = "Idle";
@@ -54,6 +58,14 @@ public final class KspF2pClueScript extends Script
     private volatile boolean running;
     private volatile int pendingMapGroup = -1;
     private volatile boolean deviceFeedback, deviceShaking, progressMessage;
+    private volatile BeginnerClueCatalog.Step pendingCharlieStep;
+    private volatile boolean clueWidgetPending;
+    private long nextClueBankCheckAt, nextClueWithdrawAt, nextDiagnosticAt, nextReldoActionAt;
+    private long nextRequiredItemActionAt;
+    private int clueWithdrawAttempts, neededItemAttempts, reldoAttempts;
+    private boolean hadClueInInventory, verifyStepAfterAction, coinsWithdrawnForStep;
+    private String lastNeededAttemptItem = "";
+    private String previousStatus = "";
 
     private final Set<String> bankChecked = new HashSet<>();
     private KspF2pClueConfig config;
@@ -74,6 +86,13 @@ public final class KspF2pClueScript extends Script
         completed = 0;
         committedGp = 0;
         nextActionAt = nextReadAt = nextBankAt = 0;
+        nextClueBankCheckAt = nextClueWithdrawAt = nextDiagnosticAt = nextReldoActionAt = 0;
+        nextRequiredItemActionAt = 0;
+        clueWithdrawAttempts = neededItemAttempts = reldoAttempts = 0;
+        hadClueInInventory = verifyStepAfterAction = clueWidgetPending = coinsWithdrawnForStep = false;
+        previousStatus = "";
+        lastNeededAttemptItem = "";
+        pendingCharlieStep = null;
         step = null;
         lastStepKey = null;
         bankChecked.clear();
@@ -84,17 +103,23 @@ public final class KspF2pClueScript extends Script
         deviceFeedback = waitingForDevice = deviceShaking = false;
         progressMessage = false;
         running = true;
+        log.info("[KSP Clue] Starting v0.1.3 | bankClueCheck=true, checkNeededItems=true, debug={}, autoBuy={}, maxUnit={}, maxSpend={}",
+            config.debugLogging(), config.autoBuy(), config.maxUnitPrice(), config.maxSessionSpend());
         mainScheduledFuture = scheduledExecutorService.scheduleWithFixedDelay(() ->
         {
             if (!running || !Microbot.isLoggedIn()) return;
             try
             {
-                if (super.run()) tick();
+                if (super.run())
+                {
+                    tick();
+                    logStatusIfChanged();
+                }
             }
             catch (Exception error)
             {
                 status = "Error - see client log";
-                log.error("KSP F2P clue solver action failed", error);
+                log.error("[KSP Clue] Action failed | step={} status={}", lastStepKey, status, error);
                 delay(2_000);
             }
         }, 0, 600, TimeUnit.MILLISECONDS);
@@ -105,7 +130,7 @@ public final class KspF2pClueScript extends Script
     public void onWidgetLoaded(int group)
     {
         if (BeginnerClueCatalog.fromMap(group) != null) pendingMapGroup = group;
-        if (group == InterfaceID.TRAIL_CLUETEXT) nextReadAt = 0;
+        if (group == InterfaceID.TRAIL_CLUETEXT) clueWidgetPending = true;
     }
 
     public void onChatMessage(String message)
@@ -127,12 +152,22 @@ public final class KspF2pClueScript extends Script
         // for chat mirrors as a backup to the live dialogue reader below.
         BeginnerClueCatalog.Step clue = BeginnerClueCatalog.fromText(normalized);
         if (clue != null && clue.kind == BeginnerClueCatalog.Kind.CHARLIE)
-            acceptStep(clue);
+            pendingCharlieStep = clue;
     }
 
     private void tick()
     {
         long now = System.currentTimeMillis();
+        if (config.debugLogging() && now >= nextDiagnosticAt)
+        {
+            nextDiagnosticAt = now + DIAGNOSTIC_INTERVAL_MS;
+            log.info("[KSP Clue] Heartbeat | status={} step={} clueInv={} boxInv={} deviceInv={} bankOpen={} geOpen={} dialogue={} position={} bankNextIn={}ms",
+                status, lastStepKey, Rs2Inventory.hasItem(CLUE_ID),
+                Rs2Inventory.hasItem("Scroll box (beginner)"),
+                Rs2Inventory.hasItem("Strange device"), Rs2Bank.isOpen(), Rs2GrandExchange.isOpen(),
+                Rs2Dialogue.isInDialogue(), Rs2Player.getWorldLocation(),
+                Math.max(0L, nextClueBankCheckAt - now));
+        }
         if (now < nextActionAt) return;
 
         int caskets = Rs2Inventory.itemQuantity("Reward casket (beginner)");
@@ -147,37 +182,35 @@ public final class KspF2pClueScript extends Script
             bankChecked.clear();
             pendingMapGroup = -1;
             nextReadAt = 0;
+            verifyStepAfterAction = false;
+            nextClueBankCheckAt = 0;
         }
 
         if (!Rs2Inventory.hasItem(CLUE_ID))
         {
-            if (Rs2Inventory.hasItem("Scroll box (beginner)"))
-            {
-                status = "Opening beginner scroll box";
-                Rs2Inventory.interact("Scroll box (beginner)", "Open");
-                delay(ACTION_GAP);
-                return;
-            }
-            if (config.openCaskets() && Rs2Inventory.hasItem("Reward casket (beginner)"))
-            {
-                status = "Opening beginner reward";
-                Rs2Inventory.interact("Reward casket (beginner)", "Open");
-                delay(ACTION_GAP);
-                return;
-            }
-            step = null;
-            lastStepKey = null;
-            activePurchaseId = -1;
-            status = "Waiting for beginner clue";
-            clueName = "None";
-            neededItem = "-";
+            handleMissingClue(now);
             return;
+        }
+
+        if (!hadClueInInventory)
+        {
+            hadClueInInventory = true;
+            clueWithdrawAttempts = 0;
+            nextClueWithdrawAt = 0;
+            log.info("[KSP Clue] Beginner clue detected in inventory");
         }
 
         if (activePurchaseId > 0)
         {
             handlePendingPurchase();
             return;
+        }
+
+        if (pendingCharlieStep != null)
+        {
+            BeginnerClueCatalog.Step candidate = pendingCharlieStep;
+            pendingCharlieStep = null;
+            acceptStep(candidate);
         }
 
         if (pendingMapGroup != -1)
@@ -187,29 +220,43 @@ public final class KspF2pClueScript extends Script
             acceptStep(BeginnerClueCatalog.fromMap(group));
         }
 
-        readClueTextIfOpen();
+        // Only read an unknown clue or verify a completed interaction.
+        // Never interrupt Reldo dialogue or hot/cold device processing.
+        if (clueWidgetPending || step == null || verifyStepAfterAction)
+        {
+            clueWidgetPending = false;
+            readClueTextIfOpen();
+        }
         readCharlieAssignment();
 
-        if (step != null && now >= nextReadAt
-                && !Rs2Dialogue.isInDialogue() && !Rs2Bank.isOpen()
-                && !Rs2GrandExchange.isOpen())
-        {
-            status = "Checking clue progress";
-            Rs2Inventory.interact(CLUE_ID, "Read");
-            nextReadAt = now + READ_GAP;
-            delay(ACTION_GAP);
-            return;
-        }
         if (step == null)
         {
-            status = "Reading clue scroll";
             if (now >= nextReadAt)
             {
-                if (Rs2Bank.isOpen()) Rs2Bank.closeBank();
-                else Rs2Inventory.interact(CLUE_ID, "Read");
+                if (Rs2Bank.isOpen()) { status = "Closing bank before reading clue"; Rs2Bank.closeBank(); }
+                else if (Rs2GrandExchange.isOpen()) { status = "Closing GE before reading clue"; Rs2GrandExchange.closeExchange(); }
+                else if (!Rs2Dialogue.isInDialogue())
+                {
+                    status = "Reading unknown beginner clue";
+                    boolean clicked = Rs2Inventory.interact(CLUE_ID, "Read");
+                    diagnostic("Clue read clicked=" + clicked);
+                }
                 nextReadAt = now + READ_GAP;
                 delay(ACTION_GAP);
             }
+            return;
+        }
+
+        if (verifyStepAfterAction && step.kind != BeginnerClueCatalog.Kind.HOT_COLD
+                && now >= nextReadAt && !Rs2Dialogue.isInDialogue()
+                && !Rs2Bank.isOpen() && !Rs2GrandExchange.isOpen())
+        {
+            verifyStepAfterAction = false;
+            status = "Verifying clue after step interaction";
+            boolean clicked = Rs2Inventory.interact(CLUE_ID, "Read");
+            diagnostic("Clue progress verification clicked=" + clicked);
+            nextReadAt = now + READ_GAP;
+            delay(ACTION_GAP);
             return;
         }
 
@@ -258,6 +305,126 @@ public final class KspF2pClueScript extends Script
         }
     }
 
+    /** Checks the actual bank if the inventory has no beginner clue. */
+    private void handleMissingClue(long now)
+    {
+        if (hadClueInInventory)
+        {
+            log.info("[KSP Clue] Clue left inventory; resetting step and rescanning bank");
+            hadClueInInventory = false;
+            nextClueBankCheckAt = 0;
+            clueWithdrawAttempts = 0;
+        }
+        if (step != null)
+        {
+            step = null;
+            lastStepKey = null;
+            clueName = "None";
+            neededItem = "-";
+            activePurchaseId = -1;
+            pendingMapGroup = -1;
+            verifyStepAfterAction = false;
+            bankChecked.clear();
+        }
+
+        if (Rs2Inventory.hasItem("Scroll box (beginner)"))
+        {
+            if (Rs2Bank.isOpen()) Rs2Bank.closeBank();
+            else if (Rs2GrandExchange.isOpen()) Rs2GrandExchange.closeExchange();
+            else
+            {
+                status = "Opening beginner scroll box from inventory";
+                boolean clicked = Rs2Inventory.interact("Scroll box (beginner)", "Open");
+                diagnostic("Scroll box clicked=" + clicked);
+            }
+            delay(ACTION_GAP);
+            return;
+        }
+
+        if (Rs2Bank.isOpen())
+        {
+            boolean hasClue = Rs2Bank.hasItem(CLUE_ID);
+            boolean hasBox = Rs2Bank.hasItem("Scroll box (beginner)", true);
+            if (hasClue || hasBox)
+            {
+                if (now < nextClueWithdrawAt) return;
+                String desired = hasClue ? "Clue scroll (beginner)" : "Scroll box (beginner)";
+                if (clueWithdrawAttempts >= 3)
+                {
+                    status = "Clue bank withdrawal failed 3 times - check inventory space";
+                    diagnostic("Bank retry limit for " + desired);
+                    return;
+                }
+                status = "Withdrawing " + desired + " from bank";
+                boolean clicked = hasClue ? Rs2Bank.withdrawOne(CLUE_ID) :
+                                  Rs2Bank.withdrawOne("Scroll box (beginner)", true);
+                clueWithdrawAttempts++;
+                nextClueWithdrawAt = now + BANK_RETRY_MS;
+                log.info("[KSP Clue] Withdrawing from bank | item={} success={} attempt={}/3",
+                    desired, clicked, clueWithdrawAttempts);
+                delay(ACTION_GAP);
+                return;
+            }
+            clueWithdrawAttempts = 0;
+            nextClueBankCheckAt = now + CLUE_BANK_REFRESH_MS;
+            log.info("[KSP Clue] Bank scan complete: no beginner clue or scroll box | next={}s",
+                CLUE_BANK_REFRESH_MS / 1000);
+            Rs2Bank.closeBank();
+            delay(ACTION_GAP);
+            return;
+        }
+
+        if (now >= nextClueBankCheckAt && now >= nextBankAt)
+        {
+            if (Rs2GrandExchange.isOpen())
+            {
+                Rs2GrandExchange.closeExchange();
+                delay(ACTION_GAP);
+                return;
+            }
+            status = "Searching bank for beginner clue";
+            boolean opened = Rs2Bank.walkToBankAndUseBank();
+            diagnostic("Bank open requested, result=" + opened);
+            nextBankAt = now + BANK_RETRY_MS;
+            delay(ACTION_GAP);
+            return;
+        }
+
+        if (config.openCaskets() && Rs2Inventory.hasItem("Reward casket (beginner)"))
+        {
+            status = "Opening beginner reward";
+            boolean clicked = Rs2Inventory.interact("Reward casket (beginner)", "Open");
+            diagnostic("Reward casket clicked=" + clicked);
+            delay(ACTION_GAP);
+            return;
+        }
+        status = "Waiting for beginner clue (inventory and bank checked)";
+    }
+
+    private void logStatusIfChanged()
+    {
+        if (!status.equals(previousStatus))
+        {
+            previousStatus = status;
+            log.info("[KSP Clue] State | {} | step={} needed={}", status, lastStepKey, neededItem);
+        }
+    }
+
+    private void diagnostic(String text)
+    {
+        if (config != null && config.debugLogging())
+            log.info("[KSP Clue] Debug | {} | step={} status={}", text, lastStepKey, status);
+    }
+
+    private void requestClueVerification()
+    {
+        if (step != null && step.kind != BeginnerClueCatalog.Kind.HOT_COLD)
+        {
+            verifyStepAfterAction = true;
+            nextReadAt = System.currentTimeMillis() + 3_000L;
+        }
+    }
+
     private void readClueTextIfOpen()
     {
         String text = Microbot.getClientThread().runOnClientThreadOptional(() ->
@@ -289,7 +456,17 @@ public final class KspF2pClueScript extends Script
         deviceRequestedAt = 0;
         deviceAttempts = 0;
         deviceFeedback = deviceShaking = waitingForDevice = false;
+        verifyStepAfterAction = false;
+        coinsWithdrawnForStep = false;
+        neededItemAttempts = 0;
+        lastNeededAttemptItem = "";
+        nextRequiredItemActionAt = 0;
+        reldoAttempts = 0;
+        nextReldoActionAt = 0;
         nextReadAt = System.currentTimeMillis() + READ_GAP;
+        log.info("[KSP Clue] New step | kind={} key={} label={} target={} requirements={}",
+            candidate.kind, candidate.key, candidate.label, candidate.destination,
+            java.util.Arrays.toString(candidate.requiredItems));
         status = "Identified: " + candidate.label;
     }
 
