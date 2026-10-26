@@ -49,16 +49,19 @@ jobs:
           cache: gradle
           cache-dependency-path: hub/**/*.gradle*
 
-      - name: Run Bond Goal persistence regression
+      - name: Run Bond Goal persistence and overlay lifecycle regressions
         shell: bash
         run: |
           set -euo pipefail
           TEST_ROOT=/tmp/ksp-bond-goal-test
           mkdir -p "$TEST_ROOT/src" "$TEST_ROOT/bin"
           cp release/kspbondgoal/BondCoinState.java "$TEST_ROOT/src/"
+          cp release/kspbondgoal/BondGoalOverlayLifecycle.java "$TEST_ROOT/src/"
           cp release/.github/tests/bondgoal/BondCoinStateTest.java.txt "$TEST_ROOT/src/BondCoinStateTest.java"
+          cp release/.github/tests/bondgoal/BondGoalOverlayLifecycleTest.java.txt "$TEST_ROOT/src/BondGoalOverlayLifecycleTest.java"
           javac --release 11 -d "$TEST_ROOT/bin" "$TEST_ROOT/src/"*.java
           java -cp "$TEST_ROOT/bin" net.runelite.client.plugins.microbot.kspbondgoal.BondCoinStateTest
+          java -cp "$TEST_ROOT/bin" net.runelite.client.plugins.microbot.kspbondgoal.BondGoalOverlayLifecycleTest
 
       - name: Install Bond Goal source in Microbot Hub
         shell: bash
