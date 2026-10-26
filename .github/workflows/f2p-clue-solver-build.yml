@@ -1,0 +1,58 @@
+name: Build KSP F2P Clue Solver
+
+on:
+  pull_request:
+    paths:
+      - 'kspf2pcluesolver/**'
+      - '.github/workflows/f2p-clue-solver-build.yml'
+  push:
+    branches: [dev]
+    paths:
+      - 'kspf2pcluesolver/**'
+      - '.github/workflows/f2p-clue-solver-build.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout KSP plugin sources
+        uses: actions/checkout@v4
+        with:
+          path: release
+      - name: Checkout latest Microbot Hub
+        uses: actions/checkout@v4
+        with:
+          repository: chsami/Microbot-Hub
+          ref: main
+          path: hub
+      - name: Setup Java 11
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '11'
+      - name: Install clue solver sources into hub
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT='hub/src/main/java/net/runelite/client/plugins/microbot'
+          rm -rf "$ROOT/kspf2pcluesolver"
+          cp -R release/kspf2pcluesolver "$ROOT/kspf2pcluesolver"
+      - name: Compile clue solver against hub dependencies
+        working-directory: hub
+        shell: bash
+        run: |
+          chmod +x gradlew
+          ./gradlew clean build -PpluginList=KspF2pCluePlugin --stacktrace --no-daemon
+      - name: Upload compiled plugin JAR
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: KspF2pCluePlugin-build
+          path: hub/build/libs/KspF2pCluePlugin-*.jar
+          if-no-files-found: error
+          retention-days: 7
