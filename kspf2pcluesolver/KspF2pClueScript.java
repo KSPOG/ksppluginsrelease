@@ -63,6 +63,8 @@ public final class KspF2pClueScript extends Script
     private long nextClueBankCheckAt, nextClueWithdrawAt, nextDiagnosticAt, nextReldoActionAt;
     private long nextRequiredItemActionAt;
     private int clueWithdrawAttempts, neededItemAttempts, reldoAttempts;
+    private int reldoDialogueAttempts;
+    private String lastReldoOptionMenu = "";
     private boolean hadClueInInventory, verifyStepAfterAction, coinsWithdrawnForStep;
     private String lastNeededAttemptItem = "";
     private String previousStatus = "";
@@ -88,7 +90,8 @@ public final class KspF2pClueScript extends Script
         nextActionAt = nextReadAt = nextBankAt = 0;
         nextClueBankCheckAt = nextClueWithdrawAt = nextDiagnosticAt = nextReldoActionAt = 0;
         nextRequiredItemActionAt = 0;
-        clueWithdrawAttempts = neededItemAttempts = reldoAttempts = 0;
+        clueWithdrawAttempts = neededItemAttempts = reldoAttempts = reldoDialogueAttempts = 0;
+        lastReldoOptionMenu = "";
         hadClueInInventory = verifyStepAfterAction = clueWidgetPending = coinsWithdrawnForStep = false;
         previousStatus = "";
         lastNeededAttemptItem = "";
@@ -279,6 +282,13 @@ public final class KspF2pClueScript extends Script
             delay(ACTION_GAP);
             return;
         }
+        // Reldo owns its dialogue from start to finish. The generic
+        // continue handler must not intercept his yes/no confirmation.
+        if (step.kind == BeginnerClueCatalog.Kind.HOT_COLD)
+        {
+            handleHotCold();
+            return;
+        }
         if (Rs2Dialogue.hasContinue())
         {
             status = "Continuing dialogue";
@@ -300,7 +310,7 @@ public final class KspF2pClueScript extends Script
             case CHARLIE: handleNpc(); break;
             case EMOTE: handleEmote(); break;
             case DIG: handleDig(step.destination); break;
-            case HOT_COLD: handleHotCold(); break;
+            case HOT_COLD: handleHotCold(); break; // handled above while dialogue is open
             default: status = "Unsupported clue"; break;
         }
     }
@@ -461,7 +471,8 @@ public final class KspF2pClueScript extends Script
         neededItemAttempts = 0;
         lastNeededAttemptItem = "";
         nextRequiredItemActionAt = 0;
-        reldoAttempts = 0;
+        reldoAttempts = reldoDialogueAttempts = 0;
+        lastReldoOptionMenu = "";
         nextReldoActionAt = 0;
         nextReadAt = System.currentTimeMillis() + READ_GAP;
         log.info("[KSP Clue] New step | kind={} key={} label={} target={} requirements={}",
@@ -854,6 +865,83 @@ public final class KspF2pClueScript extends Script
      * Experimental 5-location device search. Only dig after explicit device
      * shaking. Stop with a visible status on inconclusive responses.
      */
+    /**
+     * Handle Reldo's current *visible* option list rather than assuming the
+     * confirmation is labelled "strange device". Never select a negative
+     * option, and never run this handler for another clue or NPC.
+     */
+    private void handleReldoOptions(long now)
+    {
+        java.util.List<Widget> options = Rs2Dialogue.getDialogueOptions();
+        StringBuilder signature = new StringBuilder();
+        int positiveIndex = -1;
+        String positiveLabel = null;
+
+        for (int i = 0; i < options.size(); i++)
+        {
+            Widget option = options.get(i);
+            String label = option == null ? "" : strip(option.getText());
+            if (signature.length() != 0) signature.append(" | ");
+            signature.append(i + 1).append(':').append(label);
+
+            String normalized = label.toLowerCase(Locale.ROOT)
+                .replaceAll("[^a-z0-9]+", " ").trim();
+            boolean negative = normalized.startsWith("no ")
+                || normalized.equals("no")
+                || normalized.contains("don t")
+                || normalized.contains("do not")
+                || normalized.contains("not interested")
+                || normalized.contains("never mind");
+            boolean affirmative = normalized.equals("yes i do")
+                || normalized.equals("yes")
+                || normalized.equals("yes please")
+                || normalized.equals("i do")
+                || normalized.equals("yes i have")
+                || normalized.contains("strange device")
+                || normalized.contains("hot and cold")
+                || normalized.contains("clue scroll");
+            if (!negative && affirmative && positiveIndex < 0)
+            {
+                positiveIndex = i;
+                positiveLabel = label;
+            }
+        }
+
+        String visibleMenu = signature.toString();
+        if (!visibleMenu.equals(lastReldoOptionMenu))
+        {
+            lastReldoOptionMenu = visibleMenu;
+            reldoDialogueAttempts = 0;
+            nextReldoActionAt = 0; // New option set: act immediately.
+            log.info("[KSP Clue] Reldo options visible | question={} options=[{}]",
+                Rs2Dialogue.getQuestion(), visibleMenu);
+        }
+        if (positiveIndex < 0)
+        {
+            status = "Reldo dialogue: no safe positive option recognised";
+            return;
+        }
+        if (now < nextReldoActionAt) return;
+        if (reldoDialogueAttempts >= 5)
+        {
+            status = "Reldo option failed after five attempts; manual review";
+            return;
+        }
+
+        // Use the exact visible menu position. This API reads the widget's
+        // own key binding and only falls back to the numbered hotkey.
+        boolean pressed = Rs2Dialogue.keyPressForDialogueOption(positiveIndex + 1);
+        if (!pressed)
+            pressed = Rs2Widget.clickWidget(options.get(positiveIndex));
+        reldoDialogueAttempts++;
+        nextReldoActionAt = now + 2_500L;
+        log.info("[KSP Clue] Reldo option selected | option={} text='{}' clicked={} attempt={}/5",
+            positiveIndex + 1, positiveLabel, pressed, reldoDialogueAttempts);
+        status = pressed ? "Confirmed Reldo: " + positiveLabel
+                         : "Unable to select Reldo option: " + positiveLabel;
+        delay(1_100L);
+    }
+
     private void handleHotCold()
     {
         if (!Rs2Inventory.hasItem("Strange device"))
@@ -874,29 +962,27 @@ public final class KspF2pClueScript extends Script
             }
 
             long now = System.currentTimeMillis();
+            // Selection menus take precedence over NPC/player continuations.
+            // In particular Reldo asks "Yes, I do." / "No, I don't."
+            if (Rs2Dialogue.hasSelectAnOption())
+            {
+                handleReldoOptions(now);
+                return;
+            }
+            if (Rs2Dialogue.hasContinue())
+            {
+                if (now < nextReldoActionAt) return;
+                status = "Advancing Reldo conversation";
+                Rs2Dialogue.clickContinue();
+                nextReldoActionAt = now + 2_000L;
+                diagnostic("Reldo dialogue: clicked Continue");
+                delay(1_100L);
+                return;
+            }
             if (Rs2Dialogue.isInDialogue())
             {
-                if (!Rs2Dialogue.hasSelectAnOption())
-                {
-                    status = "Waiting for Reldo dialogue/continue";
-                    delay(1_200);
-                    return;
-                }
-                if (now < nextReldoActionAt) return;
-                if (reldoAttempts >= 5)
-                {
-                    status = "Reldo dialogue option not recognized - manual review";
-                    return;
-                }
-                boolean chosen = Rs2Dialogue.clickOption(
-                    "strange device", "hot and cold", "hot-and-cold", "device", "clue scroll");
-                nextReldoActionAt = now + RELDO_INTERACT_COOLDOWN_MS;
-                reldoAttempts++;
-                log.info("[KSP Clue] Reldo dialogue option | chosen={} attempt={}/5 dialogue={}",
-                    chosen, reldoAttempts, Rs2Dialogue.getDialogueText());
-                status = chosen ? "Selected Reldo strange-device option"
-                                : "Reldo dialogue needs a device option";
-                delay(1_500);
+                status = "Waiting for Reldo dialogue widgets";
+                delay(1_200);
                 return;
             }
 
@@ -925,11 +1011,19 @@ public final class KspF2pClueScript extends Script
             delay(1_500);
             return;
         }
-        if (reldoAttempts > 0)
+        if (reldoAttempts > 0 || reldoDialogueAttempts > 0)
         {
             log.info("[KSP Clue] Strange device obtained from Reldo, beginning hot/cold step");
-            reldoAttempts = 0;
+            reldoAttempts = reldoDialogueAttempts = 0;
+            lastReldoOptionMenu = "";
             nextReldoActionAt = 0;
+        }
+        if (Rs2Dialogue.hasContinue())
+        {
+            status = "Closing Reldo dialogue after receiving device";
+            Rs2Dialogue.clickContinue();
+            delay(1_100L);
+            return;
         }
         if (hotColdAreaIndex >= BeginnerClueCatalog.HOT_COLD_CENTERS.length)
         {
