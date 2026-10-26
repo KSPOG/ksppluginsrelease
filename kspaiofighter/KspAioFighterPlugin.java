@@ -83,7 +83,8 @@ public class KspAioFighterPlugin extends Plugin
 	@Override
 	protected void startUp()
 	{
-        breaks.start(config);
+        // An enabled side-panel is not an active fighter session.
+        breaks.start(config, () -> automationRunning);
 		automationRunning = false;
 		preparingStart = false;
 		inventoryLoadInProgress = false;
