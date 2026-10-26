@@ -3,6 +3,7 @@ package net.runelite.client.plugins.microbot.kspwillowchopper;
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.GameObject;
 import net.runelite.api.Skill;
+import net.runelite.api.WorldType;
 import net.runelite.api.coords.WorldPoint;
 import net.runelite.api.events.GameObjectDespawned;
 import net.runelite.api.events.GameObjectSpawned;
@@ -21,6 +22,7 @@ import net.runelite.client.plugins.microbot.util.inventory.InteractOrder;
 import net.runelite.client.plugins.microbot.util.keyboard.Rs2Keyboard;
 import net.runelite.client.plugins.microbot.util.player.Rs2Player;
 import net.runelite.client.plugins.microbot.util.widget.Rs2Widget;
+import net.runelite.client.plugins.microbot.util.walker.Rs2Walker;
 
 import javax.inject.Inject;
 import javax.inject.Singleton;
@@ -132,6 +134,9 @@ public class KspWillowChopperScript extends KspBreakAwareScript {
     private int burnCommandResourceCount = -1;
     private volatile boolean promotingFireToCampfire;
 
+    private long lastProgressiveWalkAttemptMillis;
+    private boolean progressiveWalkIssued;
+
     private long lastTreeClickMillis;
     private long lastTreeProgressMillis;
     private long lastBankAttemptMillis;
@@ -152,6 +157,11 @@ public class KspWillowChopperScript extends KspBreakAwareScript {
         runtimeConfig = config;
         activeTree = safeTree(config.tree());
         activeMode = config.mode() == null ? KspChopperMode.CHOP_BANK : config.mode();
+        if (activeMode.isProgressive()) {
+            activeTree = progressiveTree();
+        }
+        lastProgressiveWalkAttemptMillis = 0L;
+        progressiveWalkIssued = false;
         state = RuntimeState.CHOPPING;
         status = "Starting";
         sessionStarted = true;
@@ -218,19 +228,29 @@ public class KspWillowChopperScript extends KspBreakAwareScript {
 
             if (Thread.currentThread().isInterrupted()) return;
 
-            KspTree selected = safeTree(config.tree());
-            if (selected != activeTree) switchTree(selected);
             KspChopperMode selectedMode = config.mode() == null ? KspChopperMode.CHOP_BANK : config.mode();
             if (selectedMode != activeMode) {
                 activeMode = selectedMode;
                 finishBurnBatch();
                 resetActionLatches();
                 lastDropAttemptMillis = 0L;
+                lastProgressiveWalkAttemptMillis = 0L;
+                progressiveWalkIssued = false;
                 state = RuntimeState.CHOPPING;
                 status = "Mode changed to " + selectedMode;
             }
 
             trackResourceChanges();
+            KspTree selected = activeMode.isProgressive() ? progressiveTree() : safeTree(config.tree());
+            if (selected != activeTree) {
+                // Do not carry old logs into the next tier. Process them using
+                // the chosen Bank/Burn/Drop strategy before changing resources.
+                if (activeMode.isProgressive() && Rs2Inventory.count(activeTree.getResourceId()) > 0) {
+                    completeProgressiveTier();
+                    return;
+                }
+                switchTree(selected);
+            }
 
             if (config.enableForestry() && plugin.runForestryIfNeeded()) {
                 state = RuntimeState.FORESTRY;
@@ -267,12 +287,15 @@ public class KspWillowChopperScript extends KspBreakAwareScript {
 
             switch (activeMode) {
                 case CHOP_BANK:
+                case PROGRESSIVE_CHOP_BANK:
                     tickBankMode();
                     break;
                 case CHOP_BURN:
+                case PROGRESSIVE_CHOP_BURN:
                     tickBurnMode();
                     break;
                 case CHOP_DROP:
+                case PROGRESSIVE_CHOP_DROP:
                     tickDropMode();
                     break;
                 default:
@@ -285,6 +308,81 @@ public class KspWillowChopperScript extends KspBreakAwareScript {
         }
     }
 
+    /**
+     * Complete a previous tree tier using the currently selected progressive
+     * resource strategy. Normal/manual modes never enter this path.
+     */
+    private void completeProgressiveTier() {
+        clearActiveTreeTarget();
+        if (activeMode.isBank()) {
+            bankResource();
+        } else if (activeMode.isDrop()) {
+            int before = Rs2Inventory.count(activeTree.getResourceId());
+            long now = System.currentTimeMillis();
+            state = RuntimeState.DROPPING;
+            status = "Clearing previous tier: " + activeTree;
+            if (now - lastDropAttemptMillis >= 1_500L) {
+                lastDropAttemptMillis = now;
+                Rs2Inventory.dropAmount(activeTree.getResourceName(), before, InteractOrder.EFFICIENT_ROW);
+                int after = Rs2Inventory.count(activeTree.getResourceId());
+                resourcesDropped += Math.max(0, before - after);
+                lastResourceCount = after;
+            }
+        } else {
+            burnBatchActive = true; // Burn leftovers even when inventory is not full.
+            tickBurnMode();
+        }
+    }
+
+    private KspTree progressiveTree() {
+        int wc = Rs2Player.getRealSkillLevel(Skill.WOODCUTTING);
+        int fm = Rs2Player.getRealSkillLevel(Skill.FIREMAKING);
+        boolean members = Microbot.getClient() != null
+                && Microbot.getClient().getWorldType().contains(WorldType.MEMBERS);
+        return KspProgressiveTreeSelection.select(wc, fm, members, activeMode.isBurn());
+    }
+
+    private void clearProgressiveWalk() {
+        if (progressiveWalkIssued) {
+            Rs2Walker.clearWalkingRoute("KSP Chopper: leaving progressive tree route");
+            progressiveWalkIssued = false;
+        }
+        lastProgressiveWalkAttemptMillis = 0L;
+    }
+
+    private boolean ensureProgressiveLocation() {
+        WorldPoint player = Rs2Player.getWorldLocation();
+        if (player == null) {
+            status = "Waiting for player location";
+            return false;
+        }
+
+        // Honour an existing suitable group of trees when the player starts
+        // locally, rather than forcing a walk to one hard-coded site.
+        Rs2TileObjectModel nearby = findNextChoppableTree(null);
+        if (nearby != null && nearby.getWorldLocation() != null
+                && nearby.getWorldLocation().distanceTo(player) <= 18) {
+            clearProgressiveWalk();
+            return true;
+        }
+
+        WorldPoint anchor = KspProgressiveTreeSelection.anchor(activeTree);
+        if (player.getPlane() == anchor.getPlane() && player.distanceTo(anchor) <= 22) {
+            clearProgressiveWalk();
+            return true;
+        }
+
+        state = RuntimeState.CHOPPING;
+        status = "Walking to " + activeTree + " trees";
+        long now = System.currentTimeMillis();
+        if (!Rs2Player.isMoving() && now - lastProgressiveWalkAttemptMillis >= 12_000L) {
+            lastProgressiveWalkAttemptMillis = now;
+            progressiveWalkIssued = true;
+            Rs2Walker.walkTo(anchor, 7);
+        }
+        return false;
+    }
+
     private void tickBankMode() {
         burningActive = false;
         burnBatchActive = false;
@@ -294,6 +392,12 @@ public class KspWillowChopperScript extends KspBreakAwareScript {
         clearActiveCampfireTarget();
 
         if (Rs2Inventory.isFull()) {
+            if (activeMode.isProgressive() && Rs2Inventory.count(activeTree.getResourceId()) <= 0) {
+                state = RuntimeState.PAUSED;
+                status = "Inventory full of other items; no " + activeTree.getResourceName() + " to bank";
+                clearActiveTreeTarget();
+                return;
+            }
             clearActiveTreeTarget();
             bankResource();
             return;
@@ -430,6 +534,11 @@ public class KspWillowChopperScript extends KspBreakAwareScript {
 
         if (Rs2Bank.isOpen()) {
             Rs2Bank.closeBank();
+            return;
+        }
+
+        if (activeMode.isProgressive() && !ensureProgressiveLocation()) {
+            clearActiveTreeTarget();
             return;
         }
 
@@ -752,7 +861,8 @@ public class KspWillowChopperScript extends KspBreakAwareScript {
 
         KspWillowChopperConfig config = runtimeConfig;
         if (config == null) return false;
-        if (config.mode() == KspChopperMode.CHOP_BURN && activeTree.isCampfireBurnable() && burnBatchActive) return false;
+        if (config.mode() != null && config.mode().isBurn()
+                && activeTree.isCampfireBurnable() && burnBatchActive) return false;
 
         return hasAxe()
                 && Rs2Player.getRealSkillLevel(Skill.WOODCUTTING) >= activeTree.getWoodcuttingLevel();
@@ -809,7 +919,8 @@ public class KspWillowChopperScript extends KspBreakAwareScript {
         KspWillowChopperConfig config = runtimeConfig;
         if (!sessionStarted
                 || config == null
-                || config.mode() != KspChopperMode.CHOP_BURN
+                || config.mode() == null
+                || !config.mode().isBurn()
                 || !activeTree.isCampfireBurnable()
                 || !burnBatchActive
                 || !Microbot.isLoggedIn()
@@ -916,7 +1027,7 @@ public class KspWillowChopperScript extends KspBreakAwareScript {
 
         // Prefer the exact Port Sarim deposit box when it is loaded. This path is
         // intentionally resource-only so axes, tinderboxes and unrelated items stay put.
-        if (bankResourceAtDepositBox()) {
+        if (!activeMode.isProgressive() && bankResourceAtDepositBox()) {
             return;
         }
 
@@ -928,7 +1039,13 @@ public class KspWillowChopperScript extends KspBreakAwareScript {
             }
             lastBankAttemptMillis = now;
             status = "Opening bank";
-            if (!openAllowedBank() && !Rs2Bank.isOpen()) {
+            if (activeMode.isProgressive()) {
+                clearProgressiveWalk();
+                if (!Rs2Bank.openBank() && !Rs2Bank.walkToBankAndUseBank() && !Rs2Bank.isOpen()) {
+                    status = "Walking to bank";
+                    return;
+                }
+            } else if (!openAllowedBank() && !Rs2Bank.isOpen()) {
                 status = "Need nearby bank";
                 return;
             }
@@ -988,7 +1105,13 @@ public class KspWillowChopperScript extends KspBreakAwareScript {
 
         if (!Rs2Bank.isOpen()) {
             status = "Getting tinderbox";
-            if (!openAllowedBank() && !Rs2Bank.isOpen()) {
+            if (activeMode.isProgressive()) {
+                clearProgressiveWalk();
+                if (!Rs2Bank.openBank() && !Rs2Bank.walkToBankAndUseBank() && !Rs2Bank.isOpen()) {
+                    status = "Walking to bank for Tinderbox";
+                    return;
+                }
+            } else if (!openAllowedBank() && !Rs2Bank.isOpen()) {
                 status = "Need Tinderbox / nearby bank";
                 return;
             }
@@ -1272,6 +1395,7 @@ public class KspWillowChopperScript extends KspBreakAwareScript {
     }
 
     private void switchTree(KspTree selected) {
+        clearProgressiveWalk();
         activeTree = selected;
         finishBurnBatch();
         campfireNearby = false;
@@ -1359,6 +1483,7 @@ public class KspWillowChopperScript extends KspBreakAwareScript {
 
         runtimeConfig = null;
         sessionStarted = false;
+        clearProgressiveWalk();
         state = RuntimeState.IDLE;
         status = "Idle";
         campfireNearby = false;
