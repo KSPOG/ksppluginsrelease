@@ -31,7 +31,7 @@ import net.runelite.client.ui.overlay.OverlayManager;
 )
 public class KspBondGoalPlugin extends Plugin
 {
-    static final String VERSION = "1.0.3";
+    static final String VERSION = "1.0.4";
 
     private static final int COINS = 995;
     private static final int OLD_SCHOOL_BOND = 13190;
@@ -88,6 +88,13 @@ public class KspBondGoalPlugin extends Plugin
         lastPositiveBondPrice = 0;
         running = true;
 
+        // A source reload can construct a new copy of KspBondGoalOverlay
+        // from a different classloader before the old Plugin is shut down.
+        // Removing our injected instance by identity alone cannot remove
+        // those old v1.0.2/v1.0.3 overlays. OverlayManager.removeIf
+        // also rebuilds render layers so stale panels disappear immediately.
+        overlayManager.removeIf(existing -> BondGoalOverlayLifecycle.removeOnStartup(
+            existing.getClass().getName()));
         overlayManager.add(overlay);
         tradeLimits.ensureLoaded(this::refreshSnapshot);
 
@@ -108,7 +115,10 @@ public class KspBondGoalPlugin extends Plugin
     protected void shutDown()
     {
         running = false;
-        overlayManager.remove(overlay);
+        // Protect the *new* plugin if an older copy is shut down later:
+        // only remove overlays owned by this exact Plugin object.
+        overlayManager.removeIf(existing -> BondGoalOverlayLifecycle.removeOnShutdown(
+            existing.getClass().getName(), existing.getPlugin() == this));
         snapshot = BondGoalSnapshot.empty();
         advisor = null;
 
@@ -203,6 +213,11 @@ public class KspBondGoalPlugin extends Plugin
     BondGoalSnapshot getSnapshot()
     {
         return snapshot;
+    }
+
+    boolean isRunning()
+    {
+        return running;
     }
 
     KspBondGoalConfig getConfig()
