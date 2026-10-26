@@ -85,8 +85,17 @@ public class KspBondGoalOverlay extends OverlayPanel
         {
             panelComponent.getChildren().add(
                 LineComponent.builder()
-                    .left("* Open bank once to include banked GP")
+                    .left("* Bank GP not known yet; open bank once")
                     .leftColor(WARN)
+                    .build()
+            );
+        }
+        else if (cachedBank)
+        {
+            panelComponent.getChildren().add(
+                LineComponent.builder()
+                    .left("~ Bank GP saved from last visit; open bank to update")
+                    .leftColor(MUTED)
                     .build()
             );
         }
