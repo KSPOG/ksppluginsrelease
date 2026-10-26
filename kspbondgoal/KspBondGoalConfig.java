@@ -38,7 +38,7 @@ public interface KspBondGoalConfig extends Config
     @ConfigItem(
         keyName = "includeBankCoins",
         name = "Include banked coins",
-        description = "Include the last known bank coin stack. Open the bank once after login to populate the cache.",
+        description = "Include the account-specific last known bank coin stack saved across logouts and restarts. Open the bank only to refresh it.",
         position = 2
     )
     default boolean includeBankCoins()
