@@ -38,9 +38,11 @@ public final class KspProgressiveTreeSelectionTest {
                     || mode == KspChopperMode.CHOP_DROP)) {
                 throw new AssertionError("Wrong progressive flag for " + mode);
             }
-            if (mode.isBank() == mode.isBurn() || mode.isBank() == mode.isDrop()
-                    || mode.isBurn() == mode.isDrop()) {
-                throw new AssertionError("Mode strategy must be exclusive: " + mode);
+            int strategies = (mode.isBank() ? 1 : 0)
+                    + (mode.isBurn() ? 1 : 0)
+                    + (mode.isDrop() ? 1 : 0);
+            if (strategies != 1) {
+                throw new AssertionError("Mode must map to exactly one strategy: " + mode);
             }
         }
 
