@@ -73,7 +73,7 @@ public class KspWillowChopperPlugin extends Plugin {
     private final KspBreakService breaks = new KspBreakService();
 
     /** Intentionally unchanged at the user's request. */
-    public static final String VERSION = "0.1.3";
+    public static final String VERSION = "0.1.4";
 
     private static final String LEGACY_FORESTRY_PACKAGE =
             "net.runelite.client.plugins.microbot.kspwillowchopper.forestry.";
@@ -519,6 +519,11 @@ public class KspWillowChopperPlugin extends Plugin {
         }
     }
     public KspTree getSelectedTree() {
+        // Forestry uses the active progressive resource, not the saved manual selection.
+        if (config != null && config.mode() != null && config.mode().isProgressive()
+                && script != null && script.hasSessionStarted()) {
+            return script.getActiveTree();
+        }
         KspTree tree = config == null ? null : config.tree();
         return tree == null ? KspTree.WILLOW : tree;
     }

@@ -62,7 +62,7 @@ public class KspWillowChopperOverlay extends OverlayPanel {
             addLine("Resource:", tree.getResourceName(), VALUE);
             addLine("Inventory:", String.valueOf(script.getCurrentResourceCount()), VALUE);
 
-            if (config.mode() == KspChopperMode.CHOP_BURN && tree.isCampfireBurnable()) {
+            if (config.mode().isBurn() && tree.isCampfireBurnable()) {
                 String campfire = script.isBurningActive()
                         ? "Burning"
                         : (script.isCampfireNearby() ? "Nearby" : "None");
@@ -88,9 +88,9 @@ public class KspWillowChopperOverlay extends OverlayPanel {
             addLine("Runtime:", formatDuration(elapsedMs), VALUE);
             addLine("Items chopped:", format(chopped) + " (" + formatRate(chopped, hours) + "/h)", VALUE);
 
-            if (config.mode() == KspChopperMode.CHOP_BANK) {
+            if (config.mode().isBank()) {
                 addLine("Items banked:", format(script.getResourcesBanked()), GOOD);
-            } else if (config.mode() == KspChopperMode.CHOP_DROP) {
+            } else if (config.mode().isDrop()) {
                 addLine("Items dropped:", format(script.getResourcesDropped()), GOOD);
             } else if (tree.isCampfireBurnable()) {
                 addLine("Logs burned:", format(script.getResourcesBurned()), GOOD);
@@ -100,7 +100,7 @@ public class KspWillowChopperOverlay extends OverlayPanel {
             addLine("WC Lv:", formatLevel(script.getWoodcuttingLevel(), script.getWoodcuttingLevelsGained()), VALUE);
             addLine("FM Lv:", formatLevel(script.getFiremakingLevel(), script.getFiremakingLevelsGained()), VALUE);
             addLine("WC XP:", format(wcXp) + " (" + formatRate(wcXp, hours) + "/h)", VALUE);
-            if (config.mode() == KspChopperMode.CHOP_BURN || fmXp > 0) {
+            if (config.mode().isBurn() || fmXp > 0) {
                 addLine("FM XP:", format(fmXp) + " (" + formatRate(fmXp, hours) + "/h)", VALUE);
             }
 

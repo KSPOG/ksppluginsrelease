@@ -56,7 +56,7 @@ final class KspWillowChopperPanel extends PluginPanel {
         add(heading("Resource collection"));
         treeSelector.setMaximumRowCount(12);
         add(settingRow("Tree / Resource", treeSelector));
-        modeSelector.setMaximumRowCount(3);
+        modeSelector.setMaximumRowCount(6);
         add(settingRow("Resource handling", modeSelector));
         hint.setForeground(new Color(255, 203, 118));
         add(hint);
@@ -145,7 +145,13 @@ final class KspWillowChopperPanel extends PluginPanel {
     private void updateHint() {
         KspTree tree = (KspTree) treeSelector.getSelectedItem();
         KspChopperMode mode = (KspChopperMode) modeSelector.getSelectedItem();
-        if (tree != null && mode == KspChopperMode.CHOP_BURN && !tree.isCampfireBurnable()) {
+        boolean progressive = mode != null && mode.isProgressive();
+        treeSelector.setEnabled(!progressive);
+        if (progressive) {
+            hint.setText(mode.isBurn()
+                    ? "<html>Auto-select trees by Woodcutting and<br>Firemaking; burns logs before upgrading.</html>"
+                    : "<html>Auto-select trees by Woodcutting level.<br>Manual tree selection remains saved.</html>");
+        } else if (tree != null && mode != null && mode.isBurn() && !tree.isCampfireBurnable()) {
             hint.setText("<html>This resource cannot be burned.<br>Choose Bank or Drop.</html>");
         } else {
             hint.setText("<html>Bank stores resources, Burn uses<br>a campfire, Drop clears inventory.</html>");

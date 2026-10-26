@@ -1,8 +1,8 @@
-# KSP Chopper v0.1.3
+# KSP Chopper v0.1.4
 
 Package: `net.runelite.client.plugins.microbot.kspwillowchopper`
 
-> The version intentionally remains **0.1.3**. The implementation was rewritten from the ground up after the previous runtime proved unreliable.
+> Progressive modes extend the existing deterministic Bank, Burn and Drop state machine; legacy modes remain available.
 
 ## Runtime architecture
 
@@ -29,9 +29,48 @@ handling mode, in-game overlay, and individual Forestry events. Break Handler an
 Local Mule settings remain in the regular plugin configuration.
 
 The **Resource handling** dropdown offers **Chop & Bank**, **Chop & Burn**, and
-**Chop & Drop**. Changes persist via RuneLite configuration and apply while running.
+**Chop & Drop**, **Progressive Chop & Bank**, **Progressive Chop & Burn**, and **Progressive Chop & Drop**. Changes persist via RuneLite configuration and apply while running.
 Previous `bankLogs=false` setups migrate to **Chop & Burn** unless an explicit mode
 has already been saved.
+
+## Progressive modes
+
+Progression is independent for each handling strategy. The saved manual tree choice
+is not modified; when any of the original three modes is selected, manual selection
+and its original resource handling remain unchanged.
+
+- **Progressive Chop & Bank**: select the highest configured progression tier
+  unlocked by real Woodcutting level; bank logs whenever full. Bank leftovers
+  from the previous tier before upgrading.
+- **Progressive Chop & Drop**: select by real Woodcutting level; discard only
+  the current tree's logs when full and clear the previous tier's logs before
+  upgrading.
+- **Progressive Chop & Burn**: select by the lower of real Woodcutting and
+  Firemaking levels so logs are burnable; burn the remaining logs from the
+  previous tier even if the inventory is not full, then upgrade.
+
+All three use the existing Forestry, overlay, resource counters, object-target
+locking, and pause/break behavior. A target location is selected automatically
+if no matching tree is within range; the walker is throttled to avoid repeating
+the same path each script tick. Progressive banking and tinderbox retrieval use
+the regular Microbot bank navigation, unlike the intentionally local-only
+bank logic retained in manual modes. Axe presence is still required and
+automatic axe purchases/upgrades are not part of this change.
+
+| Required level | F2P tree | Members tree |
+| --- | --- | --- |
+| 1 | Tree | Tree |
+| 15 | Oak | Oak |
+| 30 | Willow | Willow |
+| 45 | Willow | Maple |
+| 60 | Yew | Yew |
+| 75 | Yew | Magic |
+| 90 | Yew | Redwood |
+
+F2P stays on mainland trees rather than assuming access to the Corsair Cove
+maple grove. At level 90 on members worlds, redwood routing targets the upper
+scaffolding in the Woodcutting Guild; this location requires the pathfinder
+to negotiate the guild and rope ladders. Other special trees are still manual.
 
 ## Chop & Bank
 

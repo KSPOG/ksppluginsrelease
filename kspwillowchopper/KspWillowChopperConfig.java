@@ -18,6 +18,8 @@ import net.runelite.client.plugins.microbot.kspmule.KspMuleConfig;
                 + "<p><b>Chop &amp; Bank:</b> bank the selected resource when full.</p>"
                 + "<p><b>Chop &amp; Burn:</b> use campfire Firemaking for logs.</p>"
                 + "<p><b>Chop &amp; Drop:</b> drop only the selected resource when full.</p>"
+                + "<p><b>Progressive Chop &amp; Bank / Burn / Drop:</b> automatically change trees as skills advance.</p>"
+                + "<p>Progressive Burn respects both Woodcutting and Firemaking levels.</p>"
                 + "<p>Non-log resources cannot use Firemaking mode.</p>"
                 + "<p>Forestry helpers run inside this plugin and do not register themselves as Microbot global blocking events.</p>"
                 + "</html>")
@@ -64,7 +66,7 @@ public interface KspWillowChopperConfig extends Config, KspMuleConfig, KspBreakC
     @ConfigItem(
             keyName = "mode",
             name = "Resource handling",
-            description = "Chop & Bank, Chop & Burn or Chop & Drop. Configure in the Chopper side panel.",
+            description = "Manual and progressive Bank, Burn, and Drop. Configure in the Chopper side panel.",
             position = 1,
             section = generalSection,
             hidden = true
