@@ -478,12 +478,36 @@ public final class KspF2pClueScript extends Script
 
     private void acquireItem(String name)
     {
+        long now = System.currentTimeMillis();
+
+        // Recheck inventory/equipment before every purchase decision.
+        if (hasNeededItem(name, step.kind == BeginnerClueCatalog.Kind.EMOTE))
+        {
+            diagnostic("Item already available: " + name);
+            return;
+        }
+        if (!name.equals(lastNeededAttemptItem))
+        {
+            lastNeededAttemptItem = name;
+            neededItemAttempts = 0;
+            nextRequiredItemActionAt = 0;
+        }
+
         if (Rs2Inventory.hasItem(name) && step.kind == BeginnerClueCatalog.Kind.EMOTE)
         {
-            status = "Equipping " + name;
+            if (now < nextRequiredItemActionAt) return;
+            if (neededItemAttempts >= 3)
+            {
+                status = "Cannot equip " + name + " after 3 attempts - check equipment";
+                return;
+            }
+            status = "Equipping " + name + " from inventory";
             boolean clicked = Rs2Inventory.interact(name, "Wear");
             if (!clicked) clicked = Rs2Inventory.interact(name, "Wield");
-            if (!clicked) status = "Cannot equip: " + name;
+            neededItemAttempts++;
+            nextRequiredItemActionAt = now + BANK_RETRY_MS;
+            log.info("[KSP Clue] Equip | item={} success={} attempt={}/3",
+                name, clicked, neededItemAttempts);
             delay(ACTION_GAP);
             return;
         }
@@ -492,27 +516,47 @@ public final class KspF2pClueScript extends Script
         {
             if (!Rs2Bank.isOpen())
             {
-                if (System.currentTimeMillis() < nextBankAt) return;
-                status = "Checking bank for " + name;
-                Rs2Bank.walkToBankAndUseBank();
-                nextBankAt = System.currentTimeMillis() + 2_000;
+                if (now < nextBankAt) return;
+                status = "Checking bank for required item: " + name;
+                boolean opened = Rs2Bank.walkToBankAndUseBank();
+                diagnostic("Required item bank open " + name + " success=" + opened);
+                nextBankAt = now + BANK_RETRY_MS;
+                delay(ACTION_GAP);
                 return;
             }
+
             Rs2Bank.setWithdrawAsItem();
-            if (Rs2Bank.hasItem(name))
+            if (Rs2Bank.hasItem(name, true))
             {
-                status = "Withdrawing " + name;
-                Rs2Bank.withdrawOne(name);
+                if (now < nextRequiredItemActionAt) return;
+                if (neededItemAttempts >= 3)
+                {
+                    status = "Could not withdraw " + name + " after 3 attempts - check inventory space";
+                    return; // Item exists in bank: never buy a duplicate.
+                }
+                status = "Withdrawing required item: " + name;
+                boolean clicked = Rs2Bank.withdrawOne(name, true);
+                neededItemAttempts++;
+                nextRequiredItemActionAt = now + BANK_RETRY_MS;
+                log.info("[KSP Clue] Required item bank withdrawal | item={} success={} attempt={}/3",
+                    name, clicked, neededItemAttempts);
                 delay(ACTION_GAP);
                 return;
             }
             bankChecked.add(name);
-            // Fetch coins only if there is something missing and we can buy it.
-            if (config.autoBuy() && Rs2Bank.hasItem(COINS)
+            neededItemAttempts = 0;
+            nextRequiredItemActionAt = 0;
+            log.info("[KSP Clue] Required item absent from inventory/equipment/bank: {} | autoBuy={}",
+                name, config.autoBuy());
+            // Only withdraw coins once per clue step, preventing bank loops.
+            if (config.autoBuy() && !coinsWithdrawnForStep && Rs2Bank.hasItem(COINS)
                     && Rs2Inventory.itemQuantity(COINS) < config.maxSessionSpend())
             {
-                status = "Withdrawing GE spending coins";
-                Rs2Bank.withdrawAll(COINS);
+                coinsWithdrawnForStep = true;
+                status = "Withdrawing coins for required item purchase";
+                boolean clicked = Rs2Bank.withdrawAll(COINS);
+                log.info("[KSP Clue] Coin withdrawal for GE | success={} availableInvBefore={}",
+                    clicked, Rs2Inventory.itemQuantity(COINS));
                 delay(ACTION_GAP);
                 return;
             }
@@ -520,15 +564,17 @@ public final class KspF2pClueScript extends Script
 
         if (!config.autoBuy())
         {
-            status = "Missing " + name + " (auto-buy disabled)";
+            status = "Required item missing (GE disabled): " + name;
             return;
         }
         if (Rs2Bank.isOpen())
         {
+            status = "Bank checked; closing to buy " + name;
             Rs2Bank.closeBank();
             delay(ACTION_GAP);
             return;
         }
+        // No GE offer before proving the item is absent everywhere.
         placeOrCollectBuy(name);
     }
 
@@ -597,6 +643,8 @@ public final class KspF2pClueScript extends Script
             // Conservative cap: committed offers are treated as spent even
             // if a partial fill later returns coins.
             committedGp += offerPrice;
+            log.info("[KSP Clue] GE buy order submitted | item={} id={} unitPrice={} spentCommitted={}",
+                name, id, offerPrice, committedGp);
             activePurchaseId = id;
             offerPlacedAt = System.currentTimeMillis();
             delay(2_000);
@@ -694,7 +742,7 @@ public final class KspF2pClueScript extends Script
         if (Rs2Npc.getNpc(step.npc, true) != null)
             Rs2Npc.interact(Rs2Npc.getNpc(step.npc, true), "Talk-to");
         delay(2_000);
-        nextReadAt = 0;
+        requestClueVerification();
     }
 
     private void handleDig(WorldPoint spot)
@@ -709,9 +757,10 @@ public final class KspF2pClueScript extends Script
             return;
         }
         status = "Digging: " + clueName;
-        Rs2Inventory.interact("Spade", "Dig");
+        boolean clicked = Rs2Inventory.interact("Spade", "Dig");
+        diagnostic("Dig clicked=" + clicked + " tile=" + spot);
         delay(2_000);
-        nextReadAt = 0;
+        if (clicked) requestClueVerification();
     }
 
     private void handleEmote()
@@ -729,8 +778,9 @@ public final class KspF2pClueScript extends Script
         if (Rs2Npc.getNpc("Uri", true) != null)
         {
             status = "Talking to Uri";
-            Rs2Npc.interact(Rs2Npc.getNpc("Uri", true), "Talk-to");
-            nextReadAt = 0;
+            boolean clicked = Rs2Npc.interact(Rs2Npc.getNpc("Uri", true), "Talk-to");
+            diagnostic("Uri interaction clicked=" + clicked);
+            if (clicked) requestClueVerification();
             delay(2_000);
             return;
         }
@@ -752,7 +802,12 @@ public final class KspF2pClueScript extends Script
             status = "Emote widget not visible: " + step.emote;
             return;
         }
-        if (Rs2Widget.clickWidget(target)) delay(2_000);
+        if (Rs2Widget.clickWidget(target))
+        {
+            diagnostic("Emote performed: " + step.emote);
+            requestClueVerification();
+            delay(2_000);
+        }
         else
         {
             status = "Unable to click emote";
@@ -794,19 +849,73 @@ public final class KspF2pClueScript extends Script
             if (player == null) return;
             if (player.getPlane() != reldo.getPlane() || player.distanceTo2D(reldo) > 4)
             {
-                status = "Walking to Reldo for device";
-                if (!Rs2Player.isMoving()) Rs2Walker.walkTo(reldo, 4);
+                status = "Walking to Reldo for strange device";
+                if (!Rs2Player.isMoving())
+                {
+                    boolean queued = Rs2Walker.walkTo(reldo, 4);
+                    diagnostic("Walking to Reldo queued=" + queued + " current=" + player);
+                }
+                delay(1_500);
+                return;
             }
-            else
+
+            long now = System.currentTimeMillis();
+            if (Rs2Dialogue.isInDialogue())
             {
-                status = "Requesting strange device from Reldo";
-                if (Rs2Dialogue.isInDialogue())
-                    Rs2Dialogue.clickOption("Strange device", "Hot and cold", "Yes");
-                else if (Rs2Npc.getNpc("Reldo", true) != null)
-                    Rs2Npc.interact(Rs2Npc.getNpc("Reldo", true), "Talk-to");
+                if (!Rs2Dialogue.hasSelectAnOption())
+                {
+                    status = "Waiting for Reldo dialogue/continue";
+                    delay(1_200);
+                    return;
+                }
+                if (now < nextReldoActionAt) return;
+                if (reldoAttempts >= 5)
+                {
+                    status = "Reldo dialogue option not recognized - manual review";
+                    return;
+                }
+                boolean chosen = Rs2Dialogue.clickOption(
+                    "strange device", "hot and cold", "hot-and-cold", "device", "clue scroll");
+                nextReldoActionAt = now + RELDO_INTERACT_COOLDOWN_MS;
+                reldoAttempts++;
+                log.info("[KSP Clue] Reldo dialogue option | chosen={} attempt={}/5 dialogue={}",
+                    chosen, reldoAttempts, Rs2Dialogue.getDialogueText());
+                status = chosen ? "Selected Reldo strange-device option"
+                                : "Reldo dialogue needs a device option";
+                delay(1_500);
+                return;
             }
-            delay(2_000);
+
+            if (now < nextReldoActionAt) return;
+            if (reldoAttempts >= 5)
+            {
+                status = "Reldo interaction failed after 5 attempts - manual review";
+                return;
+            }
+            net.runelite.client.plugins.microbot.api.npc.models.Rs2NpcModel npc =
+                Rs2Npc.getNpc("Reldo", true);
+            if (npc == null)
+            {
+                status = "Reldo not found nearby";
+                diagnostic("Reldo NPC unavailable at " + player);
+                delay(2_000);
+                return;
+            }
+            boolean clicked = Rs2Npc.interact(npc, "Talk-to");
+            reldoAttempts++;
+            nextReldoActionAt = now + RELDO_INTERACT_COOLDOWN_MS;
+            log.info("[KSP Clue] Reldo interaction | clicked={} attempt={}/5 position={}",
+                clicked, reldoAttempts, player);
+            status = clicked ? "Waiting for Reldo to give strange device"
+                             : "Reldo click failed; retry cooldown";
+            delay(1_500);
             return;
+        }
+        if (reldoAttempts > 0)
+        {
+            log.info("[KSP Clue] Strange device obtained from Reldo, beginning hot/cold step");
+            reldoAttempts = 0;
+            nextReldoActionAt = 0;
         }
         if (hotColdAreaIndex >= BeginnerClueCatalog.HOT_COLD_CENTERS.length)
         {
