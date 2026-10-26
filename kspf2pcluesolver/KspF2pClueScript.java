@@ -892,16 +892,16 @@ public final class KspF2pClueScript extends Script
                 status = "Reldo interaction failed after 5 attempts - manual review";
                 return;
             }
-            net.runelite.client.plugins.microbot.api.npc.models.Rs2NpcModel npc =
-                Rs2Npc.getNpc("Reldo", true);
-            if (npc == null)
+            if (Rs2Npc.getNpc("Reldo", true) == null)
             {
                 status = "Reldo not found nearby";
                 diagnostic("Reldo NPC unavailable at " + player);
                 delay(2_000);
                 return;
             }
-            boolean clicked = Rs2Npc.interact(npc, "Talk-to");
+            // Name-based interaction avoids NPC model binary incompatibility
+            // between Microbot-Hub and the 2.6.43 client.
+            boolean clicked = Rs2Npc.interact("Reldo", "Talk-to");
             reldoAttempts++;
             nextReldoActionAt = now + RELDO_INTERACT_COOLDOWN_MS;
             log.info("[KSP Clue] Reldo interaction | clicked={} attempt={}/5 position={}",
