@@ -112,7 +112,7 @@ public final class KspF2pClueScript extends Script
         deviceFeedback = waitingForDevice = deviceShaking = false;
         progressMessage = false;
         running = true;
-        log.info("[KSP Clue] Starting v0.1.3 | bankClueCheck=true, checkNeededItems=true, debug={}, autoBuy={}, maxUnit={}, maxSpend={}",
+        log.info("[KSP Clue] Starting v0.1.4 | bankClueCheck=true, checkNeededItems=true, debug={}, autoBuy={}, maxUnit={}, maxSpend={}",
             config.debugLogging(), config.autoBuy(), config.maxUnitPrice(), config.maxSessionSpend());
         mainScheduledFuture = scheduledExecutorService.scheduleWithFixedDelay(() ->
         {
