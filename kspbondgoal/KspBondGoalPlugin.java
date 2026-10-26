@@ -25,6 +25,8 @@ import net.runelite.client.ui.overlay.OverlayManager;
     name = PluginDescriptor.Default + "KSP Bond Goal",
     description = "Tracks GP progress toward an Old School bond plus extra coins and advises eligible money-making activities.",
     tags = {"microbot", "ksp", "bond", "money", "f2p", "advisor"},
+    version = KspBondGoalPlugin.VERSION,
+    minClientVersion = "2.1.32",
     enabledByDefault = false
 )
 public class KspBondGoalPlugin extends Plugin
