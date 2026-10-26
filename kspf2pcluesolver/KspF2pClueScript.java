@@ -856,80 +856,212 @@ public final class KspF2pClueScript extends Script
      * shaking. Stop with a visible status on inconclusive responses.
      */
     /**
-     * Handle Reldo's current *visible* option list rather than assuming the
-     * confirmation is labelled "strange device". Never select a negative
-     * option, and never run this handler for another clue or NPC.
+     * One dialogue controller for ALL supported beginner clue interactions:
+     * Reldo, Charlie, anagram/cryptic clue NPCs, and Uri.
+     * The handler never takes over random global NPC conversations.
+     *
+     * True means a clue-related dialogue is active and owns this scheduler
+     * tick, regardless of whether an option was actually clicked.
      */
-    private void handleReldoOptions(long now)
+    private boolean handleClueConversation(long now)
     {
-        java.util.List<Widget> options = Rs2Dialogue.getDialogueOptions();
-        StringBuilder signature = new StringBuilder();
-        int positiveIndex = -1;
-        String positiveLabel = null;
-
-        for (int i = 0; i < options.size(); i++)
+        boolean optionsOpen = Rs2Dialogue.hasSelectAnOption();
+        boolean canContinue = Rs2Dialogue.hasContinue();
+        boolean conversationOpen = optionsOpen || canContinue || Rs2Dialogue.isInDialogue();
+        if (!conversationOpen)
         {
-            Widget option = options.get(i);
-            String label = option == null ? "" : strip(option.getText());
-            if (signature.length() != 0) signature.append(" | ");
-            signature.append(i + 1).append(':').append(label);
+            lastConversationFrame = "";
+            conversationAttempts = 0;
+            nextConversationAt = 0;
+            return false;
+        }
+        if (!isExpectedClueConversation()) return false;
 
-            String normalized = label.toLowerCase(Locale.ROOT)
-                .replaceAll("[^a-z0-9]+", " ").trim();
-            boolean negative = normalized.startsWith("no ")
-                || normalized.equals("no")
-                || normalized.contains("don t")
-                || normalized.contains("do not")
-                || normalized.contains("not interested")
-                || normalized.contains("never mind");
-            boolean affirmative = normalized.equals("yes i do")
-                || normalized.equals("yes")
-                || normalized.equals("yes please")
-                || normalized.equals("i do")
-                || normalized.equals("yes i have")
-                || normalized.contains("strange device")
-                || normalized.contains("hot and cold")
-                || normalized.contains("clue scroll");
-            if (!negative && affirmative && positiveIndex < 0)
+        // Select menus BEFORE Continue, because option menus can be visible
+        // while Continue state is also reported by a dialogue widget.
+        if (optionsOpen)
+        {
+            java.util.List<Widget> options = Rs2Dialogue.getDialogueOptions();
+            String question = strip(Rs2Dialogue.getQuestion());
+            StringBuilder labels = new StringBuilder();
+            int chosenIndex = -1;
+            int bestScore = 0;
+            String chosenText = "";
+            for (int i = 0; i < options.size(); i++)
             {
-                positiveIndex = i;
-                positiveLabel = label;
+                Widget option = options.get(i);
+                String label = option == null ? "" : strip(option.getText());
+                if (labels.length() > 0) labels.append(" | ");
+                labels.append(i + 1).append(':').append(label);
+
+                int score = scoreClueOption(label, question);
+                if (score > bestScore)
+                {
+                    bestScore = score;
+                    chosenIndex = i;
+                    chosenText = label;
+                }
             }
+            String frame = "OPTIONS|" + lastStepKey + "|" + question + "|" + labels;
+            logConversationFrame(frame, "question='" + question + "' options=[" + labels + "]");
+
+            if (chosenIndex == -1)
+            {
+                status = "Clue dialogue: no safe choice (see log)";
+                return true; // Never guess / take unrelated options.
+            }
+            if (now < nextConversationAt) return true;
+            if (conversationAttempts >= 4)
+            {
+                status = "Clue dialogue option not advancing after 4 attempts";
+                return true;
+            }
+
+            boolean selected = Rs2Dialogue.keyPressForDialogueOption(chosenIndex + 1);
+            if (!selected && chosenIndex < options.size())
+                selected = Rs2Widget.clickWidget(options.get(chosenIndex));
+            conversationAttempts++;
+            nextConversationAt = now + 2_500L;
+            log.info("[KSP Clue] Dialogue selection | step={} npc={} option={}/{} label='{}' success={} attempt={}/4",
+                lastStepKey, conversationNpc, chosenIndex + 1, options.size(),
+                chosenText, selected, conversationAttempts);
+            status = selected ? "Clue dialogue: " + chosenText : "Dialogue selection failed: " + chosenText;
+            delay(1_100L);
+            return true;
         }
 
-        String visibleMenu = signature.toString();
-        if (!visibleMenu.equals(lastReldoOptionMenu))
+        if (canContinue)
         {
-            lastReldoOptionMenu = visibleMenu;
-            reldoDialogueAttempts = 0;
-            nextReldoActionAt = 0; // New option set: act immediately.
-            log.info("[KSP Clue] Reldo options visible | question={} options=[{}]",
-                Rs2Dialogue.getQuestion(), visibleMenu);
-        }
-        if (positiveIndex < 0)
-        {
-            status = "Reldo dialogue: no safe positive option recognised";
-            return;
-        }
-        if (now < nextReldoActionAt) return;
-        if (reldoDialogueAttempts >= 5)
-        {
-            status = "Reldo option failed after five attempts; manual review";
-            return;
+            String line = strip(Rs2Dialogue.getDialogueText());
+            String frame = "CONTINUE|" + lastStepKey + "|" + line;
+            logConversationFrame(frame, "continue='" + line + "'");
+            if (now < nextConversationAt) return true;
+            if (conversationAttempts >= 4)
+            {
+                status = "Clue dialogue Continue stalled (see log)";
+                return true;
+            }
+            Rs2Dialogue.clickContinue();
+            conversationAttempts++;
+            nextConversationAt = now + 1_700L;
+            log.info("[KSP Clue] Dialogue continue | step={} npc={} text='{}' attempt={}/4",
+                lastStepKey, conversationNpc, line, conversationAttempts);
+            status = "Advancing clue NPC dialogue";
+            delay(1_100L);
+            return true;
         }
 
-        // Use the exact visible menu position. This API reads the widget's
-        // own key binding and only falls back to the numbered hotkey.
-        boolean pressed = Rs2Dialogue.keyPressForDialogueOption(positiveIndex + 1);
-        if (!pressed)
-            pressed = Rs2Widget.clickWidget(options.get(positiveIndex));
-        reldoDialogueAttempts++;
-        nextReldoActionAt = now + 2_500L;
-        log.info("[KSP Clue] Reldo option selected | option={} text='{}' clicked={} attempt={}/5",
-            positiveIndex + 1, positiveLabel, pressed, reldoDialogueAttempts);
-        status = pressed ? "Confirmed Reldo: " + positiveLabel
-                         : "Unable to select Reldo option: " + positiveLabel;
-        delay(1_100L);
+        String line = strip(Rs2Dialogue.getDialogueText());
+        logConversationFrame("DIALOGUE|" + lastStepKey + "|" + line, "waiting='" + line + "'");
+        status = "Waiting for clue dialogue widget";
+        delay(900L);
+        return true;
+    }
+
+    /** Scores only safe answers appropriate to the current clue step. */
+    private int scoreClueOption(String visibleText, String visibleQuestion)
+    {
+        String label = normalizeDialogue(visibleText);
+        String question = normalizeDialogue(visibleQuestion);
+        if (label.isEmpty()) return 0;
+
+        // Never accept no/cancel/exit, unrelated quests, purchases or travel.
+        if (label.startsWith("no ") || label.equals("no")
+            || label.contains("don t") || label.contains("do not")
+            || label.contains("not interested") || label.contains("never mind")
+            || label.contains("not now") || label.contains("cancel")
+            || label.contains("leave") || label.contains("buy ")
+            || label.contains("sell ") || label.contains("pay ")
+            || label.contains("trade ") || label.contains("teleport ")
+            || label.contains("travel ") || label.contains("quest"))
+            return 0;
+
+        if (step.kind == BeginnerClueCatalog.Kind.HOT_COLD)
+        {
+            if (label.equals("yes i do") || label.equals("yes i know")
+                || label.equals("yes") || label.equals("i do"))
+                return 100;
+            if (label.contains("strange device") || label.contains("hot and cold")
+                || label.contains("clue scroll")) return 95;
+            return 0;
+        }
+
+        if (step.kind == BeginnerClueCatalog.Kind.CHARLIE
+            || (step.kind == BeginnerClueCatalog.Kind.NPC
+                && "Charlie the Tramp".equals(step.npc)))
+        {
+            if (label.contains("give") || label.contains("here you go")
+                || label.contains("i have") || label.contains("glad to help"))
+                return 100;
+        }
+
+        if (label.contains("clue scroll") || label.contains("treasure trail")
+            || label.contains("another clue") || label.contains("reward")
+            || label.contains("casket"))
+            return 95;
+
+        // Generic affirmative answers are allowed only inside the currently
+        // handled clue-NPC conversation, not across arbitrary RuneLite chats.
+        boolean clueQuestion = question.contains("clue") || question.contains("help")
+            || question.contains("item") || question.contains("have ")
+            || question.contains("ready") || question.contains("business")
+            || question.contains("find") || question.contains("treasure")
+            || question.contains("option") || question.isEmpty();
+
+        if (question.contains("buy") || question.contains("sell") || question.contains("pay")
+            || question.contains("travel") || question.contains("teleport")
+            || question.contains("quest") || question.contains("pass"))
+            return 0;
+
+        if (clueQuestion)
+        {
+            if (label.equals("yes") || label.equals("yes please")
+                || label.equals("yes i do") || label.equals("sure")
+                || label.equals("of course") || label.equals("okay")
+                || label.equals("ok") || label.equals("continue")
+                || label.startsWith("sure i ll")
+                || label.startsWith("i can help"))
+                return 70;
+        }
+        return 0;
+    }
+
+    private static String normalizeDialogue(String raw)
+    {
+        return strip(raw).toLowerCase(Locale.ROOT)
+            .replaceAll("[^a-z0-9]+", " ").trim();
+    }
+
+    private boolean isExpectedClueConversation()
+    {
+        if (step == null) return false;
+        WorldPoint where = Rs2Player.getWorldLocation();
+        if (where == null) return false;
+        if (step.kind == BeginnerClueCatalog.Kind.DIG) return false;
+        if (step.kind == BeginnerClueCatalog.Kind.HOT_COLD)
+        {
+            if (Rs2Inventory.hasItem("Strange device")) return "Reldo".equals(conversationNpc);
+            return where.getPlane() == step.destination.getPlane()
+                && where.distanceTo2D(step.destination) <= step.radius + 3;
+        }
+        if (step.kind == BeginnerClueCatalog.Kind.EMOTE)
+            return "Uri".equals(conversationNpc)
+                || Rs2Npc.getNpc("Uri", true) != null;
+        return where.getPlane() == step.destination.getPlane()
+            && (where.distanceTo2D(step.destination) <= step.radius + 8
+                || step.npc != null && step.npc.equals(conversationNpc));
+    }
+
+    private void logConversationFrame(String frame, String detail)
+    {
+        if (!frame.equals(lastConversationFrame))
+        {
+            lastConversationFrame = frame;
+            conversationAttempts = 0;
+            nextConversationAt = 0;
+            log.info("[KSP Clue] Dialogue observed | step={} npc={} {}",
+                lastStepKey, conversationNpc, detail);
+        }
     }
 
     private void handleHotCold()
