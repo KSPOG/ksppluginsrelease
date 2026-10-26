@@ -64,11 +64,17 @@ public class KspBondGoalOverlay extends OverlayPanel
 
         String coinText = formatGp(state.getCurrentCoins());
         boolean bankWarning = plugin.getConfig().includeBankCoins() && !state.isBankKnown();
+        boolean cachedBank = plugin.isBankBalanceCached();
         if (bankWarning)
         {
             coinText += " *";
         }
-        addLine("Current coins", coinText, bankWarning ? WARN : Color.WHITE);
+        else if (cachedBank)
+        {
+            coinText += " ~";
+        }
+        addLine("Current coins", coinText,
+            bankWarning || cachedBank ? WARN : Color.WHITE);
 
         Color remainingColor = state.getRemainingCoins() == 0 ? GOOD : WARN;
         addLine("Remaining", formatGp(state.getRemainingCoins()), remainingColor);
