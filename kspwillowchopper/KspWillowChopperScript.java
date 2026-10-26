@@ -158,7 +158,7 @@ public class KspWillowChopperScript extends KspBreakAwareScript {
         activeTree = safeTree(config.tree());
         activeMode = config.mode() == null ? KspChopperMode.CHOP_BANK : config.mode();
         if (activeMode.isProgressive()) {
-            activeTree = progressiveTree();
+            activeTree = Microbot.isLoggedIn() ? progressiveTree() : KspTree.TREE;
         }
         lastProgressiveWalkAttemptMillis = 0L;
         progressiveWalkIssued = false;
@@ -328,6 +328,12 @@ public class KspWillowChopperScript extends KspBreakAwareScript {
                 resourcesDropped += Math.max(0, before - after);
                 lastResourceCount = after;
             }
+        } else if (!activeTree.isCampfireBurnable()
+                || Rs2Player.getRealSkillLevel(Skill.FIREMAKING) < activeTree.getWoodcuttingLevel()) {
+            // Switching from a manual tree can leave logs that this account
+            // cannot burn. Preserve them in the bank instead of stalling forever.
+            status = "Banking unburnable previous-tier resources";
+            bankResource();
         } else {
             burnBatchActive = true; // Burn leftovers even when inventory is not full.
             tickBurnMode();
@@ -1396,7 +1402,14 @@ public class KspWillowChopperScript extends KspBreakAwareScript {
 
     private void switchTree(KspTree selected) {
         clearProgressiveWalk();
+        KspTree previousTree = activeTree;
         activeTree = selected;
+        if (activeMode.isProgressive()) {
+            log.info("[KSP Chopper] Progressive tree change | mode={} from={} to={} wc={} fm={}",
+                    activeMode, previousTree, selected,
+                    Rs2Player.getRealSkillLevel(Skill.WOODCUTTING),
+                    Rs2Player.getRealSkillLevel(Skill.FIREMAKING));
+        }
         finishBurnBatch();
         campfireNearby = false;
         lastChangedTreeLocation = null;
