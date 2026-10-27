@@ -14,6 +14,7 @@ import net.runelite.client.plugins.microbot.kspaccountbuilder.KspBankMode;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.KspTaskDebug;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.KspWalkerGuard;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.ksputil.KspBankWidgetHelper;
+import net.runelite.client.plugins.microbot.kspaccountbuilder.ksputil.KspLiveScene;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.questing.cooksassistant.reqs.Items;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.selling.gearea.GEArea;
 import net.runelite.client.plugins.microbot.util.bank.Rs2Bank;
@@ -678,10 +679,9 @@ public class CooksScript extends KspManagedScript {
     }
 
     private Rs2NpcModel findNearestCook() {
-        return Microbot.getRs2NpcCache().query()
-                .fromWorldView()
-                .withName("Cook")
-                .nearestOnClientThread();
+        return KspLiveScene.nearestNpcModel(
+                Rs2Player.getWorldLocation(), 30,
+                npc -> "Cook".equalsIgnoreCase(npc.getName()));
     }
 
     private boolean hasRequirementsInInventory() {
