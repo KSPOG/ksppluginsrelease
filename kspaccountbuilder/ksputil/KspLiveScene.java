@@ -713,6 +713,114 @@ public final class KspLiveScene
         }).orElse(null);
     }
 
+    /**
+     * Portal-only direct scene menu dispatch. Do not delegate to
+     * Rs2TileObjectModel.click(): its cant-reach recovery and >51-tile branch
+     * can call global WebWalker against a template instance WorldPoint.
+     */
+    public static boolean clickInstancePortal(TileObject object, String action)
+    {
+        if (object == null || action == null || distanceFromPlayerInScene(object.getLocalLocation()) < 0)
+            return false;
+        final net.runelite.api.MenuAction[] actions = {
+                net.runelite.api.MenuAction.GAME_OBJECT_FIRST_OPTION,
+                net.runelite.api.MenuAction.GAME_OBJECT_SECOND_OPTION,
+                net.runelite.api.MenuAction.GAME_OBJECT_THIRD_OPTION,
+                net.runelite.api.MenuAction.GAME_OBJECT_FOURTH_OPTION,
+                net.runelite.api.MenuAction.GAME_OBJECT_FIFTH_OPTION
+        };
+        net.runelite.client.plugins.microbot.util.menu.NewMenuEntry entry =
+                Microbot.getClientThread().runOnClientThreadOptional(() ->
+                {
+                    ObjectComposition definition = Microbot.getClient().getObjectDefinition(object.getId());
+                    if (definition == null) return null;
+                    ObjectComposition visible = definition.getImpostorIds() == null
+                            ? definition : definition.getImpostor();
+                    if (visible == null || visible.getActions() == null) return null;
+                    String[] options = visible.getActions();
+                    int index = -1;
+                    for (int i = 0; i < options.length && i < actions.length; i++)
+                    {
+                        if (options[i] != null && action.equalsIgnoreCase(
+                                net.runelite.client.plugins.microbot.util.misc.Rs2UiHelper.stripColTags(options[i])))
+                        {
+                            index = i;
+                            break;
+                        }
+                    }
+                    if (index < 0) return null;
+                    net.runelite.api.coords.LocalPoint local = object.getLocalLocation();
+                    if (local == null || object.getWorldView() == null) return null;
+                    int x = local.getSceneX();
+                    int y = local.getSceneY();
+                    if (object instanceof GameObject)
+                    {
+                        GameObject game = (GameObject) object;
+                        if (game.sizeX() > 1) x -= game.sizeX() / 2;
+                        if (game.sizeY() > 1) y -= game.sizeY() / 2;
+                    }
+                    return new net.runelite.client.plugins.microbot.util.menu.NewMenuEntry()
+                            .param0(x).param1(y).opcode(actions[index].getId())
+                            .identifier(object.getId()).itemId(-1)
+                            .option(options[index]).target(visible.getName())
+                            .setWorldViewId(object.getWorldView().getId())
+                            .gameObject(object);
+                }).orElse(null);
+        if (entry == null) return false;
+        if (!net.runelite.client.plugins.microbot.util.camera.Rs2Camera.isTileOnScreen(object.getLocalLocation()))
+            net.runelite.client.plugins.microbot.util.camera.Rs2Camera.turnTo(object);
+        Microbot.doInvoke(entry,
+                net.runelite.client.plugins.microbot.util.misc.Rs2UiHelper.getObjectClickbox(object));
+        return true;
+    }
+
+    /** Bypass NPC cant-reach recovery while inside the instanced mine. */
+    public static boolean clickInstancePortal(
+            net.runelite.client.plugins.microbot.api.npc.models.Rs2NpcModel npcModel, String action)
+    {
+        if (npcModel == null || action == null || npcModel.getNpc() == null
+                || distanceFromPlayerInScene(npcModel.getLocalLocation()) < 0) return false;
+        net.runelite.api.NPC npc = npcModel.getNpc();
+        final net.runelite.api.MenuAction[] actions = {
+                net.runelite.api.MenuAction.NPC_FIRST_OPTION,
+                net.runelite.api.MenuAction.NPC_SECOND_OPTION,
+                net.runelite.api.MenuAction.NPC_THIRD_OPTION,
+                net.runelite.api.MenuAction.NPC_FOURTH_OPTION,
+                net.runelite.api.MenuAction.NPC_FIFTH_OPTION
+        };
+        net.runelite.client.plugins.microbot.util.menu.NewMenuEntry entry =
+                Microbot.getClientThread().runOnClientThreadOptional(() ->
+                {
+                    net.runelite.api.NPCComposition composition = npc.getTransformedComposition();
+                    if (composition == null) composition = npc.getComposition();
+                    if (composition == null || composition.getActions() == null
+                            || npc.getWorldView() == null) return null;
+                    String[] options = composition.getActions();
+                    int index = -1;
+                    for (int i = 0; i < options.length && i < actions.length; i++)
+                    {
+                        if (options[i] != null && action.equalsIgnoreCase(
+                                net.runelite.client.plugins.microbot.util.misc.Rs2UiHelper.stripColTags(options[i])))
+                        {
+                            index = i;
+                            break;
+                        }
+                    }
+                    if (index < 0) return null;
+                    return new net.runelite.client.plugins.microbot.util.menu.NewMenuEntry()
+                            .param0(0).param1(0).opcode(actions[index].getId())
+                            .identifier(npc.getIndex()).itemId(-1)
+                            .option(options[index]).target(npc.getName())
+                            .setWorldViewId(npc.getWorldView().getId())
+                            .actor(npc);
+                }).orElse(null);
+        if (entry == null) return false;
+        if (!net.runelite.client.plugins.microbot.util.camera.Rs2Camera.isTileOnScreen(npc.getLocalLocation()))
+            net.runelite.client.plugins.microbot.util.camera.Rs2Camera.turnTo(npc);
+        Microbot.doInvoke(entry, net.runelite.client.plugins.microbot.util.misc.Rs2UiHelper.getActorClickbox(npc));
+        return true;
+    }
+
     public static boolean interact(String objectName, WorldPoint origin, int maxDistance, String action)
     {
         TileObject object = nearestTileObject(objectName, origin, maxDistance);
