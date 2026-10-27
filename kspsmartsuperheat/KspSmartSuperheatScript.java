@@ -1,11 +1,11 @@
 package net.runelite.client.plugins.microbot.kspsmartsuperheat;
 
 
-import net.runelite.client.plugins.microbot.kspbank.KspVerifiedBank;
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.GrandExchangeOffer;
 import net.runelite.api.GrandExchangeOfferState;
 import net.runelite.api.Skill;
+import net.runelite.api.coords.WorldPoint;
 import net.runelite.api.widgets.Widget;
 import net.runelite.api.gameval.InterfaceID;
 import net.runelite.api.gameval.ItemID;
@@ -21,6 +21,7 @@ import net.runelite.client.plugins.microbot.util.inventory.Rs2Inventory;
 import net.runelite.client.plugins.microbot.util.magic.Rs2Magic;
 import net.runelite.client.plugins.microbot.util.keyboard.Rs2Keyboard;
 import net.runelite.client.plugins.microbot.util.player.Rs2Player;
+import net.runelite.client.plugins.microbot.util.walker.Rs2Walker;
 import net.runelite.client.plugins.microbot.util.widget.Rs2Widget;
 
 import java.util.ArrayDeque;
@@ -96,6 +97,20 @@ public class KspSmartSuperheatScript extends KspBreakAwareScript
 
     private void tick()
     {
+        // Smart Superheat is a GE-stationary workflow. In particular, never
+        // let a generic bank helper route to Varrock West/East bank booths.
+        WorldPoint player = Rs2Player.getWorldLocation();
+        if (!KspSmartSuperheatGeAccess.isInGrandExchange(player))
+        {
+            status = "Move into Grand Exchange to run Smart Superheat (no walking)";
+            return;
+        }
+        WorldPoint walkerTarget = Rs2Walker.getCurrentTarget();
+        if (walkerTarget != null && !KspSmartSuperheatGeAccess.isInGrandExchange(walkerTarget))
+        {
+            Rs2Walker.clearWalkingRoute("ksp_smart_superheat_ge_only");
+            log.warn("Blocked Smart Superheat navigation outside Grand Exchange: target={}", walkerTarget);
+        }
         switch (state)
         {
             case STARTING: start(); break;
@@ -680,8 +695,12 @@ public class KspSmartSuperheatScript extends KspBreakAwareScript
     {
         if (bankOpen()) return true;
         if (Rs2GrandExchange.isOpen()) { Rs2GrandExchange.closeExchange(); return false; }
-        status = "Opening bank";
-        if (!KspVerifiedBank.openBank()) return false;
+        status = "Opening GE banker only";
+        if (!KspSmartSuperheatGeAccess.openLocalBank())
+        {
+            status = "Waiting for GE banker in range - no walking";
+            return false;
+        }
         return sleepUntil(this::bankOpen, 5000);
     }
 
@@ -830,8 +849,13 @@ public class KspSmartSuperheatScript extends KspBreakAwareScript
     {
         if (!Rs2GrandExchange.isOpen())
         {
-            status = "Opening Grand Exchange";
-            if (!Rs2GrandExchange.openExchange() || !sleepUntil(Rs2GrandExchange::isOpen, 5000)) return false;
+            status = "Opening GE clerk only";
+            if (!KspSmartSuperheatGeAccess.openLocalExchange())
+            {
+                status = "Waiting for GE clerk in range - no walking";
+                return false;
+            }
+            if (!sleepUntil(Rs2GrandExchange::isOpen, 5000)) return false;
         }
         if (!geSubScreen()) return true;
         status = "Returning to GE overview";
