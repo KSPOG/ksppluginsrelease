@@ -3,6 +3,8 @@ package net.runelite.client.plugins.microbot.kspaccountbuilder.ksputil.randomeve
 import net.runelite.client.plugins.microbot.BlockingEvent;
 import net.runelite.client.plugins.microbot.BlockingEventPriority;
 import net.runelite.client.plugins.microbot.Microbot;
+import net.runelite.client.plugins.microbot.kspaccountbuilder.ksputil.KspLiveScene;
+import net.runelite.client.plugins.microbot.util.player.Rs2Player;
 import net.runelite.client.plugins.microbot.api.npc.models.Rs2NpcModel;
 import net.runelite.client.plugins.microbot.util.dialogues.Rs2Dialogue;
 import net.runelite.client.plugins.microbot.util.npc.Rs2Npc;
@@ -20,10 +22,8 @@ public class KspRandomEventSolver implements BlockingEvent
         var oldModel = Rs2Npc.getRandomEventNPC();
         if (oldModel == null) return null;
 
-        return Microbot.getRs2NpcCache().query()
-                .fromWorldView()
-                .where(npc -> npc.getNpc().equals(oldModel.getRuneliteNpc()))
-                .nearest();
+        return KspLiveScene.nearestNpcModel(Rs2Player.getWorldLocation(), 35,
+                npc -> npc.getNpc().equals(oldModel.getRuneliteNpc()));
     }
 
     @Override
