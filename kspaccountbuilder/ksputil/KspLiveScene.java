@@ -288,9 +288,151 @@ public final class KspLiveScene
         }).orElse(null);
     }
 
+    /**
+     * Look up currently rendered tile objects by their object definition name,
+     * including wall, decorative and ground objects. The older name overload
+     * only examined GameObject[] and could miss bank/deposit-box scene layers.
+     */
+    public static TileObject nearestTileObject(String objectName, WorldPoint origin, int maxDistance)
+    {
+        if (objectName == null || objectName.isEmpty()) return null;
+        return Microbot.getClientThread().runOnClientThreadOptional(() ->
+        {
+            if (Microbot.getClient() == null) return null;
+            net.runelite.api.Player player = Microbot.getClient().getLocalPlayer();
+            net.runelite.api.WorldView view = player == null ? null : player.getWorldView();
+            net.runelite.api.Scene scene = view == null ? Microbot.getClient().getScene() : view.getScene();
+            if (scene == null || scene.getTiles() == null) return null;
+            net.runelite.api.coords.LocalPoint local = player == null ? null : player.getLocalLocation();
+            TileObject nearest = null;
+            int nearestDistance = Integer.MAX_VALUE;
+            for (Tile[][] plane : scene.getTiles())
+            {
+                if (plane == null) continue;
+                for (Tile[] row : plane)
+                {
+                    if (row == null) continue;
+                    for (Tile tile : row)
+                    {
+                        if (tile == null) continue;
+                        TileObject[] fixed = {tile.getWallObject(), tile.getDecorativeObject(), tile.getGroundObject()};
+                        for (TileObject object : fixed)
+                        {
+                            if (object == null || !hasObjectName(object.getId(), objectName)) continue;
+                            int distance = distanceToPlayer(object, origin, local, view);
+                            if (distance < 0 || distance > maxDistance || distance >= nearestDistance) continue;
+                            nearest = object;
+                            nearestDistance = distance;
+                        }
+                        GameObject[] objects = tile.getGameObjects();
+                        if (objects == null) continue;
+                        for (GameObject object : objects)
+                        {
+                            if (object == null || !hasObjectName(object.getId(), objectName)) continue;
+                            int distance = distanceToPlayer(object, origin, local, view);
+                            if (distance < 0 || distance > maxDistance || distance >= nearestDistance) continue;
+                            nearest = object;
+                            nearestDistance = distance;
+                        }
+                    }
+                }
+            }
+            return nearest;
+        }).orElse(null);
+    }
+
+    private static boolean hasObjectName(int id, String expected)
+    {
+        ObjectComposition definition = Microbot.getClient().getObjectDefinition(id);
+        if (definition == null) return false;
+        ObjectComposition active = definition.getImpostorIds() == null ? definition : definition.getImpostor();
+        return (active != null && expected.equalsIgnoreCase(active.getName()))
+                || expected.equalsIgnoreCase(definition.getName());
+    }
+
+    /**
+     * Live-scene rock lookup for Account Builder Mining. Match known rock IDs
+     * first; unknown variants may match their visible ore name. Only return
+     * objects inside the requested mining area with a real Mine action.
+     */
+    public static TileObject nearestMineableRock(int[] allowedIds, String oreName,
+                                                  net.runelite.api.coords.WorldArea area,
+                                                  WorldPoint origin, int maxDistance)
+    {
+        return Microbot.getClientThread().runOnClientThreadOptional(() ->
+        {
+            if (Microbot.getClient() == null) return null;
+            net.runelite.api.Player player = Microbot.getClient().getLocalPlayer();
+            net.runelite.api.WorldView view = player == null ? null : player.getWorldView();
+            net.runelite.api.Scene scene = view == null ? Microbot.getClient().getScene() : view.getScene();
+            if (scene == null || scene.getTiles() == null) return null;
+            net.runelite.api.coords.LocalPoint local = player == null ? null : player.getLocalLocation();
+            TileObject nearest = null;
+            int nearestDistance = Integer.MAX_VALUE;
+            for (Tile[][] plane : scene.getTiles())
+            {
+                if (plane == null) continue;
+                for (Tile[] row : plane)
+                {
+                    if (row == null) continue;
+                    for (Tile tile : row)
+                    {
+                        if (tile == null) continue;
+                        TileObject[] fixed = {tile.getWallObject(), tile.getDecorativeObject(), tile.getGroundObject()};
+                        for (TileObject object : fixed)
+                        {
+                            if (!matchesMineableRock(object, allowedIds, oreName, area)) continue;
+                            int distance = distanceToPlayer(object, origin, local, view);
+                            if (distance < 0 || distance > maxDistance || distance >= nearestDistance) continue;
+                            nearest = object;
+                            nearestDistance = distance;
+                        }
+                        GameObject[] objects = tile.getGameObjects();
+                        if (objects == null) continue;
+                        for (GameObject object : objects)
+                        {
+                            if (!matchesMineableRock(object, allowedIds, oreName, area)) continue;
+                            int distance = distanceToPlayer(object, origin, local, view);
+                            if (distance < 0 || distance > maxDistance || distance >= nearestDistance) continue;
+                            nearest = object;
+                            nearestDistance = distance;
+                        }
+                    }
+                }
+            }
+            return nearest;
+        }).orElse(null);
+    }
+
+    private static boolean matchesMineableRock(TileObject object, int[] ids, String oreName,
+                                                 net.runelite.api.coords.WorldArea area)
+    {
+        if (object == null || object.getWorldLocation() == null
+                || area != null && !area.contains(object.getWorldLocation())) return false;
+        ObjectComposition definition = Microbot.getClient().getObjectDefinition(object.getId());
+        if (definition == null) return false;
+        ObjectComposition active = definition.getImpostorIds() == null ? definition : definition.getImpostor();
+        if (active == null) active = definition;
+        String name = active.getName();
+        boolean matching = false;
+        if (ids != null) for (int id : ids) if (id == object.getId() || id == active.getId()) { matching = true; break; }
+        if (!matching && oreName != null && name != null)
+        {
+            String lower = name.toLowerCase(java.util.Locale.ENGLISH);
+            matching = lower.contains(oreName.toLowerCase(java.util.Locale.ENGLISH)) && lower.contains("rock");
+        }
+        if (!matching) return false;
+        String[] actions = active.getActions();
+        if (actions == null) return false;
+        for (String action : actions)
+            if (action != null && "Mine".equalsIgnoreCase(net.runelite.client.plugins.microbot.util.misc.Rs2UiHelper.stripColTags(action)))
+                return true;
+        return false;
+    }
+
     public static boolean interact(String objectName, WorldPoint origin, int maxDistance, String action)
     {
-        TileObject object = nearestGameObject(objectName, origin, maxDistance);
+        TileObject object = nearestTileObject(objectName, origin, maxDistance);
         if (object == null) return false;
         try { return Rs2GameObject.interact(object, action); }
         catch (RuntimeException exception) { return false; }
@@ -299,7 +441,7 @@ public final class KspLiveScene
     /** Safe fallback for cache misses; return false and let the task retry. */
     public static boolean interact(int objectId, WorldPoint origin, int maxDistance, String action)
     {
-        TileObject object = nearestGameObject(objectId, origin, maxDistance);
+        TileObject object = nearestTileObject(new int[]{objectId}, origin, maxDistance);
         if (object == null) return false;
         try { return Rs2GameObject.interact(object, action); }
         catch (RuntimeException exception) { return false; }
