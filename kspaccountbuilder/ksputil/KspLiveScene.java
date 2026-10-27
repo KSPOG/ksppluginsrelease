@@ -522,6 +522,34 @@ public final class KspLiveScene
         }).orElse(null);
     }
 
+    /** List nearby NPCs from the actual world view for multi-NPC Forestry events. */
+    public static java.util.List<net.runelite.client.plugins.microbot.api.npc.models.Rs2NpcModel> nearbyNpcModels(
+            WorldPoint origin, int maxDistance,
+            java.util.function.Predicate<net.runelite.client.plugins.microbot.api.npc.models.Rs2NpcModel> matches)
+    {
+        return Microbot.getClientThread().runOnClientThreadOptional(() ->
+        {
+            java.util.List<net.runelite.client.plugins.microbot.api.npc.models.Rs2NpcModel> result =
+                    new java.util.ArrayList<>();
+            if (Microbot.getClient() == null) return result;
+            net.runelite.api.Player player = Microbot.getClient().getLocalPlayer();
+            net.runelite.api.WorldView view = player == null ? null : player.getWorldView();
+            if (view == null || view.npcs() == null) return result;
+            for (net.runelite.api.NPC npc : view.npcs())
+            {
+                if (npc == null || npc.getWorldLocation() == null) continue;
+                if (origin != null && npc.getWorldLocation().getPlane() != origin.getPlane()) continue;
+                if (origin != null && origin.distanceTo(npc.getWorldLocation()) > maxDistance) continue;
+                net.runelite.client.plugins.microbot.api.npc.models.Rs2NpcModel model =
+                        new net.runelite.client.plugins.microbot.api.npc.models.Rs2NpcModel(npc);
+                if (matches == null || matches.test(model)) result.add(model);
+            }
+            if (origin != null) result.sort(java.util.Comparator.comparingInt(
+                    npc -> origin.distanceTo(npc.getWorldLocation())));
+            return result;
+        }).orElseGet(java.util.Collections::emptyList);
+    }
+
     public static boolean interact(String objectName, WorldPoint origin, int maxDistance, String action)
     {
         TileObject object = nearestTileObject(objectName, origin, maxDistance);
