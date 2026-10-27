@@ -11,6 +11,7 @@ import net.runelite.api.coords.WorldPoint;
 import net.runelite.client.plugins.microbot.Microbot;
 import net.runelite.client.plugins.microbot.Script;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.KspWalkerGuard;
+import net.runelite.client.plugins.microbot.kspaccountbuilder.ksputil.KspLiveScene;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.ksputil.KspBankWidgetHelper;
 import net.runelite.client.plugins.microbot.util.bank.Rs2Bank;
 import net.runelite.client.plugins.microbot.util.dialogues.Rs2Dialogue;
@@ -314,7 +315,8 @@ public abstract class SimpleQuestScript extends KspManagedScript
     protected void talkTo(String name, WorldPoint destination)
     {
         String key = questName + ":" + name;
-        var npc = Microbot.getRs2NpcCache().query().fromWorldView().withName(name).nearestOnClientThread();
+        var npc = KspLiveScene.nearestNpcModel(Rs2Player.getWorldLocation(), 30,
+                candidate -> name.equalsIgnoreCase(candidate.getName()));
         WorldPoint player = Rs2Player.getWorldLocation();
 
         // If the NPC is already in the nearby reachable scene, do not keep
@@ -350,7 +352,8 @@ public abstract class SimpleQuestScript extends KspManagedScript
         // handles the final local approach.
         if (!walkTo(name, destination, 6)) return;
 
-        npc = Microbot.getRs2NpcCache().query().fromWorldView().withName(name).nearestOnClientThread();
+        npc = KspLiveScene.nearestNpcModel(Rs2Player.getWorldLocation(), 30,
+                candidate -> name.equalsIgnoreCase(candidate.getName()));
         if (npc == null || npc.getWorldLocation() == null)
         {
             setStatus("Searching for " + name);
@@ -384,7 +387,9 @@ public abstract class SimpleQuestScript extends KspManagedScript
 
         state = QuestTaskState.INTERACTING;
         setStatus(action + " quest object");
-        if (Rs2GameObject.interact(objectId, action)) actionSent();
+        WorldPoint here = Rs2Player.getWorldLocation();
+        if ((here != null && KspLiveScene.interact(objectId, here, 15, action))
+                || Rs2GameObject.interact(objectId, action)) actionSent();
     }
 
     protected void actionSent() { nextActionAt = System.currentTimeMillis() + 1_200L; }
