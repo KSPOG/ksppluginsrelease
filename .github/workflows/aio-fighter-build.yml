@@ -102,6 +102,17 @@ jobs:
           java -cp "$TEST_ROOT/bin" net.runelite.client.plugins.microbot.kspaiofighter.KspAioFighterHighAlchGateTest
           java -cp "$TEST_ROOT/bin" net.runelite.client.plugins.microbot.kspaiofighter.KspAioFighterActionThrottleTest
 
+      - name: Run AIO Fighter potion selection regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          TEST_ROOT=/tmp/ksp-aio-potitions
+          mkdir -p "$TEST_ROOT/src" "$TEST_ROOT/bin"
+          cp release/kspaiofighter/KspAioFighterPotionPolicy.java "$TEST_ROOT/src/"
+          cp release/.github/tests/aiofighter/KspAioFighterPotionPolicyTest.java.txt "$TEST_ROOT/src/KspAioFighterPotionPolicyTest.java"
+          javac --release 11 -d "$TEST_ROOT/bin" "$TEST_ROOT/src/"*.java
+          java -cp "$TEST_ROOT/bin" net.runelite.client.plugins.microbot.kspaiofighter.KspAioFighterPotionPolicyTest
+
       - name: Build KSP AIO Fighter
         working-directory: hub
         run: ./gradlew clean build -PpluginList=KspAioFighterPlugin --stacktrace --no-daemon
