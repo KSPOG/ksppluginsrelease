@@ -83,6 +83,8 @@ public class KspAioFighterScript extends KspBreakAwareScript
     private static final long GEAR_CHECK_INTERVAL_MS = 700L;
     private static final long COMBAT_STYLE_INTERVAL_MS = 800L;
     private static final long POTION_CHECK_INTERVAL_MS = 2_500L;
+    private static final long POTION_DISPATCH_GUARD_MS = 750L;
+    private static final int MIN_HP_TO_DRINK_DIVINE = 21;
     private static final long NPC_SEARCH_INTERVAL_MS = 350L;
     private static final long NPC_ATTACK_ACK_MS = 1_100L;
     private static final long EMPTY_LOOT_SCAN_INTERVAL_MS = 180L;
@@ -107,6 +109,7 @@ public class KspAioFighterScript extends KspBreakAwareScript
 	private WorldPoint attackAreaReturnTarget;
 	private final Set<WorldPoint> rejectedAttackAreaTiles = new HashSet<>();
 	private long lastGearBankAttemptMs = 0L;
+    private long lastPotionDispatchAtMs = 0L;
 	private Skill lastGearBankSkill;
 	private final Set<String> unavailableGearThisRun = new HashSet<>();
 	private final AtomicBoolean missingGearDialogShown = new AtomicBoolean(false);
@@ -181,6 +184,7 @@ public class KspAioFighterScript extends KspBreakAwareScript
 		strongholdDialogue.reset();
         highAlchGate.reset();
         actionThrottle.reset();
+        lastPotionDispatchAtMs = 0L;
         attackPendingUntilMs = 0L;
         lastEmptyAlchScanMs = 0L;
         lastCombatAlchFailureMs = 0L;
@@ -243,34 +247,37 @@ public class KspAioFighterScript extends KspBreakAwareScript
 
 			refreshPaintState();
 
-            // Safety first: eat if required, then immediately alch any
-            // profitable inventory item before banking, ground loot, bone
-            // burying, area movement, gear changes or NPC interactions.
+            // Safety first: heal before any other action. Potion boosts then
+            // take priority over High Alch, loot, banking, and target movement.
             if (healIfNeeded())
             {
                 return;
             }
-            if (highAlch())
+            // Heal first. Potion use must not be starved by alching, loot,
+            // banking, NPC combat or movement on the 100ms fighter loop.
+            Optional<Skill> selectedSkill = selectTrainingSkill();
+            if (selectedSkill.isPresent())
             {
+                Skill combatSkill = selectedSkill.get();
+                if (currentTrainingSkill != combatSkill)
+                {
+                    currentTrainingSkill = combatSkill;
+                    actionThrottle.invalidate(KspAioFighterActionThrottle.Action.GEAR_CHECK);
+                    actionThrottle.invalidate(KspAioFighterActionThrottle.Action.COMBAT_STYLE);
+                    actionThrottle.invalidate(KspAioFighterActionThrottle.Action.POTION_CHECK);
+                    Microbot.log("KSP AIO Fighter training " + combatSkill.getName());
+                }
+                if (drinkPotionIfUnboosted(combatSkill)) return;
+            }
+
+            if (highAlch()) return;
+            if (selectedSkill.isEmpty())
+            {
+                handleGoalsReached();
                 return;
             }
 
-			Optional<Skill> selectedSkill = selectTrainingSkill();
-			if (selectedSkill.isEmpty())
-			{
-				handleGoalsReached();
-				return;
-			}
-
-			Skill skill = selectedSkill.get();
-			if (currentTrainingSkill != skill)
-			{
-				currentTrainingSkill = skill;
-                actionThrottle.invalidate(KspAioFighterActionThrottle.Action.GEAR_CHECK);
-                actionThrottle.invalidate(KspAioFighterActionThrottle.Action.COMBAT_STYLE);
-                actionThrottle.invalidate(KspAioFighterActionThrottle.Action.POTION_CHECK);
-				Microbot.log("KSP AIO Fighter training " + skill.getName());
-			}
+            Skill skill = selectedSkill.get();
 
 			if (waitForRequiredAreaSetupBeforeBanking())
 			{
@@ -300,7 +307,6 @@ public class KspAioFighterScript extends KspBreakAwareScript
 
 			equipGearFor(skill);
 			configureCombatStyle(skill);
-			drinkPotionIfUnboosted(skill);
 			if (moveToSafeSpotIfNeeded())
 			{
 				return;
@@ -800,6 +806,17 @@ public class KspAioFighterScript extends KspBreakAwareScript
 			protectedRunes.add(Runes.FIRE.getItemId());
 		}
 
+        // Saved combat inventories often include potion doses. Old banking
+        // deposited them and did not restore them, silently disabling potion
+        // use after the first restock.
+        if (config.usePotions())
+        {
+            for (Rs2ItemModel item : Rs2Inventory.all())
+                if (item != null && !item.isNoted()
+                        && KspAioFighterPotionPolicy.isSupportedPotion(item.getName()))
+                    protectedRunes.add(item.getId());
+        }
+
 		if (protectedRunes.isEmpty())
 		{
 			Rs2Bank.depositAll();
@@ -808,6 +825,16 @@ public class KspAioFighterScript extends KspBreakAwareScript
 
 		Rs2Bank.depositAllExcept(protectedRunes.toArray(new Integer[0]));
 	}
+
+    private boolean isProtectedCombatRune(int id)
+    {
+        if (config.highAlchLoot()
+                && (id == Runes.NATURE.getItemId() || id == Runes.FIRE.getItemId()))
+            return true;
+        return config.trainMagic() && getLevel(Skill.MAGIC) < config.magicTarget()
+                && getSpellRuneRequirements(config.magicSpell()).keySet().stream()
+                        .anyMatch(rune -> rune.getItemId() == id);
+    }
 
 	private boolean withdrawRunesForHighAlch()
 	{
@@ -1069,17 +1096,64 @@ public class KspAioFighterScript extends KspBreakAwareScript
         return false;
 	}
 
-	private void drinkPotionIfUnboosted(Skill skill)
-	{
-        if (!actionThrottle.ready(KspAioFighterActionThrottle.Action.POTION_CHECK,
-                System.currentTimeMillis(), POTION_CHECK_INTERVAL_MS)) return;
-		if (!config.usePotions() || Rs2Player.getBoostedSkillLevel(skill) > Rs2Player.getRealSkillLevel(skill))
-		{
-			return;
-		}
+    /**
+     * Consume a matching carried combat potion whenever the relevant boost
+     * expires. For melee, an Attack training task may benefit from Strength
+     * and Defence boosts as well: inspect the entire melee group.
+     *
+     * Returns true when an interaction was dispatched or is still settling,
+     * allowing the caller to avoid overlapping combat/loot/alch clicks.
+     */
+    private boolean drinkPotionIfUnboosted(Skill skill)
+    {
+        if (!config.usePotions() || Rs2Bank.isOpen()) return false;
 
-		Rs2Player.drinkCombatPotionAt(skill);
-	}
+        long now = System.currentTimeMillis();
+        if (lastPotionDispatchAtMs > 0L
+                && now - lastPotionDispatchAtMs < POTION_DISPATCH_GUARD_MS)
+            return true;
+        if (!actionThrottle.ready(KspAioFighterActionThrottle.Action.POTION_CHECK,
+                now, POTION_CHECK_INTERVAL_MS)) return false;
+
+        KspAioFighterPotionPolicy.Style style;
+        if (MELEE_SKILLS.contains(skill)) style = KspAioFighterPotionPolicy.Style.MELEE;
+        else if (skill == Skill.RANGED) style = KspAioFighterPotionPolicy.Style.RANGED;
+        else if (skill == Skill.MAGIC) style = KspAioFighterPotionPolicy.Style.MAGIC;
+        else return false;
+
+        List<Rs2ItemModel> available = Rs2Inventory.all(item -> item != null
+                && !item.isNoted() && KspAioFighterPotionPolicy.isSupportedPotion(item.getName()));
+        if (available.isEmpty()) return false;
+
+        int[] boosts = {
+                Rs2Player.getBoostedSkillLevel(Skill.ATTACK) - Rs2Player.getRealSkillLevel(Skill.ATTACK),
+                Rs2Player.getBoostedSkillLevel(Skill.STRENGTH) - Rs2Player.getRealSkillLevel(Skill.STRENGTH),
+                Rs2Player.getBoostedSkillLevel(Skill.DEFENCE) - Rs2Player.getRealSkillLevel(Skill.DEFENCE),
+                Rs2Player.getBoostedSkillLevel(Skill.RANGED) - Rs2Player.getRealSkillLevel(Skill.RANGED),
+                Rs2Player.getBoostedSkillLevel(Skill.MAGIC) - Rs2Player.getRealSkillLevel(Skill.MAGIC)
+        };
+        List<String> names = available.stream().map(Rs2ItemModel::getName).collect(Collectors.toList());
+        String chosen = KspAioFighterPotionPolicy.choose(names, style, boosts,
+                Rs2Player.getBoostedSkillLevel(Skill.HITPOINTS) >= MIN_HP_TO_DRINK_DIVINE);
+        if (chosen == null) return false;
+
+        for (Rs2ItemModel potion : available)
+        {
+            if (!chosen.equalsIgnoreCase(potion.getName())) continue;
+            if (Rs2Inventory.interact(potion, "Drink"))
+            {
+                lastPotionDispatchAtMs = System.currentTimeMillis();
+                setStatus("drinking " + potion.getName());
+                Microbot.log("KSP AIO Fighter: potion interaction dispatched: "
+                        + potion.getName() + " | combat style=" + style);
+                return true;
+            }
+            lastError = "Potion interaction rejected: " + potion.getName();
+            lastErrorMs = System.currentTimeMillis();
+            return false;
+        }
+        return false;
+    }
 
 	private int getConfiguredFoodCount() { return Rs2Inventory.count(config.foodName(), true); }
 
@@ -1594,9 +1668,12 @@ public class KspAioFighterScript extends KspBreakAwareScript
 			return;
 		}
 
-		Rs2Bank.depositAll();
+        depositAllExceptProtectedRunes();
 		lootCollectedSinceBank = false;
-		sleepUntil(() -> Rs2Inventory.isEmpty(), 1_800);
+        sleepUntil(() -> Rs2Inventory.all().stream().noneMatch(item ->
+                item != null
+                        && !(config.usePotions() && KspAioFighterPotionPolicy.isSupportedPotion(item.getName()))
+                        && !isProtectedCombatRune(item.getId())), 1_800);
 		depositEquippedItemsFromBank();
 		equipGearFromOpenBank(skill);
 		reportGearStillMissingAfterBank(skill);

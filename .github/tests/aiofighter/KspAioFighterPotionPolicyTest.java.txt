@@ -1,0 +1,97 @@
+package net.runelite.client.plugins.microbot.kspaiofighter;
+
+import java.util.Arrays;
+import java.util.List;
+
+public final class KspAioFighterPotionPolicyTest
+{
+    private KspAioFighterPotionPolicyTest() {}
+
+    public static void main(String[] args)
+    {
+        testDoseDetection();
+        testMelee();
+        testRangedAndMagic();
+        testDivineSafety();
+        System.out.println("PASS: AIO Fighter potion recognition, boost thresholds, combat styles and safety");
+    }
+
+    private static void testDoseDetection()
+    {
+        check(KspAioFighterPotionPolicy.isSupportedPotion("Strength potion(4)"), "4-dose");
+        check(KspAioFighterPotionPolicy.isSupportedPotion("Super attack(1)"), "1-dose");
+        check(KspAioFighterPotionPolicy.isSupportedPotion("super combat potion(3)"), "case");
+        check(KspAioFighterPotionPolicy.isSupportedPotion("Divine bastion potion(2)"), "divine");
+        check(!KspAioFighterPotionPolicy.isSupportedPotion("Strength potion(0)"), "empty vial");
+        check(!KspAioFighterPotionPolicy.isSupportedPotion("Strength potion(5)"), "invalid dose");
+        check(!KspAioFighterPotionPolicy.isSupportedPotion("Prayer potion(4)"), "unrelated");
+        check(!KspAioFighterPotionPolicy.isSupportedPotion("Saradomin brew(4)"), "debuffing");
+        check(!KspAioFighterPotionPolicy.isSupportedPotion("Super attack(4) (noted)"), "noted text");
+    }
+
+    private static void testMelee()
+    {
+        KspAioFighterPotionPolicy.Style melee = KspAioFighterPotionPolicy.Style.MELEE;
+        expect("Strength potion(4)", list("Strength potion(4)"), melee, zero(), true);
+        expect("Super combat potion(2)", list("Super combat potion(2)", "Attack potion(4)"),
+                melee, zero(), true);
+        expect("Combat potion(3)", list("Combat potion(3)"),
+                melee, zero(), true);
+        expect("Super defence(1)", list("Super combat potion(2)", "Super defence(1)"),
+                melee, boosts(1,1,0,0,0), true);
+        expect("Super attack(4)", list("Super attack(4)", "Combat potion(3)"),
+                melee, boosts(0,1,1,0,0), true);
+        expect("Super strength(2)", list("Super strength(2)", "Attack potion(3)"),
+                melee, boosts(1,0,1,0,0), true);
+        expect(null, list("Strength potion(4)", "Super combat potion(4)"),
+                melee, boosts(1,1,1,0,0), true);
+        expect(null, list("Prayer potion(4)"), melee, zero(), true);
+    }
+
+    private static void testRangedAndMagic()
+    {
+        expect("Bastion potion(3)", list("Strength potion(4)", "Bastion potion(3)"),
+                KspAioFighterPotionPolicy.Style.RANGED, zero(), true);
+        expect("Ranging potion(1)", list("Ranging potion(1)"),
+                KspAioFighterPotionPolicy.Style.RANGED, zero(), true);
+        expect(null, list("Ranging potion(1)"),
+                KspAioFighterPotionPolicy.Style.RANGED, boosts(0,0,0,1,0), true);
+        expect("Battlemage potion(2)", list("Battlemage potion(2)"),
+                KspAioFighterPotionPolicy.Style.MAGIC, zero(), true);
+        expect(null, list("Magic potion(3)"),
+                KspAioFighterPotionPolicy.Style.MAGIC, boosts(0,0,0,0,1), true);
+    }
+
+    private static void testDivineSafety()
+    {
+        expect(null, list("Divine ranging potion(4)"),
+                KspAioFighterPotionPolicy.Style.RANGED, zero(), false);
+        expect("Divine ranging potion(4)", list("Divine ranging potion(4)"),
+                KspAioFighterPotionPolicy.Style.RANGED, zero(), true);
+        expect("Ranging potion(2)", list("Divine ranging potion(4)", "Ranging potion(2)"),
+                KspAioFighterPotionPolicy.Style.RANGED, zero(), true);
+    }
+
+    private static int[] zero() { return boosts(0,0,0,0,0); }
+
+    private static int[] boosts(int attack, int strength, int defence, int ranged, int magic)
+    {
+        return new int[] {attack, strength, defence, ranged, magic};
+    }
+
+    private static List<String> list(String... names) { return Arrays.asList(names); }
+
+    private static void expect(String expected, List<String> inventory,
+                               KspAioFighterPotionPolicy.Style style, int[] boosts, boolean divineSafe)
+    {
+        String actual = KspAioFighterPotionPolicy.choose(inventory, style, boosts, divineSafe);
+        if (expected == null ? actual != null : !expected.equals(actual))
+            throw new AssertionError("Expected " + expected + " but got " + actual
+                    + " for style " + style + " and inventory " + inventory);
+    }
+
+    private static void check(boolean value, String name)
+    {
+        if (!value) throw new AssertionError(name);
+    }
+}

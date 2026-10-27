@@ -283,7 +283,7 @@ public interface KspAioFighterConfig extends Config, KspMuleConfig, KspBreakConf
 		return 12;
 	}
 
-	@ConfigItem(keyName = "usePotions", name = "Use potions", description = "Drink combat potions only when the selected skill has no active boost.", position = 4, section = suppliesSection)
+	@ConfigItem(keyName = "usePotions", name = "Use potions", description = "Use carried combat potions when melee, Ranged, or Magic boosts expire. Keep carried potion doses on bank trips; does not automatically buy or withdraw potions.", position = 4, section = suppliesSection)
 	default boolean usePotions()
 	{
 		return true;
