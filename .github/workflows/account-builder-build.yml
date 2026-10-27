@@ -86,16 +86,22 @@ jobs:
           assert ids('PORTAL_NPC_IDS') == {3086, 3088}, 'Incomplete NPC portal variants'
           assert ids('PORTAL_OBJECT_IDS') == {34774, 34775, 34776, 34777, 34778}, 'Incomplete object portal variants'
           assert 'id == 34775 || id == 34777' in task, 'Exit-action variants missing'
-          assert 'nearestTileObject(PORTAL_OBJECT_IDS' in task, 'All-layer object discovery missing'
+          assert 'nearestTileObject(' in task and 'PORTAL_OBJECT_IDS' in task, 'All-layer object discovery missing'
+          assert 'nearestNamedPortal(' in task, 'Live portal name/action fallback missing'
+          assert 'nearestPortalNpc(' in task, 'Instanced scene-local NPC portal discovery missing'
+          assert 'stepTowardSceneLocal(' in task and 'walkFastCanvas(step)' in scene, 'Scene-only portal movement missing'
+          assert 'ESSENCE_MINE_PORTAL_LOCATIONS' not in task, 'Fixed instanced portal coordinates must never be used'
+          assert 'getRs2NpcCache()' not in task and 'getRs2TileObjectCache()' not in task, 'Rune Essence must not use stale scene caches'
+          assert 'cancelInstanceWalkerRoute(' in task and 'Rs2Walker.clearWalkingRoute(reason)' in task, 'Stale instance route cancellation missing'
           assert 'getLocalLocation()' in scene, 'Instanced scene coordinate distance missing'
           assert 'objectLocal.getWorldView() == playerLocal.getWorldView()' in scene, 'Portal/player WorldView mismatch guard missing'
           assert 'KspWalkerGuard.clear(WALK_KEY_PORTAL);' in task, 'Portal discovery must cancel fallback walking'
           assert 'resolvedObjectId(liveObject)' in task, 'Active morph resolution missing'
-          assert 'nearestNpcId(PORTAL_NPC_IDS' in task, 'NPC discovery missing'
+          assert 'nearestPortalNpc(PORTAL_NPC_IDS' in task or ('nearestPortalNpc(' in task and 'PORTAL_NPC_IDS' in task), 'NPC discovery missing'
           assert 'public static TileObject nearestTileObject(' in scene, 'Shared scene object resolver missing'
           assert 'essenceMining.recoverFromEssenceMine()' in parent, 'Parent scheduler recovery must delegate'
           assert 'essenceMining.getStatus()' in parent, 'Parent scheduler must report portal status'
-          print('PASS: all 7 Rune Essence portal variants and shared recovery routing')
+          print('PASS: 7 Rune Essence portal variants, scene-local instance routing and recovery')
 
       - name: Verify state-preserving pause and fitted chatbox controls
         shell: python
