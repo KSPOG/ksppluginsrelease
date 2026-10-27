@@ -430,10 +430,102 @@ public final class KspLiveScene
         return false;
     }
 
+    /**
+     * Build a transient model from the live scene. This preserves existing
+     * Rs2TileObjectModel action/reachability APIs without using an entity cache.
+     * Predicates are evaluated on the client thread.
+     */
+    public static net.runelite.client.plugins.microbot.api.tileobject.models.Rs2TileObjectModel nearestModel(
+            WorldPoint origin, int maxDistance,
+            java.util.function.Predicate<net.runelite.client.plugins.microbot.api.tileobject.models.Rs2TileObjectModel> matches)
+    {
+        return Microbot.getClientThread().runOnClientThreadOptional(() ->
+        {
+            if (Microbot.getClient() == null) return null;
+            net.runelite.api.Player player = Microbot.getClient().getLocalPlayer();
+            net.runelite.api.WorldView view = player == null ? null : player.getWorldView();
+            net.runelite.api.Scene scene = view == null ? Microbot.getClient().getScene() : view.getScene();
+            if (scene == null || scene.getTiles() == null) return null;
+            net.runelite.api.coords.LocalPoint local = player == null ? null : player.getLocalLocation();
+            net.runelite.client.plugins.microbot.api.tileobject.models.Rs2TileObjectModel nearest = null;
+            int bestDistance = Integer.MAX_VALUE;
+            for (Tile[][] plane : scene.getTiles())
+            {
+                if (plane == null) continue;
+                for (Tile[] row : plane)
+                {
+                    if (row == null) continue;
+                    for (Tile tile : row)
+                    {
+                        if (tile == null) continue;
+                        TileObject[] fixed = {tile.getWallObject(), tile.getDecorativeObject(), tile.getGroundObject()};
+                        for (TileObject object : fixed)
+                        {
+                            if (object == null) continue;
+                            int distance = distanceToPlayer(object, origin, local, view);
+                            if (distance < 0 || distance > maxDistance || distance >= bestDistance) continue;
+                            net.runelite.client.plugins.microbot.api.tileobject.models.Rs2TileObjectModel model =
+                                    new net.runelite.client.plugins.microbot.api.tileobject.models.Rs2TileObjectModel(object);
+                            if (matches != null && !matches.test(model)) continue;
+                            nearest = model;
+                            bestDistance = distance;
+                        }
+                        GameObject[] objects = tile.getGameObjects();
+                        if (objects == null) continue;
+                        for (GameObject object : objects)
+                        {
+                            if (object == null) continue;
+                            int distance = distanceToPlayer(object, origin, local, view);
+                            if (distance < 0 || distance > maxDistance || distance >= bestDistance) continue;
+                            net.runelite.client.plugins.microbot.api.tileobject.models.Rs2TileObjectModel model =
+                                    new net.runelite.client.plugins.microbot.api.tileobject.models.Rs2TileObjectModel(object);
+                            if (matches != null && !matches.test(model)) continue;
+                            nearest = model;
+                            bestDistance = distance;
+                        }
+                    }
+                }
+            }
+            return nearest;
+        }).orElse(null);
+    }
+
+    /**
+     * Live NPC model source for fishing, questing, combat and Tutorial Island.
+     * Avoids the NPC cache, while retaining all Rs2NpcModel.click() behaviors.
+     */
+    public static net.runelite.client.plugins.microbot.util.npc.Rs2NpcModel nearestNpcModel(
+            WorldPoint origin, int maxDistance,
+            java.util.function.Predicate<net.runelite.client.plugins.microbot.util.npc.Rs2NpcModel> matches)
+    {
+        return Microbot.getClientThread().runOnClientThreadOptional(() ->
+        {
+            if (Microbot.getClient() == null) return null;
+            net.runelite.api.Player player = Microbot.getClient().getLocalPlayer();
+            net.runelite.api.WorldView view = player == null ? null : player.getWorldView();
+            if (view == null || view.npcs() == null) return null;
+            net.runelite.client.plugins.microbot.util.npc.Rs2NpcModel nearest = null;
+            int bestDistance = Integer.MAX_VALUE;
+            for (net.runelite.api.NPC npc : view.npcs())
+            {
+                if (npc == null || npc.getWorldLocation() == null) continue;
+                if (origin != null && npc.getWorldLocation().getPlane() != origin.getPlane()) continue;
+                int distance = origin == null ? 0 : origin.distanceTo(npc.getWorldLocation());
+                if (distance > maxDistance || distance >= bestDistance) continue;
+                net.runelite.client.plugins.microbot.util.npc.Rs2NpcModel model =
+                        new net.runelite.client.plugins.microbot.util.npc.Rs2NpcModel(npc);
+                if (matches != null && !matches.test(model)) continue;
+                nearest = model;
+                bestDistance = distance;
+            }
+            return nearest;
+        }).orElse(null);
+    }
+
     public static boolean interact(String objectName, WorldPoint origin, int maxDistance, String action)
     {
         TileObject object = nearestTileObject(objectName, origin, maxDistance);
-        if (object == null) return false;
+        if (object == null || !new net.runelite.client.plugins.microbot.api.tileobject.models.Rs2TileObjectModel(object).hasAction(action)) return false;
         try { return Rs2GameObject.interact(object, action); }
         catch (RuntimeException exception) { return false; }
     }
