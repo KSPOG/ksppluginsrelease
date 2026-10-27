@@ -14,6 +14,7 @@ import net.runelite.client.plugins.microbot.kspaccountbuilder.KspBankMode;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.KspTaskDebug;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.KspWalkerGuard;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.ksputil.KspBankWidgetHelper;
+import net.runelite.client.plugins.microbot.kspaccountbuilder.ksputil.KspLiveScene;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.questing.goblindip.reqs.GobReqs;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.selling.gearea.GEArea;
 import net.runelite.client.plugins.microbot.util.bank.Rs2Bank;
@@ -802,10 +803,10 @@ public class GobScript extends KspManagedScript {
     }
 
     private Rs2NpcModel findNearestGeneral() {
-        return Microbot.getRs2NpcCache().query()
-                .fromWorldView()
-                .withNames(GENERAL_NAMES)
-                .nearestOnClientThread();
+        return KspLiveScene.nearestNpcModel(Rs2Player.getWorldLocation(), 30,
+                npc -> npc.getName() != null
+                        && java.util.Arrays.stream(GENERAL_NAMES)
+                                .anyMatch(name -> name.equalsIgnoreCase(npc.getName())));
     }
 
     private boolean hasQuestMaterialsInInventory() {
