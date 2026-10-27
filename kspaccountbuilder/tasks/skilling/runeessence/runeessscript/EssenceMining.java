@@ -25,6 +25,7 @@ import net.runelite.client.plugins.microbot.util.equipment.Rs2Equipment;
 import net.runelite.client.plugins.microbot.util.inventory.Rs2Inventory;
 import net.runelite.client.plugins.microbot.util.player.Rs2Player;
 import net.runelite.client.plugins.microbot.util.gameobject.Rs2GameObject;
+import net.runelite.client.plugins.microbot.util.walker.Rs2Walker;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -40,6 +41,9 @@ public class EssenceMining extends KspManagedScript
     private static final int NPC_REACH_DISTANCE = 5;
     private static final int PORTAL_APPROACH_DISTANCE = 3;
     private static final long PORTAL_SEARCH_TIMEOUT_MS = 10_000L;
+    private static final long PORTAL_SCENE_WALK_COOLDOWN_MS = 1_600L;
+    private static final int PORTAL_LOCAL_APPROACH_TILES = 12;
+    private static final int PORTAL_SCENE_DISCOVERY_RADIUS = 104;
     private static final long PORTAL_EXIT_TIMEOUT_MS = 8_000L;
     private static final long WALK_REFIRE_COOLDOWN_MS = 1_000L;
     private static final long ACTION_COOLDOWN_MS = 100L;
@@ -47,12 +51,6 @@ public class EssenceMining extends KspManagedScript
     private static final long AUBURY_TELEPORT_TIMEOUT_MS = 8_000L;
     private static final long MINING_PROGRESS_TIMEOUT_MS = 4_800L;
     private static final WorldPoint AUBURY_POSITION = new WorldPoint(3253, 3399, 0);
-    private static final WorldPoint[] ESSENCE_MINE_PORTAL_LOCATIONS = {
-            new WorldPoint(2932, 4854, 0),
-            new WorldPoint(2885, 4850, 0),
-            new WorldPoint(2889, 4813, 0),
-            new WorldPoint(2933, 4815, 0)
-    };
     private static final String WALK_KEY_AUBURY = "Rune Essence:aubury";
     private static final String WALK_KEY_BANK = "Rune Essence:bank";
     private static final String WALK_KEY_PORTAL = "Rune Essence:portal";
@@ -68,7 +66,8 @@ public class EssenceMining extends KspManagedScript
     private int pendingBankEmptySlots = -1;
     private boolean bankCloseRequested;
     private long portalSearchStartedAtMs;
-    private int portalFallbackIndex = -1;
+    private long lastPortalSceneWalkAtMs;
+    private boolean lastObservedInsideMine;
     private volatile EssenceState state = EssenceState.PREPARING;
     private volatile String status = "Idle";
 
@@ -83,7 +82,8 @@ public class EssenceMining extends KspManagedScript
         bankCloseRequested = false;
         state = EssenceState.PREPARING;
         portalSearchStartedAtMs = 0L;
-        portalFallbackIndex = -1;
+        lastPortalSceneWalkAtMs = 0L;
+        lastObservedInsideMine = false;
         status = "Starting rune essence mining";
 
         mainScheduledFuture = scheduledExecutorService.scheduleWithFixedDelay(() ->
@@ -124,6 +124,11 @@ public class EssenceMining extends KspManagedScript
 
         if (isInEssenceMine())
         {
+            lastObservedInsideMine = true;
+            // The Essence mine is instanced. A route started against template
+            // WorldPoints can silently select a surface teleport. Never allow
+            // WebWalker to own a route while we're inside the mine.
+            cancelInstanceWalkerRoute("ksp_rune_essence_inside_instance");
             clearAuburyTeleportTransition();
             if (Rs2Inventory.isFull())
             {
@@ -136,6 +141,14 @@ public class EssenceMining extends KspManagedScript
             return;
         }
 
+        if (lastObservedInsideMine)
+        {
+            // Leaving through a portal can change region mid-walk. Cancel any
+            // stale instance destination before the banking path is started.
+            cancelInstanceWalkerRoute("ksp_rune_essence_left_instance");
+            KspWalkerGuard.clear(WALK_KEY_PORTAL);
+            lastObservedInsideMine = false;
+        }
         clearEssenceMiningAction();
         resetPortalSearch();
         if (EssenceBankCompletionPolicy.shouldContinueBanking(state, Rs2Inventory.isFull(), hasPickaxe()))
@@ -315,181 +328,161 @@ public class EssenceMining extends KspManagedScript
         lastMiningProgressAtMs = 0L;
     }
 
+    /**
+     * All mine navigation is tied to live local scene coordinates. Fixed
+     * world-point portal locations and WebWalker are unsafe in this instance:
+     * the player's scene may be mapped to a different template WorldPoint,
+     * and an apparently unreachable goal can trigger a surface teleport.
+     */
     private void exitMine()
     {
         clearEssenceMiningAction();
         state = EssenceState.EXITING_MINE;
-        status = "Leaving rune essence mine";
-        if (Rs2Player.isAnimating() || Rs2Player.isInteracting()
-                || isPortalExitPending() || !canAct()) return;
+        cancelInstanceWalkerRoute("ksp_rune_essence_exit_scene_only");
+        if (isPortalExitPending())
+        {
+            return;
+        }
+        if (Rs2Player.isAnimating() || Rs2Player.isInteracting() || !canAct()) return;
 
         WorldPoint player = Rs2Player.getWorldLocation();
-        // Resolve the actual world-view NPC first, without relying on the
-        // cache or exact names (some portal names include colour tags).
-        int liveNpcId = KspLiveScene.nearestNpcId(PORTAL_NPC_IDS, player, 100);
-        if (liveNpcId > 0)
+        if (player == null) return;
+
+        // NPC portals: match known IDs and recognizable live-name variants.
+        // Their WorldPoints need not agree with the player's instanced map;
+        // KspLiveScene compares LocalPoints in the same WorldView instead.
+        Rs2NpcModel liveNpc = KspLiveScene.nearestPortalNpc(
+                PORTAL_NPC_IDS, PORTAL_SCENE_DISCOVERY_RADIUS);
+        if (liveNpc != null)
         {
-            Rs2NpcModel liveNpc = KspLiveScene.nearestNpcModel(player, 100,
-                    npc -> npc.getId() == liveNpcId);
-            if (liveNpc != null)
+            int distance = KspLiveScene.distanceFromPlayerInScene(liveNpc.getLocalLocation());
+            if (distance >= 0)
             {
+                if (distance > PORTAL_LOCAL_APPROACH_TILES)
+                {
+                    approachLivePortal(liveNpc.getLocalLocation(), "NPC", liveNpc.getId(), distance);
+                    return;
+                }
                 if (Rs2Player.isMoving())
                 {
-                    status = "Approaching live rune essence NPC portal";
+                    status = "Approaching live Rune Essence NPC portal";
                     return;
                 }
                 try
                 {
-                    String action = liveNpcId == 3088 ? "Exit" : "Use";
-                    // Portal actions can differ between live NPC variants. Try the
-                    // alternative only if the preferred action was not dispatched.
+                    String action = liveNpc.getId() == 3088 ? "Exit" : "Use";
                     if (liveNpc.click(action)
                             || liveNpc.click("Exit".equals(action) ? "Use" : "Exit"))
                     {
-                        markPortalExit("live NPC", liveNpcId);
+                        markPortalExit("live NPC", liveNpc.getId());
                         return;
                     }
                 }
                 catch (RuntimeException ex)
                 {
                     KspTaskDebug.throttled(log, true, "Rune Essence", "portal-npc-live-failure", 5_000L,
-                            "Live NPC portal interaction failed | id={} error={}", liveNpcId, ex.toString());
+                            "Local NPC portal interaction failed | id={} local={} error={}",
+                            liveNpc.getId(), liveNpc.getLocalLocation(), ex.toString());
                 }
             }
         }
 
-        // Portals have five object morph IDs (including 34777). Look across
-        // all TileObject layers and their impostor definitions, not only
-        // Tile.getGameObjects(), which can miss visible portal variants.
-        // Keep direct interactions inside Microbot's 51-tile local click
-        // range; beyond that its legacy object-click path may attempt to
-        // walk using non-comparable instance/template world coordinates.
-        TileObject liveObject = KspLiveScene.nearestTileObject(PORTAL_OBJECT_IDS, player, 45);
+        // Object portals: scan ALL live scene layers and resolve transformed
+        // object IDs. In addition to the known variants, accept an object named
+        // "Portal" with a real Exit/Use action (for newly morphed instances).
+        TileObject liveObject = KspLiveScene.nearestTileObject(
+                PORTAL_OBJECT_IDS, player, PORTAL_SCENE_DISCOVERY_RADIUS);
+        boolean nameFallback = false;
+        if (liveObject == null)
+        {
+            liveObject = KspLiveScene.nearestNamedPortal(player, PORTAL_SCENE_DISCOVERY_RADIUS);
+            nameFallback = true;
+        }
         if (liveObject != null)
         {
-            // Portal discovery now uses local scene positions. Cancel the
-            // coordinate-only fallback walk before trying the real object.
-            KspWalkerGuard.clear(WALK_KEY_PORTAL);
-            int sceneId = liveObject.getId();
-            int id = KspLiveScene.resolvedObjectId(liveObject);
-            KspTaskDebug.throttled(log, true, "Rune Essence", "portal-object-found", 5_000L,
-                    "Rune essence portal found | sceneId={} activeMorphId={} kind={} world={} local={}",
-                    sceneId, id, liveObject.getClass().getSimpleName(),
-                    liveObject.getWorldLocation(), liveObject.getLocalLocation());
-            if (Rs2Player.isMoving())
+            int distance = KspLiveScene.distanceFromPlayerInScene(liveObject.getLocalLocation());
+            if (distance >= 0)
             {
-                status = "Approaching rune essence portal (ID " + id + ")";
-                return;
-            }
-            try
-            {
-                String action = portalObjectAction(id);
-                if (Rs2GameObject.interact(liveObject, action)
-                        || Rs2GameObject.interact(liveObject,
-                                "Exit".equals(action) ? "Use" : "Exit"))
+                int id = KspLiveScene.resolvedObjectId(liveObject);
+                KspTaskDebug.throttled(log, debugLogging, "Rune Essence",
+                        "portal-live-object-discovery", 5_000L,
+                        "Live portal | sceneId={} activeId={} local={} distance={} nameFallback={}",
+                        liveObject.getId(), id, liveObject.getLocalLocation(), distance, nameFallback);
+                if (distance > PORTAL_LOCAL_APPROACH_TILES)
                 {
-                    markPortalExit("live object", id);
+                    approachLivePortal(liveObject.getLocalLocation(), "object", id, distance);
                     return;
                 }
-            }
-            catch (RuntimeException ex)
-            {
-                KspTaskDebug.throttled(log, true, "Rune Essence", "portal-object-live-failure", 5_000L,
-                        "Live object portal interaction failed | id={} error={}", id, ex.toString());
+                if (Rs2Player.isMoving())
+                {
+                    status = "Approaching live Rune Essence portal";
+                    return;
+                }
+                try
+                {
+                    net.runelite.client.plugins.microbot.api.tileobject.models.Rs2TileObjectModel model =
+                            new net.runelite.client.plugins.microbot.api.tileobject.models.Rs2TileObjectModel(liveObject);
+                    String preferred = portalObjectAction(id);
+                    String alternate = "Exit".equals(preferred) ? "Use" : "Exit";
+                    if ((model.hasAction(preferred) && Rs2GameObject.interact(liveObject, preferred))
+                            || (model.hasAction(alternate) && Rs2GameObject.interact(liveObject, alternate)))
+                    {
+                        markPortalExit("live object", id);
+                        return;
+                    }
+                    KspTaskDebug.throttled(log, true, "Rune Essence",
+                            "portal-live-object-action-missing", 5_000L,
+                            "Visible portal has no dispatched Exit/Use | id={} local={}",
+                            id, liveObject.getLocalLocation());
+                }
+                catch (RuntimeException ex)
+                {
+                    KspTaskDebug.throttled(log, true, "Rune Essence", "portal-object-live-failure", 5_000L,
+                            "Local object portal interaction failed | id={} local={} error={}",
+                            id, liveObject.getLocalLocation(), ex.toString());
+                }
             }
         }
 
-        // Cache is a fallback for missing or stale live scene entries.
-        for (int id : PORTAL_NPC_IDS)
-        {
-            Rs2NpcModel npc = Microbot.getRs2NpcCache().query()
-                    .fromWorldView().withId(id).nearestOnClientThread();
-            if (npc == null) continue;
-            if (Rs2Player.isMoving()) return;
-            try
-            {
-                String action = id == 3088 ? "Exit" : "Use";
-                // Cached NPCs must support the same action fallback as live NPCs.
-                if (npc.click(action)
-                        || npc.click("Exit".equals(action) ? "Use" : "Exit"))
-                {
-                    markPortalExit("cached NPC", id);
-                    return;
-                }
-            }
-            catch (RuntimeException ex)
-            {
-                KspTaskDebug.throttled(log, true, "Rune Essence", "portal-npc-cache-failure", 5_000L,
-                        "Cached NPC portal interaction failed | id={} error={}", id, ex.toString());
-            }
-        }
-        for (int id : PORTAL_OBJECT_IDS)
-        {
-            var portal = Microbot.getRs2TileObjectCache().query()
-                    .fromWorldView().withId(id).nearestOnClientThread();
-            if (portal == null) continue;
-            if (Rs2Player.isMoving()) return;
-            try
-            {
-                String action = portalObjectAction(id);
-                // Match live object handling: portal variants can expose either
-                // Use or Exit, independently of their configured object ID.
-                if (portal.click(action)
-                        || portal.click("Exit".equals(action) ? "Use" : "Exit"))
-                {
-                    markPortalExit("cached object", id);
-                    return;
-                }
-            }
-            catch (RuntimeException ex)
-            {
-                KspTaskDebug.throttled(log, true, "Rune Essence", "portal-object-cache-failure", 5_000L,
-                        "Cached object portal interaction failed | id={} error={}", id, ex.toString());
-            }
-        }
-
-        // The portal can be missing from the tile-object cache immediately
-        // after a mine scene rebuild. Previously reaching the expected portal
-        // tile caused an infinite "Waiting for rune essence portal" state.
+        // Never use a cached entity from an old scene, or walk to fixed mine
+        // WorldPoints. Retrying live discovery is safer than allowing the
+        // pathfinder to leave the mine by an unrelated teleport.
+        status = "Searching live Rune Essence portal";
         long now = System.currentTimeMillis();
-        if (portalFallbackIndex < 0)
-        {
-            portalFallbackIndex = nearestPortalIndex(player);
-            portalSearchStartedAtMs = now;
-        }
+        if (portalSearchStartedAtMs == 0L) portalSearchStartedAtMs = now;
         if (now - portalSearchStartedAtMs >= PORTAL_SEARCH_TIMEOUT_MS)
         {
-            // Give the live scene and caches time to discover the portal, but
-            // do not leave the player waiting beside a missing exit forever.
-            // Rotate only after the full timeout to avoid rapid zigzagging.
-            int previousPortalIndex = portalFallbackIndex;
-            portalFallbackIndex = (portalFallbackIndex + 1) % ESSENCE_MINE_PORTAL_LOCATIONS.length;
+            KspTaskDebug.throttled(log, true, "Rune Essence", "portal-instance-diagnostic", 10_000L,
+                    "No actionable portal in current instance; holding position | player={} region={} "
+                            + "npcFound={} objectFound={} moving={} walkerTarget={}",
+                    player, getCurrentRegion(), liveNpc != null, liveObject != null,
+                    Rs2Player.isMoving(), Rs2Walker.getCurrentTarget());
             portalSearchStartedAtMs = now;
-            KspWalkerGuard.clear(WALK_KEY_PORTAL);
-            KspTaskDebug.throttled(log, true, "Rune Essence", "portal-recovery", 5_000L,
-                    "Portal discovery timed out; changing exit | from={} to={} player={}",
-                    previousPortalIndex, portalFallbackIndex, player);
-            KspTaskDebug.throttled(log, true, "Rune Essence", "portal-discovery", 10_000L,
-                    "Portal missing from scene/cache; holding nearest exit | player={} target={} index={} distance={} moving={}",
-                    player, ESSENCE_MINE_PORTAL_LOCATIONS[portalFallbackIndex], portalFallbackIndex,
-                    player == null ? -1 : player.distanceTo(ESSENCE_MINE_PORTAL_LOCATIONS[portalFallbackIndex]),
-                    Rs2Player.isMoving());
         }
+    }
 
-        WorldPoint portalLocation = ESSENCE_MINE_PORTAL_LOCATIONS[portalFallbackIndex];
-        if (player != null && player.distanceTo(portalLocation) <= PORTAL_APPROACH_DISTANCE)
-        {
-            KspWalkerGuard.clear(WALK_KEY_PORTAL);
-            status = "Searching for rune essence portal";
-            return;
-        }
+    private void approachLivePortal(net.runelite.api.coords.LocalPoint local, String type,
+                                    int id, int distance)
+    {
+        status = "Approaching live Rune Essence " + type + " portal";
+        if (Rs2Player.isMoving()) return;
+        long now = System.currentTimeMillis();
+        if (now - lastPortalSceneWalkAtMs < PORTAL_SCENE_WALK_COOLDOWN_MS) return;
+        lastPortalSceneWalkAtMs = now;
+        boolean clicked = KspLiveScene.stepTowardSceneLocal(local);
+        KspTaskDebug.throttled(log, debugLogging, "Rune Essence", "portal-scene-step", 3_000L,
+                "Portal scene-only step | kind={} id={} local={} distance={} clicked={}",
+                type, id, local, distance, clicked);
+    }
 
-        status = "Walking to rune essence portal";
-        KspWalkerGuard.walkToPoint(
-                WALK_KEY_PORTAL,
-                portalLocation,
-                PORTAL_APPROACH_DISTANCE,
-                WALK_REFIRE_COOLDOWN_MS);
+    private void cancelInstanceWalkerRoute(String reason)
+    {
+        KspWalkerGuard.clear(WALK_KEY_PORTAL);
+        // The old fallback route can survive an instance transition despite
+        // its Account Builder key being cleared, especially when WebWalker is
+        // calculating/continuing a previous segment.
+        if (Rs2Walker.getCurrentTarget() != null)
+            Rs2Walker.clearWalkingRoute(reason);
     }
 
     private static String portalObjectAction(int id)
@@ -529,58 +522,22 @@ public class EssenceMining extends KspManagedScript
         return false;
     }
 
-    private int nearestPortalIndex(WorldPoint player)
-    {
-        int best = 0;
-        if (player == null) return best;
-        for (int i = 1; i < ESSENCE_MINE_PORTAL_LOCATIONS.length; i++)
-        {
-            if (player.distanceTo(ESSENCE_MINE_PORTAL_LOCATIONS[i])
-                    < player.distanceTo(ESSENCE_MINE_PORTAL_LOCATIONS[best]))
-            {
-                best = i;
-            }
-        }
-        return best;
-    }
-
     private void resetPortalSearch()
     {
         portalSearchStartedAtMs = 0L;
-        portalFallbackIndex = -1;
+        lastPortalSceneWalkAtMs = 0L;
     }
 
     public boolean recoverFromEssenceMine()
     {
         if (!isInEssenceMine())
         {
-            KspWalkerGuard.clear(WALK_KEY_PORTAL);
+            cancelInstanceWalkerRoute("ksp_rune_essence_recovery_left_instance");
             return false;
         }
 
         exitMine();
         return true;
-    }
-
-    private WorldPoint getNearestPortalLocation()
-    {
-        WorldPoint playerLocation = Rs2Player.getWorldLocation();
-        WorldPoint nearest = ESSENCE_MINE_PORTAL_LOCATIONS[0];
-
-        if (playerLocation == null)
-        {
-            return nearest;
-        }
-
-        for (WorldPoint portalLocation : ESSENCE_MINE_PORTAL_LOCATIONS)
-        {
-            if (playerLocation.distanceTo(portalLocation) < playerLocation.distanceTo(nearest))
-            {
-                nearest = portalLocation;
-            }
-        }
-
-        return nearest;
     }
 
     private void equipBestInventoryPickaxe()
@@ -755,6 +712,7 @@ public class EssenceMining extends KspManagedScript
         clearAuburyTeleportTransition();
         KspWalkerGuard.clear(WALK_KEY_BANK);
         KspWalkerGuard.clear(WALK_KEY_PORTAL);
+        lastObservedInsideMine = false;
         super.shutdown();
     }
 }
