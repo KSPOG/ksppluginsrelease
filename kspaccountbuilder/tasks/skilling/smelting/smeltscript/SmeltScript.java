@@ -416,12 +416,11 @@ public class SmeltScript extends KspManagedScript
     {
         WorldPoint playerLocation = Rs2Player.getWorldLocation();
         if (playerLocation == null) return null;
-        return Microbot.getClientThread().invoke(() -> Microbot.getRs2TileObjectCache().query()
-                .fromWorldView()
-                .withName("Furnace")
-                .within(playerLocation, 12)
-                .where(obj -> obj.getWorldLocation() != null && targetArea.toWorldArea().contains(obj.getWorldLocation()))
-                .nearestReachable(12));
+        return KspLiveScene.nearestModel(playerLocation, 12,
+                obj -> obj != null && "Furnace".equalsIgnoreCase(obj.getName())
+                        && obj.getWorldLocation() != null
+                        && targetArea.toWorldArea().contains(obj.getWorldLocation())
+                        && obj.isReachable());
     }
 
     private boolean handleSmeltSelection(BarLevels bar)
