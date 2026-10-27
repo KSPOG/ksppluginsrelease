@@ -19,6 +19,7 @@ import net.runelite.client.plugins.microbot.api.tileobject.models.Rs2TileObjectM
 import net.runelite.client.plugins.microbot.kspaccountbuilder.KspBankMode;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.KspTaskDebug;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.KspWalkerGuard;
+import net.runelite.client.plugins.microbot.kspaccountbuilder.ksputil.KspLiveScene;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.ksputil.KspBankWidgetHelper;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.firemaking.fmarea.FireArea;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.firemaking.loglevels.LogsLvl;
@@ -770,47 +771,36 @@ public class FireMakingScript extends KspManagedScript
         WorldPoint playerLocation = Rs2Player.getWorldLocation();
         if (playerLocation == null) return null;
 
-        return Microbot.getClientThread().invoke(() -> Microbot.getRs2TileObjectCache().query()
-                .fromWorldView()
-                .within(playerLocation, NEARBY_CAMPFIRE_SCAN_RADIUS)
-                .where(object -> object.getWorldLocation() != null
+        return KspLiveScene.nearestModel(playerLocation, NEARBY_CAMPFIRE_SCAN_RADIUS,
+                object -> object.getWorldLocation() != null
                         && isInTargetArea(object.getWorldLocation())
                         && isValidFireId(object.getId())
-                        && (!forestersOnly || object.getId() == FORESTERS_CAMPFIRE_ID))
-                .nearest(playerLocation, NEARBY_CAMPFIRE_SCAN_RADIUS));
+                        && (!forestersOnly || object.getId() == FORESTERS_CAMPFIRE_ID));
     }
 
     private Rs2TileObjectModel findNearestFireObjectInTargetArea()
     {
-        return Microbot.getClientThread().invoke(() -> Microbot.getRs2TileObjectCache().query()
-                .fromWorldView()
-                .within(getAreaCenter(), getAreaSearchRadius())
-                .where(object -> object.getWorldLocation() != null
+        return KspLiveScene.nearestModel(getAreaCenter(), getAreaSearchRadius(),
+                object -> object.getWorldLocation() != null
                         && isInTargetArea(object.getWorldLocation())
-                        && isValidFireId(object.getId()))
-                .nearest(getAreaCenter(), getAreaSearchRadius()));
+                        && isValidFireId(object.getId()));
     }
 
     private Rs2TileObjectModel findNearestForestersCampfireInTargetArea()
     {
-        return Microbot.getClientThread().invoke(() -> Microbot.getRs2TileObjectCache().query()
-                .fromWorldView()
-                .within(getAreaCenter(), getAreaSearchRadius())
-                .where(object -> object.getWorldLocation() != null
+        return KspLiveScene.nearestModel(getAreaCenter(), getAreaSearchRadius(),
+                object -> object.getWorldLocation() != null
                         && isInTargetArea(object.getWorldLocation())
-                        && object.getId() == FORESTERS_CAMPFIRE_ID)
-                .nearest(getAreaCenter(), getAreaSearchRadius()));
+                        && object.getId() == FORESTERS_CAMPFIRE_ID);
     }
 
     private Rs2TileObjectModel findFireObjectAtLocation(WorldPoint location)
     {
         if (location == null) return null;
-        return Microbot.getClientThread().invoke(() -> Microbot.getRs2TileObjectCache().query()
-                .fromWorldView()
-                .where(object -> object.getWorldLocation() != null
+        return KspLiveScene.nearestModel(location, 2,
+                object -> object.getWorldLocation() != null
                         && location.equals(object.getWorldLocation())
-                        && isValidFireId(object.getId()))
-                .first());
+                        && isValidFireId(object.getId()));
     }
 
     private boolean isInTargetArea(WorldPoint point)
