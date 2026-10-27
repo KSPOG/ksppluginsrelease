@@ -10,6 +10,7 @@ import net.runelite.api.coords.WorldPoint;
 import net.runelite.client.plugins.microbot.Microbot;
 import net.runelite.client.plugins.microbot.Script;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.KspWalkerGuard;
+import net.runelite.client.plugins.microbot.kspaccountbuilder.ksputil.KspLiveScene;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.stronghold.areas.Areas;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.stronghold.inventory.InvFood;
 import net.runelite.client.plugins.microbot.util.bank.Rs2Bank;
@@ -297,10 +298,8 @@ public class SoCScript extends KspManagedScript
         }
 
         if (isInteractionPending("ladder-down")) return;
-        boolean interacted = Microbot.getRs2TileObjectCache().query()
-                .fromWorldView()
-                .withName("Ladder")
-                .interact("Climb-down");
+        boolean interacted = KspLiveScene.interact(
+                "Ladder", Rs2Player.getWorldLocation(), 15, "Climb-down");
         if (interacted)
         {
             markInteraction("ladder-down");
