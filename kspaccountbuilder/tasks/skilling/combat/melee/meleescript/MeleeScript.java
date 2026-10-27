@@ -25,6 +25,7 @@ import net.runelite.client.plugins.microbot.api.tileitem.models.Rs2TileItemModel
 import net.runelite.client.plugins.microbot.globval.enums.InterfaceTab;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.KspBankMode;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.KspTaskDebug;
+import net.runelite.client.plugins.microbot.kspaccountbuilder.ksputil.KspLiveScene;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.KspWalkerGuard;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.ksputil.KspBankWidgetHelper;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.combat.melee.areas.CombatAreas;
@@ -868,21 +869,15 @@ public class MeleeScript extends KspManagedScript {
         String primaryName = stage.primaryNpc.getDisplayName();
         String secondaryName = stage.secondaryNpc == null ? null : stage.secondaryNpc.getDisplayName();
 
-        // Filter directly in the NPC cache and ask it for the nearest usable target. The old
-        // path materialized every matching NPC on the client thread and then manually ranked
-        // the list, which added avoidable latency on every reacquisition.
-        Rs2NpcModel target = Microbot.getRs2NpcCache().query()
-                .fromWorldView()
-                .where(npc -> npc != null && npc.getCombatLevel() > 0 && !npc.isDead())
-                .where(npc -> {
-                    String name = npc.getName();
-                    return name != null
-                            && (name.equalsIgnoreCase(primaryName)
-                            || (secondaryName != null && name.equalsIgnoreCase(secondaryName)));
-                })
-                .where(npc -> this.isNpcInTargetArea(npc, stage))
-                .where(npc -> this.canAttackNpc(npc, localPlayer))
-                .nearestOnClientThread();
+        // Read the live NPC list from the player's current WorldView rather
+        // than reusing cached NPC models after a despawn/replacement.
+        Rs2NpcModel target = KspLiveScene.nearestNpcModel(playerLocation, 40,
+                npc -> npc != null && npc.getCombatLevel() > 0 && !npc.isDead()
+                        && npc.getName() != null
+                        && (npc.getName().equalsIgnoreCase(primaryName)
+                            || (secondaryName != null && npc.getName().equalsIgnoreCase(secondaryName)))
+                        && this.isNpcInTargetArea(npc, stage)
+                        && this.canAttackNpc(npc, localPlayer));
 
         if (target == null) {
             this.setStatus("Waiting for " + primaryName);
@@ -1099,17 +1094,15 @@ public class MeleeScript extends KspManagedScript {
             return null;
         }
 
-        return Microbot.getRs2NpcCache().query()
-                .fromWorldView()
-                .where(npc -> npc != null
+        return KspLiveScene.nearestNpcModel(playerLocation, 40,
+                npc -> npc != null
                         && !npc.isDead()
                         && npc.getCombatLevel() > 0
                         && !this.isIgnoredCombatNpc(npc.getName())
                         && this.isActiveCombatLocation(npc.getWorldLocation(), stage)
                         && (Rs2Player.isInteracting()
                             || npc.getWorldLocation().distanceTo(playerLocation) <= PASSIVE_ATTACKER_MAX_DISTANCE)
-                        && Objects.equals(npc.getInteracting(), localPlayer))
-                .nearestOnClientThread();
+                        && Objects.equals(npc.getInteracting(), localPlayer));
     }
 
     private boolean isIgnoredCombatNpc(String npcName) {
