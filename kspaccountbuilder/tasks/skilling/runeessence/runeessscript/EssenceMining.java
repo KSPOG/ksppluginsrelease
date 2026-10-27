@@ -24,7 +24,6 @@ import net.runelite.client.plugins.microbot.util.bank.enums.BankLocation;
 import net.runelite.client.plugins.microbot.util.equipment.Rs2Equipment;
 import net.runelite.client.plugins.microbot.util.inventory.Rs2Inventory;
 import net.runelite.client.plugins.microbot.util.player.Rs2Player;
-import net.runelite.client.plugins.microbot.util.gameobject.Rs2GameObject;
 import net.runelite.client.plugins.microbot.util.walker.Rs2Walker;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -382,8 +381,9 @@ public class EssenceMining extends KspManagedScript
                 try
                 {
                     String action = liveNpc.getId() == 3088 ? "Exit" : "Use";
-                    if (liveNpc.click(action)
-                            || liveNpc.click("Exit".equals(action) ? "Use" : "Exit"))
+                    if (KspLiveScene.clickInstancePortal(liveNpc, action)
+                            || KspLiveScene.clickInstancePortal(liveNpc,
+                                    "Exit".equals(action) ? "Use" : "Exit"))
                     {
                         markPortalExit("live NPC", liveNpc.getId());
                         return;
@@ -435,8 +435,8 @@ public class EssenceMining extends KspManagedScript
                             new net.runelite.client.plugins.microbot.api.tileobject.models.Rs2TileObjectModel(liveObject);
                     String preferred = portalObjectAction(id);
                     String alternate = "Exit".equals(preferred) ? "Use" : "Exit";
-                    if ((model.hasAction(preferred) && Rs2GameObject.interact(liveObject, preferred))
-                            || (model.hasAction(alternate) && Rs2GameObject.interact(liveObject, alternate)))
+                    if ((model.hasAction(preferred) && KspLiveScene.clickInstancePortal(liveObject, preferred))
+                            || (model.hasAction(alternate) && KspLiveScene.clickInstancePortal(liveObject, alternate)))
                     {
                         markPortalExit("live object", id);
                         return;
