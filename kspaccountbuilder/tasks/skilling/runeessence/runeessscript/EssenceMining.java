@@ -42,6 +42,7 @@ public class EssenceMining extends KspManagedScript
     private static final int PORTAL_APPROACH_DISTANCE = 3;
     private static final long PORTAL_SEARCH_TIMEOUT_MS = 10_000L;
     private static final long PORTAL_SCENE_WALK_COOLDOWN_MS = 1_600L;
+    private static final long PORTAL_SCENE_SCAN_INTERVAL_MS = 700L;
     private static final int PORTAL_LOCAL_APPROACH_TILES = 12;
     private static final int PORTAL_SCENE_DISCOVERY_RADIUS = 104;
     private static final long PORTAL_EXIT_TIMEOUT_MS = 8_000L;
@@ -67,6 +68,7 @@ public class EssenceMining extends KspManagedScript
     private boolean bankCloseRequested;
     private long portalSearchStartedAtMs;
     private long lastPortalSceneWalkAtMs;
+    private long lastPortalSceneScanAtMs;
     private boolean lastObservedInsideMine;
     private volatile EssenceState state = EssenceState.PREPARING;
     private volatile String status = "Idle";
@@ -83,6 +85,7 @@ public class EssenceMining extends KspManagedScript
         state = EssenceState.PREPARING;
         portalSearchStartedAtMs = 0L;
         lastPortalSceneWalkAtMs = 0L;
+        lastPortalSceneScanAtMs = 0L;
         lastObservedInsideMine = false;
         status = "Starting rune essence mining";
 
@@ -345,6 +348,14 @@ public class EssenceMining extends KspManagedScript
         }
         if (Rs2Player.isAnimating() || Rs2Player.isInteracting() || !canAct()) return;
 
+        // Full-scene searches are expensive; never repeat both the object-ID
+        // and name-based portal scans on every 100ms script tick.
+        long scanAt = System.currentTimeMillis();
+        if (lastPortalSceneScanAtMs > 0L
+                && scanAt - lastPortalSceneScanAtMs < PORTAL_SCENE_SCAN_INTERVAL_MS)
+            return;
+        lastPortalSceneScanAtMs = scanAt;
+
         WorldPoint player = Rs2Player.getWorldLocation();
         if (player == null) return;
 
@@ -526,6 +537,7 @@ public class EssenceMining extends KspManagedScript
     {
         portalSearchStartedAtMs = 0L;
         lastPortalSceneWalkAtMs = 0L;
+        lastPortalSceneScanAtMs = 0L;
     }
 
     public boolean recoverFromEssenceMine()
