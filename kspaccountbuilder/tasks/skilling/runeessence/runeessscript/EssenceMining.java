@@ -237,8 +237,8 @@ public class EssenceMining extends KspManagedScript
         }
 
         WorldPoint player = Rs2Player.getWorldLocation();
-        Rs2NpcModel aubury = Microbot.getRs2NpcCache().query()
-                .fromWorldView().withName("Aubury").nearestOnClientThread();
+        Rs2NpcModel aubury = KspLiveScene.nearestNpcModel(player, 35,
+                npc -> "Aubury".equalsIgnoreCase(npc.getName()));
 
         if (player == null || aubury == null || aubury.getWorldLocation() == null
                 || player.distanceTo(aubury.getWorldLocation()) > NPC_REACH_DISTANCE)
@@ -271,10 +271,8 @@ public class EssenceMining extends KspManagedScript
             return;
         }
 
-        var essenceRock = Microbot.getRs2TileObjectCache().query()
-                .fromWorldView()
-                .withName("Rune Essence")
-                .nearestOnClientThread();
+        var essenceRock = KspLiveScene.nearestModel(Rs2Player.getWorldLocation(), 30,
+                obj -> "Rune Essence".equalsIgnoreCase(obj.getName()));
         if (essenceRock != null && essenceRock.click("Mine"))
         {
             lastActionAtMs = System.currentTimeMillis();
@@ -331,8 +329,8 @@ public class EssenceMining extends KspManagedScript
         int liveNpcId = KspLiveScene.nearestNpcId(PORTAL_NPC_IDS, player, 100);
         if (liveNpcId > 0)
         {
-            Rs2NpcModel liveNpc = Microbot.getRs2NpcCache().query()
-                    .fromWorldView().withId(liveNpcId).nearestOnClientThread();
+            Rs2NpcModel liveNpc = KspLiveScene.nearestNpcModel(player, 100,
+                    npc -> npc.getId() == liveNpcId);
             if (liveNpc != null)
             {
                 if (Rs2Player.isMoving())
