@@ -22,6 +22,7 @@ import net.runelite.client.plugins.microbot.kspaccountbuilder.KspBankMode;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.KspTaskDebug;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.KspWalkerGuard;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.ksputil.KspBankWidgetHelper;
+import net.runelite.client.plugins.microbot.kspaccountbuilder.ksputil.KspLiveScene;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.fishing.areas.Areas;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.fishing.helper.KaramjaTravelHelper;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.fishing.levelreqfishing.LevelReqs;
@@ -338,8 +339,8 @@ public class FishingScript extends KspManagedScript
         WorldPoint player = Rs2Player.getWorldLocation();
         if (player == null) return true;
 
-        Rs2TileObjectModel fire = Microbot.getRs2TileObjectCache().query()
-                .fromWorldView().withId(TROUT_SALMON_FIRE_ID).nearest();
+        Rs2TileObjectModel fire = KspLiveScene.nearestModel(
+                player, 30, object -> object.getId() == TROUT_SALMON_FIRE_ID);
         if (fire == null) {
             pendingCookingFireActionAtMs = 0L;
             KspWalkerGuard.clear(WALK_KEY_TO_TROUT_SALMON_FIRE);
@@ -711,30 +712,16 @@ public class FishingScript extends KspManagedScript
             WorldArea fishingArea,
             boolean requireInsideArea)
     {
-        List<Rs2NpcModel> candidates = Microbot.getRs2NpcCache().query()
-                .fromWorldView()
-                .within(searchCenter, searchRadius)
-                .where(candidate -> candidate != null
+        return KspLiveScene.nearestNpcModel(
+                searchCenter, searchRadius,
+                candidate -> candidate != null
                         && candidate.getWorldLocation() != null
                         && isFishingSpotName(candidate)
                         && (requireInsideArea
                         ? fishingArea.contains(candidate.getWorldLocation())
                         : isNearTargetArea(candidate.getWorldLocation(), OUT_OF_AREA_SPOT_FALLBACK_RADIUS))
-                        && isInteractableFishingSpot(candidate))
-                .toListOnClientThread();
-
-        return candidates.stream()
-                .filter(candidate -> !getAvailableAction(candidate, target.getActions()).isEmpty())
-                .min(Comparator.comparingInt(candidate -> {
-                    WorldPoint playerLocation = Rs2Player.getWorldLocation();
-                    WorldPoint candidateLocation = candidate.getWorldLocation();
-                    if (playerLocation == null || candidateLocation == null)
-                    {
-                        return Integer.MAX_VALUE;
-                    }
-                    return playerLocation.distanceTo(candidateLocation);
-                }))
-                .orElse(null);
+                        && isInteractableFishingSpot(candidate)
+                        && !getAvailableAction(candidate, target.getActions()).isEmpty());
     }
 
     private boolean isFishingSpotName(Rs2NpcModel candidate)

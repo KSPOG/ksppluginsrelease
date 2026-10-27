@@ -14,6 +14,7 @@ import javax.inject.Singleton;
 import net.runelite.api.ObjectComposition;
 import net.runelite.api.ObjectID;
 import net.runelite.api.Skill;
+import net.runelite.api.TileObject;
 import net.runelite.api.coords.WorldArea;
 import net.runelite.api.coords.WorldPoint;
 import net.runelite.client.plugins.microbot.Microbot;
@@ -25,6 +26,8 @@ import net.runelite.client.plugins.microbot.kspaccountbuilder.KspEquipmentAction
 import net.runelite.client.plugins.microbot.kspaccountbuilder.KspTaskDebug;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.KspWalkerGuard;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.ksputil.KspBankWidgetHelper;
+import net.runelite.client.plugins.microbot.kspaccountbuilder.ksputil.KspLiveScene;
+import net.runelite.client.plugins.microbot.util.gameobject.Rs2GameObject;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.mining.areas.Areas;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.mining.equiplevels.PickaxeEquip;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.mining.levelreqmining.MiningReq;
@@ -57,6 +60,10 @@ public class MiningScript extends KspManagedScript
     private static final int OUT_OF_AREA_ROCK_FALLBACK_RADIUS = 4;
     private static final String BANK_WALK_KEY = "Mining:bank";
     private static final String DEPOSIT_BOX_WALK_KEY = "Mining:port-sarim-deposit-box";
+    private static final WorldPoint PORT_SARIM_DEPOSIT_TILE = new WorldPoint(3045, 3234, 0);
+    private static final int PORT_SARIM_DEPOSIT_OBJECT_ID = 26254;
+    private static final long DEPOSIT_BOX_RETRY_MS = 2_000L;
+    private static final int DEPOSIT_BOX_MAX_ATTEMPTS = 5;
     private static final int MUGGER_COMBAT_LEVEL = 6;
     private static final int RAT_COMBAT_LEVEL = 6;
     private static final int SILVER_SAFE_COMBAT_LEVEL = (MUGGER_COMBAT_LEVEL * 2) + 1;
@@ -122,6 +129,9 @@ public class MiningScript extends KspManagedScript
     private long lastUnavailableRockReportAtMs;
     private long lastUnderAttackAtMs;
     private long lastBankActionAtMs;
+    private long lastDepositBoxAttemptAtMs;
+    private int failedDepositBoxOpenAttempts;
+    private boolean useBankInsteadOfDepositBox;
     private long pendingBankInventoryActionAtMs;
     private int pendingBankInventoryEmptySlots = -1;
     private final KspEquipmentActionGuard equipmentGuard = new KspEquipmentActionGuard();
@@ -191,13 +201,20 @@ public class MiningScript extends KspManagedScript
                     Rs2Inventory.isFull(),
                     Rs2Bank.isOpen());
 
+            if (!Rs2Inventory.isFull())
+            {
+                failedDepositBoxOpenAttempts = 0;
+                lastDepositBoxAttemptAtMs = 0L;
+                useBankInsteadOfDepositBox = false;
+            }
+
             if (Rs2Inventory.isFull())
             {
                 debug("Inventory full; banking ores | player={} area={} pickaxeToKeep={}",
                         Rs2Player.getWorldLocation(),
                         targetArea.getDisplayName(),
                         resolveInventoryPickaxeToKeep(miningLevel));
-                if (targetArea.isRimmingtonArea())
+                if (targetArea.isRimmingtonArea() && !useBankInsteadOfDepositBox)
                 {
                     depositRimmingtonOresAtPortSarim(miningLevel);
                 }
@@ -536,37 +553,90 @@ public class MiningScript extends KspManagedScript
 
     private void depositRimmingtonOresAtPortSarim(int miningLevel)
     {
-        if (!ensureInventoryTabOpenFast()) return;
-
         WorldPoint player = Rs2Player.getWorldLocation();
-        WorldArea area = Areas.PORT_SARIM_DEPOSIT_BOX.toWorldArea();
         if (player == null) return;
 
-        if (!area.contains(player))
+        // Finish the walk at the real deposit-box object, rather than a
+        // random tile inside the relatively large Port Sarim area.
+        if (!Rs2DepositBox.isOpen() && player.distanceTo(PORT_SARIM_DEPOSIT_TILE) > 5)
         {
-            Microbot.status = "Walking to " + Areas.PORT_SARIM_DEPOSIT_BOX.getDisplayName();
+            Microbot.status = "Walking to Port Sarim deposit box";
             KspWalkerGuard.walkToDestination(
                     DEPOSIT_BOX_WALK_KEY,
-                    Areas.PORT_SARIM_DEPOSIT_BOX::getRandomPoint,
-                    area::contains,
-                    3,
+                    () -> PORT_SARIM_DEPOSIT_TILE,
+                    point -> point != null && point.distanceTo(PORT_SARIM_DEPOSIT_TILE) <= 5,
+                    2,
                     WEB_WALK_COOLDOWN_MS);
             return;
         }
 
-        KspWalkerGuard.clear(DEPOSIT_BOX_WALK_KEY);
+        KspWalkerGuard.clearReachedDestination(DEPOSIT_BOX_WALK_KEY, "Mining:deposit-box-in-range");
 
         if (!Rs2DepositBox.isOpen())
         {
-            Rs2DepositBox.openDepositBox();
+            long now = System.currentTimeMillis();
+            if (now - lastDepositBoxAttemptAtMs < DEPOSIT_BOX_RETRY_MS) return;
+            lastDepositBoxAttemptAtMs = now;
+
+            // TileObject comes from the live rendered scene (including wall,
+            // decorative and game-object layers), NOT Rs2DepositBox's cache
+            // search. Never spam the same failed interaction every tick.
+            TileObject box = KspLiveScene.nearestTileObject(
+                    new int[] {PORT_SARIM_DEPOSIT_OBJECT_ID}, player, 12);
+            if (box == null)
+            {
+                box = KspLiveScene.nearestTileObject("Bank deposit box", player, 12);
+            }
+            if (box == null)
+            {
+                box = KspLiveScene.nearestTileObject("Deposit box", player, 12);
+            }
+
+            boolean clicked = false;
+            if (box != null)
+            {
+                try
+                {
+                    clicked = Rs2GameObject.interact(box, "Deposit");
+                }
+                catch (RuntimeException exception)
+                {
+                    debug("Live deposit-box interaction failed | id={} position={} reason={}",
+                            box.getId(), box.getWorldLocation(), exception.toString());
+                }
+            }
+            failedDepositBoxOpenAttempts++;
+            debug("Port Sarim live-scene deposit attempt | attempt={} object={} clicked={} player={}",
+                    failedDepositBoxOpenAttempts,
+                    box == null ? "not loaded" : box.getId(),
+                    clicked, player);
+            Microbot.status = clicked ? "Opening Port Sarim deposit box"
+                    : "Retrying Port Sarim live deposit box";
+
+            if (failedDepositBoxOpenAttempts >= DEPOSIT_BOX_MAX_ATTEMPTS)
+            {
+                // Do not trap the entire Account Builder at Port Sarim when
+                // the deposit-box object/widget cannot be opened this trip.
+                useBankInsteadOfDepositBox = true;
+                KspWalkerGuard.clear(DEPOSIT_BOX_WALK_KEY);
+                lastBankActionAtMs = 0L;
+                KspTaskDebug.info(log, true, "Mining",
+                        "Port Sarim deposit box unavailable after {} attempts; recovering via standard bank",
+                        failedDepositBoxOpenAttempts);
+                bankOresOnly(miningLevel);
+            }
             return;
         }
 
+        failedDepositBoxOpenAttempts = 0;
+        lastDepositBoxAttemptAtMs = 0L;
+        if (!ensureInventoryTabOpenFast()) return;
         if (bankInventoryActionPending()) return;
         String keep = resolveInventoryPickaxeToKeep(miningLevel);
         List<String> itemsToKeep = keep == null ? Collections.emptyList() : Collections.singletonList(keep);
         int before = Rs2Inventory.emptySlotCount();
-        if (Rs2DepositBox.depositAllExcept(itemsToKeep, false)) {
+        if (Rs2DepositBox.depositAllExcept(itemsToKeep, false))
+        {
             markBankInventoryAction(before);
             return;
         }
@@ -642,21 +712,39 @@ public class MiningScript extends KspManagedScript
         if (now - lastObjectInteractionAtMs < OBJECT_INTERACTION_COOLDOWN_MS) return;
 
         if (!MiningRockRetryPolicy.shouldSearch(now, lastUnavailableRockAtMs)) return;
+        RockLevel type = targetArea.isTinCopperArea() ? getStarterRockToMine() : resolveTargetRock(miningLevel);
+        if (type == null) return;
+        TileObject liveRock = KspLiveScene.nearestMineableRock(
+                getTargetRockIds(type), type.getDisplayName(), targetArea.toWorldArea(),
+                Rs2Player.getWorldLocation(), Math.max(15, getAreaSearchRadius() + ROCK_SEARCH_PADDING_TILES));
+        if (liveRock != null)
+        {
+            if (!canStartMiningInTargetArea(now)) return;
+            lastObjectInteractionAtMs = now;
+            Microbot.status = "Mining " + type.getDisplayName() + " (live scene)";
+            boolean clicked = Rs2GameObject.interact(liveRock, "Mine");
+            pendingObjectInteractionAtMs = clicked ? now : 0L;
+            debug("Live rock interaction | type={} id={} pos={} dispatched={}",
+                    type, liveRock.getId(), liveRock.getWorldLocation(), clicked);
+            return;
+        }
+
+        // A cache query remains as a fallback when a scene update is pending
+        // or a special rock's currently displayed ID is not in our known list.
         Rs2TileObjectModel rock = findNearestRockInTargetArea(miningLevel);
         if (rock == null || !canStartMiningInTargetArea(now)) return;
-
         lastObjectInteractionAtMs = now;
-        Microbot.status = "Mining " + rock.getName();
+        Microbot.status = "Mining " + rock.getName() + " (fallback)";
         if (rock.click("Mine"))
         {
             pendingObjectInteractionAtMs = now;
-            debug("Rock interaction dispatched | rock={} id={} loc={} player={}",
-                    rock.getName(), rock.getId(), rock.getWorldLocation(), Rs2Player.getWorldLocation());
+            debug("Fallback rock interaction dispatched | rock={} id={} loc={}",
+                    rock.getName(), rock.getId(), rock.getWorldLocation());
         }
         else
         {
             pendingObjectInteractionAtMs = 0L;
-            debug("Rock interaction rejected | rock={} id={} loc={}",
+            debug("Fallback rock interaction rejected | rock={} id={} loc={}",
                     rock.getName(), rock.getId(), rock.getWorldLocation());
         }
     }
@@ -1166,6 +1254,9 @@ public class MiningScript extends KspManagedScript
     public void shutdown()
     {
         lastBankActionAtMs = 0L;
+        lastDepositBoxAttemptAtMs = 0L;
+        failedDepositBoxOpenAttempts = 0;
+        useBankInsteadOfDepositBox = false;
         pendingBankInventoryActionAtMs = 0L;
         pendingBankInventoryEmptySlots = -1;
         equipmentGuard.reset();

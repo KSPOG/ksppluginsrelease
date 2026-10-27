@@ -17,6 +17,7 @@ import net.runelite.api.gameval.ObjectID;
 import net.runelite.client.plugins.microbot.Microbot;
 import net.runelite.client.plugins.microbot.api.npc.models.Rs2NpcModel;
 import net.runelite.client.plugins.microbot.api.tileobject.models.Rs2TileObjectModel;
+import net.runelite.client.plugins.microbot.kspaccountbuilder.ksputil.KspLiveScene;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.woodcutting.treelevel.TreeLevel;
 import net.runelite.client.plugins.microbot.util.dialogues.Rs2Dialogue;
 import net.runelite.client.plugins.microbot.util.inventory.InteractOrder;
@@ -80,12 +81,9 @@ final class AccountBuilderForestryHandler {
     }
 
     private boolean handleSapling(TreeLevel tree) {
-        Rs2TileObjectModel sapling = Microbot.getRs2TileObjectCache().query()
-                .withName("Struggling sapling")
-                .toListOnClientThread().stream()
-                .filter(x -> x != null && near(x.getWorldLocation()))
-                .filter(x -> hasAction(x, "Add-mulch"))
-                .findFirst().orElse(null);
+        Rs2TileObjectModel sapling = KspLiveScene.nearestModel(Rs2Player.getWorldLocation(), EVENT_DISTANCE,
+                x -> x != null && "Struggling sapling".equalsIgnoreCase(x.getName())
+                        && near(x.getWorldLocation()) && hasAction(x, "Add-mulch"));
         if (sapling == null) return false;
 
         Microbot.status = "Forestry: Struggling Sapling";
@@ -108,17 +106,15 @@ final class AccountBuilderForestryHandler {
                 ObjectID.GATHERING_EVENT_SAPLING_INGREDIENT_4C,
                 ObjectID.GATHERING_EVENT_SAPLING_INGREDIENT_5);
 
-        Rs2TileObjectModel ingredient = Microbot.getRs2TileObjectCache().query()
-                .where(x -> x != null && ids.contains(x.getId()) && near(x.getWorldLocation()) && hasAction(x, "Collect"))
-                .toListOnClientThread().stream()
-                .filter(x -> !saplingTriedByStage[stage].contains(x.getId()))
-                .findFirst().orElse(null);
+        Rs2TileObjectModel ingredient = KspLiveScene.nearestModel(Rs2Player.getWorldLocation(), EVENT_DISTANCE,
+                x -> x != null && ids.contains(x.getId()) && near(x.getWorldLocation())
+                        && hasAction(x, "Collect")
+                        && !saplingTriedByStage[stage].contains(x.getId()));
 
         if (ingredient == null) {
             saplingTriedByStage[stage].clear();
-            ingredient = Microbot.getRs2TileObjectCache().query()
-                    .where(x -> x != null && ids.contains(x.getId()) && near(x.getWorldLocation()) && hasAction(x, "Collect"))
-                    .nearestOnClientThread();
+            ingredient = KspLiveScene.nearestModel(Rs2Player.getWorldLocation(), EVENT_DISTANCE,
+                    x -> x != null && ids.contains(x.getId()) && near(x.getWorldLocation()) && hasAction(x, "Collect"));
         }
 
         if (ingredient != null && canInteract(ingredient.getHash(), "Collect")) {
@@ -131,9 +127,9 @@ final class AccountBuilderForestryHandler {
     }
 
     private boolean handleEntlings(TreeLevel tree) {
-        List<Rs2NpcModel> entlings = Microbot.getRs2NpcCache().query()
-                .withId(NpcID.GATHERING_EVENT_ENTLINGS_NPC_01)
-                .toList().stream().filter(x -> x != null && near(x.getWorldLocation())).collect(Collectors.toList());
+        List<Rs2NpcModel> entlings = KspLiveScene.nearbyNpcModels(Rs2Player.getWorldLocation(), EVENT_DISTANCE,
+                x -> x != null && x.getId() == NpcID.GATHERING_EVENT_ENTLINGS_NPC_01
+                        && near(x.getWorldLocation()));
         if (entlings.isEmpty()) return false;
 
         Microbot.status = "Forestry: Friendly Entlings";
@@ -157,12 +153,11 @@ final class AccountBuilderForestryHandler {
     }
 
     private boolean handleHives(TreeLevel tree) {
-        Rs2NpcModel hive = Microbot.getRs2NpcCache().query()
-                .where(x -> x != null
+        Rs2NpcModel hive = KspLiveScene.nearestNpcModel(Rs2Player.getWorldLocation(), EVENT_DISTANCE,
+                x -> x != null
                         && (x.getId() == NpcID.GATHERING_EVENT_BEES_BEEBOX_1
                         || x.getId() == NpcID.GATHERING_EVENT_BEES_BEEBOX_2)
-                        && near(x.getWorldLocation()))
-                .nearest();
+                        && near(x.getWorldLocation()));
         if (hive == null) return false;
 
         Microbot.status = "Forestry: Beehive";
@@ -183,8 +178,8 @@ final class AccountBuilderForestryHandler {
     }
 
     private boolean handlePheasant(TreeLevel tree) {
-        Rs2NpcModel forester = Microbot.getRs2NpcCache().query()
-                .withId(NpcID.GATHERING_EVENT_PHEASANT_FORESTER).nearest();
+        Rs2NpcModel forester = KspLiveScene.nearestNpcModel(Rs2Player.getWorldLocation(), EVENT_DISTANCE,
+                x -> x.getId() == NpcID.GATHERING_EVENT_PHEASANT_FORESTER);
         if (forester == null || !near(forester.getWorldLocation())) return false;
 
         Microbot.status = "Forestry: Pheasant Control";
@@ -200,17 +195,13 @@ final class AccountBuilderForestryHandler {
             return true;
         }
 
-        List<Rs2NpcModel> pheasants = Microbot.getRs2NpcCache().query()
-                .withId(NpcID.GATHERING_EVENT_PHEASANT).toList();
-        Rs2TileObjectModel nest = Microbot.getRs2TileObjectCache().query()
-                .withId(ObjectID.GATHERING_EVENT_PHEASANT_NEST02)
-                .toListOnClientThread().stream()
-                .filter(x -> x != null && near(x.getWorldLocation()))
-                .filter(x -> pheasants.stream().noneMatch(p -> p != null
-                        && p.getWorldLocation() != null
-                        && p.getWorldLocation().equals(x.getWorldLocation())))
-                .min(Comparator.comparingInt(x -> x.getWorldLocation().distanceTo(Rs2Player.getWorldLocation())))
-                .orElse(null);
+        List<Rs2NpcModel> pheasants = KspLiveScene.nearbyNpcModels(Rs2Player.getWorldLocation(), EVENT_DISTANCE,
+                x -> x.getId() == NpcID.GATHERING_EVENT_PHEASANT);
+        Rs2TileObjectModel nest = KspLiveScene.nearestModel(Rs2Player.getWorldLocation(), EVENT_DISTANCE,
+                x -> x.getId() == ObjectID.GATHERING_EVENT_PHEASANT_NEST02
+                        && near(x.getWorldLocation())
+                        && pheasants.stream().noneMatch(p -> p.getWorldLocation() != null
+                                && p.getWorldLocation().equals(x.getWorldLocation())));
         if (nest != null && canInteract(nest.getHash(), "Nest") && nest.click()) {
             markInteraction(nest.getHash(), "Nest");
         }
@@ -218,35 +209,33 @@ final class AccountBuilderForestryHandler {
     }
 
     private boolean handleFox() {
-        Rs2NpcModel fox = Microbot.getRs2NpcCache().query()
-                .where(x -> x != null
+        Rs2NpcModel fox = KspLiveScene.nearestNpcModel(Rs2Player.getWorldLocation(), EVENT_DISTANCE,
+                x -> x != null
                         && (x.getId() == NpcID.GATHERING_EVENT_POACHERS_FOX_OUTDOORS
                         || x.getId() == NpcID.GATHERING_EVENT_POACHERS_FOX_INDOORS)
-                        && near(x.getWorldLocation()))
-                .nearest();
+                        && near(x.getWorldLocation()));
         if (fox == null) return false;
 
         Microbot.status = "Forestry: Poachers / Fox";
-        Rs2NpcModel trap = Microbot.getRs2NpcCache().query()
-                .withId(NpcID.GATHERING_EVENT_POACHERS_TRAP).nearest();
+        Rs2NpcModel trap = KspLiveScene.nearestNpcModel(Rs2Player.getWorldLocation(), EVENT_DISTANCE,
+                x -> x.getId() == NpcID.GATHERING_EVENT_POACHERS_TRAP);
         if (trap != null && near(trap.getWorldLocation())) clickNpc(trap, "Disarm");
         return true;
     }
 
     private boolean handleRitual(TreeLevel tree) {
-        Rs2NpcModel dryad = Microbot.getRs2NpcCache().query()
-                .withId(NpcID.GATHERING_EVENT_ENCHANTED_RITUAL_DRYAD).nearest();
+        Rs2NpcModel dryad = KspLiveScene.nearestNpcModel(Rs2Player.getWorldLocation(), EVENT_DISTANCE,
+                x -> x.getId() == NpcID.GATHERING_EVENT_ENCHANTED_RITUAL_DRYAD);
         if (dryad == null || !near(dryad.getWorldLocation())) return false;
 
         Microbot.status = "Forestry: Enchantment Ritual";
         ensureInventorySpace(tree, 1);
 
-        List<Rs2NpcModel> circles = Microbot.getRs2NpcCache().query()
-                .where(x -> x != null
+        List<Rs2NpcModel> circles = KspLiveScene.nearbyNpcModels(Rs2Player.getWorldLocation(), EVENT_DISTANCE,
+                x -> x != null
                         && x.getId() >= NpcID.GATHERING_EVENT_ENCHANTED_RITUAL_A_1
                         && x.getId() <= NpcID.GATHERING_EVENT_ENCHANTED_RITUAL_D_4
-                        && near(x.getWorldLocation()))
-                .toList();
+                        && near(x.getWorldLocation()));
         Rs2NpcModel target = solveRitual(circles);
         if (target != null && !target.getWorldLocation().equals(Rs2Player.getWorldLocation())) {
             moveDirect(target.getHash(), target.getWorldLocation(), target.getMinimapLocation(), target.getCanvasTilePoly());
@@ -255,14 +244,13 @@ final class AccountBuilderForestryHandler {
     }
 
     private boolean handleLeprechaun() {
-        Rs2NpcModel leprechaun = Microbot.getRs2NpcCache().query()
-                .withId(NpcID.GATHERING_EVENT_WOODCUTTING_LEPRECHAUN).nearest();
+        Rs2NpcModel leprechaun = KspLiveScene.nearestNpcModel(Rs2Player.getWorldLocation(), EVENT_DISTANCE,
+                x -> x.getId() == NpcID.GATHERING_EVENT_WOODCUTTING_LEPRECHAUN);
         if (leprechaun == null || !near(leprechaun.getWorldLocation())) return false;
 
         Microbot.status = "Forestry: Woodcutting Leprechaun";
-        Rs2TileObjectModel rainbow = Microbot.getRs2TileObjectCache().query()
-                .withId(ObjectID.GATHERING_EVENT_WOODCUTTING_LEPRECHAUN_RAINBOW)
-                .nearestOnClientThread();
+        Rs2TileObjectModel rainbow = KspLiveScene.nearestModel(Rs2Player.getWorldLocation(), EVENT_DISTANCE,
+                x -> x.getId() == ObjectID.GATHERING_EVENT_WOODCUTTING_LEPRECHAUN_RAINBOW);
         if (rainbow != null && near(rainbow.getWorldLocation())
                 && !rainbow.getWorldLocation().equals(Rs2Player.getWorldLocation())) {
             moveDirect(rainbow.getHash(), rainbow.getWorldLocation(), rainbow.getMinimapLocation(), rainbow.getCanvasTilePoly());
@@ -271,16 +259,14 @@ final class AccountBuilderForestryHandler {
     }
 
     private boolean handleFlowers() {
-        Rs2NpcModel bush = Microbot.getRs2NpcCache().query()
-                .where(x -> x != null && isFloweringBush(x.getId()) && near(x.getWorldLocation()))
-                .nearest();
+        Rs2NpcModel bush = KspLiveScene.nearestNpcModel(Rs2Player.getWorldLocation(), EVENT_DISTANCE,
+                x -> x != null && isFloweringBush(x.getId()) && near(x.getWorldLocation()));
         if (bush == null) return false;
 
         Microbot.status = "Forestry: Flowering Tree";
-        Rs2NpcModel target = Microbot.getRs2NpcCache().query()
-                .where(x -> x != null && isFloweringBush(x.getId())
-                        && x.getAnimation() == -1 && near(x.getWorldLocation()))
-                .nearest();
+        Rs2NpcModel target = KspLiveScene.nearestNpcModel(Rs2Player.getWorldLocation(), EVENT_DISTANCE,
+                x -> x != null && isFloweringBush(x.getId())
+                        && x.getAnimation() == -1 && near(x.getWorldLocation()));
         if (target != null) clickNpc(target, "Tend-to");
         return true;
     }
@@ -330,11 +316,8 @@ final class AccountBuilderForestryHandler {
     }
 
     private Rs2TileObjectModel nearestObject(int id, String action) {
-        return Microbot.getRs2TileObjectCache().query()
-                .withId(id).toListOnClientThread().stream()
-                .filter(x -> x != null && near(x.getWorldLocation()) && hasAction(x, action))
-                .min(Comparator.comparingInt(x -> x.getWorldLocation().distanceTo(Rs2Player.getWorldLocation())))
-                .orElse(null);
+        return KspLiveScene.nearestModel(Rs2Player.getWorldLocation(), EVENT_DISTANCE,
+                x -> x != null && x.getId() == id && near(x.getWorldLocation()) && hasAction(x, action));
     }
 
     private boolean near(net.runelite.api.coords.WorldPoint point) {

@@ -16,6 +16,7 @@ import net.runelite.client.plugins.microbot.Script;
 import net.runelite.client.plugins.microbot.api.npc.models.Rs2NpcModel;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.KspTaskDebug;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.KspWalkerGuard;
+import net.runelite.client.plugins.microbot.kspaccountbuilder.ksputil.KspLiveScene;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.questing.romeoandjuliet.romeinv.Inv;
 import net.runelite.client.plugins.microbot.questhelper.questinfo.QuestVarPlayer;
 import net.runelite.client.plugins.microbot.util.bank.Rs2Bank;
@@ -596,10 +597,8 @@ public class RomeoScript extends KspManagedScript
 
     private Rs2NpcModel findNpc(String name)
     {
-        return Microbot.getRs2NpcCache().query()
-                .fromWorldView()
-                .withName(name)
-                .nearestOnClientThread();
+        return KspLiveScene.nearestNpcModel(Rs2Player.getWorldLocation(), 30,
+                npc -> name.equalsIgnoreCase(npc.getName()));
     }
 
     private boolean interactionReady()

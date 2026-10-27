@@ -21,6 +21,9 @@ import net.runelite.client.plugins.microbot.kspaccountbuilder.KspEquipmentAction
 import net.runelite.client.plugins.microbot.kspaccountbuilder.KspTaskDebug;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.KspWalkerGuard;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.ksputil.KspBankWidgetHelper;
+import net.runelite.client.plugins.microbot.kspaccountbuilder.ksputil.KspLiveScene;
+import net.runelite.client.plugins.microbot.util.gameobject.Rs2GameObject;
+import net.runelite.api.TileObject;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.selling.buyscript.Buy;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.woodcutting.equiplevels.AxeEquip;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.woodcutting.levelreqwc.WoodCuttingReq;
@@ -387,6 +390,23 @@ public class WoodCuttingScript extends KspManagedScript {
     private void chopForCurrentLevel(int woodcuttingLevel) {
         long now = System.currentTimeMillis();
         if (!canStartChopInTargetArea(now) || now - lastObjectInteractionAtMs < OBJECT_INTERACTION_COOLDOWN_MS) return;
+        TreeLevel type = getTargetTreeLevel(woodcuttingLevel);
+        WorldPoint here = Rs2Player.getWorldLocation();
+        TileObject live = type == null || here == null ? null
+                : KspLiveScene.nearestTileObject(type.getObjectCompositionName(), here,
+                        getAreaSearchRadius() + TREE_SEARCH_PADDING_TILES);
+        if (live != null && live.getWorldLocation() != null
+                && isNearTargetArea(live.getWorldLocation(), OUT_OF_AREA_TREE_FALLBACK_RADIUS))
+        {
+            lastObjectInteractionAtMs = now;
+            if (Rs2GameObject.interact(live, "Chop down"))
+            {
+                pendingObjectInteractionAtMs = now;
+                Microbot.status = "Chopping " + type.getDisplayName() + " (live scene)";
+            }
+            return;
+        }
+
         Rs2TileObjectModel tree = findNearestTreeInTargetArea(woodcuttingLevel);
         if (tree == null) {
             Microbot.status = "No reachable tree found";
@@ -444,17 +464,14 @@ public class WoodCuttingScript extends KspManagedScript {
     }
 
     private Rs2TileObjectModel findMatchingTree(WorldPoint searchCenter, int searchRadius, TreeLevel treeLevel, boolean mustBeInsideArea) {
-        return Microbot.getRs2TileObjectCache().query()
-                .fromWorldView()
-                .within(searchCenter, searchRadius)
-                .where(candidate -> candidate != null
+        return KspLiveScene.nearestModel(searchCenter, searchRadius,
+                candidate -> candidate != null
                         && candidate.getWorldLocation() != null
                         && (mustBeInsideArea ? targetArea.contains(candidate.getWorldLocation())
                         : isNearTargetArea(candidate.getWorldLocation(), OUT_OF_AREA_TREE_FALLBACK_RADIUS))
                         && isTargetTree(candidate, treeLevel)
                         && candidate.isReachable()
-                        && hasObjectAction(candidate, "Chop down"))
-                .nearestOnClientThread();
+                        && hasObjectAction(candidate, "Chop down"));
     }
 
     private boolean isNearTargetArea(WorldPoint point, int radius) {

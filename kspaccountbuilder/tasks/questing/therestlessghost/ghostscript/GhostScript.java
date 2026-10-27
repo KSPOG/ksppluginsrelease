@@ -9,6 +9,7 @@ import net.runelite.api.gameval.VarPlayerID;
 import net.runelite.client.plugins.microbot.Microbot;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.questing.shared.QuestRequirement;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.questing.shared.SimpleQuestScript;
+import net.runelite.client.plugins.microbot.kspaccountbuilder.ksputil.KspLiveScene;
 import net.runelite.client.plugins.microbot.util.equipment.Rs2Equipment;
 import net.runelite.client.plugins.microbot.util.gameobject.Rs2GameObject;
 import net.runelite.client.plugins.microbot.util.inventory.Rs2Inventory;
@@ -47,7 +48,8 @@ public class GhostScript extends SimpleQuestScript
                 return;
             }
             if (!walkTo("ghost's coffin", COFFIN, 3)) return;
-            var ghost = Microbot.getRs2NpcCache().query().fromWorldView().withName("Restless ghost").nearestOnClientThread();
+            var ghost = KspLiveScene.nearestNpcModel(Rs2Player.getWorldLocation(), 30,
+                    npc -> "Restless ghost".equalsIgnoreCase(npc.getName()));
             if (ghost != null) talkTo("Restless ghost", new WorldPoint(3250, 3195, 0));
             else if (Rs2GameObject.getGameObject(ObjectID.OPENGHOSTCOFFIN) != null)
                 interactObject(ObjectID.OPENGHOSTCOFFIN, "Search", COFFIN);

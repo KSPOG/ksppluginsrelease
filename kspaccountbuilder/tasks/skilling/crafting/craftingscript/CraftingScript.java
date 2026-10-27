@@ -818,13 +818,11 @@ public class CraftingScript extends KspManagedScript
             return null;
         }
 
-        return Microbot.getClientThread().invoke(() -> Microbot.getRs2TileObjectCache().query()
-                .fromWorldView()
-                .withName("Furnace")
-                .within(playerLocation, FURNACE_SEARCH_RADIUS)
-                .where(object -> object.getWorldLocation() != null
-                        && selectedFurnaceArea.getArea().contains(object.getWorldLocation()))
-                .nearestReachable(FURNACE_SEARCH_RADIUS));
+        return KspLiveScene.nearestModel(playerLocation, FURNACE_SEARCH_RADIUS,
+                object -> object != null && "Furnace".equalsIgnoreCase(object.getName())
+                        && object.getWorldLocation() != null
+                        && selectedFurnaceArea.getArea().contains(object.getWorldLocation())
+                        && object.isReachable());
     }
 
     private void debug(String message, Object... args)

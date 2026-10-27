@@ -5,6 +5,7 @@ import net.runelite.api.coords.WorldPoint;
 import net.runelite.client.plugins.microbot.Microbot;
 import net.runelite.client.plugins.microbot.api.npc.models.Rs2NpcModel;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.KspWalkerGuard;
+import net.runelite.client.plugins.microbot.kspaccountbuilder.ksputil.KspLiveScene;
 import net.runelite.client.plugins.microbot.util.dialogues.Rs2Dialogue;
 import net.runelite.client.plugins.microbot.util.player.Rs2Player;
 
@@ -395,11 +396,9 @@ public final class KaramjaTravelHelper
             return null;
         }
 
-        String[] names = npcNames.toArray(new String[0]);
-        return Microbot.getRs2NpcCache().query()
-                .fromWorldView()
-                .withNames(names)
-                .nearestOnClientThread();
+        return KspLiveScene.nearestNpcModel(Rs2Player.getWorldLocation(), 30,
+                npc -> npc.getName() != null
+                        && npcNames.stream().anyMatch(name -> name.equalsIgnoreCase(npc.getName())));
     }
 
     private static String getAvailableAction(Rs2NpcModel npc, List<String> preferredActions)

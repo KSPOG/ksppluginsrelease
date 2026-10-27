@@ -18,6 +18,7 @@ import net.runelite.client.plugins.microbot.api.tileobject.models.Rs2TileObjectM
 import net.runelite.client.plugins.microbot.globval.enums.InterfaceTab;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.KspWalkerGuard;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.ksputil.KspBankWidgetHelper;
+import net.runelite.client.plugins.microbot.kspaccountbuilder.ksputil.KspLiveScene;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.tutorialisland.areas.TutAreas;
 import net.runelite.client.plugins.microbot.util.bank.Rs2Bank;
 import net.runelite.client.plugins.microbot.util.camera.Rs2Camera;
@@ -692,7 +693,7 @@ public class TutorialIslandScript extends KspManagedScript
 
     private void gettingStarted()
     {
-        Rs2NpcModel npc = Microbot.getRs2NpcCache().query().fromWorldView().withId(NpcID.GIELINOR_GUIDE).nearest();
+        Rs2NpcModel npc = tutorialNpc(NpcID.GIELINOR_GUIDE);
         int progress = Microbot.getVarbitPlayerValue(281);
 
         if (progress < 3)
@@ -867,9 +868,7 @@ public class TutorialIslandScript extends KspManagedScript
 
         if (playerLocation.getX() < ACCOUNT_GUIDE_ROOM_MIN_X)
         {
-            Microbot.getRs2TileObjectCache().query().fromWorldView()
-                    .withId(ACCOUNT_GUIDE_DOOR_ID)
-                    .interact("Open");
+            clickNearestTutorialObject(ACCOUNT_GUIDE_DOOR_ID, "Open");
             return false;
         }
 
@@ -883,11 +882,11 @@ public class TutorialIslandScript extends KspManagedScript
             return true;
         }
 
-        Rs2NpcModel npc = Microbot.getRs2NpcCache().query().fromWorldView().withId(NpcID.SURVIVAL_EXPERT).nearest();
+        Rs2NpcModel npc = tutorialNpc(NpcID.SURVIVAL_EXPERT);
 
         if (npc == null)
         {
-            npc = Microbot.getRs2NpcCache().query().fromWorldView().withName("Survival Expert").nearest();
+            npc = tutorialNpc("Survival Expert");
         }
 
         WorldPoint playerLocation = Rs2Player.getWorldLocation();
@@ -969,7 +968,7 @@ public class TutorialIslandScript extends KspManagedScript
         }
         if (progress == 140)
         {
-            walkAndTalk(Microbot.getRs2NpcCache().query().fromWorldView().withId(NpcID.MASTER_CHEF).nearest());
+            walkAndTalk(tutorialNpc(NpcID.MASTER_CHEF));
             return;
         }
 
@@ -999,7 +998,7 @@ public class TutorialIslandScript extends KspManagedScript
 
     private void questGuide()
     {
-        Rs2NpcModel npc = Microbot.getRs2NpcCache().query().fromWorldView().withId(NpcID.QUEST_GUIDE).nearest();
+        Rs2NpcModel npc = tutorialNpc(NpcID.QUEST_GUIDE);
         int progress = Microbot.getVarbitPlayerValue(281);
 
         if (progress == 200 || progress == 210)
@@ -1033,11 +1032,7 @@ public class TutorialIslandScript extends KspManagedScript
             return;
         }
 
-        Rs2TileObjectModel ladder = Microbot.getRs2TileObjectCache()
-                .query()
-                .fromWorldView()
-                .withId(9726)
-                .nearestOnClientThread();
+        Rs2TileObjectModel ladder = tutorialObject(9726);
 
         if (prepareTutorialObjectInteraction(ladder, 4))
         {
@@ -1055,7 +1050,7 @@ public class TutorialIslandScript extends KspManagedScript
         int progress = Microbot.getVarbitPlayerValue(281);
         if (progress == 260 || progress == 330)
         {
-            walkAndTalk(Microbot.getRs2NpcCache().query().fromWorldView().withId(NpcID.MINING_INSTRUCTOR).nearest());
+            walkAndTalk(tutorialNpc(NpcID.MINING_INSTRUCTOR));
             return;
         }
 
@@ -1138,7 +1133,7 @@ public class TutorialIslandScript extends KspManagedScript
     private void combatGuide()
     {
         int progress = Microbot.getVarbitPlayerValue(281);
-        Rs2NpcModel instructor = Microbot.getRs2NpcCache().query().fromWorldView().withId(NpcID.COMBAT_INSTRUCTOR).nearest();
+        Rs2NpcModel instructor = tutorialNpc(NpcID.COMBAT_INSTRUCTOR);
 
         if (progress <= 370) { walkAndTalk(instructor); return; }
 
@@ -1213,7 +1208,7 @@ public class TutorialIslandScript extends KspManagedScript
     {
         if (isInsideRatPen(Rs2Player.getWorldLocation()))
         {
-            Microbot.getRs2TileObjectCache().query().fromWorldView().withId(RAT_PEN_GATE_ID).interact("Open");
+            clickNearestTutorialObject(RAT_PEN_GATE_ID, "Open");
         }
         else walkAndTalk(instructor);
     }
@@ -1249,7 +1244,7 @@ public class TutorialIslandScript extends KspManagedScript
 
     private void bankerGuide()
     {
-        Rs2NpcModel npc = Microbot.getRs2NpcCache().query().fromWorldView().withId(NpcID.ACCOUNT_GUIDE).nearest();
+        Rs2NpcModel npc = tutorialNpc(NpcID.ACCOUNT_GUIDE);
         int progress = Microbot.getVarbitPlayerValue(281);
 
         if (progress == 510)
@@ -1275,7 +1270,7 @@ public class TutorialIslandScript extends KspManagedScript
 
             if (!Rs2Player.isMoving() && !Rs2Player.isInteracting())
             {
-                Microbot.getRs2TileObjectCache().query().fromWorldView().interact(ObjectID.BANK_BOOTH_10083);
+                clickNearestTutorialObject(ObjectID.BANK_BOOTH_10083, "Bank");
             }
             return;
         }
@@ -1311,7 +1306,7 @@ public class TutorialIslandScript extends KspManagedScript
 
     private void prayerGuide()
     {
-        Rs2NpcModel npc = Microbot.getRs2NpcCache().query().fromWorldView().withId(NpcID.BROTHER_BRACE).nearest();
+        Rs2NpcModel npc = tutorialNpc(NpcID.BROTHER_BRACE);
         int progress = Microbot.getVarbitPlayerValue(281);
 
         if (progress == 540 || progress == 550)
@@ -1346,7 +1341,7 @@ public class TutorialIslandScript extends KspManagedScript
 
     private void mageGuide()
     {
-        Rs2NpcModel npc = Microbot.getRs2NpcCache().query().fromWorldView().withId(NpcID.MAGIC_INSTRUCTOR).nearest();
+        Rs2NpcModel npc = tutorialNpc(NpcID.MAGIC_INSTRUCTOR);
         int progress = Microbot.getVarbitPlayerValue(281);
 
         if (progress == 610 || progress == 620)
@@ -1773,7 +1768,7 @@ public class TutorialIslandScript extends KspManagedScript
         }
 
         if (!isTutorialInteractionPending("rat-gate")
-                && Microbot.getRs2TileObjectCache().query().fromWorldView().withId(RAT_PEN_GATE_ID).interact("Open"))
+                && clickNearestTutorialObject(RAT_PEN_GATE_ID, "Open"))
         {
             markTutorialInteraction("rat-gate");
         }
@@ -1792,7 +1787,7 @@ public class TutorialIslandScript extends KspManagedScript
 
     private boolean attackNearestRat()
     {
-        Rs2NpcModel rat = Microbot.getRs2NpcCache().query().fromWorldView().withName("Giant rat").nearest();
+        Rs2NpcModel rat = tutorialNpc("Giant rat");
 
         if (rat == null)
         {
@@ -1881,11 +1876,7 @@ public class TutorialIslandScript extends KspManagedScript
             treeActionDispatched = false;
         }
 
-        Rs2TileObjectModel tree = Microbot.getRs2TileObjectCache()
-                .query()
-                .fromWorldView()
-                .withName("Tree")
-                .nearestOnClientThread();
+        Rs2TileObjectModel tree = tutorialObject("Tree");
 
         if (!prepareTutorialObjectInteraction(tree, 4))
         {
@@ -1916,11 +1907,7 @@ public class TutorialIslandScript extends KspManagedScript
             fishingActionDispatched = false;
         }
 
-        Rs2NpcModel fishingSpot = Microbot.getRs2NpcCache()
-                .query()
-                .fromWorldView()
-                .withId(NpcID.FISHING_SPOT_3317)
-                .nearest();
+        Rs2NpcModel fishingSpot = tutorialNpc(NpcID.FISHING_SPOT_3317);
 
         if (fishingSpot == null || fishingSpot.getWorldLocation() == null)
         {
@@ -1990,15 +1977,11 @@ public class TutorialIslandScript extends KspManagedScript
             return null;
         }
 
-        return Microbot.getRs2TileObjectCache()
-                .query()
-                .fromWorldView()
-                .withId(ObjectID.FIRE_26185)
-                .within(origin, 3)
-                .nearestOnClientThread();
+        return KspLiveScene.nearestModel(origin, 3,
+                object -> object.getId() == ObjectID.FIRE_26185);
     }
 
-    private boolean hasNearbyFire() { return Microbot.getRs2TileObjectCache().query().fromWorldView().withId(ObjectID.FIRE_26185).nearest() != null; }
+    private boolean hasNearbyFire() { return tutorialObject(ObjectID.FIRE_26185) != null; }
 
     // -------------------------------------------------------------------------
     // Magic helper
@@ -2054,11 +2037,7 @@ public class TutorialIslandScript extends KspManagedScript
             return true;
         }
 
-        Rs2NpcModel chicken = Microbot.getRs2NpcCache()
-                .query()
-                .fromWorldView()
-                .withName("chicken")
-                .nearestOnClientThread();
+        Rs2NpcModel chicken = tutorialNpc("chicken");
 
         if (chicken == null)
         {
@@ -2151,7 +2130,8 @@ public class TutorialIslandScript extends KspManagedScript
 
         if (!Rs2Player.isMoving() && !Rs2Player.isInteracting())
         {
-            Microbot.getRs2TileObjectCache().query().fromWorldView().interact(26815);
+            Rs2TileObjectModel object = tutorialObject(26815);
+            if (object != null) object.click();
         }
     }
 
@@ -2300,12 +2280,26 @@ public class TutorialIslandScript extends KspManagedScript
 
     private Rs2TileObjectModel tutorialObject(int id)
     {
-        return Microbot.getRs2TileObjectCache().query().fromWorldView().withId(id).nearestOnClientThread();
+        return KspLiveScene.nearestModel(Rs2Player.getWorldLocation(), 45,
+                object -> object.getId() == id);
     }
 
     private Rs2TileObjectModel tutorialObject(String name)
     {
-        return Microbot.getRs2TileObjectCache().query().fromWorldView().withName(name).nearestOnClientThread();
+        return KspLiveScene.nearestModel(Rs2Player.getWorldLocation(), 45,
+                object -> name.equalsIgnoreCase(object.getName()));
+    }
+
+    private Rs2NpcModel tutorialNpc(int id)
+    {
+        return KspLiveScene.nearestNpcModel(Rs2Player.getWorldLocation(), 45,
+                npc -> npc.getId() == id);
+    }
+
+    private Rs2NpcModel tutorialNpc(String name)
+    {
+        return KspLiveScene.nearestNpcModel(Rs2Player.getWorldLocation(), 45,
+                npc -> name.equalsIgnoreCase(npc.getName()));
     }
 
     private boolean clickTutorialObject(int id, String action, int reach)
@@ -2351,11 +2345,7 @@ public class TutorialIslandScript extends KspManagedScript
 
     private boolean clickNearestTutorialObject(int objectId, String action)
     {
-        Rs2TileObjectModel object = Microbot.getRs2TileObjectCache()
-                .query()
-                .fromWorldView()
-                .withId(objectId)
-                .nearest();
+        Rs2TileObjectModel object = tutorialObject(objectId);
 
         if (isTutorialInteractionPending("object:" + objectId + ":" + action)) return false;
 
@@ -2365,10 +2355,9 @@ public class TutorialIslandScript extends KspManagedScript
             return true;
         }
 
-        boolean interacted = Microbot.getRs2TileObjectCache()
-                .query()
-                .fromWorldView()
-                .interact(objectId, action);
+        boolean interacted = false;
+        WorldPoint player = Rs2Player.getWorldLocation();
+        if (player != null) interacted = KspLiveScene.interact(objectId, player, 45, action);
         if (interacted) markTutorialInteraction("object:" + objectId + ":" + action);
         return interacted;
     }
@@ -2386,10 +2375,8 @@ public class TutorialIslandScript extends KspManagedScript
             return false;
         }
 
-        if (Microbot.getRs2TileObjectCache()
-                .query()
-                .fromWorldView()
-                .interact(objectId, "Open"))
+        WorldPoint player = Rs2Player.getWorldLocation();
+        if (player != null && KspLiveScene.interact(objectId, player, 45, "Open"))
         {
             markTutorialInteraction("open:" + objectId);
             return false;

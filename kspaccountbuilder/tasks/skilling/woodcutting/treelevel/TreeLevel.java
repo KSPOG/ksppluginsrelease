@@ -1,6 +1,8 @@
 package net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.woodcutting.treelevel;
 import net.runelite.api.ObjectComposition;
 import net.runelite.client.plugins.microbot.Microbot;
+import net.runelite.client.plugins.microbot.util.player.Rs2Player;
+import net.runelite.client.plugins.microbot.kspaccountbuilder.ksputil.KspLiveScene;
 import net.runelite.client.plugins.microbot.api.tileobject.models.Rs2TileObjectModel;
 import net.runelite.client.plugins.microbot.util.misc.Rs2UiHelper;
 import javax.annotation.Nullable;
@@ -34,12 +36,9 @@ public enum TreeLevel {
      */
     @Nullable
     public Rs2TileObjectModel findNearestChoppable(int radiusTiles) {
-        return Microbot.getRs2TileObjectCache().query()
-                .fromWorldView()
-                .within(radiusTiles)
-                .withName(objectCompositionName)
-                .where(TreeLevel::objectHasChopAction)
-                .nearestReachable(radiusTiles);
+        return KspLiveScene.nearestModel(Rs2Player.getWorldLocation(), radiusTiles,
+                object -> objectCompositionName.equalsIgnoreCase(object.getName())
+                        && objectHasChopAction(object) && object.isReachable());
     }
     /** Same as {@link #findNearestChoppable(int)} but entire query runs on the client thread. */
     @Nullable
