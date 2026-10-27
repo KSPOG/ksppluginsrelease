@@ -406,6 +406,19 @@ extends KspManagedScript {
         WorldPoint player = Rs2Player.getWorldLocation();
         if (player == null || !targetArea.toWorldArea().contains(player)) return;
 
+        long liveAttemptAt = System.currentTimeMillis();
+        if (!isWorldActionPending("anvil")
+                && liveAttemptAt - lastAnvilInteractAtMs >= ANVIL_INTERACT_COOLDOWN_MS
+                && KspLiveScene.interact("Anvil", player, 12, "Smith"))
+        {
+            lastAnvilInteractAtMs = liveAttemptAt;
+            awaitingSmithStartAtMs = liveAttemptAt;
+            markWorldAction("anvil");
+            return;
+        }
+
+        // Retain the original reachable-model path for transient live-scene
+        // failures while the scene is rebuilding.
         Rs2TileObjectModel anvil = findNearbyAnvilInTargetArea();
         if (anvil == null) {
             long now = System.currentTimeMillis();
