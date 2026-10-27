@@ -464,17 +464,14 @@ public class WoodCuttingScript extends KspManagedScript {
     }
 
     private Rs2TileObjectModel findMatchingTree(WorldPoint searchCenter, int searchRadius, TreeLevel treeLevel, boolean mustBeInsideArea) {
-        return Microbot.getRs2TileObjectCache().query()
-                .fromWorldView()
-                .within(searchCenter, searchRadius)
-                .where(candidate -> candidate != null
+        return KspLiveScene.nearestModel(searchCenter, searchRadius,
+                candidate -> candidate != null
                         && candidate.getWorldLocation() != null
                         && (mustBeInsideArea ? targetArea.contains(candidate.getWorldLocation())
                         : isNearTargetArea(candidate.getWorldLocation(), OUT_OF_AREA_TREE_FALLBACK_RADIUS))
                         && isTargetTree(candidate, treeLevel)
                         && candidate.isReachable()
-                        && hasObjectAction(candidate, "Chop down"))
-                .nearestOnClientThread();
+                        && hasObjectAction(candidate, "Chop down"));
     }
 
     private boolean isNearTargetArea(WorldPoint point, int radius) {
