@@ -13,6 +13,7 @@ import net.runelite.client.plugins.microbot.Script;
 import net.runelite.client.plugins.microbot.api.npc.models.Rs2NpcModel;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.KspTaskDebug;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.KspWalkerGuard;
+import net.runelite.client.plugins.microbot.kspaccountbuilder.ksputil.KspLiveScene;
 import net.runelite.client.plugins.microbot.util.dialogues.Rs2Dialogue;
 import net.runelite.client.plugins.microbot.util.inventory.Rs2Inventory;
 import net.runelite.client.plugins.microbot.util.player.Rs2Player;
@@ -243,10 +244,8 @@ public class RuneMystScript extends KspManagedScript
             RuneMystState talkingState,
             String walkingStatus)
     {
-        Rs2NpcModel npc = Microbot.getRs2NpcCache().query()
-                .fromWorldView()
-                .withName(npcName)
-                .nearestOnClientThread();
+        Rs2NpcModel npc = KspLiveScene.nearestNpcModel(Rs2Player.getWorldLocation(), 30,
+                candidate -> npcName.equalsIgnoreCase(candidate.getName()));
         WorldPoint playerLocation = Rs2Player.getWorldLocation();
 
         if (playerLocation == null || playerLocation.getPlane() != destination.getPlane()
