@@ -550,6 +550,277 @@ public final class KspLiveScene
         }).orElseGet(java.util.Collections::emptyList);
     }
 
+    /**
+     * Distance in TILES using scene coordinates, valid only when both local
+     * points belong to the player's current WorldView. Never compare a
+     * template WorldPoint to an instanced player's WorldPoint.
+     */
+    public static int distanceFromPlayerInScene(net.runelite.api.coords.LocalPoint target)
+    {
+        return Microbot.getClientThread().runOnClientThreadOptional(() ->
+        {
+            if (target == null || Microbot.getClient() == null
+                    || Microbot.getClient().getLocalPlayer() == null) return -1;
+            net.runelite.api.coords.LocalPoint player =
+                    Microbot.getClient().getLocalPlayer().getLocalLocation();
+            if (player == null || player.getWorldView() != target.getWorldView()) return -1;
+            return Math.max(Math.abs(target.getSceneX() - player.getSceneX()),
+                    Math.abs(target.getSceneY() - player.getSceneY()));
+        }).orElse(-1);
+    }
+
+    /**
+     * Walk at most eight local scene tiles in one canvas/minimap click. Use
+     * WorldPoint.fromScene from the LIVE WorldView, not fixed/template coords,
+     * and never call the global pathfinder inside an instanced Essence Mine.
+     */
+    public static boolean stepTowardSceneLocal(net.runelite.api.coords.LocalPoint target)
+    {
+        WorldPoint step = Microbot.getClientThread().runOnClientThreadOptional(() ->
+        {
+            if (target == null || Microbot.getClient() == null
+                    || Microbot.getClient().getLocalPlayer() == null) return null;
+            net.runelite.api.Player player = Microbot.getClient().getLocalPlayer();
+            net.runelite.api.coords.LocalPoint local = player.getLocalLocation();
+            net.runelite.api.WorldView view = player.getWorldView();
+            if (local == null || view == null || local.getWorldView() != target.getWorldView())
+                return null;
+            int diffX = target.getSceneX() - local.getSceneX();
+            int diffY = target.getSceneY() - local.getSceneY();
+            int sceneX = local.getSceneX() + Math.max(-8, Math.min(8, diffX));
+            int sceneY = local.getSceneY() + Math.max(-8, Math.min(8, diffY));
+            if (sceneX < 0 || sceneY < 0 || sceneX >= 104 || sceneY >= 104) return null;
+            return WorldPoint.fromScene(view, sceneX, sceneY, view.getPlane());
+        }).orElse(null);
+        return step != null && net.runelite.client.plugins.microbot.util.walker.Rs2Walker.walkFastCanvas(step);
+    }
+
+    /**
+     * Some Rune Essence portal morphs do not expose one of the known IDs.
+     * Detect an actionable "Portal" object by its current scene definition
+     * as a secondary source, over all four scene layers.
+     */
+    public static TileObject nearestNamedPortal(WorldPoint origin, int maxDistance)
+    {
+        return Microbot.getClientThread().runOnClientThreadOptional(() ->
+        {
+            if (Microbot.getClient() == null || Microbot.getClient().getLocalPlayer() == null) return null;
+            net.runelite.api.Player player = Microbot.getClient().getLocalPlayer();
+            net.runelite.api.WorldView view = player.getWorldView();
+            net.runelite.api.Scene scene = view == null ? null : view.getScene();
+            if (scene == null || scene.getTiles() == null) return null;
+            net.runelite.api.coords.LocalPoint local = player.getLocalLocation();
+            TileObject nearest = null;
+            int best = Integer.MAX_VALUE;
+            for (Tile[][] plane : scene.getTiles())
+            {
+                if (plane == null) continue;
+                for (Tile[] row : plane)
+                {
+                    if (row == null) continue;
+                    for (Tile tile : row)
+                    {
+                        if (tile == null) continue;
+                        TileObject[] fixed = {tile.getWallObject(), tile.getDecorativeObject(), tile.getGroundObject()};
+                        for (TileObject object : fixed)
+                        {
+                            if (object == null) continue;
+                            int distance = distanceToPlayer(object, origin, local, view);
+                            if (distance < 0 || distance > maxDistance || distance >= best
+                                    || !isActionablePortalObject(object.getId())) continue;
+                            nearest = object;
+                            best = distance;
+                        }
+                        GameObject[] objects = tile.getGameObjects();
+                        if (objects == null) continue;
+                        for (GameObject object : objects)
+                        {
+                            if (object == null) continue;
+                            int distance = distanceToPlayer(object, origin, local, view);
+                            if (distance < 0 || distance > maxDistance || distance >= best
+                                    || !isActionablePortalObject(object.getId())) continue;
+                            nearest = object;
+                            best = distance;
+                        }
+                    }
+                }
+            }
+            return nearest;
+        }).orElse(null);
+    }
+
+    private static boolean isActionablePortalObject(int id)
+    {
+        ObjectComposition definition = Microbot.getClient().getObjectDefinition(id);
+        if (definition == null) return false;
+        ObjectComposition active = definition.getImpostorIds() == null ? definition : definition.getImpostor();
+        if (active == null || active.getName() == null
+                || !active.getName().toLowerCase(java.util.Locale.ROOT).contains("portal"))
+            return false;
+        String[] actions = active.getActions();
+        if (actions == null) return false;
+        for (String action : actions)
+        {
+            if ("Use".equalsIgnoreCase(action) || "Exit".equalsIgnoreCase(action))
+                return true;
+        }
+        return false;
+    }
+
+    /**
+     * Live NPC portal discovery by the same local-scene coordinate basis.
+     * Includes name-based fallback for variants added by the game.
+     */
+    public static net.runelite.client.plugins.microbot.api.npc.models.Rs2NpcModel nearestPortalNpc(
+            int[] npcIds, int maxDistance)
+    {
+        return Microbot.getClientThread().runOnClientThreadOptional(() ->
+        {
+            if (Microbot.getClient() == null || Microbot.getClient().getLocalPlayer() == null) return null;
+            net.runelite.api.Player player = Microbot.getClient().getLocalPlayer();
+            net.runelite.api.WorldView view = player.getWorldView();
+            net.runelite.api.coords.LocalPoint local = player.getLocalLocation();
+            if (view == null || local == null || view.npcs() == null) return null;
+            net.runelite.api.NPC nearest = null;
+            int best = Integer.MAX_VALUE;
+            for (net.runelite.api.NPC npc : view.npcs())
+            {
+                if (npc == null || npc.getLocalLocation() == null
+                        || npc.getLocalLocation().getWorldView() != local.getWorldView()) continue;
+                boolean idMatches = false;
+                for (int id : npcIds) if (npc.getId() == id) { idMatches = true; break; }
+                if (!idMatches)
+                {
+                    String name = npc.getName();
+                    if (name == null || !name.toLowerCase(java.util.Locale.ROOT).contains("portal")) continue;
+                    net.runelite.api.NPCComposition composition = npc.getTransformedComposition();
+                    if (composition == null) composition = npc.getComposition();
+                    if (composition == null || composition.getActions() == null) continue;
+                    boolean actionMatches = false;
+                    for (String action : composition.getActions())
+                        if ("Use".equalsIgnoreCase(action) || "Exit".equalsIgnoreCase(action))
+                            { actionMatches = true; break; }
+                    if (!actionMatches) continue;
+                }
+                int distance = Math.max(Math.abs(local.getSceneX() - npc.getLocalLocation().getSceneX()),
+                        Math.abs(local.getSceneY() - npc.getLocalLocation().getSceneY()));
+                if (distance > maxDistance || distance >= best) continue;
+                nearest = npc;
+                best = distance;
+            }
+            return nearest == null ? null
+                    : new net.runelite.client.plugins.microbot.api.npc.models.Rs2NpcModel(nearest);
+        }).orElse(null);
+    }
+
+    /**
+     * Portal-only direct scene menu dispatch. Do not delegate to
+     * Rs2TileObjectModel.click(): its cant-reach recovery and >51-tile branch
+     * can call global WebWalker against a template instance WorldPoint.
+     */
+    public static boolean clickInstancePortal(TileObject object, String action)
+    {
+        if (object == null || action == null || distanceFromPlayerInScene(object.getLocalLocation()) < 0)
+            return false;
+        final net.runelite.api.MenuAction[] actions = {
+                net.runelite.api.MenuAction.GAME_OBJECT_FIRST_OPTION,
+                net.runelite.api.MenuAction.GAME_OBJECT_SECOND_OPTION,
+                net.runelite.api.MenuAction.GAME_OBJECT_THIRD_OPTION,
+                net.runelite.api.MenuAction.GAME_OBJECT_FOURTH_OPTION,
+                net.runelite.api.MenuAction.GAME_OBJECT_FIFTH_OPTION
+        };
+        net.runelite.client.plugins.microbot.util.menu.NewMenuEntry entry =
+                Microbot.getClientThread().runOnClientThreadOptional(() ->
+                {
+                    ObjectComposition definition = Microbot.getClient().getObjectDefinition(object.getId());
+                    if (definition == null) return null;
+                    ObjectComposition visible = definition.getImpostorIds() == null
+                            ? definition : definition.getImpostor();
+                    if (visible == null || visible.getActions() == null) return null;
+                    String[] options = visible.getActions();
+                    int index = -1;
+                    for (int i = 0; i < options.length && i < actions.length; i++)
+                    {
+                        if (options[i] != null && action.equalsIgnoreCase(
+                                net.runelite.client.plugins.microbot.util.misc.Rs2UiHelper.stripColTags(options[i])))
+                        {
+                            index = i;
+                            break;
+                        }
+                    }
+                    if (index < 0) return null;
+                    net.runelite.api.coords.LocalPoint local = object.getLocalLocation();
+                    if (local == null || object.getWorldView() == null) return null;
+                    int x = local.getSceneX();
+                    int y = local.getSceneY();
+                    if (object instanceof GameObject)
+                    {
+                        GameObject game = (GameObject) object;
+                        if (game.sizeX() > 1) x -= game.sizeX() / 2;
+                        if (game.sizeY() > 1) y -= game.sizeY() / 2;
+                    }
+                    return new net.runelite.client.plugins.microbot.util.menu.NewMenuEntry()
+                            .param0(x).param1(y).opcode(actions[index].getId())
+                            .identifier(object.getId()).itemId(-1)
+                            .option(options[index]).target(visible.getName())
+                            .setWorldViewId(object.getWorldView().getId())
+                            .gameObject(object);
+                }).orElse(null);
+        if (entry == null) return false;
+        if (!net.runelite.client.plugins.microbot.util.camera.Rs2Camera.isTileOnScreen(object.getLocalLocation()))
+            net.runelite.client.plugins.microbot.util.camera.Rs2Camera.turnTo(object);
+        Microbot.doInvoke(entry,
+                net.runelite.client.plugins.microbot.util.misc.Rs2UiHelper.getObjectClickbox(object));
+        return true;
+    }
+
+    /** Bypass NPC cant-reach recovery while inside the instanced mine. */
+    public static boolean clickInstancePortal(
+            net.runelite.client.plugins.microbot.api.npc.models.Rs2NpcModel npcModel, String action)
+    {
+        if (npcModel == null || action == null || npcModel.getNpc() == null
+                || distanceFromPlayerInScene(npcModel.getLocalLocation()) < 0) return false;
+        net.runelite.api.NPC npc = npcModel.getNpc();
+        final net.runelite.api.MenuAction[] actions = {
+                net.runelite.api.MenuAction.NPC_FIRST_OPTION,
+                net.runelite.api.MenuAction.NPC_SECOND_OPTION,
+                net.runelite.api.MenuAction.NPC_THIRD_OPTION,
+                net.runelite.api.MenuAction.NPC_FOURTH_OPTION,
+                net.runelite.api.MenuAction.NPC_FIFTH_OPTION
+        };
+        net.runelite.client.plugins.microbot.util.menu.NewMenuEntry entry =
+                Microbot.getClientThread().runOnClientThreadOptional(() ->
+                {
+                    net.runelite.api.NPCComposition composition = npc.getTransformedComposition();
+                    if (composition == null) composition = npc.getComposition();
+                    if (composition == null || composition.getActions() == null
+                            || npc.getWorldView() == null) return null;
+                    String[] options = composition.getActions();
+                    int index = -1;
+                    for (int i = 0; i < options.length && i < actions.length; i++)
+                    {
+                        if (options[i] != null && action.equalsIgnoreCase(
+                                net.runelite.client.plugins.microbot.util.misc.Rs2UiHelper.stripColTags(options[i])))
+                        {
+                            index = i;
+                            break;
+                        }
+                    }
+                    if (index < 0) return null;
+                    return new net.runelite.client.plugins.microbot.util.menu.NewMenuEntry()
+                            .param0(0).param1(0).opcode(actions[index].getId())
+                            .identifier(npc.getIndex()).itemId(-1)
+                            .option(options[index]).target(npc.getName())
+                            .setWorldViewId(npc.getWorldView().getId())
+                            .actor(npc);
+                }).orElse(null);
+        if (entry == null) return false;
+        if (!net.runelite.client.plugins.microbot.util.camera.Rs2Camera.isTileOnScreen(npc.getLocalLocation()))
+            net.runelite.client.plugins.microbot.util.camera.Rs2Camera.turnTo(npc);
+        Microbot.doInvoke(entry, net.runelite.client.plugins.microbot.util.misc.Rs2UiHelper.getActorClickbox(npc));
+        return true;
+    }
+
     public static boolean interact(String objectName, WorldPoint origin, int maxDistance, String action)
     {
         TileObject object = nearestTileObject(objectName, origin, maxDistance);
