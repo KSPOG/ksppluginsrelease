@@ -494,9 +494,9 @@ public final class KspLiveScene
      * Live NPC model source for fishing, questing, combat and Tutorial Island.
      * Avoids the NPC cache, while retaining all Rs2NpcModel.click() behaviors.
      */
-    public static net.runelite.client.plugins.microbot.util.npc.Rs2NpcModel nearestNpcModel(
+    public static net.runelite.client.plugins.microbot.api.npc.models.Rs2NpcModel nearestNpcModel(
             WorldPoint origin, int maxDistance,
-            java.util.function.Predicate<net.runelite.client.plugins.microbot.util.npc.Rs2NpcModel> matches)
+            java.util.function.Predicate<net.runelite.client.plugins.microbot.api.npc.models.Rs2NpcModel> matches)
     {
         return Microbot.getClientThread().runOnClientThreadOptional(() ->
         {
@@ -504,7 +504,7 @@ public final class KspLiveScene
             net.runelite.api.Player player = Microbot.getClient().getLocalPlayer();
             net.runelite.api.WorldView view = player == null ? null : player.getWorldView();
             if (view == null || view.npcs() == null) return null;
-            net.runelite.client.plugins.microbot.util.npc.Rs2NpcModel nearest = null;
+            net.runelite.client.plugins.microbot.api.npc.models.Rs2NpcModel nearest = null;
             int bestDistance = Integer.MAX_VALUE;
             for (net.runelite.api.NPC npc : view.npcs())
             {
@@ -512,8 +512,8 @@ public final class KspLiveScene
                 if (origin != null && npc.getWorldLocation().getPlane() != origin.getPlane()) continue;
                 int distance = origin == null ? 0 : origin.distanceTo(npc.getWorldLocation());
                 if (distance > maxDistance || distance >= bestDistance) continue;
-                net.runelite.client.plugins.microbot.util.npc.Rs2NpcModel model =
-                        new net.runelite.client.plugins.microbot.util.npc.Rs2NpcModel(npc);
+                net.runelite.client.plugins.microbot.api.npc.models.Rs2NpcModel model =
+                        new net.runelite.client.plugins.microbot.api.npc.models.Rs2NpcModel(npc);
                 if (matches != null && !matches.test(model)) continue;
                 nearest = model;
                 bestDistance = distance;
