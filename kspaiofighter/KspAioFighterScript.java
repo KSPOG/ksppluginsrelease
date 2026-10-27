@@ -247,9 +247,8 @@ public class KspAioFighterScript extends KspBreakAwareScript
 
 			refreshPaintState();
 
-            // Safety first: eat if required, then immediately alch any
-            // profitable inventory item before banking, ground loot, bone
-            // burying, area movement, gear changes or NPC interactions.
+            // Safety first: heal before any other action. Potion boosts then
+            // take priority over High Alch, loot, banking, and target movement.
             if (healIfNeeded())
             {
                 return;
@@ -1097,17 +1096,64 @@ public class KspAioFighterScript extends KspBreakAwareScript
         return false;
 	}
 
-	private void drinkPotionIfUnboosted(Skill skill)
-	{
-        if (!actionThrottle.ready(KspAioFighterActionThrottle.Action.POTION_CHECK,
-                System.currentTimeMillis(), POTION_CHECK_INTERVAL_MS)) return;
-		if (!config.usePotions() || Rs2Player.getBoostedSkillLevel(skill) > Rs2Player.getRealSkillLevel(skill))
-		{
-			return;
-		}
+    /**
+     * Consume a matching carried combat potion whenever the relevant boost
+     * expires. For melee, an Attack training task may benefit from Strength
+     * and Defence boosts as well: inspect the entire melee group.
+     *
+     * Returns true when an interaction was dispatched or is still settling,
+     * allowing the caller to avoid overlapping combat/loot/alch clicks.
+     */
+    private boolean drinkPotionIfUnboosted(Skill skill)
+    {
+        if (!config.usePotions() || Rs2Bank.isOpen()) return false;
 
-		Rs2Player.drinkCombatPotionAt(skill);
-	}
+        long now = System.currentTimeMillis();
+        if (lastPotionDispatchAtMs > 0L
+                && now - lastPotionDispatchAtMs < POTION_DISPATCH_GUARD_MS)
+            return true;
+        if (!actionThrottle.ready(KspAioFighterActionThrottle.Action.POTION_CHECK,
+                now, POTION_CHECK_INTERVAL_MS)) return false;
+
+        KspAioFighterPotionPolicy.Style style;
+        if (MELEE_SKILLS.contains(skill)) style = KspAioFighterPotionPolicy.Style.MELEE;
+        else if (skill == Skill.RANGED) style = KspAioFighterPotionPolicy.Style.RANGED;
+        else if (skill == Skill.MAGIC) style = KspAioFighterPotionPolicy.Style.MAGIC;
+        else return false;
+
+        List<Rs2ItemModel> available = Rs2Inventory.all(item -> item != null
+                && !item.isNoted() && KspAioFighterPotionPolicy.isSupportedPotion(item.getName()));
+        if (available.isEmpty()) return false;
+
+        int[] boosts = {
+                Rs2Player.getBoostedSkillLevel(Skill.ATTACK) - Rs2Player.getRealSkillLevel(Skill.ATTACK),
+                Rs2Player.getBoostedSkillLevel(Skill.STRENGTH) - Rs2Player.getRealSkillLevel(Skill.STRENGTH),
+                Rs2Player.getBoostedSkillLevel(Skill.DEFENCE) - Rs2Player.getRealSkillLevel(Skill.DEFENCE),
+                Rs2Player.getBoostedSkillLevel(Skill.RANGED) - Rs2Player.getRealSkillLevel(Skill.RANGED),
+                Rs2Player.getBoostedSkillLevel(Skill.MAGIC) - Rs2Player.getRealSkillLevel(Skill.MAGIC)
+        };
+        List<String> names = available.stream().map(Rs2ItemModel::getName).collect(Collectors.toList());
+        String chosen = KspAioFighterPotionPolicy.choose(names, style, boosts,
+                Rs2Player.getBoostedSkillLevel(Skill.HITPOINTS) >= MIN_HP_TO_DRINK_DIVINE);
+        if (chosen == null) return false;
+
+        for (Rs2ItemModel potion : available)
+        {
+            if (!chosen.equalsIgnoreCase(potion.getName())) continue;
+            if (Rs2Inventory.interact(potion, "Drink"))
+            {
+                lastPotionDispatchAtMs = System.currentTimeMillis();
+                setStatus("drinking " + potion.getName());
+                Microbot.log("KSP AIO Fighter: potion interaction dispatched: "
+                        + potion.getName() + " | combat style=" + style);
+                return true;
+            }
+            lastError = "Potion interaction rejected: " + potion.getName();
+            lastErrorMs = System.currentTimeMillis();
+            return false;
+        }
+        return false;
+    }
 
 	private int getConfiguredFoodCount() { return Rs2Inventory.count(config.foodName(), true); }
 
