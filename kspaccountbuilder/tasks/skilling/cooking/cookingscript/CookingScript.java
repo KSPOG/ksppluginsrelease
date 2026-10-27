@@ -264,11 +264,8 @@ public class CookingScript extends KspManagedScript
             return true;
         }
 
-        Rs2TileObjectModel door = Microbot.getRs2TileObjectCache().query()
-                .fromWorldView()
-                .withId(COOKING_EXIT_DOOR_ID)
-                .within(COOKING_EXIT_DOOR_POINT, 2)
-                .nearestOnClientThread();
+        Rs2TileObjectModel door = KspLiveScene.nearestModel(
+                COOKING_EXIT_DOOR_POINT, 5, obj -> obj.getId() == COOKING_EXIT_DOOR_ID);
 
         if (!KspLiveScene.interact(COOKING_EXIT_DOOR_ID, COOKING_EXIT_DOOR_POINT, 5, "Open")
                 && (door == null || !door.click("Open")))
@@ -334,11 +331,10 @@ public class CookingScript extends KspManagedScript
 
         if (targetArea == Areas.LUMBRIDGE_KITCHEN)
         {
-            Rs2TileObjectModel range = Microbot.getRs2TileObjectCache().query()
-                    .fromWorldView()
-                    .withId(LUMBRIDGE_RANGE_ID)
-                    .within(LUMBRIDGE_RANGE_LOCATION, 3)
-                    .nearestOnClientThread();
+            Rs2TileObjectModel range = KspLiveScene.nearestModel(
+                    playerLocation, 12, obj -> obj.getId() == LUMBRIDGE_RANGE_ID
+                            && obj.getWorldLocation() != null
+                            && obj.getWorldLocation().distanceTo(LUMBRIDGE_RANGE_LOCATION) <= 3);
 
             if (range == null)
             {
@@ -352,12 +348,11 @@ public class CookingScript extends KspManagedScript
             return range;
         }
 
-        return Microbot.getClientThread().invoke(() -> Microbot.getRs2TileObjectCache().query()
-                .fromWorldView()
-                .withId(EDGEVILLE_STOVE_ID)
-                .within(playerLocation, 12)
-                .where(object -> targetArea.getArea().contains(object.getWorldLocation()))
-                .nearestReachable(12));
+        return KspLiveScene.nearestModel(playerLocation, 12,
+                object -> object.getId() == EDGEVILLE_STOVE_ID
+                        && object.getWorldLocation() != null
+                        && targetArea.getArea().contains(object.getWorldLocation())
+                        && object.isReachable());
     }
 
     private Areas resolveCookingArea(Areas requestedArea)
