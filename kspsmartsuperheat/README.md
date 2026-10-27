@@ -18,6 +18,12 @@ A Microbot plugin that checks the bank before selecting a Superheat Item route, 
 The plugin filters recipes by your real Smithing level and requires 43 Magic.
 Members-only recipes are considered only when the account has membership and is currently on a members world.
 
+## Grand Exchange-only operation
+
+Smart Superheat is **stationary at the Grand Exchange**: start the plugin inside the GE central square. The script does not walk to Varrock banks or use the shared `KspVerifiedBank.openBank()` booth search, because that can select a distant bank booth and trigger Microbot's automatic "can't-reach" WebWalker recovery.
+
+Instead it selects a nearby **GE Banker** or **Grand Exchange Clerk** from the live scene and dispatches the validated Bank/Exchange action directly (no NPC click recovery or global pathfinding). If a GE-local banker or clerk is unavailable, the plugin holds its current state and retries. When outside the GE, it does not automatically walk back; move the character into the GE manually. An active walking route targeting outside the GE is cancelled while Smart Superheat is running.
+
 ## Bank-aware route selection
 
 Smart Superheat opens the bank before its initial market decision so the route selector has a current view of existing ores, runes and bars.
