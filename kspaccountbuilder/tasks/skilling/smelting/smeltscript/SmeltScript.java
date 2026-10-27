@@ -391,6 +391,14 @@ public class SmeltScript extends KspManagedScript
         if (Rs2Player.isMoving() || Rs2Player.isInteracting()) return;
 
         furnaceInteractionSentAt = 0L;
+        Microbot.status = "Opening furnace interface (live scene)";
+        if (KspLiveScene.interact("Furnace", player, 12, "Smelt"))
+        {
+            furnaceInteractionSentAt = now;
+            return;
+        }
+        // Retry against the existing reachable model only when no live
+        // furnace interaction could be dispatched.
         Rs2TileObjectModel furnace = findNearbyFurnaceInTargetArea();
         if (furnace == null)
         {
