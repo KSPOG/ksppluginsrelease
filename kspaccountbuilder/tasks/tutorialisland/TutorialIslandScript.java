@@ -274,7 +274,12 @@ public class TutorialIslandScript extends KspManagedScript
                 return true;
             }
 
-            return Microbot.getVarbitPlayerValue(281) < 1000;
+            // Varbit 281 is the tutorial progress state. Only a valid
+            // unfinished value is a fallback when client position is not yet
+            // available (e.g. login handoff). The zero/uninitialized value
+            // alone must not classify a mainland account as a tutorial user.
+            int progress = Microbot.getVarbitPlayerValue(281);
+            return progress > 0 && progress < 1000 && location == null;
         }
         catch (Exception ignored)
         {
@@ -311,14 +316,18 @@ public class TutorialIslandScript extends KspManagedScript
 
     private static WorldPoint getLocalPlayerWorldLocationSafe()
     {
+        // Tutorial detection is called from the Account Builder worker thread.
+        // Query RuneLite player coordinates on the client thread; reading the
+        // live Client/Actor directly from a scheduler thread can throw or
+        // return an incomplete snapshot, making the island look undetected.
         try
         {
-            Client client = Microbot.getClient();
-            if (client == null || client.getLocalPlayer() == null)
+            return Microbot.getClientThread().runOnClientThreadOptional(() ->
             {
-                return null;
-            }
-            return client.getLocalPlayer().getWorldLocation();
+                Client client = Microbot.getClient();
+                return client == null || client.getLocalPlayer() == null
+                        ? null : client.getLocalPlayer().getWorldLocation();
+            }).orElse(null);
         }
         catch (Exception ignored)
         {
