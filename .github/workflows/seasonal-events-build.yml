@@ -55,7 +55,7 @@ jobs:
           panel=(root/'KspSeasonalEventsPanel.java').read_text()
           overlay=(root/'KspSeasonalEventsOverlay.java').read_text()
           event=(root/'KspSeasonalEvent.java').read_text()
-          assert 'VERSION = "0.2.3"' in plugin
+          assert 'VERSION = "0.2.4"' in plugin
           assert 'KSP + "Seasonal Events"' in plugin
           assert 'kspwillowchopper' not in plugin and 'kspwillowchopper' not in script
           assert 'HALLOWEEN_2026' in event
@@ -211,6 +211,43 @@ jobs:
           assert 'skeleton boots' in script and 'skeleton shirt' in script
           assert 'No eligible holiday costume item found in Diango retrieval' in costume
           print('PASS: Diango live widgets, restricted item selection, receipt verification and bounded recovery')
+
+      - name: Verify Diango stays open until four distinct costume slots are held
+        shell: python
+        run: |
+          from pathlib import Path
+          code = Path('release/kspseasonalevents/KspHalloween2026Script.java').read_text()
+          batch = code.split('private void collectCostume(WorldPoint player)', 1)[1].split('private List<String> missingCostumeRetrievalNames()', 1)[0]
+          missing = code.split('private List<String> missingCostumeRetrievalNames()', 1)[1].split('private void closeHolidayRetrieval(', 1)[0]
+          slot = code.split('private CostumeSlot costumeSlot(', 1)[1].split('private Set<CostumeSlot> heldCostumeSlots(', 1)[0]
+          held = code.split('private Set<CostumeSlot> heldCostumeSlots(', 1)[1].split('private int costumeCount()', 1)[0]
+          assert 'enum CostumeSlot { HEAD, BODY, LEGS, HANDS, FEET }' in code
+          for group in ('boots', 'gloves', 'leggings', 'trousers', 'bottoms', 'skirt', 'shirt', 'top', 'robe', 'jumper', 'mask', 'hood', 'wig', 'hat'):
+              assert group in slot, 'Missing costume slot classification: ' + group
+          assert 'EnumSet.noneOf(CostumeSlot.class)' in held
+          assert 'includeInventory && Rs2Inventory.hasItem(piece, true)' in held
+          assert 'Rs2Equipment.isWearing(piece, true)' in held
+
+          pending = batch.index('if (pendingHolidayItem != null)')
+          full_batch = batch.index('if (ownedSlots.size() >= 4)')
+          close = batch.index('closeHolidayRetrieval(window)', full_batch)
+          wear = batch.index('Rs2Inventory.wear(piece)', full_batch)
+          partial_batch = batch.index('if (window.open)', wear)
+          next_retrieval = batch.index('KspDiangoHolidayRetrieval.select(window)', partial_batch)
+          reopen = batch.index('Rs2Npc.interact("Diango", "Holiday-items")', next_retrieval)
+          assert pending < full_batch < close < wear < partial_batch < next_retrieval < reopen
+          assert 'Set<CostumeSlot> ownedSlots = heldCostumeSlots(true)' in batch
+          assert 'Set<CostumeSlot> wornSlots = heldCostumeSlots(false)' in batch
+          assert 'wornSlots.contains(slot)' in batch
+          assert 'pendingHolidayItem = window.itemName;' in batch
+          assert 'Rs2Inventory.hasItem(pendingHolidayItem, true)' in batch
+          assert 'holidayRetrievalTimeouts >= 3' in batch
+          assert 'holidayScrollAttempts < 24' in batch
+          assert 'KspDiangoHolidayRetrieval.scrollDown(window)' in batch
+          assert 'ownedSlots.contains(slot)' in missing
+          assert 'DIANGO_COSTUME_PRIORITY.stream()' in missing
+          assert 'closeHolidayRetrieval(window)' not in batch[partial_batch:reopen]
+          print('PASS: four distinct slots must be owned before any automatic window closing/equipping')
 
       - name: Install Seasonal Events sources into Microbot Hub
         shell: bash
