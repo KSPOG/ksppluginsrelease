@@ -611,24 +611,37 @@ public final class KspHalloween2026Script extends Script {
             change(Stage.SPOOK_CHILDREN, "Four Halloween outfit pieces equipped");
             return;
         }
-        if (!nearOrWalk(player, DIANGO, 8, "Diango in Draynor Village")) return;
+        // Do not travel to Draynor while usable costume pieces are already
+        // in the inventory; wear them first, then only recover what is missing.
         for (String piece : COSTUME_PIECES) {
-            if (Rs2Inventory.hasItem(piece) && !Rs2Equipment.isWearing(piece, true) && ready()) {
-                Rs2Inventory.wear(piece);
-                acted("Equipping Halloween costume: " + piece);
+            if (Rs2Inventory.hasItem(piece) && !Rs2Equipment.isWearing(piece, true)) {
+                if (ready()) {
+                    Rs2Inventory.wear(piece);
+                    acted("Equipping Halloween costume: " + piece);
+                }
                 return;
             }
         }
+        if (!nearOrWalk(player, DIANGO, 8, "Diango in Draynor Village")) return;
+
+        // Diango has a dedicated Holiday-items retrieval menu action.
+        // Simply talking to him can lead to unrelated conversations.
         if (ready() && Rs2Npc.getNpc("Diango") != null
                 && System.currentTimeMillis() - lastTalkAt > 15_000L) {
+            if (Rs2Npc.interact("Diango", "Holiday-items")) {
+                lastTalkAt = System.currentTimeMillis();
+                acted("Opening Diango's Holiday Item Retrieval");
+                return;
+            }
             if (Rs2Npc.interact("Diango", "Talk-to")) {
                 lastTalkAt = System.currentTimeMillis();
-                acted("Requesting previous Halloween rewards from Diango");
+                acted("Asking Diango for previous Halloween rewards");
+                return;
             }
         }
-        // The wiki specifies *where* to get the items but not Diango's
-        // current reward interface widget IDs. Do not blindly buy/select.
-        status = "Equip 4 Halloween items from Diango (equipped: " + equipped + "/4)";
+        // Live retrieval interface widgets remain unverified. Never select
+        // arbitrary options or claim that an item has been collected.
+        status = "Recover and equip 4 Halloween items (equipped: " + equipped + "/4)";
     }
 
     private boolean npcHasAction(Rs2NpcModel npc, String action) {
