@@ -99,7 +99,7 @@ jobs:
           set -euo pipefail
           DEST='hub/src/test/java/net/runelite/client/plugins/microbot/kspf2phighalchtrader'
           mkdir -p "$DEST"
-          cp release/.github/tests/high-alch-trader/KspHighAlchGeAccessRegressionTest.java "$DEST/"
+          cp release/.github/tests/high-alch-trader/KspHighAlchGeAccessRegressionTest.java.txt "$DEST/KspHighAlchGeAccessRegressionTest.java"
           cat > "$DEST/KspHighAlchGeJUnitTest.java" <<'EOF'
           package net.runelite.client.plugins.microbot.kspf2phighalchtrader;
 
