@@ -269,7 +269,8 @@ jobs:
           assert '&& !npcHasAction(n, "Spook")' not in adults
           age = code.split('private void observeTreaterAges()',1)[1].split('private void spookChildren(',1)[0]
           assert 'treaterGroup(n.getId())' in age
-          assert 'n::getLogicalHeight' in age
+          assert 'candidate.getLogicalHeight()' in age
+          assert 'n::getLogicalHeight' not in age
           assert 'a.size() >= 2 && b.size() >= 2' in age
           assert 'confirmedChildGroup = TreaterGroup.A' in age
           assert 'confirmedChildGroup = TreaterGroup.B' in age
@@ -311,7 +312,7 @@ jobs:
           assert 'givenAdultIndexes' not in code
           assert 'configManager.unsetConfiguration(GROUP, SPOOKED_CHILD_IDS_KEY)' in code
           assert 'configManager.unsetConfiguration(GROUP, DELIVERED_ADULT_IDS_KEY)' in code
-          print('PASS: 10-child checkpoint, starter confirmation gate, unique adult receipt, persistence and bounded scanning')
+          print('PASS: five-child report checkpoint, NPC-only scouting, single-batch classification and adult receipts')
 
       - name: Test child-report dialogue classification with actual 2026 text
         shell: bash
