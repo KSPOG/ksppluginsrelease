@@ -1216,6 +1216,8 @@ public final class KspHalloween2026Script extends Script {
         configManager.unsetConfiguration(GROUP, PENDING_LANTERN_KEY);
         configManager.unsetConfiguration(GROUP, LANTERNS_VERIFIED_KEY);
         configManager.unsetConfiguration(GROUP, ADULTS_KEY);
+        configManager.unsetConfiguration(GROUP, SPOOKED_CHILD_IDS_KEY);
+        configManager.unsetConfiguration(GROUP, DELIVERED_ADULT_IDS_KEY);
         smashedLanternTiles.clear();
         pendingLantern = null;
         lanternsVerified = false;
