@@ -18,11 +18,33 @@ A Microbot plugin that checks the bank before selecting a Superheat Item route, 
 The plugin filters recipes by your real Smithing level and requires 43 Magic.
 Members-only recipes are considered only when the account has membership and is currently on a members world.
 
-## Grand Exchange-only operation
+## Grand Exchange movement and banking (v0.2.0)
 
-Smart Superheat is **stationary at the Grand Exchange**: start the plugin inside the GE central square. The script does not walk to Varrock banks or use the shared `KspVerifiedBank.openBank()` booth search, because that can select a distant bank booth and trigger Microbot's automatic "can't-reach" WebWalker recovery.
+When started **outside the Grand Exchange**, Smart Superheat walks to Microbot's canonical
+`BankLocation.GRAND_EXCHANGE` destination (the same destination used by
+`Rs2GrandExchange.walkToGrandExchange()`). The plugin cancels its approach route once
+the player reaches the GE. It does not choose any alternative bank destination.
 
-Instead it selects a nearby **GE Banker** or **Grand Exchange Clerk** from the live scene and dispatches the validated Bank/Exchange action directly (no NPC click recovery or global pathfinding). If a GE-local banker or clerk is unavailable, the plugin holds its current state and retries. When outside the GE, it does not automatically walk back; move the character into the GE manually. An active walking route targeting outside the GE is cancelled while Smart Superheat is running.
+While **inside the GE**, all banking uses a live RuneLite `Banker` NPC with
+a verified `Bank` action; all trading uses a nearby `Grand Exchange Clerk`
+with a verified `Exchange` action. Both actors must be inside the GE and
+within the configured local-interaction distance. Smart Superheat never scans
+`Bank booth` objects or invokes `KspVerifiedBank.openBank()`, which may
+select the Cooking Guild booth. Direct actor menu actions avoid Microbot's
+automatic cannot-reach recovery. If no suitable actor is visible, it retries
+in place rather than walking to a distant booth.
+
+Bank-open confirmation uses RuneLite's `BANKMAIN` interface, as recognized
+by Microbot's `Rs2Bank.isOpen()`.
+
+### Confirm the updated plugin is loaded
+
+The startup log must show **`KSP Smart Superheat v0.2.0 started`**. A log
+showing `v0.1.8` means the old compiled/plugin-loader version is still running:
+the new GE-only fixes cannot affect that process. Update the installed Smart
+Superheat source/JAR from the `dev` branch, reload/recompile the plugin using
+the source loader or replace the old JAR, and restart the client if necessary.
+Avoid keeping two loaded copies of Smart Superheat.
 
 ## Bank-aware route selection
 
