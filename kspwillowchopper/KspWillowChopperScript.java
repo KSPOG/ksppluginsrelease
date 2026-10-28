@@ -385,6 +385,14 @@ public class KspWillowChopperScript extends KspBreakAwareScript {
         if (!Rs2Player.isMoving() && now - lastProgressiveWalkAttemptMillis >= 12_000L) {
             lastProgressiveWalkAttemptMillis = now;
             progressiveWalkIssued = true;
+            // A bank trip or a late task callback may have just moved us
+            // inside the correct zone. Recheck immediately before dispatch.
+            if (KspProgressiveTreeSelection.isInAssignedArea(
+                    activeTree, Rs2Player.getWorldLocation()))
+            {
+                clearProgressiveWalk();
+                return true;
+            }
             Rs2Walker.walkTo(anchor, 3);
         }
         return false;
@@ -878,10 +886,24 @@ public class KspWillowChopperScript extends KspBreakAwareScript {
 
                 KspWillowChopperConfig config = runtimeConfig;
                 if (config != null) {
-                    KspTree selected = safeTree(config.tree());
-                    if (selected != activeTree) switchTree(selected);
+                    // The manual dropdown is not authoritative in a
+                    // Progressive mode. It previously reverted Oak to Tree
+                    // on each despawn, sending the player back to the wrong
+                    // training area before the next 300ms tick changed it.
+                    KspTree selected = activeMode.isProgressive()
+                            ? progressiveTree() : safeTree(config.tree());
+                    if (selected != activeTree)
+                    {
+                        // Let the main tick safely finish/bank existing logs
+                        // before changing tiers. Never switch in this callback.
+                        return;
+                    }
                 }
 
+                WorldPoint player = Rs2Player.getWorldLocation();
+                if (activeMode.isProgressive()
+                        && !KspProgressiveTreeSelection.isInAssignedArea(activeTree, player))
+                    return; // Main tick handles intentional inter-area travel.
                 chopSelectedTree(true, lastChangedTreeLocation);
             } catch (Exception ex) {
                 Microbot.logStackTrace("KSP Chopper immediate retarget", ex);
@@ -893,6 +915,7 @@ public class KspWillowChopperScript extends KspBreakAwareScript {
 
     private boolean canImmediateRetarget() {
         if (!sessionStarted
+                || userPaused
                 || !Microbot.isLoggedIn()
                 || net.runelite.client.plugins.microbot.kspsupport.KspBreakService.shouldPause()
                 || state != RuntimeState.CHOPPING
