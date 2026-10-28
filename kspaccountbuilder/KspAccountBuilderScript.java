@@ -425,6 +425,17 @@ public class KspAccountBuilderScript extends KspManagedScript
                 return;
             }
             refreshAccountIdentity();
+            // Tutorial Island owns the client before forced skill targets, GE
+            // restocking, bank recovery, activity switching or break scheduling.
+            // Those normal workflows may teleport or walk away if dispatched
+            // before the tutorial priority is enforced. Do not allow them to
+            // run until the player has actually left Tutorial Island.
+            if (Microbot.isLoggedIn() && runTutorialIslandExclusively())
+            {
+                updateWindowTitle();
+                maybeLogStatus();
+                return;
+            }
             // Sync independently of the active task. Early returns during GE,
             // breaks, quests and resource recovery must not starve this read.
             sampleAccountPlayTime();
@@ -804,7 +815,6 @@ public class KspAccountBuilderScript extends KspManagedScript
                 return;
             }
         }
-        if (!isSingleSkillTaskForced()) handleTutorialIslandPriority();
         if (postTutorialBankCameraPending && currentTask != BuilderTask.TUTORIAL_ISLAND)
             postTutorialBankCameraPending = !setPostTutorialBankCamera();
         if (handlePendingMeleeSellHandoff()) return;
@@ -1054,21 +1064,58 @@ public class KspAccountBuilderScript extends KspManagedScript
                 reason, autoLoginScript == null ? "none" : autoLoginScript.getState(), getSafePlayerLocation(), taskStarted, currentTask);
     }
 
-    private void handleTutorialIslandPriority()
+    /**
+     * The exclusive onboarding gate runs BEFORE all ordinary task selection,
+     * skill-only overrides, resource checks, bank/GE handoffs and timers. A
+     * player still on Tutorial Island must never launch a mainland activity.
+     *
+     * This also handles interrupted sessions: when a partially completed
+     * tutorial account logs back in, resume from tutorial varbit 281 instead
+     * of attempting the account's saved mainland task or teleport route.
+     */
+    private boolean runTutorialIslandExclusively()
     {
-        if (!TutorialIslandScript.isOnTutorialIsland()) return;
-        if (currentTask != BuilderTask.TUTORIAL_ISLAND)
+        if (!TutorialIslandScript.isOnTutorialIsland()) return false;
+
+        boolean taskChanged = currentTask != BuilderTask.TUTORIAL_ISLAND;
+        if (taskChanged || pendingTask != null || pendingRandomTaskSelection
+                || preselectedHandoffTask != null || pendingResupplyReturnTask != null)
         {
-            stopCurrentTaskScript();
+            // Stop every non-tutorial child, including the pending GE/bank or
+            // single-skill worker which would otherwise keep navigating.
+            stopAllTaskScriptsExcept(BuilderTask.TUTORIAL_ISLAND);
+            Rs2Walker.clearWalkingRoute("ksp_account_builder_tutorial_exclusive");
             currentTask = BuilderTask.TUTORIAL_ISLAND;
-            taskStarted = false;
+            taskStarted = tutorialIslandScript.isRunning();
             pendingTask = null;
+            preselectedHandoffTask = null;
+            pendingResupplyReturnTask = null;
+            singleSkillRecoveryTask = null;
+            pendingSingleSkillAuditTask = null;
             pendingRandomTaskSelection = false;
             awaitingNextActivityStart = false;
             awaitingActivitySwitchTimerStart = false;
             nextActivitySwitchAtMillis = -1L;
-            debug("Detected Tutorial Island; switching to tutorial task");
+            manualSkipRequested = false;
+            clearPendingActivitySwitch();
+            clearActivitySwitchTimerState();
+            KspTaskDebug.throttled(log, true, "Builder", "tutorial-exclusive-enter", 5_000L,
+                    "Tutorial Island prioritized | player={} progressVarbit281={} previousTask={} singleSkillForced={}",
+                    getSafePlayerLocation(), Microbot.getVarbitPlayerValue(281),
+                    taskChanged ? "mainland-task" : "tutorial-recovery", isSingleSkillTaskForced());
         }
+
+        if (!taskStarted || !tutorialIslandScript.isRunning())
+        {
+            taskStarted = startTask(BuilderTask.TUTORIAL_ISLAND);
+            if (!taskStarted)
+            {
+                Microbot.status = "Waiting to start Tutorial Island";
+                return true;
+            }
+        }
+        Microbot.status = "Tutorial Island: " + tutorialIslandScript.getStatus();
+        return true;
     }
 
     private BuilderTask resolveStartingTask()
