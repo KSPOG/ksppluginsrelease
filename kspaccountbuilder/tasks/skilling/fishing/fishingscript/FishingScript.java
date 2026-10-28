@@ -508,7 +508,7 @@ public class FishingScript extends KspManagedScript
         }
 
         WorldPoint walkerTarget = Rs2Walker.getCurrentTarget();
-        if (walkerTarget != null && targetArea.getArea().contains(walkerTarget))
+        if (walkerTarget != null && targetArea.contains(walkerTarget))
         {
             Rs2Walker.clearWalkingRoute("ksp_account_builder_fishing_reached_area");
         }
