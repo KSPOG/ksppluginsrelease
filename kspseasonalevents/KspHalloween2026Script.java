@@ -54,8 +54,8 @@ public final class KspHalloween2026Script extends Script {
     private static final String ADULTS_KEY = "halloweenAdultsGiven";
     private static final String SPOOKED_CHILD_IDS_KEY = "halloweenChildNpcIdsAttempted";
     private static final String DELIVERED_ADULT_IDS_KEY = "halloweenAdultNpcIdsDelivered";
-    // Ten distinct child IDs are observed in the supplied 2026 client log.
-    // This is a report-to-starter checkpoint, never proof of game success.
+    // Five NPCs per candidate age group were seen in the 2026 log.
+    // Five verified child attempts trigger a report checkpoint, not success.
     private static final int CHILD_REPORT_CHECKPOINT = 5;
     private static final String TREATER_CHILD_GROUP_KEY = "halloweenConfirmedChildNpcGroup";
     // 2026 client logs show two groups of five NPC definition IDs. The
@@ -1012,6 +1012,12 @@ public final class KspHalloween2026Script extends Script {
             }
         }
 
+        if (confirmedChildGroup == TreaterGroup.UNKNOWN && a.size() >= 2 && b.size() >= 2) {
+            stopForReview("Child/adult NPC models cannot be differentiated safely"
+                    + "; groupAHeights=" + a + " groupBHeights=" + b);
+            return;
+        }
+
         if (confirmedChildGroup == TreaterGroup.UNKNOWN
                 && System.currentTimeMillis() - lastTreaterClassificationLogAt > 10_000L) {
             lastTreaterClassificationLogAt = System.currentTimeMillis();
@@ -1045,13 +1051,14 @@ public final class KspHalloween2026Script extends Script {
                 && !nearOrWalk(player, STARTER, 12, "child trick-or-treaters")) return;
 
         observeTreaterAges();
+        if (stage == Stage.NEEDS_REVIEW) return;
         // Only confirmed CHILD identities contribute to the checkpoint.
         // Adults are explicitly excluded even if they expose 'Spook'.
         // The conversation will decide whether another sweep is required.
         if (spookedChildren.size() >= CHILD_REPORT_CHECKPOINT) {
             childrenReportConfirmed = false;
             change(Stage.REPORT_CHILDREN,
-                    "Ten child Spook attempts recorded; checking Angel/Henja");
+                    "Five verified child Spook attempts recorded; checking Angel/Henja");
             return;
         }
 
@@ -1205,6 +1212,7 @@ public final class KspHalloween2026Script extends Script {
         if (!RIMMINGTON.contains(player)
                 && !nearOrWalk(player, STARTER, 10, "adult trick-or-treaters")) return;
         observeTreaterAges();
+        if (stage == Stage.NEEDS_REVIEW) return;
         Rs2NpcModel adult = Rs2Npc.getNpcs().filter(n -> n.getName() != null
                 && n.getName().toLowerCase(Locale.ROOT).contains("trick")
                 && classifyTreater(n) == TreaterAge.ADULT
