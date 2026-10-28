@@ -67,6 +67,48 @@ jobs:
           test -s release/kspaccountbuilder/KspAccountBuilderPlugin.java
           test -s release/kspaccountbuilder/KspCinematicHudRenderer.java
 
+      - name: Verify Tutorial Island exclusive scheduling and detection
+        shell: python
+        run: |
+          from pathlib import Path
+          root = Path('release/kspaccountbuilder')
+          parent = (root / 'KspAccountBuilderScript.java').read_text()
+          tutorial = (root / 'tasks/tutorialisland/TutorialIslandScript.java').read_text()
+          areas = (root / 'tasks/tutorialisland/areas/TutAreas.java').read_text()
+          loop = parent.split('private void runLoop()', 1)[1].split('private void resetRuntimeState()', 1)[0]
+          priority = parent.split('private boolean runTutorialIslandExclusively()', 1)[1].split('private BuilderTask resolveStartingTask()', 1)[0]
+
+          assert 'Microbot.isLoggedIn() && runTutorialIslandExclusively()' in loop
+          for gate in ('sampleAccountPlayTime()', 'handleExperienceLampInterruption()',
+                       'processTimers()', 'handleUnexpectedEssenceMineRecovery()',
+                       'resolveStartingTask()', 'runAccountBuilderCycle()'):
+              assert loop.index('runTutorialIslandExclusively()') < loop.index(gate), (
+                  'Tutorial Island must preempt ' + gate)
+          assert 'stopAllTaskScriptsExcept(BuilderTask.TUTORIAL_ISLAND)' in priority
+          assert 'Rs2Walker.clearWalkingRoute("ksp_account_builder_tutorial_exclusive")' in priority
+          assert 'taskStarted = startTask(BuilderTask.TUTORIAL_ISLAND)' in priority
+          assert 'pendingTask = null;' in priority and 'pendingRandomTaskSelection = false;' in priority
+          assert 'preselectedHandoffTask = null;' in priority
+          assert 'pendingResupplyReturnTask = null;' in priority
+          assert 'singleSkillRecoveryTask = null;' in priority
+          assert 'manualSkipRequested = false;' in priority
+          assert 'isSingleSkillTaskForced()' not in loop.split('runTutorialIslandExclusively()', 1)[0]
+          assert 'if (!isSingleSkillTaskForced()) handleTutorialIslandPriority()' not in parent
+
+          assert 'runOnClientThreadOptional' in tutorial.split('getLocalPlayerWorldLocationSafe()', 2)[-1]
+          assert 'isTutorialIslandLocation(location)' in tutorial
+          assert 'int progress = Microbot.getVarbitPlayerValue(281);' in tutorial
+          assert 'return progress > 0 && progress < 1000;' in tutorial
+          assert 'TutAreas.TUT_OVERWORLD_AREA.contains(location)' in tutorial
+          assert 'TutAreas.TUTORIAL_ISLAND_UNDERGROUND_AREA.contains(location)' in tutorial
+          assert 'TUT_OVERWORLD_AREA' in areas and 'TUTORIAL_ISLAND_UNDERGROUND_AREA' in areas
+
+          # The actual Tutorial Island completion spell remains available
+          # only in the mage instructor's last tutorial stage.
+          mage = tutorial.split('private void mageGuide()', 1)[1].split('private void handleFinalMageDialogue()', 1)[0]
+          assert 'if (progress >= 680)' in mage and 'castLumbridgeHomeTeleport();' in mage
+          print('PASS: Tutorial Island preempts mainland teleport/bank tasks and uses client-thread location + stage')
+          
       - name: Verify all Rune Essence portal variants and shared recovery
         shell: python
         run: |
