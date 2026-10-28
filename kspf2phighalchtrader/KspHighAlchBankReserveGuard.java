@@ -1,7 +1,6 @@
 package net.runelite.client.plugins.microbot.kspf2phighalchtrader;
 
 
-import net.runelite.client.plugins.microbot.kspbank.KspVerifiedBank;
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.client.plugins.microbot.Microbot;
 import net.runelite.client.plugins.microbot.util.bank.Rs2Bank;
@@ -125,6 +124,14 @@ public class KspHighAlchBankReserveGuard
             return;
         }
 
+        // Never move to a distant booth while the trader approaches GE.
+        // This guard must remain passive until the worker is in the GE.
+        if (!KspHighAlchGeAccess.isInGrandExchange(
+                net.runelite.client.plugins.microbot.util.player.Rs2Player.getWorldLocation())) {
+            status = "Waiting for Grand Exchange before protecting reserve";
+            return;
+        }
+
         long cachedBankCoins = Math.max(0L, Rs2Bank.count(COINS_ID));
         if (normalisedReserve == reserve && cachedBankCoins == reserve)
         {
@@ -144,9 +151,19 @@ public class KspHighAlchBankReserveGuard
         try
         {
             status = "Normalising protected bank reserve";
-            if (!KspVerifiedBank.walkToBankAndOpenBank())
+            if (!KspHighAlchGeAccess.isInGrandExchange(
+                    net.runelite.client.plugins.microbot.util.player.Rs2Player.getWorldLocation())) {
+                status = "Waiting for Grand Exchange before protecting reserve";
+                return;
+            }
+            if (!Rs2Bank.isOpen() && !KspHighAlchGeAccess.openLocalBank())
             {
-                status = "Waiting for bank to protect reserve";
+                status = "Waiting for GE Banker to protect reserve";
+                return;
+            }
+            if (!sleepUntil(Rs2Bank::isOpen, 4_000))
+            {
+                status = "Waiting for GE bank interface";
                 return;
             }
 
