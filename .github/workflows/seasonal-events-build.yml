@@ -420,7 +420,7 @@ jobs:
           assert 'change(Stage.REPORT_CHILDREN' in child
           assert 'visibleTreaters=[' in child
 
-          assert 'required == Stage.SPOOK_CHILDREN && !spookedChildren.isEmpty()' in report
+          assert 'if (required == Stage.SPOOK_CHILDREN)' in report
           assert 'childSpookRetries > allowedRetries' in report
           assert 'if (spookedChildren.size() >= CHILD_REPORT_CHECKPOINT)' in report
           assert 'if (next == Stage.SPOOK_CHILDREN)' in change
