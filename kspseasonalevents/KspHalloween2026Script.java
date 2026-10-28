@@ -984,21 +984,26 @@ public final class KspHalloween2026Script extends Script {
             return;
         }
 
-        if (required == Stage.SPOOK_CHILDREN
-                && spookedChildren.size() >= CHILD_REPORT_CHECKPOINT) {
+        if (required == Stage.SPOOK_CHILDREN && !spookedChildren.isEmpty()) {
+            // A report after a PARTIAL (e.g. 2/5) live scene search must
+            // also be bounded. Previously only 5/5 reports incremented the
+            // counter, allowing unlimited two-child/report loops.
             childSpookRetries++;
             configManager.setConfiguration(GROUP, CHILD_RETRY_COUNT_KEY, childSpookRetries);
-            if (childSpookRetries > 1) {
+            int allowedRetries = spookedChildren.size() >= CHILD_REPORT_CHECKPOINT ? 1 : 2;
+            if (childSpookRetries > allowedRetries) {
                 pendingStarterNext = null;
-                stopForReview("Angel/Henja still requires child scares after a retry."
-                        + " Inspect the Spook responses and NPC classifications");
+                stopForReview("Angel/Henja still requests child scares after "
+                        + childSpookRetries + " searches with no additional successful targets."
+                        + " Inspect the Spook responses and loaded NPC IDs");
                 return;
             }
-            // Previous entries are attempted clicks, not game-confirmed
-            // successful scares. Only clear them following this explicit
-            // server-side report that the child objective remains unfinished.
-            spookedChildren.clear();
-            persistNpcIds(SPOOKED_CHILD_IDS_KEY, spookedChildren);
+            if (spookedChildren.size() >= CHILD_REPORT_CHECKPOINT) {
+                // Only discard fully attempted IDs following an explicit
+                // rejection by the server. Partial attempts are preserved.
+                spookedChildren.clear();
+                persistNpcIds(SPOOKED_CHILD_IDS_KEY, spookedChildren);
+            }
         }
 
         childrenReportConfirmed = false;
@@ -1405,6 +1410,10 @@ public final class KspHalloween2026Script extends Script {
             actionsAtStage = 0;
             sweepsWithoutTarget = 0;
             sweepIndex = 0;
+            if (next == Stage.SPOOK_CHILDREN) {
+                childNoTargetSince = 0L;
+                childScoutedNpcTiles.clear();
+            }
         }
     }
 
@@ -1474,6 +1483,8 @@ public final class KspHalloween2026Script extends Script {
         pendingLantern = null;
         lanternsVerified = false;
         spookedChildren.clear();
+        childScoutedNpcTiles.clear();
+        childNoTargetSince = 0L;
         givenAdultIds.clear();
         pendingAdultId = -1;
         childrenReportConfirmed = false;
