@@ -20,6 +20,7 @@ import javax.inject.Inject;
 import javax.inject.Singleton;
 import java.util.Arrays;
 import java.util.HashSet;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
@@ -102,7 +103,7 @@ public final class KspHalloween2026Script extends Script {
     private volatile boolean paused;
     private volatile long startedAt;
 
-    private final Set<String> smashedLanternTiles = new HashSet<>();
+    private final Set<String> smashedLanternTiles = ConcurrentHashMap.newKeySet();
     private volatile boolean lanternsVerified;
     private final Set<Integer> spookedChildren = new HashSet<>();
     private final Set<Integer> givenAdultIndexes = new HashSet<>();
@@ -114,7 +115,7 @@ public final class KspHalloween2026Script extends Script {
     private long lastWalkAt;
     private long lastTalkAt;
     private long lastDiagnosticAt;
-    private WorldPoint pendingLantern;
+    private volatile WorldPoint pendingLantern;
     private long pendingLanternAt;
     private long lastVerificationTalkAt;
     private boolean sweepRequiredByStarter;
