@@ -149,7 +149,7 @@ public final class KspHalloween2026Script extends Script {
     private boolean sweepRequiredByStarter;
     private int starterReportedRemainingCount;
     private int pendingCandyCount = -1;
-    private int pendingAdultIndex = -1;
+    private int pendingAdultId = -1;
     private String pendingHolidayItem;
     private long pendingHolidayItemAt;
     private int holidayRetrievalTimeouts;
@@ -1086,13 +1086,16 @@ public final class KspHalloween2026Script extends Script {
             if (System.currentTimeMillis() - lastActionAt >= 1_200L) {
                 if (candyCount < pendingCandyCount) {
                     int used = pendingCandyCount - candyCount;
-                    adultsGiven += used;
-                    configManager.setConfiguration(GROUP, ADULTS_KEY, adultsGiven);
-                    givenAdultIndexes.add(pendingAdultIndex);
-                    log.info("Halloween candy onions delivered | total={} remaining={}",
-                            adultsGiven, candyCount);
+                    if (pendingAdultId > 0 && givenAdultIds.add(pendingAdultId)) {
+                        adultsGiven = Math.min(5, adultsGiven + 1);
+                        configManager.setConfiguration(GROUP, ADULTS_KEY, adultsGiven);
+                        persistNpcIds(DELIVERED_ADULT_IDS_KEY, givenAdultIds);
+                        log.info("Halloween candy delivery verified | adultId={} used={} total={}/5",
+                                pendingAdultId, used, adultsGiven);
+                    }
                 }
                 pendingCandyCount = -1;
+                pendingAdultId = -1;
             } else return;
         }
         if (adultsGiven >= 5) {
@@ -1108,13 +1111,16 @@ public final class KspHalloween2026Script extends Script {
         Rs2NpcModel adult = Rs2Npc.getNpcs().filter(n -> n.getName() != null
                 && n.getName().toLowerCase(Locale.ROOT).contains("trick")
                 && !npcHasAction(n, "Spook")
-                && !givenAdultIndexes.contains(n.getIndex())).findFirst().orElse(null);
+                && !spookedChildren.contains(n.getId())
+                && !givenAdultIds.contains(n.getId())
+                && (npcHasAction(n, "Talk-to") || npcHasAction(n, "Trick-or-treat")))
+                .findFirst().orElse(null);
         net.runelite.client.plugins.microbot.util.inventory.Rs2ItemModel item =
                 Rs2Inventory.get("Candy onion");
         if (adult != null && item != null) {
             if (ready() && Rs2Inventory.useItemOnNpc(item.getId(), adult)) {
                 pendingCandyCount = candyCount;
-                pendingAdultIndex = adult.getIndex();
+                pendingAdultId = adult.getId();
                 acted("Offering candy onion to adult npcId=" + adult.getId());
                 sweepsWithoutTarget = 0;
             }
