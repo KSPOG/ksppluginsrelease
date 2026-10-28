@@ -211,6 +211,14 @@ public final class KspHalloween2026Script extends Script {
                 spookedChildren.size(), givenAdultIds.size(), adultsGiven);
 
         Stage saved = savedStage();
+        if (saved == Stage.SPOOK_CHILDREN && spookedChildren.isEmpty()
+                && configManager.getConfiguration(GROUP, SPOOKED_CHILD_IDS_KEY) == null) {
+            // Upgrade from v0.2.4, where spooked children were never saved.
+            // Ask Angel/Henja for the authoritative next step before doing
+            // another full Rimmington loop.
+            saved = Stage.REPORT_CHILDREN;
+            log.info("Halloween legacy child-stage resume | verifying with starter");
+        }
         if (lanternsVerified && (saved == Stage.SMASH_LANTERNS
                 || saved == Stage.VERIFY_LANTERNS))
             saved = Stage.REPORT_LANTERNS;
@@ -269,6 +277,12 @@ public final class KspHalloween2026Script extends Script {
                 && (Rs2Dialogue.hasContinue() || Rs2Dialogue.hasSelectAnOption()))
             inspectLanternVerificationDialogue();
 
+        if (stage == Stage.REPORT_CHILDREN
+                && (Rs2Dialogue.hasContinue() || Rs2Dialogue.hasSelectAnOption())) {
+            inspectChildReportDialogue();
+            if (stage != Stage.REPORT_CHILDREN) return;
+        }
+
         if (pendingStarterNext != null
                 && (Rs2Dialogue.hasContinue() || Rs2Dialogue.hasSelectAnOption())) {
             pendingStarterDialogueSeen = true;
@@ -302,6 +316,13 @@ public final class KspHalloween2026Script extends Script {
                 Stage next = pendingStarterNext;
                 pendingStarterNext = null;
                 pendingStarterDialogueSeen = false;
+                if (stage == Stage.REPORT_CHILDREN
+                        && next == Stage.CHEMIST_RIDDLE
+                        && !childrenReportConfirmed) {
+                    stopForReview("Angel/Henja dialogue did not confirm the Chemist/adult objective;"
+                            + " cannot advance without quest evidence");
+                    return;
+                }
                 change(next, "Starter dialogue completed");
             } else if (System.currentTimeMillis() - pendingStarterAt > 8_000L) {
                 log.warn("Halloween starter click produced no visible dialogue | stage={} next={}",
@@ -880,6 +901,47 @@ public final class KspHalloween2026Script extends Script {
         }).orElse(false);
     }
 
+    private void inspectChildReportDialogue() {
+        String text = Rs2Dialogue.hasSelectAnOption()
+                ? Rs2Dialogue.getQuestion() : Rs2Dialogue.getDialogueText();
+        if (text == null || text.isBlank()) return;
+        String lower = text.replaceAll("<[^>]*>", "").toLowerCase(Locale.ROOT);
+
+        boolean stillNeedsChildren = (lower.contains("children")
+                || lower.contains("trick-or-treater") || lower.contains("kids"))
+                && (lower.contains("more") || lower.contains("still")
+                    || lower.contains("haven't") || lower.contains("not all"));
+        if (stillNeedsChildren) {
+            log.info("Halloween children objective not complete | starter={}", text);
+            pendingStarterNext = null;
+            pendingStarterDialogueSeen = false;
+            if (++childSpookRetries > 1) {
+                stopForReview("Starter twice reported children remaining; inspect live NPC actions");
+            } else {
+                spookedChildren.clear();
+                persistNpcIds(SPOOKED_CHILD_IDS_KEY, spookedChildren);
+                change(Stage.SPOOK_CHILDREN, "Starter requests more child spooking; retrying scene targets");
+            }
+            return;
+        }
+
+        // A mention of the subsequent chemist/sugar/onions/adults task is
+        // authoritative evidence the event progressed past scaring children.
+        if (lower.contains("chemist") || lower.contains("molten sugar")
+                || lower.contains("candy onion") || lower.contains("old onion")
+                || (lower.contains("sugar") && !lower.contains("sugar rush"))
+                || lower.contains("adults") || lower.contains("grown-ups")) {
+            if (!childrenReportConfirmed)
+                log.info("Halloween children objective verified by starter | dialogue={}", text);
+            childrenReportConfirmed = true;
+            return;
+        }
+        if (System.currentTimeMillis() - lastDiagnosticAt > 5_000L) {
+            lastDiagnosticAt = System.currentTimeMillis();
+            log.info("Halloween starter child-report dialogue pending evidence | text={}", text);
+        }
+    }
+
     private void spookChildren(WorldPoint player) {
         if (costumeCount() < 4) {
             change(Stage.GET_COSTUME, "Need four Halloween outfit pieces equipped");
@@ -887,21 +949,39 @@ public final class KspHalloween2026Script extends Script {
         }
         if (!RIMMINGTON.contains(player)
                 && !nearOrWalk(player, STARTER, 12, "child trick-or-treaters")) return;
+
+        // NPC indexes are session-local and may be reused after scene
+        // reloads. Use the observed NPC definition IDs to deduplicate clicks.
         Rs2NpcModel child = Rs2Npc.getNpcs().filter(n -> n.getName() != null
                 && n.getName().toLowerCase(Locale.ROOT).contains("trick")
                 && npcHasAction(n, "Spook")
-                && !spookedChildren.contains(n.getIndex())).findFirst().orElse(null);
+                && !spookedChildren.contains(n.getId())).findFirst().orElse(null);
         if (child != null) {
             if (ready() && Rs2Npc.interact(child, "Spook")) {
-                spookedChildren.add(child.getIndex());
-                acted("Spooking child trick-or-treater npcId=" + child.getId()
-                        + " index=" + child.getIndex());
+                spookedChildren.add(child.getId());
+                persistNpcIds(SPOOKED_CHILD_IDS_KEY, spookedChildren);
+                acted("Spook attempt | childNpcId=" + child.getId()
+                        + " index=" + child.getIndex()
+                        + " distinctAttempts=" + spookedChildren.size());
                 sweepsWithoutTarget = 0;
             }
             return;
         }
+
+        // After the 10 distinct IDs observed in the supplied 2026 run,
+        // do not walk eight arbitrary waypoints. Verify with Angel/Henja.
+        // Attempts are not counted as game-confirmed successful scares.
+        if (spookedChildren.size() >= CHILD_REPORT_CHECKPOINT) {
+            childrenReportConfirmed = false;
+            change(Stage.REPORT_CHILDREN,
+                    "Ten distinct Spook actions attempted; checking with Angel/Henja");
+            return;
+        }
+
         if (sweepsWithoutTarget >= RIMMINGTON_SWEEP.length) {
-            change(Stage.REPORT_CHILDREN, "No remaining Spook targets seen; check with Angel/Henja");
+            childrenReportConfirmed = false;
+            change(Stage.REPORT_CHILDREN,
+                    "No other child targets located; checking with Angel/Henja");
             return;
         }
         scanRimmington(player, "Looking for child trick-or-treaters");
