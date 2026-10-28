@@ -149,6 +149,39 @@ jobs:
           assert 'TutAreas.contains(destination)' in plugin
           print('PASS: mining progress/live ore targeting, ranged rat attack and Tutorial Island banker-only routing')
 
+      - name: Verify Tutorial Island prayer/magic exits and regular-account dialogue
+        shell: python
+        run: |
+          from pathlib import Path
+          code = Path('release/kspaccountbuilder/tasks/tutorialisland/TutorialIslandScript.java').read_text()
+          prayer = code.split('private void prayerGuide()', 1)[1].split('private void mageGuide()', 1)[0]
+          mage = code.split('private void mageGuide()', 1)[1].split('private void handleFinalMageDialogue()', 1)[0]
+          dialogue = code.split('private void handleFinalMageDialogue()', 1)[1].split('private boolean castLumbridgeHomeTeleport()', 1)[0]
+          for token in ('CHAPEL_PASSAGE_DOOR_ID = 9722', 'MAGIC_PASSAGE_DOOR_ID = 9723',
+                        'CHAPEL_INTERIOR_DOOR_ID = 1524', 'CHAPEL_INSTRUCTOR_TILE',
+                        'MAGIC_INSTRUCTOR_TILE', 'ensurePrayerChapelEntrance(',
+                        'advanceThroughTutorialDoor('):
+              assert token in code, 'Missing tutorial door/route handler: ' + token
+          assert 'if (progress == 540)' in prayer
+          assert 'advanceThroughTutorialDoor(CHAPEL_PASSAGE_DOOR_ID' in prayer
+          assert 'if (progress == 550)' in prayer
+          assert 'ensurePrayerChapelEntrance(npc)' in prayer
+          for progress, action in ((560, 'Prayer'), (580, 'Friends list'), (590, 'Ignore list')):
+              assert 'if (progress == ' + str(progress) + ')' in prayer
+              assert 'clickTab("' + action + '")' in prayer
+          assert 'if (progress == 600)' in prayer
+          assert 'if (progress == 610)' in mage
+          assert 'advanceThroughTutorialDoor(MAGIC_PASSAGE_DOOR_ID' in mage
+          assert 'if (progress == 620)' in mage
+          assert 'walkTutorialLocal(MAGIC_INSTRUCTOR_TILE, 3)' in mage
+          assert 'No, I\'m not planning to do that.' in dialogue
+          assert 'Yes, I\'d like to go to the mainland' in dialogue
+          assert 'text.contains("mainland") && !text.contains("ironman")' in dialogue
+          assert 'keyPressForDialogueOption(1)' not in dialogue
+          assert 'keyPressForDialogueOption("Yes")' not in dialogue
+          assert 'Unrecognized final dialogue; no option selected' in dialogue
+          print('PASS: explicit chapel/magic transitions, prayer social tabs, and no Ironman fallback')
+
       - name: Verify all Rune Essence portal variants and shared recovery
         shell: python
         run: |
