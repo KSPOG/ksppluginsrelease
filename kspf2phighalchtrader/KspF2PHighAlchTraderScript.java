@@ -1,13 +1,15 @@
 package net.runelite.client.plugins.microbot.kspf2phighalchtrader;
 
 
-import net.runelite.client.plugins.microbot.kspbank.KspVerifiedBank;
 import net.runelite.api.GrandExchangeOfferState;
 import net.runelite.api.ItemComposition;
 import net.runelite.api.Skill;
+import net.runelite.api.coords.WorldPoint;
 import net.runelite.client.plugins.microbot.Microbot;
+import lombok.extern.slf4j.Slf4j;
 import net.runelite.client.plugins.microbot.kspsupport.KspBreakAwareScript;
 import net.runelite.client.plugins.microbot.util.bank.Rs2Bank;
+import net.runelite.client.plugins.microbot.util.bank.enums.BankLocation;
 import net.runelite.client.plugins.microbot.util.equipment.Rs2Equipment;
 import net.runelite.client.plugins.microbot.util.grandexchange.Rs2GrandExchange;
 import net.runelite.client.plugins.microbot.util.grandexchange.GrandExchangeSlots;
@@ -21,6 +23,7 @@ import net.runelite.client.plugins.microbot.util.magic.Rs2Magic;
 import net.runelite.client.plugins.microbot.util.player.Rs2Player;
 import net.runelite.client.plugins.microbot.util.settings.Rs2Settings;
 import net.runelite.client.plugins.microbot.util.widget.Rs2Widget;
+import net.runelite.client.plugins.microbot.util.walker.Rs2Walker;
 
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -34,6 +37,7 @@ import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 import javax.inject.Singleton;
 
+@Slf4j
 @Singleton
 public class KspF2PHighAlchTraderScript extends KspBreakAwareScript {
     public enum State {
@@ -68,6 +72,7 @@ public class KspF2PHighAlchTraderScript extends KspBreakAwareScript {
     private static final long FOUR_HOURS_MS = TimeUnit.HOURS.toMillis(4);
     private static final long ZERO_FILL_BLOCK_MS = TimeUnit.MINUTES.toMillis(2);
     private static final long GE_TRAVEL_RETRY_MS = 4000L;
+    private static final long GE_TRAVEL_RECHECK_MS = 15_000L;
 
     private KspF2PHighAlchTraderConfig config;
     private volatile State state = State.STARTING;
@@ -120,6 +125,7 @@ public class KspF2PHighAlchTraderScript extends KspBreakAwareScript {
 
     private volatile boolean shuttingDown = false;
     private long nextGeTravelAttemptAt = 0L;
+    private boolean geTravelOwned;
 
     public synchronized boolean run(KspF2PHighAlchTraderConfig config) {
         // Plugin/hot-reload start events can occasionally call run() more than once on the
@@ -131,6 +137,8 @@ public class KspF2PHighAlchTraderScript extends KspBreakAwareScript {
             return true;
         }
         this.shuttingDown = false;
+        this.geTravelOwned = false;
+        this.nextGeTravelAttemptAt = 0L;
         this.config = config;
         this.startedAt = System.currentTimeMillis();
         this.lastMarketScanAt = 0L;
@@ -189,6 +197,13 @@ public class KspF2PHighAlchTraderScript extends KspBreakAwareScript {
 
     private void tick() {
         if (shuttingDown) {
+            return;
+        }
+        // The trader is GE-based: the ONLY permitted cross-area route is
+        // initial travel to BankLocation.GRAND_EXCHANGE. Once inside GE
+        // neither banking nor exchange access may choose another destination.
+        if (!ensureInsideGrandExchange()) {
+            Microbot.status = "KSP High Alch Trader: " + status;
             return;
         }
         resetExpiredPurchaseWindows();
@@ -1533,11 +1548,58 @@ public class KspF2PHighAlchTraderScript extends KspBreakAwareScript {
     }
 
     /**
-     * Open the GE without hammering the walker every 600 ms. openExchange() is tried
-     * first; walking is rate-limited and only started when the exchange cannot be
-     * opened from the current location.
+     * Move to the canonical Grand Exchange only when not in its paved
+     * banking/trading square. Never walk to any arbitrary bank object.
+     */
+    private boolean ensureInsideGrandExchange() {
+        WorldPoint player = Rs2Player.getWorldLocation();
+        if (player == null) {
+            status = "Waiting for player location";
+            return false;
+        }
+        WorldPoint target = Rs2Walker.getCurrentTarget();
+        WorldPoint destination = BankLocation.GRAND_EXCHANGE.getWorldPoint();
+
+        if (KspHighAlchGeAccess.isInGrandExchange(player)) {
+            if (geTravelOwned) {
+                geTravelOwned = false;
+                if (target != null)
+                    Rs2Walker.clearWalkingRoute("ksp_high_alch_ge_arrived");
+                status = "Arrived at Grand Exchange";
+                log.info("High Alch Trader arrived at GE: {}", player);
+            } else if (target != null && !KspHighAlchGeAccess.isInGrandExchange(target)) {
+                // Drop any stale Cooking Guild route, including one issued by
+                // a plugin's historic generic bank helper.
+                Rs2Walker.clearWalkingRoute("ksp_high_alch_ge_only");
+                log.warn("Cancelled offsite walker target while trading at GE: {}", target);
+            }
+            return true;
+        }
+
+        status = "Walking to Grand Exchange";
+        long now = System.currentTimeMillis();
+        if (target != null && !destination.equals(target)) {
+            Rs2Walker.clearWalkingRoute("ksp_high_alch_redirect_to_ge");
+            target = null;
+        }
+        if (now < nextGeTravelAttemptAt && (!geTravelOwned || destination.equals(target)))
+            return false;
+        // Do not reissue an in-flight route on every 300ms trader tick.
+        nextGeTravelAttemptAt = now + (destination.equals(target)
+                ? GE_TRAVEL_RECHECK_MS : GE_TRAVEL_RETRY_MS);
+        geTravelOwned = true;
+        log.info("High Alch Trader walking to GE | from={} destination={}", player, destination);
+        Rs2GrandExchange.walkToGrandExchange();
+        return false;
+    }
+
+    /**
+     * Open a real Grand Exchange Clerk's Exchange menu. Microbot's generic
+     * openExchange() and bank-booth search can resolve an unrelated distant
+     * bank or invoke can't-reach pathfinding from the GE.
      */
     private boolean ensureGrandExchangeOpen() {
+        if (!ensureInsideGrandExchange()) return false;
         if (Rs2GrandExchange.isOfferScreenOpen()) {
             Rs2GrandExchange.backToOverview();
             status = "Returning to GE overview";
@@ -1552,30 +1614,19 @@ public class KspF2PHighAlchTraderScript extends KspBreakAwareScript {
             status = "Closing bank before Grand Exchange";
             return false;
         }
-
-        // The supplied Flipper JAR rate-limits the entire GE acquisition attempt,
-        // not only walking. That prevents openExchange()/walker calls from being
-        // hammered by a 600 ms state-machine tick when the client UI is not ready.
         long now = System.currentTimeMillis();
         if (now < nextGeTravelAttemptAt) {
-            status = "Waiting to retry Grand Exchange";
+            status = "Waiting to retry GE clerk";
             return false;
         }
         nextGeTravelAttemptAt = now + GE_TRAVEL_RETRY_MS;
-
-        status = "Opening Grand Exchange";
-        if (Rs2GrandExchange.openExchange()) {
-            nextGeTravelAttemptAt = 0L;
-            return true;
-        }
-
-        if (Thread.currentThread().isInterrupted() || shuttingDown) {
+        status = "Opening nearby Grand Exchange Clerk";
+        if (!KspHighAlchGeAccess.openLocalExchange()) {
+            status = "Waiting for GE Clerk in range (no offsite walk)";
             return false;
         }
-
-        status = "Walking to Grand Exchange";
-        Rs2GrandExchange.walkToGrandExchange();
-        return false;
+        return sleepUntil(Rs2GrandExchange::isOpen, 3_000)
+                && !Rs2GrandExchange.isOfferScreenOpen();
     }
 
     private boolean isExpectedInterruption(Throwable throwable) {
@@ -1593,10 +1644,14 @@ public class KspF2PHighAlchTraderScript extends KspBreakAwareScript {
     }
 
     private boolean openBankSafely() {
-        if (!closeGrandExchangeInterface()) {
+        if (!ensureInsideGrandExchange()) return false;
+        if (!closeGrandExchangeInterface()) return false;
+        if (Rs2Bank.isOpen()) return true;
+        if (!KspHighAlchGeAccess.openLocalBank()) {
+            status = "Waiting for GE Banker (no bank booths)";
             return false;
         }
-        return KspVerifiedBank.openBank();
+        return sleepUntil(Rs2Bank::isOpen, 4_000);
     }
 
     private void clearPendingPurchase() {
@@ -1748,6 +1803,9 @@ public class KspF2PHighAlchTraderScript extends KspBreakAwareScript {
         // ClientThread.invoke interruption is treated as expected shutdown noise.
         shuttingDown = true;
         nextGeTravelAttemptAt = 0L;
+        if (geTravelOwned && Rs2Walker.getCurrentTarget() != null)
+            Rs2Walker.clearWalkingRoute("ksp_high_alch_trader_stopped");
+        geTravelOwned = false;
 
         // Cancel the worker before mutating the state it is reading. With the run()
         // duplicate-loop guard above, this is the one and only active main future.

@@ -26,7 +26,7 @@ public class KspF2PHighAlchTraderPlugin extends Plugin
 {
     private final KspBreakService breaks = new KspBreakService();
 
-    public static final String VERSION = "0.3.7";
+    public static final String VERSION = "0.3.8";
 
     @Inject private KspF2PHighAlchTraderConfig config;
     @Inject private KspF2PHighAlchTraderScript script;
