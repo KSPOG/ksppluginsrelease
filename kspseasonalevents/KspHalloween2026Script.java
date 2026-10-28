@@ -931,44 +931,68 @@ public final class KspHalloween2026Script extends Script {
     }
 
     private void inspectChildReportDialogue() {
-        String text = Rs2Dialogue.hasSelectAnOption()
+        String raw = Rs2Dialogue.hasSelectAnOption()
                 ? Rs2Dialogue.getQuestion() : Rs2Dialogue.getDialogueText();
-        if (text == null || text.isBlank()) return;
-        String lower = text.replaceAll("<[^>]*>", "").toLowerCase(Locale.ROOT);
-
-        boolean stillNeedsChildren = (lower.contains("children")
-                || lower.contains("trick-or-treater") || lower.contains("kids"))
-                && (lower.contains("more") || lower.contains("still")
-                    || lower.contains("haven't") || lower.contains("not all"));
-        if (stillNeedsChildren) {
-            log.info("Halloween children objective not complete | starter={}", text);
-            pendingStarterNext = null;
-            pendingStarterDialogueSeen = false;
-            if (++childSpookRetries > 1) {
-                stopForReview("Starter twice reported children remaining; inspect live NPC actions");
-            } else {
-                spookedChildren.clear();
-                persistNpcIds(SPOOKED_CHILD_IDS_KEY, spookedChildren);
-                change(Stage.SPOOK_CHILDREN, "Starter requests more child spooking; retrying scene targets");
+        KspHalloweenChildReport.Instruction instruction =
+                KspHalloweenChildReport.classify(raw);
+        if (instruction == KspHalloweenChildReport.Instruction.UNKNOWN) {
+            if (raw != null && System.currentTimeMillis() - lastDiagnosticAt > 5_000L) {
+                lastDiagnosticAt = System.currentTimeMillis();
+                log.info("Halloween starter child-report dialogue pending evidence | text={}", raw);
             }
             return;
         }
 
-        // A mention of the subsequent chemist/sugar/onions/adults task is
-        // authoritative evidence the event progressed past scaring children.
-        if (lower.contains("chemist") || lower.contains("molten sugar")
-                || lower.contains("candy onion") || lower.contains("old onion")
-                || (lower.contains("sugar") && !lower.contains("sugar rush"))
-                || lower.contains("adults") || lower.contains("grown-ups")) {
-            if (!childrenReportConfirmed)
-                log.info("Halloween children objective verified by starter | dialogue={}", text);
+        if (instruction == KspHalloweenChildReport.Instruction.VISIT_CHEMIST) {
+            if (!childrenReportConfirmed) {
+                log.info("Halloween child objective confirmed; next objective is Chemist"
+                        + " | starter={}", raw);
+            }
             childrenReportConfirmed = true;
+            pendingStarterNext = Stage.CHEMIST_RIDDLE;
+            pendingStarterDialogueSeen = true;
+            pendingStarterLastDialogueAt = System.currentTimeMillis();
+            configManager.unsetConfiguration(GROUP, CHILD_RETRY_COUNT_KEY);
+            childSpookRetries = 0;
             return;
         }
-        if (System.currentTimeMillis() - lastDiagnosticAt > 5_000L) {
-            lastDiagnosticAt = System.currentTimeMillis();
-            log.info("Halloween starter child-report dialogue pending evidence | text={}", text);
+
+        // The starter explicitly says to scare trick-or-treaters (including
+        // "Get yourself a Halloween costume and scare off ..."). This is a
+        // real instruction to CONTINUE the child objective, not an unknown
+        // dialogue and certainly not permission to visit the Chemist.
+        Stage required = costumeCount() >= 4
+                ? Stage.SPOOK_CHILDREN : Stage.GET_COSTUME;
+        if (pendingStarterNext == required) {
+            // The same dialogue widget remains visible for multiple ticks.
+            // Never count a single line as multiple failed quest reports.
+            return;
         }
+
+        if (required == Stage.SPOOK_CHILDREN
+                && spookedChildren.size() >= CHILD_REPORT_CHECKPOINT) {
+            childSpookRetries++;
+            configManager.setConfiguration(GROUP, CHILD_RETRY_COUNT_KEY, childSpookRetries);
+            if (childSpookRetries > 1) {
+                pendingStarterNext = null;
+                stopForReview("Angel/Henja still requires child scares after a retry."
+                        + " Inspect the Spook responses and NPC classifications");
+                return;
+            }
+            // Previous entries are attempted clicks, not game-confirmed
+            // successful scares. Only clear them following this explicit
+            // server-side report that the child objective remains unfinished.
+            spookedChildren.clear();
+            persistNpcIds(SPOOKED_CHILD_IDS_KEY, spookedChildren);
+        }
+
+        childrenReportConfirmed = false;
+        pendingStarterNext = required;
+        pendingStarterDialogueSeen = true;
+        pendingStarterLastDialogueAt = System.currentTimeMillis();
+        log.info("Halloween starter requests more child scares | next={} costumeSlots={}"
+                        + " retries={} recordedChildAttempts={} dialogue={}",
+                required, costumeCount(), childSpookRetries, spookedChildren.size(), raw);
     }
 
     private TreaterGroup treaterGroup(int npcId) {
