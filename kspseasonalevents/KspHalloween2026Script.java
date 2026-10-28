@@ -122,6 +122,10 @@ public final class KspHalloween2026Script extends Script {
     private int starterReportedRemainingCount;
     private int pendingCandyCount = -1;
     private int pendingAdultIndex = -1;
+    // A starter conversation is not complete just because the NPC was clicked.
+    private Stage pendingStarterNext;
+    private long pendingStarterAt;
+    private boolean pendingStarterDialogueSeen;
 
     public synchronized boolean start(KspSeasonalEventsConfig configuration) {
         if (active) return true;
@@ -136,6 +140,9 @@ public final class KspHalloween2026Script extends Script {
         sweepRequiredByStarter = false;
         starterReportedRemainingCount = 0;
         pendingCandyCount = -1;
+        pendingStarterNext = null;
+        pendingStarterAt = 0L;
+        pendingStarterDialogueSeen = false;
         spookedChildren.clear();
         givenAdultIndexes.clear();
         sweepIndex = 0;
@@ -197,6 +204,10 @@ public final class KspHalloween2026Script extends Script {
                 && (Rs2Dialogue.hasContinue() || Rs2Dialogue.hasSelectAnOption()))
             inspectLanternVerificationDialogue();
 
+        if (pendingStarterNext != null
+                && (Rs2Dialogue.hasContinue() || Rs2Dialogue.hasSelectAnOption()))
+            pendingStarterDialogueSeen = true;
+
         if (Rs2Dialogue.hasContinue()) {
             if (ready()) {
                 Rs2Dialogue.clickContinue();
@@ -208,6 +219,25 @@ public final class KspHalloween2026Script extends Script {
 
         if (Rs2Dialogue.hasSelectAnOption()) {
             handleDialogueOption();
+            return;
+        }
+
+        // Prevent the next activity (e.g. walking to Diango) from starting
+        // while the NPC is still offering a hat or explaining the next step.
+        if (pendingStarterNext != null) {
+            if (pendingStarterDialogueSeen) {
+                Stage next = pendingStarterNext;
+                pendingStarterNext = null;
+                pendingStarterDialogueSeen = false;
+                change(next, "Starter dialogue completed");
+            } else if (System.currentTimeMillis() - pendingStarterAt > 8_000L) {
+                log.warn("Halloween starter click produced no visible dialogue | stage={} next={}",
+                        stage, pendingStarterNext);
+                pendingStarterNext = null;
+                pendingStarterDialogueSeen = false;
+            } else {
+                status = "Waiting for Angel / Henja dialogue";
+            }
             return;
         }
 
@@ -270,6 +300,13 @@ public final class KspHalloween2026Script extends Script {
         List<String> options = Rs2Dialogue.getDialogueOptions().stream()
                 .map(w -> w == null ? "" : w.getText())
                 .collect(Collectors.toList());
+        if ((stage == Stage.REPORT_LANTERNS || stage == Stage.GET_COSTUME
+                || stage == Stage.VERIFY_LANTERNS)
+                && Rs2Dialogue.keyPressForDialogueOption("Sure, I'll take the hat.", true)) {
+            acted("Accepted Halloween hat from Angel / Henja");
+            return;
+        }
+
         if (stage == Stage.CHEMIST_RIDDLE && Rs2Dialogue.clickOption("92")) {
             acted("Answered Chemist's COFFIN riddle: 92");
             return;
@@ -319,11 +356,11 @@ public final class KspHalloween2026Script extends Script {
             status = "Locating Angel / Henja in their Rimmington home";
             return;
         }
-        acted("Speaking to Angel / Henja");
+        acted("Speaking to Angel / Henja; waiting for dialogue");
         lastTalkAt = System.currentTimeMillis();
-        // Do not block on a fixed, unverified cutscene duration. All later
-        // stages use confirmed actions/scene state rather than blind clicks.
-        change(next, "Talked to Angel / Henja; next: " + next);
+        pendingStarterNext = next;
+        pendingStarterAt = lastTalkAt;
+        pendingStarterDialogueSeen = false;
     }
 
     private Rs2TileObjectModel lantern() {
