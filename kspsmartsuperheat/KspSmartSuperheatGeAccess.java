@@ -11,7 +11,6 @@ import net.runelite.client.plugins.microbot.util.camera.Rs2Camera;
 import net.runelite.client.plugins.microbot.util.menu.NewMenuEntry;
 import net.runelite.client.plugins.microbot.util.misc.Rs2UiHelper;
 
-import java.util.Locale;
 
 /**
  * Strict GE-only banking/exchange interaction. KspVerifiedBank searches for
@@ -53,6 +52,19 @@ final class KspSmartSuperheatGeAccess
                 && player.distanceTo(actor) <= MAX_ACTOR_DISTANCE;
     }
 
+    /**
+     * RuneLite's Bank plugin recognizes the bank interface by BANKMAIN; it
+     * does not identify "a GE bank" by scanning arbitrary bank booths.
+     * Only the GE's named Banker NPCs may open our bank. Clerks handle
+     * Exchange and never serve as the bank fallback.
+     */
+    static boolean isExpectedActor(String name, boolean clerkOnly)
+    {
+        return name != null && (clerkOnly
+                ? "Grand Exchange Clerk".equalsIgnoreCase(name.trim())
+                : "Banker".equalsIgnoreCase(name.trim()));
+    }
+
     static boolean openLocalBank()
     {
         return interactLocalActor("Bank", false);
@@ -84,8 +96,7 @@ final class KspSmartSuperheatGeAccess
                         || npc.getWorldView() != view) continue;
 
                 String npcName = npc.getName();
-                if (clerkOnly && (npcName == null
-                        || !npcName.toLowerCase(Locale.ROOT).contains("grand exchange clerk"))) continue;
+                if (!isExpectedActor(npcName, clerkOnly)) continue;
 
                 NPCComposition composition = npc.getTransformedComposition();
                 if (composition == null) composition = npc.getComposition();
