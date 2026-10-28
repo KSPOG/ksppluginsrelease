@@ -22,6 +22,9 @@ import javax.inject.Singleton;
 import java.util.Arrays;
 import java.util.EnumSet;
 import java.util.HashSet;
+import java.util.Map;
+import java.util.HashMap;
+import java.util.ArrayList;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -53,7 +56,16 @@ public final class KspHalloween2026Script extends Script {
     private static final String DELIVERED_ADULT_IDS_KEY = "halloweenAdultNpcIdsDelivered";
     // Ten distinct child IDs are observed in the supplied 2026 client log.
     // This is a report-to-starter checkpoint, never proof of game success.
-    private static final int CHILD_REPORT_CHECKPOINT = 10;
+    private static final int CHILD_REPORT_CHECKPOINT = 5;
+    private static final String TREATER_CHILD_GROUP_KEY = "halloweenConfirmedChildNpcGroup";
+    // 2026 client logs show two groups of five NPC definition IDs. The
+    // groups are NOT assigned to children or adults without live evidence.
+    private static final int TREATER_GROUP_A_START = 16778;
+    private static final int TREATER_GROUP_A_END = 16782;
+    private static final int TREATER_GROUP_B_START = 16794;
+    private static final int TREATER_GROUP_B_END = 16798;
+    private enum TreaterAge { CHILD, ADULT, UNKNOWN }
+    private enum TreaterGroup { A, B, UNKNOWN }
     private static final WorldArea RIMMINGTON = new WorldArea(2925, 3180, 85, 95, 0);
     private static final WorldPoint STARTER = new WorldPoint(2958, 3211, 0);
     private static final WorldPoint DIANGO = new WorldPoint(3081, 3248, 0);
@@ -135,6 +147,9 @@ public final class KspHalloween2026Script extends Script {
     private boolean childrenReportConfirmed;
     private int childrenReportAttempts;
     private int childSpookRetries;
+    private final Map<Integer, Integer> observedTreaterHeights = new HashMap<>();
+    private TreaterGroup confirmedChildGroup = TreaterGroup.UNKNOWN;
+    private long lastTreaterClassificationLogAt;
     private int adultsGiven;
     private int sweepIndex;
     private int sweepsWithoutTarget;
@@ -188,6 +203,9 @@ public final class KspHalloween2026Script extends Script {
         childrenReportConfirmed = false;
         childrenReportAttempts = 0;
         childSpookRetries = 0;
+        observedTreaterHeights.clear();
+        confirmedChildGroup = TreaterGroup.UNKNOWN;
+        lastTreaterClassificationLogAt = 0L;
         sweepIndex = 0;
         sweepsWithoutTarget = 0;
         actionsAtStage = 0;
@@ -207,6 +225,9 @@ public final class KspHalloween2026Script extends Script {
         catch (NumberFormatException e) { adultsGiven = 0; }
         restoreNpcIds(SPOOKED_CHILD_IDS_KEY, spookedChildren);
         restoreNpcIds(DELIVERED_ADULT_IDS_KEY, givenAdultIds);
+        String childGroupConfig = configManager.getConfiguration(GROUP, TREATER_CHILD_GROUP_KEY);
+        if ("A".equals(childGroupConfig)) confirmedChildGroup = TreaterGroup.A;
+        else if ("B".equals(childGroupConfig)) confirmedChildGroup = TreaterGroup.B;
         log.info("Halloween saved NPC progress | attemptedChildren={} adultIds={} delivered={}",
                 spookedChildren.size(), givenAdultIds.size(), adultsGiven);
 
@@ -1218,6 +1239,7 @@ public final class KspHalloween2026Script extends Script {
         configManager.unsetConfiguration(GROUP, ADULTS_KEY);
         configManager.unsetConfiguration(GROUP, SPOOKED_CHILD_IDS_KEY);
         configManager.unsetConfiguration(GROUP, DELIVERED_ADULT_IDS_KEY);
+        configManager.unsetConfiguration(GROUP, TREATER_CHILD_GROUP_KEY);
         smashedLanternTiles.clear();
         pendingLantern = null;
         lanternsVerified = false;
