@@ -58,9 +58,12 @@ final class KspDiangoHolidayRetrieval {
     }
 
     static Snapshot inspect(List<String> desiredNames) {
+        // Rs2Widget.findWidget marshals to the client thread itself. Resolve
+        // before the second client-thread operation to avoid nested waits.
+        Widget title = Rs2Widget.findWidget(TITLE, true);
+        if (title == null) return Snapshot.closed();
         return Microbot.getClientThread().runOnClientThreadOptional(() -> {
-            Widget title = Rs2Widget.findWidget(TITLE, true);
-            if (title == null || title.isHidden()) return Snapshot.closed();
+            if (title.isHidden()) return Snapshot.closed();
 
             Widget root = title;
             for (int i = 0; i < 16 && root.getParent() != null; i++) {
