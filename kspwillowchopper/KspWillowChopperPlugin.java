@@ -72,8 +72,7 @@ import java.util.regex.Pattern;
 public class KspWillowChopperPlugin extends Plugin {
     private final KspBreakService breaks = new KspBreakService();
 
-    /** Intentionally unchanged at the user's request. */
-    public static final String VERSION = "0.1.4";
+    public static final String VERSION = "0.1.5";
 
     private static final String LEGACY_FORESTRY_PACKAGE =
             "net.runelite.client.plugins.microbot.kspwillowchopper.forestry.";
@@ -116,9 +115,24 @@ public class KspWillowChopperPlugin extends Plugin {
     @Override
     protected void startUp() {
         migrateLegacyBankSelection();
-        breaks.start(config);
-        runtimeActive = true;
+        runtimeActive = false;
         currentForestryEvent = KspForestryEvent.NONE;
+        // Enabling the RuneLite plugin must NOT start chopping or display an
+        // overlay. The side-panel Start button owns the session lifecycle.
+        purgeLegacyGlobalForestryHandlers();
+        addSettingsPanel();
+    }
+
+    @Override
+    protected void shutDown() {
+        stopChopping();
+        removeSettingsPanel();
+        purgeLegacyGlobalForestryHandlers();
+    }
+
+    /** Invoked by the RuneLite side-panel Start button (not plugin enable). */
+    void startChopping() {
+        if (script.hasSessionStarted()) return;
         completedForestryEvents.set(0);
         logsChopped.set(0);
         animaBarkGained.set(0);
@@ -129,34 +143,46 @@ public class KspWillowChopperPlugin extends Plugin {
         synchronized (forestryCompletionLock) {
             forestryCompletionTimes.clear();
         }
-
+        currentForestryEvent = KspForestryEvent.NONE;
+        runtimeActive = true;
         purgeLegacyGlobalForestryHandlers();
         rebuildForestryHandlers();
+        script.run(config);
+        breaks.start(config, () -> runtimeActive
+                && script.hasSessionStarted() && !script.isUserPaused());
         muleService.start(config);
         overlayManager.add(overlay);
-        addSettingsPanel();
-        script.run(config);
     }
 
-    @Override
-    protected void shutDown() {
-        try
-        {
+    /** Stop automation, breaks, mule, Forestry and overlay; keep panel open. */
+    void stopChopping() {
+        runtimeActive = false;
+        currentForestryEvent = KspForestryEvent.NONE;
+        script.shutdown();
+        muleService.shutdown();
+        breaks.shutdown();
+        forestryHandlers.clear();
+        saplingEvent = null;
+        ritualCircles.clear();
+        saplingIngredients.clear();
+        overlayManager.remove(overlay);
+    }
+
+    /** Pause preserves the script's session statistics and selected tree. */
+    void togglePauseChopping() {
+        if (!script.hasSessionStarted()) return;
+        if (script.isUserPaused()) {
+            runtimeActive = true;
+            rebuildForestryHandlers();
+            script.setUserPaused(false);
+            breaks.start(config, () -> runtimeActive
+                    && script.hasSessionStarted() && !script.isUserPaused());
+            muleService.start(config);
+        } else {
+            script.setUserPaused(true);
             runtimeActive = false;
             currentForestryEvent = KspForestryEvent.NONE;
-            forestryHandlers.clear();
-            saplingEvent = null;
-
-            script.shutdown();
-            removeSettingsPanel();
             muleService.shutdown();
-            ritualCircles.clear();
-            saplingIngredients.clear();
-            overlayManager.remove(overlay);
-            purgeLegacyGlobalForestryHandlers();
-        }
-        finally
-        {
             breaks.shutdown();
         }
     }
@@ -182,7 +208,7 @@ public class KspWillowChopperPlugin extends Plugin {
         if (navigationButton != null) {
             return;
         }
-        settingsPanel = new KspWillowChopperPanel(config, configManager, script);
+        settingsPanel = new KspWillowChopperPanel(config, configManager, script, this);
         navigationButton = NavigationButton.builder()
                 .tooltip("KSP Chopper settings")
                 .priority(9)
@@ -266,7 +292,7 @@ public class KspWillowChopperPlugin extends Plugin {
      * that thread, but never Microbot's shared BlockingEvent executor.
      */
     public boolean runForestryIfNeeded() {
-        if (KspBreakService.shouldPause()) return false;
+        if (script == null || script.isUserPaused() || KspBreakService.shouldPause()) return false;
         if (!runtimeActive || config == null || !config.enableForestry()) {
             currentForestryEvent = KspForestryEvent.NONE;
             return false;
@@ -423,6 +449,7 @@ public class KspWillowChopperPlugin extends Plugin {
         long elapsed = System.currentTimeMillis() - lastForestryInteractionMillis.get();
         long key = forestryInteractionKey(hash, action);
         return runtimeActive
+                && script != null && !script.isUserPaused()
                 && elapsed >= 900L
                 && (key != lastForestryInteractionKey || elapsed >= 2500L)
                 && !Rs2Player.isMoving()
@@ -432,7 +459,7 @@ public class KspWillowChopperPlugin extends Plugin {
 
     public boolean moveDirectlyToForestryTarget(long hash, WorldPoint target, Point minimap, Polygon canvas) {
         if (KspBreakService.shouldPause()) return false;
-        if (!runtimeActive || target == null) {
+        if (!runtimeActive || script == null || script.isUserPaused() || target == null) {
             return false;
         }
         if (target.equals(Rs2Player.getWorldLocation())) {
@@ -485,12 +512,14 @@ public class KspWillowChopperPlugin extends Plugin {
     }
 
     public boolean isForestryRuntimeActive() {
-        return runtimeActive;
+        return runtimeActive && script != null && script.hasSessionStarted()
+                && !script.isUserPaused();
     }
 
     public boolean isForestryEventEnabled(KspForestryEvent event) {
         if (KspBreakService.shouldPause()) return false;
-        if (!runtimeActive || config == null || !config.enableForestry()
+        if (!runtimeActive || script == null || script.isUserPaused()
+                || config == null || !config.enableForestry()
                 || event == null || event == KspForestryEvent.NONE) {
             return false;
         }

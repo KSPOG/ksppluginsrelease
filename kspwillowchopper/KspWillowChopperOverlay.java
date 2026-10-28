@@ -41,7 +41,7 @@ public class KspWillowChopperOverlay extends OverlayPanel {
 
     @Override
     public Dimension render(Graphics2D graphics) {
-        if (!config.showOverlay() || !Microbot.isLoggedIn()) {
+        if (!script.hasSessionStarted() || !config.showOverlay() || !Microbot.isLoggedIn()) {
             return null;
         }
 
