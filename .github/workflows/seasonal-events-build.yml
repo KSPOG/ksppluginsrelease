@@ -261,8 +261,24 @@ jobs:
           starter = code.split('private void talkToStarter(', 1)[1].split('private Rs2TileObjectModel lantern()', 1)[0]
           tick = code.split('private void tick()', 1)[1].split('private void handleDialogueOption()', 1)[0]
 
-          assert 'CHILD_REPORT_CHECKPOINT = 10' in code
+          assert 'CHILD_REPORT_CHECKPOINT = 5' in code
           assert child.index('spookedChildren.size() >= CHILD_REPORT_CHECKPOINT') < child.index('Rs2Npc.getNpcs()')
+          assert 'observeTreaterAges();' in child
+          assert 'classifyTreater(n) == TreaterAge.CHILD' in child
+          assert 'classifyTreater(n) == TreaterAge.ADULT' in adults
+          assert '&& !npcHasAction(n, "Spook")' not in adults
+          age = code.split('private void observeTreaterAges()',1)[1].split('private void spookChildren(',1)[0]
+          assert 'treaterGroup(n.getId())' in age
+          assert 'n::getLogicalHeight' in age
+          assert 'a.size() >= 2 && b.size() >= 2' in age
+          assert 'confirmedChildGroup = TreaterGroup.A' in age
+          assert 'confirmedChildGroup = TreaterGroup.B' in age
+          assert 'TreaterAge.UNKNOWN' in age
+          assert 'TREATER_CHILD_GROUP_KEY' in age
+          assert 'confirmedChildGroup == TreaterGroup.UNKNOWN' in age
+          assert 'TREATER_GROUP_A_START = 16778' in code
+          assert 'TREATER_GROUP_B_START = 16794' in code
+          assert 'configManager.unsetConfiguration(GROUP, TREATER_CHILD_GROUP_KEY)' in code
           assert 'spookedChildren.add(child.getId())' in child
           assert 'spookedChildren.add(child.getIndex())' not in child
           assert 'persistNpcIds(SPOOKED_CHILD_IDS_KEY, spookedChildren)' in child
