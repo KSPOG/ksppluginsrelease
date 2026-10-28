@@ -72,6 +72,15 @@ final class KspDiangoHolidayRetrieval {
 
             List<Widget> all = new ArrayList<>();
             Set<Widget> visited = Collections.newSetFromMap(new IdentityHashMap<>());
+            int interfaceGroup = title.getId() >>> 16;
+            Widget[] roots = Microbot.getClient().getWidgetRoots();
+            if (roots != null) {
+                for (Widget candidate : roots) {
+                    if (candidate != null && (candidate.getId() >>> 16) == interfaceGroup) {
+                        collect(candidate, all, visited, 0);
+                    }
+                }
+            }
             collect(root, all, visited, 0);
             if (all.isEmpty()) return Snapshot.closed();
 
