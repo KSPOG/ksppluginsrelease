@@ -1,7 +1,6 @@
 package net.runelite.client.plugins.microbot.kspf2phighalchtrader;
 
 
-import net.runelite.client.plugins.microbot.kspbank.KspVerifiedBank;
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.Item;
 import net.runelite.api.ItemContainer;
@@ -172,6 +171,11 @@ public class KspHighAlchMuleService
 
     private void maybeStartTransfer()
     {
+        if (!KspHighAlchGeAccess.isInGrandExchange(Rs2Player.getWorldLocation())) {
+            state = MuleState.IDLE;
+            status = "Waiting for trader to reach Grand Exchange";
+            return;
+        }
         if (totalCoins < Math.max(1_000L, config.muleThreshold()))
         {
             state = MuleState.IDLE;
@@ -226,7 +230,7 @@ public class KspHighAlchMuleService
      */
     private long prepareCoinsForTransfer()
     {
-        if (!KspVerifiedBank.walkToBankAndOpenBank()) return -1L;
+        if (!openGeBankForMule()) return -1L;
         sleep(400);
 
         long inv = Math.max(0L, Rs2Inventory.itemQuantity(COINS_ID));
@@ -334,6 +338,17 @@ public class KspHighAlchMuleService
         {
             cancelCurrent();
             fail("Receiver transfer amount mismatch", true);
+            return;
+        }
+
+        if (!KspHighAlchGeAccess.isInGrandExchange(Rs2Player.getWorldLocation())) {
+            cancelCurrent();
+            fail("Trader left Grand Exchange during mule transfer", true);
+            return;
+        }
+        if (muleTile != null && !KspHighAlchGeAccess.isInGrandExchange(muleTile)) {
+            cancelCurrent();
+            fail("Mule meeting point is outside Grand Exchange", true);
             return;
         }
 
@@ -534,12 +549,21 @@ public class KspHighAlchMuleService
         }).orElse(0L);
     }
 
+    /** No shared bank-booth helper or offsite walk is allowed in the mule service. */
+    private boolean openGeBankForMule()
+    {
+        if (!KspHighAlchGeAccess.isInGrandExchange(Rs2Player.getWorldLocation()))
+            return false;
+        if (Rs2Bank.isOpen()) return true;
+        return KspHighAlchGeAccess.openLocalBank() && sleepUntil(Rs2Bank::isOpen, 4_000);
+    }
+
     private void restoreTradingCapital()
     {
         if (!Microbot.isLoggedIn()) return;
-        if (!KspVerifiedBank.walkToBankAndOpenBank())
+        if (!openGeBankForMule())
         {
-            status = "Transfer done - could not restore trading capital";
+            status = "Transfer done - waiting for GE Banker to restore trading capital";
             return;
         }
 
