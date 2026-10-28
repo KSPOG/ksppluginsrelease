@@ -4,13 +4,15 @@ on:
   pull_request:
     paths:
       - 'kspf2phighalchtrader/**'
+      - '.github/tests/high-alch-trader/**'
       - 'kspsupport/**'
       - 'kspbank/**'
       - '.github/workflows/high-alch-trader-build.yml'
   push:
-    branches: [main]
+    branches: [main, dev]
     paths:
       - 'kspf2phighalchtrader/**'
+      - '.github/tests/high-alch-trader/**'
       - 'kspsupport/**'
       - 'kspbank/**'
       - '.github/workflows/high-alch-trader-build.yml'
@@ -40,6 +42,33 @@ jobs:
         with:
           distribution: temurin
           java-version: '11'
+      - name: Verify GE-only behavior across trader, reserve guard and mule
+        shell: python
+        run: |
+          from pathlib import Path
+          root = Path('release/kspf2phighalchtrader')
+          trader = (root / 'KspF2PHighAlchTraderScript.java').read_text()
+          reserve = (root / 'KspHighAlchBankReserveGuard.java').read_text()
+          mule = (root / 'KspHighAlchMuleService.java').read_text()
+          access = (root / 'KspHighAlchGeAccess.java').read_text()
+          plugin = (root / 'KspF2PHighAlchTraderPlugin.java').read_text()
+          assert 'VERSION = "0.3.8"' in plugin
+          for label, code in [('trader', trader), ('reserve', reserve), ('mule', mule)]:
+              assert 'KspVerifiedBank' not in code, label + ' still accesses generic bank booth'
+              assert 'Rs2Bank.openBank()' not in code, label + ' still uses generic bank scan'
+              assert 'KspHighAlchGeAccess.openLocalBank()' in code, label + ' does not use GE banker'
+          assert 'Rs2GrandExchange.openExchange()' not in trader, 'Generic GE opener may trigger walker'
+          assert 'KspHighAlchGeAccess.openLocalExchange()' in trader, 'Trader must use GE clerk'
+          assert 'BankLocation.GRAND_EXCHANGE.getWorldPoint()' in trader
+          assert 'Rs2GrandExchange.walkToGrandExchange()' in trader
+          assert 'ensureInsideGrandExchange()' in trader
+          assert 'ksp_high_alch_ge_only' in trader
+          assert 'KspHighAlchGeAccess.isInGrandExchange(muleTile)' in mule
+          assert 'KspHighAlchGeAccess.isInGrandExchange(Rs2Player.getWorldLocation())' in mule
+          assert 'new NewMenuEntry()' in access and 'Microbot.doInvoke(entry' in access
+          assert 'MIN_X = 3153' in access and 'MAX_Y = 3502' in access
+          print('PASS: High Alch GE-only bankers, clerks, routes, reserve guard and mule')
+
       - name: Install plugin and shared KSP sources
         shell: bash
         run: |
@@ -64,8 +93,41 @@ jobs:
           if needle not in text:
               raise SystemExit('Could not locate source include rule')
           path.write_text(text.replace(needle, replacement, 1), encoding='utf-8')
+      - name: Install High Alch GE regression tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          DEST='hub/src/test/java/net/runelite/client/plugins/microbot/kspf2phighalchtrader'
+          mkdir -p "$DEST"
+          cp release/.github/tests/high-alch-trader/KspHighAlchGeAccessRegressionTest.java "$DEST/"
+          cat > "$DEST/KspHighAlchGeJUnitTest.java" <<'EOF'
+          package net.runelite.client.plugins.microbot.kspf2phighalchtrader;
+
+          import org.junit.jupiter.api.Test;
+
+          class KspHighAlchGeJUnitTest {
+              @Test void geNpcAndBoundaryRegression() {
+                  KspHighAlchGeAccessRegressionTest.main(new String[0]);
+              }
+          }
+          EOF
+
       - name: Compile High Alch Trader
         working-directory: hub
         run: |
           chmod +x gradlew
           ./gradlew clean build -PpluginList=KspF2PHighAlchTraderPlugin --stacktrace --no-daemon
+
+      - name: Verify compiled JAR
+        shell: bash
+        run: |
+          ls -lh hub/build/libs
+          test -n "$(find hub/build/libs -maxdepth 1 -type f -name 'KspF2PHighAlchTraderPlugin-*.jar' -print -quit)"
+
+      - name: Upload compiled High Alch Trader JAR
+        uses: actions/upload-artifact@v4
+        with:
+          name: KspF2PHighAlchTraderPlugin-${{ github.sha }}
+          path: hub/build/libs/KspF2PHighAlchTraderPlugin-*.jar
+          if-no-files-found: error
+          retention-days: 7
