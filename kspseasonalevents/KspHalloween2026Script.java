@@ -1020,16 +1020,30 @@ public final class KspHalloween2026Script extends Script {
     }
 
     private void observeTreaterAges() {
-        Rs2Npc.getNpcs().filter(n -> n.getName() != null
-                && n.getName().toLowerCase(Locale.ROOT).contains("trick"))
-                .forEach(n -> {
-                    if (treaterGroup(n.getId()) == TreaterGroup.UNKNOWN) return;
-                    int height = Microbot.getClientThread()
-                            .runOnClientThreadOptional(n::getLogicalHeight).orElse(0);
-                    if (height > 0) observedTreaterHeights.put(n.getId(), height);
-                });
-
+        // Once confirmed (including after a saved resume), do not make any
+        // synchronous client-thread requests just to remeasure NPC heights.
         if (confirmedChildGroup != TreaterGroup.UNKNOWN) return;
+
+        List<Rs2NpcModel> candidates = Rs2Npc.getNpcs()
+                .filter(n -> n.getName() != null
+                        && n.getName().toLowerCase(Locale.ROOT).contains("trick")
+                        && treaterGroup(n.getId()) != TreaterGroup.UNKNOWN)
+                .collect(Collectors.toList());
+
+        // RuneLite actor heights belong to the client thread. Read the
+        // complete observed set in ONE batch instead of blocking separately
+        // for every NPC on every scheduler tick.
+        Map<Integer, Integer> heights = Microbot.getClientThread()
+                .runOnClientThreadOptional(() -> {
+                    Map<Integer, Integer> snapshot = new HashMap<>();
+                    for (Rs2NpcModel candidate : candidates) {
+                        int height = candidate.getLogicalHeight();
+                        if (height > 0) snapshot.put(candidate.getId(), height);
+                    }
+                    return snapshot;
+                }).orElse(Collections.emptyMap());
+        observedTreaterHeights.putAll(heights);
+
         List<Integer> a = new ArrayList<>();
         List<Integer> b = new ArrayList<>();
         for (Map.Entry<Integer, Integer> entry : observedTreaterHeights.entrySet()) {
@@ -1038,9 +1052,8 @@ public final class KspHalloween2026Script extends Script {
             if (group == TreaterGroup.B) b.add(entry.getValue());
         }
 
-        // No hard-coded assumption about which ID range represents children:
-        // require multiple observed actors in BOTH groups and a model-height
-        // separation. An unknown NPC must NEVER be automatically spooked.
+        // The two NPC ID ranges are not assumed to be children/adults.
+        // Verify actual relative model size using multiple live samples.
         if (a.size() >= 2 && b.size() >= 2) {
             int aMin = a.stream().mapToInt(Integer::intValue).min().orElse(0);
             int aMax = a.stream().mapToInt(Integer::intValue).max().orElse(0);
@@ -1057,20 +1070,17 @@ public final class KspHalloween2026Script extends Script {
                 log.info("Halloween child/adult NPC groups confirmed by live model heights"
                         + " | childGroup={} groupAHeights={} groupBHeights={}",
                         confirmedChildGroup, a, b);
+                return;
             }
-        }
-
-        if (confirmedChildGroup == TreaterGroup.UNKNOWN && a.size() >= 2 && b.size() >= 2) {
             stopForReview("Child/adult NPC models cannot be differentiated safely"
                     + "; groupAHeights=" + a + " groupBHeights=" + b);
             return;
         }
 
-        if (confirmedChildGroup == TreaterGroup.UNKNOWN
-                && System.currentTimeMillis() - lastTreaterClassificationLogAt > 10_000L) {
+        if (System.currentTimeMillis() - lastTreaterClassificationLogAt > 10_000L) {
             lastTreaterClassificationLogAt = System.currentTimeMillis();
             log.info("Halloween NPC age classification not yet verified"
-                    + " | observedHeights={} (no unknown NPC will be spooked)",
+                    + " | observedHeights={} (unknown NPCs excluded)",
                     observedTreaterHeights);
         }
     }
