@@ -125,6 +125,7 @@ public final class KspHalloween2026Script extends Script {
     // A starter conversation is not complete just because the NPC was clicked.
     private Stage pendingStarterNext;
     private long pendingStarterAt;
+    private long pendingStarterLastDialogueAt;
     private boolean pendingStarterDialogueSeen;
 
     public synchronized boolean start(KspSeasonalEventsConfig configuration) {
@@ -142,6 +143,7 @@ public final class KspHalloween2026Script extends Script {
         pendingCandyCount = -1;
         pendingStarterNext = null;
         pendingStarterAt = 0L;
+        pendingStarterLastDialogueAt = 0L;
         pendingStarterDialogueSeen = false;
         spookedChildren.clear();
         givenAdultIndexes.clear();
@@ -205,8 +207,10 @@ public final class KspHalloween2026Script extends Script {
             inspectLanternVerificationDialogue();
 
         if (pendingStarterNext != null
-                && (Rs2Dialogue.hasContinue() || Rs2Dialogue.hasSelectAnOption()))
+                && (Rs2Dialogue.hasContinue() || Rs2Dialogue.hasSelectAnOption())) {
             pendingStarterDialogueSeen = true;
+            pendingStarterLastDialogueAt = System.currentTimeMillis();
+        }
 
         if (Rs2Dialogue.hasContinue()) {
             if (ready()) {
@@ -226,6 +230,12 @@ public final class KspHalloween2026Script extends Script {
         // while the NPC is still offering a hat or explaining the next step.
         if (pendingStarterNext != null) {
             if (pendingStarterDialogueSeen) {
+                // Dialogue frames can disappear momentarily between NPC
+                // lines. Require a short quiet period before changing stages.
+                if (System.currentTimeMillis() - pendingStarterLastDialogueAt < 1_500L) {
+                    status = "Finishing Angel / Henja conversation";
+                    return;
+                }
                 Stage next = pendingStarterNext;
                 pendingStarterNext = null;
                 pendingStarterDialogueSeen = false;
@@ -360,6 +370,7 @@ public final class KspHalloween2026Script extends Script {
         lastTalkAt = System.currentTimeMillis();
         pendingStarterNext = next;
         pendingStarterAt = lastTalkAt;
+        pendingStarterLastDialogueAt = 0L;
         pendingStarterDialogueSeen = false;
     }
 
@@ -606,6 +617,9 @@ public final class KspHalloween2026Script extends Script {
     }
 
     private void collectCostume(WorldPoint player) {
+        // Especially for sessions saved in GET_COSTUME by older versions:
+        // don't initiate travel during the short gap after accepting the hat.
+        if (!ready()) return;
         int equipped = costumeCount();
         if (equipped >= 4) {
             change(Stage.SPOOK_CHILDREN, "Four Halloween outfit pieces equipped");
