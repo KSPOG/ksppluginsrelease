@@ -328,6 +328,7 @@ public final class KspHalloween2026Script extends Script {
     private Rs2TileObjectModel lantern() {
         return Microbot.getRs2TileObjectCache().query().fromWorldView()
                 .where(o -> o != null && o.getName() != null
+                        && o.getWorldLocation() != null
                         && o.getName().toLowerCase(Locale.ROOT).contains("jack")
                         && o.getName().toLowerCase(Locale.ROOT).contains("lantern")
                         && o.hasActionContaining("Smash")
@@ -484,9 +485,13 @@ public final class KspHalloween2026Script extends Script {
                 || lower.contains("dressing up") || lower.contains("dress up")
                 || lower.contains("spook the")
                 || (lower.contains("wear") && lower.contains("halloween"));
-        boolean allDone = (lower.contains("all eight") || lower.contains("all 8"))
+        boolean allDone = (lower.contains("you've smashed")
+                || lower.contains("you have smashed")
+                || lower.contains("you've destroyed")
+                || lower.contains("you have destroyed"))
+                && (lower.contains("all eight") || lower.contains("all 8"))
                 && (lower.contains("lantern") || lower.contains("pumpkin"))
-                && !lower.contains("need to") && !lower.contains("have to");
+                && !lower.contains("?");
         if (nextTask || allDone) {
             confirmAllLanterns("starter dialogue confirms progress: " + text);
             change(Stage.GET_COSTUME, "Starter confirmed lantern completion");
@@ -768,6 +773,7 @@ public final class KspHalloween2026Script extends Script {
         stage = next;
         status = message;
         if (previous != next) {
+            Rs2Walker.clearWalkingRoute("ksp_seasonal_stage_changed");
             log.info("KSP Seasonal Events Halloween | {} -> {} | {}", previous, next, message);
             if (next != Stage.STOPPED && next != Stage.PAUSED && next != Stage.NEEDS_REVIEW)
                 configManager.setConfiguration(GROUP, STAGE_KEY, next.name());
@@ -815,6 +821,7 @@ public final class KspHalloween2026Script extends Script {
         if (!active) return;
         if (value) {
             beforePause = stage;
+            Rs2Walker.clearWalkingRoute("ksp_seasonal_paused");
             paused = true;
             stage = Stage.PAUSED;
             status = "Paused (progress preserved)";
@@ -857,6 +864,7 @@ public final class KspHalloween2026Script extends Script {
     public synchronized void shutdown() {
         active = false;
         paused = false;
+        Rs2Walker.clearWalkingRoute("ksp_seasonal_stopped");
         super.shutdown();
         stage = Stage.STOPPED;
         status = "Stopped - press Start";
