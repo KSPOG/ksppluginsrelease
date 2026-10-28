@@ -55,7 +55,7 @@ jobs:
           panel=(root/'KspSeasonalEventsPanel.java').read_text()
           overlay=(root/'KspSeasonalEventsOverlay.java').read_text()
           event=(root/'KspSeasonalEvent.java').read_text()
-          assert 'VERSION = "0.2.4"' in plugin
+          assert 'VERSION = "0.2.5"' in plugin
           assert 'KSP + "Seasonal Events"' in plugin
           assert 'kspwillowchopper' not in plugin and 'kspwillowchopper' not in script
           assert 'HALLOWEEN_2026' in event
@@ -248,6 +248,49 @@ jobs:
           assert 'DIANGO_COSTUME_PRIORITY.stream()' in missing
           assert 'closeHolidayRetrieval(window)' not in batch[partial_batch:reopen]
           print('PASS: four distinct slots must be owned before any automatic window closing/equipping')
+
+      - name: Verify child reporting and unique adult candy delivery transitions
+        shell: python
+        run: |
+          from pathlib import Path
+          code = Path('release/kspseasonalevents/KspHalloween2026Script.java').read_text()
+          child = code.split('private void spookChildren(WorldPoint player)', 1)[1].split('private void solveChemist(', 1)[0]
+          report = code.split('private void inspectChildReportDialogue()', 1)[1].split('private void spookChildren(', 1)[0]
+          adults = code.split('private void giveCandy(WorldPoint player)', 1)[1].split('private void acted(', 1)[0]
+          start = code.split('public synchronized boolean start(', 1)[1].split('private Stage savedStage()', 1)[0]
+          starter = code.split('private void talkToStarter(', 1)[1].split('private Rs2TileObjectModel lantern()', 1)[0]
+          tick = code.split('private void tick()', 1)[1].split('private void handleDialogueOption()', 1)[0]
+
+          assert 'CHILD_REPORT_CHECKPOINT = 10' in code
+          assert child.index('spookedChildren.size() >= CHILD_REPORT_CHECKPOINT') < child.index('Rs2Npc.getNpcs()')
+          assert 'spookedChildren.add(child.getId())' in child
+          assert 'spookedChildren.add(child.getIndex())' not in child
+          assert 'persistNpcIds(SPOOKED_CHILD_IDS_KEY, spookedChildren)' in child
+          assert 'change(Stage.REPORT_CHILDREN' in child
+          assert 'sweepsWithoutTarget >= RIMMINGTON_SWEEP.length' in child
+          assert 'childrenReportConfirmed = true;' in report
+          assert 'lower.contains("chemist")' in report
+          assert 'lower.contains("adults")' in report
+          assert 'lower.contains("still")' in report
+          assert 'change(Stage.SPOOK_CHILDREN' in report
+          assert 'childrenReportConfirmed' in tick and 'next == Stage.CHEMIST_RIDDLE' in tick
+          assert 'stopForReview("Angel/Henja dialogue did not confirm' in tick
+          assert 'nearOrWalk(player, STARTER, 8, "Angel / Henja' in starter
+          assert 'saved == Stage.SPOOK_CHILDREN && spookedChildren.isEmpty()' in start
+          assert 'restoreNpcIds(SPOOKED_CHILD_IDS_KEY, spookedChildren)' in start
+          assert 'restoreNpcIds(DELIVERED_ADULT_IDS_KEY, givenAdultIds)' in start
+          assert '!spookedChildren.contains(n.getId())' in adults
+          assert '!givenAdultIds.contains(n.getId())' in adults
+          assert 'pendingAdultId = adult.getId()' in adults
+          assert 'candyCount < pendingCandyCount' in adults
+          assert 'givenAdultIds.add(pendingAdultId)' in adults
+          assert 'persistNpcIds(DELIVERED_ADULT_IDS_KEY, givenAdultIds)' in adults
+          assert 'sweepsWithoutTarget >= RIMMINGTON_SWEEP.length' in adults
+          assert 'stopForReview("Adult search exhausted' in adults
+          assert 'givenAdultIndexes' not in code
+          assert 'configManager.unsetConfiguration(GROUP, SPOOKED_CHILD_IDS_KEY)' in code
+          assert 'configManager.unsetConfiguration(GROUP, DELIVERED_ADULT_IDS_KEY)' in code
+          print('PASS: 10-child checkpoint, starter confirmation gate, unique adult receipt, persistence and bounded scanning')
 
       - name: Install Seasonal Events sources into Microbot Hub
         shell: bash
