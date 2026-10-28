@@ -466,6 +466,38 @@ public final class KspHalloween2026Script extends Script {
         nearOrWalk(player, next, 6, purpose);
     }
 
+    private void inspectLanternVerificationDialogue() {
+        String text = Rs2Dialogue.hasSelectAnOption()
+                ? Rs2Dialogue.getQuestion() : Rs2Dialogue.getDialogueText();
+        if (text == null || text.isBlank()) return;
+        String lower = text.toLowerCase(Locale.ROOT).replaceAll("<[^>]*>", "");
+        boolean remaining = (lower.contains("lantern") || lower.contains("pumpkin"))
+                && (lower.contains("still") || lower.contains("more")
+                    || lower.contains("haven't") || lower.contains("not all")
+                    || lower.contains("remaining"));
+        if (remaining) {
+            log.info("Halloween starter requests more lanterns | text={}", text);
+            change(Stage.SMASH_LANTERNS, "Starter reports remaining lanterns");
+            return;
+        }
+        boolean nextTask = lower.contains("diango") || lower.contains("costume")
+                || lower.contains("dressing up") || lower.contains("dress up")
+                || lower.contains("spook the")
+                || (lower.contains("wear") && lower.contains("halloween"));
+        boolean allDone = (lower.contains("all eight") || lower.contains("all 8"))
+                && (lower.contains("lantern") || lower.contains("pumpkin"))
+                && !lower.contains("need to") && !lower.contains("have to");
+        if (nextTask || allDone) {
+            confirmAllLanterns("starter dialogue confirms progress: " + text);
+            change(Stage.GET_COSTUME, "Starter confirmed lantern completion");
+            return;
+        }
+        if (System.currentTimeMillis() - lastDiagnosticAt > 5_000L) {
+            lastDiagnosticAt = System.currentTimeMillis();
+            log.info("Halloween lantern verification dialogue | text={}", text);
+        }
+    }
+
     private int costumeCount() {
         int equipped = 0;
         for (String name : COSTUME_PIECES) {
