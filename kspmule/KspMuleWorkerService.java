@@ -370,7 +370,7 @@ public final class KspMuleWorkerService
             status = "Waiting for mule identity";
             return;
         }
-        if (allowedArea != null && (muleTile == null || !allowedArea.test(muleTile)))
+        if (allowedArea != null && muleTile != null && !allowedArea.test(muleTile))
         {
             cancelCurrent();
             fail("Receiver is outside allowed Grand Exchange area", true);
