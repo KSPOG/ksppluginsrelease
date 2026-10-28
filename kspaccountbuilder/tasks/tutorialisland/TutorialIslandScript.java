@@ -1566,6 +1566,77 @@ public class TutorialIslandScript extends KspManagedScript
         }
     }
 
+    private void advanceThroughTutorialDoor(int doorId, WorldPoint destination, int progress)
+    {
+        Rs2TileObjectModel door = tutorialObject(doorId);
+        if (door != null && door.hasAction("Open"))
+        {
+            if (clickTutorialObject(doorId, "Open", 4))
+            {
+                logTutorialTransition("Opened progression door " + doorId, progress);
+            }
+            return;
+        }
+
+        // Opening can morph/remove the closed door. Only then walk toward
+        // the next section; do not blindly click a different object.
+        walkTutorialLocal(destination, 3);
+        logTutorialTransition("Waiting for door " + doorId + " or next room", progress);
+    }
+
+    private boolean ensurePrayerChapelEntrance(Rs2NpcModel npc)
+    {
+        WorldPoint player = Rs2Player.getWorldLocation();
+        if (player == null)
+        {
+            return false;
+        }
+        if (player.distanceTo(CHAPEL_INSTRUCTOR_TILE) > 6)
+        {
+            walkTutorialLocal(CHAPEL_INSTRUCTOR_TILE, 5);
+            return false;
+        }
+
+        // The inner chapel entrance is distinct from door 9722 and can
+        // remain closed after the tutorial advances from 540 to 550.
+        Rs2TileObjectModel innerDoor = KspLiveScene.nearestModel(player, 9,
+                object -> object != null && object.getWorldLocation() != null
+                        && (object.getId() == CHAPEL_INTERIOR_DOOR_ID
+                            || object.getId() == CHAPEL_INTERIOR_OPEN_DOOR_ID)
+                        && object.getWorldLocation().distanceTo(CHAPEL_INSTRUCTOR_TILE) <= 5
+                        && object.hasAction("Open"));
+        if (innerDoor != null)
+        {
+            if (prepareTutorialObjectInteraction(innerDoor, 3)
+                    && readyForAction() && innerDoor.click("Open"))
+            {
+                markTutorialInteraction("chapel:inner-door");
+                logTutorialTransition("Opened inner chapel door " + innerDoor.getId(), 550);
+            }
+            return false;
+        }
+
+        if (npc == null || npc.getWorldLocation() == null)
+        {
+            walkTutorialLocal(CHAPEL_INSTRUCTOR_TILE, 2);
+            logTutorialTransition("Brother Brace not visible", 550);
+            return false;
+        }
+        return true;
+    }
+
+    private void logTutorialTransition(String message, int progress)
+    {
+        long now = System.currentTimeMillis();
+        if (now - lastTutorialTransitionDiagnosticAtMs < 5_000L)
+        {
+            return;
+        }
+        lastTutorialTransitionDiagnosticAtMs = now;
+        Microbot.log("[TutIsland] " + message + " | progress=" + progress
+                + " player=" + Rs2Player.getWorldLocation());
+    }
+
     private void prayerGuide()
     {
         Rs2NpcModel npc = tutorialNpc(NpcID.BROTHER_BRACE);
