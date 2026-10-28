@@ -789,6 +789,16 @@ public final class KspHalloween2026Script extends Script {
     public void onChatMessage(String raw) {
         if (!active || raw == null) return;
         String text = raw.replaceAll("<[^>]*>", "").toLowerCase(Locale.ROOT);
+        if (stage == Stage.SMASH_LANTERNS && pendingLantern != null
+                && text.startsWith("you smash")
+                && (text.contains("lantern") || text.contains("pumpkin"))) {
+            confirmSmashedLantern(pendingLantern, "game smash message");
+            if (smashedLanternTiles.size() >= 8) {
+                confirmAllLanterns("eight confirmed smashes");
+                change(Stage.REPORT_LANTERNS, "Eight lanterns smashed; report to children");
+            }
+            return;
+        }
         if (text.contains("you have completed the halloween event")
                 || text.contains("you have completed the 2026 halloween event")) {
             change(Stage.COMPLETED, "Halloween completion confirmed by game");
@@ -820,8 +830,12 @@ public final class KspHalloween2026Script extends Script {
         if (active) return;
         configManager.unsetConfiguration(GROUP, STAGE_KEY);
         configManager.unsetConfiguration(GROUP, LANTERNS_KEY);
+        configManager.unsetConfiguration(GROUP, PENDING_LANTERN_KEY);
+        configManager.unsetConfiguration(GROUP, LANTERNS_VERIFIED_KEY);
         configManager.unsetConfiguration(GROUP, ADULTS_KEY);
         smashedLanternTiles.clear();
+        pendingLantern = null;
+        lanternsVerified = false;
         spookedChildren.clear();
         givenAdultIndexes.clear();
         adultsGiven = 0;
@@ -833,7 +847,8 @@ public final class KspHalloween2026Script extends Script {
     public boolean isPaused() { return paused; }
     public String getStatus() { return status; }
     public Stage getStage() { return stage; }
-    public int getLanternCount() { return smashedLanternTiles.size(); }
+    public int getLanternCount() { return lanternsVerified ? 8
+            : Math.min(8, smashedLanternTiles.size()); }
     public int getAdultsGiven() { return adultsGiven; }
     public long getRuntimeMs() { return startedAt == 0L ? 0L :
             System.currentTimeMillis() - startedAt; }
