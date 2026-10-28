@@ -8,6 +8,7 @@ import javax.swing.JPanel;
 import javax.swing.JComboBox;
 import javax.swing.SwingConstants;
 import javax.swing.Timer;
+import javax.swing.JOptionPane;
 import java.awt.Font;
 import java.awt.Color;
 import java.awt.GridLayout;
@@ -19,6 +20,7 @@ final class KspSeasonalEventsPanel extends PluginPanel {
     private final JButton pause = new JButton("Pause");
     private final JButton stop = new JButton("Stop");
     private final JButton reset = new JButton("Reset progress");
+    private final JButton confirmLanterns = new JButton("Confirm all 8 lanterns smashed");
     private final JLabel state = new JLabel("", SwingConstants.CENTER);
     private final Timer timer;
 
@@ -41,6 +43,18 @@ final class KspSeasonalEventsPanel extends PluginPanel {
         add(buttons);
         add(reset);
         reset.addActionListener(e -> { script.resetProgress(); update(); });
+        add(confirmLanterns);
+        confirmLanterns.setToolTipText("Only use when the game has confirmed all eight pumpkins were smashed");
+        confirmLanterns.addActionListener(e -> {
+            if (!script.canConfirmLanternsManually()) return;
+            int answer = JOptionPane.showConfirmDialog(this,
+                    "Have you already smashed ALL eight pumpkins in-game?\n"
+                    + "This will resume the next Halloween event objective without smashing more.",
+                    "Confirm Halloween progress", JOptionPane.YES_NO_OPTION,
+                    JOptionPane.QUESTION_MESSAGE);
+            if (answer == JOptionPane.YES_OPTION) script.confirmLanternsManually();
+            update();
+        });
         state.setForeground(Color.LIGHT_GRAY);
         add(state);
         JLabel warning = new JLabel("<html><center>Halloween 2026 wiki walkthrough.<br>"
@@ -62,6 +76,7 @@ final class KspSeasonalEventsPanel extends PluginPanel {
         stop.setEnabled(running);
         pause.setEnabled(running);
         reset.setEnabled(!running);
+        confirmLanterns.setEnabled(script.canConfirmLanternsManually());
         pause.setText(script.isPaused() ? "Resume" : "Pause");
         state.setText("<html><center>" + script.getStage() + "<br>"
                 + "Lanterns: " + script.getLanternCount() + "/8 | Adults: "

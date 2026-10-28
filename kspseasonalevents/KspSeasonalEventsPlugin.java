@@ -6,6 +6,7 @@ import java.awt.Graphics2D;
 import java.awt.image.BufferedImage;
 import javax.inject.Inject;
 import net.runelite.api.events.ChatMessage;
+import net.runelite.api.ChatMessageType;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.eventbus.Subscribe;
 import net.runelite.client.plugins.Plugin;
@@ -25,7 +26,7 @@ import net.runelite.client.ui.overlay.OverlayManager;
         enabledByDefault = PluginConstants.DEFAULT_ENABLED,
         isExternal = PluginConstants.IS_EXTERNAL)
 public final class KspSeasonalEventsPlugin extends Plugin {
-    public static final String VERSION = "0.2.0";
+    public static final String VERSION = "0.2.1";
     @Inject private ClientToolbar toolbar;
     @Inject private OverlayManager overlays;
     @Inject private KspSeasonalEventsOverlay overlay;
@@ -70,7 +71,12 @@ public final class KspSeasonalEventsPlugin extends Plugin {
     }
 
     @Subscribe public void onChatMessage(ChatMessage event) {
-        if (event != null && script.isActive()) script.onChatMessage(event.getMessage());
+        if (event == null || !script.isActive()) return;
+        // Public, clan and private chat are not evidence of game objectives.
+        ChatMessageType type = event.getType();
+        if (type == ChatMessageType.GAMEMESSAGE || type == ChatMessageType.SPAM
+                || type == ChatMessageType.ENGINE || type == ChatMessageType.MESBOX)
+            script.onChatMessage(event.getMessage());
     }
 
     public void prepareHotUnload() { shutDown(); }

@@ -20,6 +20,7 @@ import javax.inject.Inject;
 import javax.inject.Singleton;
 import java.util.Arrays;
 import java.util.HashSet;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
@@ -43,6 +44,8 @@ public final class KspHalloween2026Script extends Script {
     private static final String GROUP = "KspSeasonalEvents";
     private static final String STAGE_KEY = "halloweenStage";
     private static final String LANTERNS_KEY = "halloweenSmashTiles";
+    private static final String PENDING_LANTERN_KEY = "halloweenPendingSmashTile";
+    private static final String LANTERNS_VERIFIED_KEY = "halloweenLanternsVerified";
     private static final String ADULTS_KEY = "halloweenAdultsGiven";
     private static final WorldArea RIMMINGTON = new WorldArea(2925, 3180, 85, 95, 0);
     private static final WorldPoint STARTER = new WorldPoint(2958, 3211, 0);
@@ -74,6 +77,7 @@ public final class KspHalloween2026Script extends Script {
         STOPPED,
         INTRODUCTION,
         SMASH_LANTERNS,
+        VERIFY_LANTERNS,
         REPORT_LANTERNS,
         GET_COSTUME,
         SPOOK_CHILDREN,
@@ -99,7 +103,8 @@ public final class KspHalloween2026Script extends Script {
     private volatile boolean paused;
     private volatile long startedAt;
 
-    private final Set<String> smashedLanternTiles = new HashSet<>();
+    private final Set<String> smashedLanternTiles = ConcurrentHashMap.newKeySet();
+    private volatile boolean lanternsVerified;
     private final Set<Integer> spookedChildren = new HashSet<>();
     private final Set<Integer> givenAdultIndexes = new HashSet<>();
     private int adultsGiven;
@@ -110,8 +115,11 @@ public final class KspHalloween2026Script extends Script {
     private long lastWalkAt;
     private long lastTalkAt;
     private long lastDiagnosticAt;
-    private WorldPoint pendingLantern;
+    private volatile WorldPoint pendingLantern;
     private long pendingLanternAt;
+    private long lastVerificationTalkAt;
+    private boolean sweepRequiredByStarter;
+    private int starterReportedRemainingCount;
     private int pendingCandyCount = -1;
     private int pendingAdultIndex = -1;
 
@@ -123,6 +131,10 @@ public final class KspHalloween2026Script extends Script {
         this.startedAt = System.currentTimeMillis();
         lastActionAt = lastWalkAt = lastTalkAt = lastDiagnosticAt = 0L;
         pendingLantern = null;
+        pendingLanternAt = 0L;
+        lastVerificationTalkAt = 0L;
+        sweepRequiredByStarter = false;
+        starterReportedRemainingCount = 0;
         pendingCandyCount = -1;
         spookedChildren.clear();
         givenAdultIndexes.clear();
@@ -134,17 +146,26 @@ public final class KspHalloween2026Script extends Script {
         String savedTiles = configManager.getConfiguration(GROUP, LANTERNS_KEY);
         if (savedTiles != null && !savedTiles.isBlank())
             smashedLanternTiles.addAll(Arrays.asList(savedTiles.split(",")));
+        lanternsVerified = Boolean.parseBoolean(
+                configManager.getConfiguration(GROUP, LANTERNS_VERIFIED_KEY));
+        pendingLantern = parseLanternTile(configManager.getConfiguration(GROUP, PENDING_LANTERN_KEY));
+        // A click recorded before a pause/restart must be checked on location,
+        // not forgotten; there is no guaranteed game-level counter in this API.
+        pendingLanternAt = 0L;
         String savedAdults = configManager.getConfiguration(GROUP, ADULTS_KEY);
         try { adultsGiven = savedAdults == null ? 0 : Integer.parseInt(savedAdults); }
         catch (NumberFormatException e) { adultsGiven = 0; }
 
         Stage saved = savedStage();
+        if (lanternsVerified && (saved == Stage.SMASH_LANTERNS
+                || saved == Stage.VERIFY_LANTERNS))
+            saved = Stage.REPORT_LANTERNS;
         change(saved == Stage.STOPPED || saved == Stage.PAUSED || saved == Stage.NEEDS_REVIEW
                 ? Stage.INTRODUCTION : saved, "Resuming Halloween 2026 walkthrough");
         mainScheduledFuture = scheduledExecutorService.scheduleWithFixedDelay(
                 this::safeTick, 0L, 600L, TimeUnit.MILLISECONDS);
         log.info("Halloween 2026 started | stage={} lanterns={}/8 adultsGiven={}",
-                stage, smashedLanternTiles.size(), adultsGiven);
+                stage, getLanternCount(), adultsGiven);
         return true;
     }
 
@@ -172,6 +193,10 @@ public final class KspHalloween2026Script extends Script {
         if (player == null) { status = "Waiting for player location"; return; }
         if (stage == Stage.COMPLETED || stage == Stage.NEEDS_REVIEW) return;
 
+        if (stage == Stage.VERIFY_LANTERNS
+                && (Rs2Dialogue.hasContinue() || Rs2Dialogue.hasSelectAnOption()))
+            inspectLanternVerificationDialogue();
+
         if (Rs2Dialogue.hasContinue()) {
             if (ready()) {
                 Rs2Dialogue.clickContinue();
@@ -192,6 +217,9 @@ public final class KspHalloween2026Script extends Script {
                 break;
             case SMASH_LANTERNS:
                 smashLanterns(player);
+                break;
+            case VERIFY_LANTERNS:
+                verifyLanternsWithStarter(player);
                 break;
             case REPORT_LANTERNS:
                 talkToStarter(player, Stage.GET_COSTUME);
@@ -301,6 +329,7 @@ public final class KspHalloween2026Script extends Script {
     private Rs2TileObjectModel lantern() {
         return Microbot.getRs2TileObjectCache().query().fromWorldView()
                 .where(o -> o != null && o.getName() != null
+                        && o.getWorldLocation() != null
                         && o.getName().toLowerCase(Locale.ROOT).contains("jack")
                         && o.getName().toLowerCase(Locale.ROOT).contains("lantern")
                         && o.hasActionContaining("Smash")
@@ -312,27 +341,71 @@ public final class KspHalloween2026Script extends Script {
         return point.getX() + ":" + point.getY() + ":" + point.getPlane();
     }
 
+    private static WorldPoint parseLanternTile(String value) {
+        if (value == null || value.isBlank()) return null;
+        try {
+            String[] parts = value.split(":");
+            if (parts.length != 3) return null;
+            WorldPoint tile = new WorldPoint(Integer.parseInt(parts[0]),
+                    Integer.parseInt(parts[1]), Integer.parseInt(parts[2]));
+            return RIMMINGTON.contains(tile) ? tile : null;
+        } catch (NumberFormatException ex) {
+            return null;
+        }
+    }
+
+    private void clearPendingLantern() {
+        pendingLantern = null;
+        pendingLanternAt = 0L;
+        configManager.unsetConfiguration(GROUP, PENDING_LANTERN_KEY);
+    }
+
+    private void confirmSmashedLantern(WorldPoint tile, String evidence) {
+        if (tile == null) return;
+        if (smashedLanternTiles.add(tileKey(tile))) {
+            configManager.setConfiguration(GROUP, LANTERNS_KEY,
+                    String.join(",", smashedLanternTiles));
+            log.info("Halloween lantern smash confirmed | tile={} evidence={} count={}/8",
+                    tile, evidence, getLanternCount());
+        }
+        clearPendingLantern();
+    }
+
+    private void confirmAllLanterns(String evidence) {
+        lanternsVerified = true;
+        clearPendingLantern();
+        configManager.setConfiguration(GROUP, LANTERNS_VERIFIED_KEY, true);
+        log.info("Halloween all eight lanterns verified | evidence={} recordedTiles={}",
+                evidence, smashedLanternTiles.size());
+    }
+
     private boolean pendingLanternConfirmed(WorldPoint player) {
         if (pendingLantern == null) return false;
-        if (System.currentTimeMillis() - pendingLanternAt < 1_100L) return true;
-        if (player.distanceTo(pendingLantern) > 12) return true;
+        // Never treat a missing object as smashed when its tile is out of
+        // scene range. Revisit the exact clicked tile after any interruption.
+        if (player.distanceTo(pendingLantern) > 9) {
+            nearOrWalk(player, pendingLantern, 6, "confirm clicked jack-o'-lantern");
+            return true;
+        }
+        if (pendingLanternAt != 0L
+                && System.currentTimeMillis() - pendingLanternAt < 1_100L) return true;
+        final WorldPoint clickedTile = pendingLantern;
         boolean stillPresent = Microbot.getRs2TileObjectCache().query().fromWorldView()
-                .where(o -> o != null && pendingLantern.equals(o.getWorldLocation())
+                .where(o -> o != null && clickedTile.equals(o.getWorldLocation())
                         && o.getName() != null
                         && o.getName().toLowerCase(Locale.ROOT).contains("lantern")
                         && o.hasActionContaining("Smash"))
                 .nearestOnClientThread() != null;
         if (!stillPresent) {
-            smashedLanternTiles.add(tileKey(pendingLantern));
-            configManager.setConfiguration(GROUP, LANTERNS_KEY,
-                    String.join(",", smashedLanternTiles));
-            log.info("Halloween lantern confirmed smashed | tile={} count={}/8",
-                    pendingLantern, smashedLanternTiles.size());
-            pendingLantern = null;
+            confirmSmashedLantern(clickedTile, "smash action disappeared at loaded tile");
             return false;
         }
-        if (System.currentTimeMillis() - pendingLanternAt > 7_500L)
-            pendingLantern = null; // Retry when the object persists.
+        if (pendingLanternAt == 0L
+                || System.currentTimeMillis() - pendingLanternAt > 7_500L) {
+            log.info("Halloween smash still available | tile={} retry allowed", clickedTile);
+            clearPendingLantern(); // Only retry a verified still-smashable object.
+            return false;
+        }
         return true;
     }
 
@@ -340,7 +413,8 @@ public final class KspHalloween2026Script extends Script {
         if (!RIMMINGTON.contains(player)
                 && !nearOrWalk(player, STARTER, 12, "Rimmington lanterns")) return;
         if (pendingLanternConfirmed(player)) return;
-        if (smashedLanternTiles.size() >= 8) {
+        if (lanternsVerified || smashedLanternTiles.size() >= 8) {
+            confirmAllLanterns("eight unique smashed locations");
             change(Stage.REPORT_LANTERNS, "All eight lanterns confirmed; return to children");
             return;
         }
@@ -351,9 +425,26 @@ public final class KspHalloween2026Script extends Script {
             if (ready() && target.click(target.findAction("Smash"))) {
                 pendingLantern = location;
                 pendingLanternAt = System.currentTimeMillis();
+                configManager.setConfiguration(GROUP, PENDING_LANTERN_KEY, tileKey(location));
                 lastActionAt = pendingLanternAt;
                 log.info("Halloween smash click | id={} tile={}", target.getId(), location);
             }
+            return;
+        }
+        // Consult the starter immediately at 7/8 if no target is visible;
+        // the eighth smash may have succeeded in a previous session.
+        if (smashedLanternTiles.size() >= 7 && !sweepRequiredByStarter) {
+            lastVerificationTalkAt = 0L;
+            change(Stage.VERIFY_LANTERNS,
+                    "Checking missed eighth lantern with Angel/Henja");
+            return;
+        }
+        // Search all areas only if the starter specifically says one remains.
+        if (sweepsWithoutTarget >= RIMMINGTON_SWEEP.length) {
+            sweepRequiredByStarter = false;
+            lastVerificationTalkAt = 0L;
+            change(Stage.VERIFY_LANTERNS,
+                    "No smashable lantern in full Rimmington sweep; checking with Angel/Henja");
             return;
         }
         scanRimmington(player, "Searching for remaining jack-o'-lanterns");
@@ -369,10 +460,104 @@ public final class KspHalloween2026Script extends Script {
         if (player.distanceTo(next) <= 7) {
             sweepIndex++;
             sweepsWithoutTarget++;
+            if (stage == Stage.SMASH_LANTERNS
+                    && sweepsWithoutTarget >= RIMMINGTON_SWEEP.length) {
+                sweepRequiredByStarter = false;
+                change(Stage.VERIFY_LANTERNS,
+                        "Sweep exhausted; checking Halloween lantern progress with children");
+                return;
+            }
             next = RIMMINGTON_SWEEP[sweepIndex % RIMMINGTON_SWEEP.length];
         }
         status = purpose + " (" + (sweepIndex % RIMMINGTON_SWEEP.length + 1) + "/8 areas)";
         nearOrWalk(player, next, 6, purpose);
+    }
+
+    private void inspectLanternVerificationDialogue() {
+        String text = Rs2Dialogue.hasSelectAnOption()
+                ? Rs2Dialogue.getQuestion() : Rs2Dialogue.getDialogueText();
+        if (text == null || text.isBlank()) return;
+        String lower = text.toLowerCase(Locale.ROOT).replaceAll("<[^>]*>", "");
+        boolean remaining = (lower.contains("lantern") || lower.contains("pumpkin"))
+                && (lower.contains("still") || lower.contains("more")
+                    || lower.contains("haven't") || lower.contains("not all")
+                    || lower.contains("remaining"));
+        if (remaining) {
+            starterReportedRemainingCount++;
+            log.info("Halloween starter reports unfinished lanterns | text={}", text);
+            if (starterReportedRemainingCount >= 2) {
+                stopForReview("Starter still reports remaining lanterns after another search");
+            } else {
+                sweepRequiredByStarter = true;
+                change(Stage.SMASH_LANTERNS, "Starter requests remaining lanterns; rescan");
+            }
+            return;
+        }
+        boolean nextTask = lower.contains("diango") || lower.contains("costume")
+                || lower.contains("dressing up") || lower.contains("dress up")
+                || lower.contains("spook the")
+                || (lower.contains("wear") && lower.contains("halloween"));
+        boolean allDone = (lower.contains("you've smashed")
+                || lower.contains("you have smashed")
+                || lower.contains("you've destroyed")
+                || lower.contains("you have destroyed"))
+                && (lower.contains("all eight") || lower.contains("all 8"))
+                && (lower.contains("lantern") || lower.contains("pumpkin"))
+                && !lower.contains("?");
+        if (nextTask || allDone) {
+            confirmAllLanterns("starter dialogue confirms progress: " + text);
+            change(Stage.GET_COSTUME, "Starter confirmed lantern completion");
+            return;
+        }
+        if (System.currentTimeMillis() - lastDiagnosticAt > 5_000L) {
+            lastDiagnosticAt = System.currentTimeMillis();
+            log.info("Halloween lantern verification dialogue | text={}", text);
+        }
+    }
+
+    private void verifyLanternsWithStarter(WorldPoint player) {
+        if (!nearOrWalk(player, STARTER, 8, "check lanterns with Angel/Henja")) return;
+        if (lastVerificationTalkAt != 0L) {
+            if (System.currentTimeMillis() - lastVerificationTalkAt > 15_000L) {
+                stopForReview("Lantern completion uncertain after visiting Angel/Henja ("
+                        + getLanternCount() + "/8 recorded). Check in-game progress.");
+            } else {
+                status = "Reading event-starter dialogue for lantern completion";
+            }
+            return;
+        }
+        if (!ready()) return;
+        boolean clicked = Rs2Npc.getNpc("Henja") != null
+                && Rs2Npc.interact("Henja", "Talk-to");
+        if (!clicked) clicked = Rs2Npc.getNpc("Angel") != null
+                && Rs2Npc.interact("Angel", "Talk-to");
+        if (clicked) {
+            lastVerificationTalkAt = System.currentTimeMillis();
+            acted("Asking Angel/Henja to verify the lantern objective");
+        } else {
+            status = "Finding Angel/Henja for completion verification";
+        }
+    }
+
+    public synchronized boolean confirmLanternsManually() {
+        if (!canConfirmLanternsManually()) return false;
+        confirmAllLanterns("explicit player confirmation");
+        if (stage == Stage.PAUSED) {
+            beforePause = Stage.REPORT_LANTERNS;
+            configManager.setConfiguration(GROUP, STAGE_KEY, Stage.REPORT_LANTERNS.name());
+            status = "Lantern completion confirmed; resume to report";
+        } else {
+            change(Stage.REPORT_LANTERNS, "Lantern completion confirmed by player");
+        }
+        return true;
+    }
+
+    public boolean canConfirmLanternsManually() {
+        Stage effective = stage == Stage.PAUSED || stage == Stage.NEEDS_REVIEW
+                ? beforePause : stage;
+        return active && !lanternsVerified && getLanternCount() >= 7
+                && (effective == Stage.SMASH_LANTERNS
+                    || effective == Stage.VERIFY_LANTERNS);
     }
 
     private int costumeCount() {
@@ -599,6 +784,7 @@ public final class KspHalloween2026Script extends Script {
         stage = next;
         status = message;
         if (previous != next) {
+            Rs2Walker.clearWalkingRoute("ksp_seasonal_stage_changed");
             log.info("KSP Seasonal Events Halloween | {} -> {} | {}", previous, next, message);
             if (next != Stage.STOPPED && next != Stage.PAUSED && next != Stage.NEEDS_REVIEW)
                 configManager.setConfiguration(GROUP, STAGE_KEY, next.name());
@@ -620,6 +806,16 @@ public final class KspHalloween2026Script extends Script {
     public void onChatMessage(String raw) {
         if (!active || raw == null) return;
         String text = raw.replaceAll("<[^>]*>", "").toLowerCase(Locale.ROOT);
+        if (stage == Stage.SMASH_LANTERNS && pendingLantern != null
+                && text.startsWith("you smash")
+                && (text.contains("lantern") || text.contains("pumpkin"))) {
+            confirmSmashedLantern(pendingLantern, "game smash message");
+            if (smashedLanternTiles.size() >= 8) {
+                confirmAllLanterns("eight confirmed smashes");
+                change(Stage.REPORT_LANTERNS, "Eight lanterns smashed; report to children");
+            }
+            return;
+        }
         if (text.contains("you have completed the halloween event")
                 || text.contains("you have completed the 2026 halloween event")) {
             change(Stage.COMPLETED, "Halloween completion confirmed by game");
@@ -636,6 +832,7 @@ public final class KspHalloween2026Script extends Script {
         if (!active) return;
         if (value) {
             beforePause = stage;
+            Rs2Walker.clearWalkingRoute("ksp_seasonal_paused");
             paused = true;
             stage = Stage.PAUSED;
             status = "Paused (progress preserved)";
@@ -651,8 +848,12 @@ public final class KspHalloween2026Script extends Script {
         if (active) return;
         configManager.unsetConfiguration(GROUP, STAGE_KEY);
         configManager.unsetConfiguration(GROUP, LANTERNS_KEY);
+        configManager.unsetConfiguration(GROUP, PENDING_LANTERN_KEY);
+        configManager.unsetConfiguration(GROUP, LANTERNS_VERIFIED_KEY);
         configManager.unsetConfiguration(GROUP, ADULTS_KEY);
         smashedLanternTiles.clear();
+        pendingLantern = null;
+        lanternsVerified = false;
         spookedChildren.clear();
         givenAdultIndexes.clear();
         adultsGiven = 0;
@@ -664,7 +865,8 @@ public final class KspHalloween2026Script extends Script {
     public boolean isPaused() { return paused; }
     public String getStatus() { return status; }
     public Stage getStage() { return stage; }
-    public int getLanternCount() { return smashedLanternTiles.size(); }
+    public int getLanternCount() { return lanternsVerified ? 8
+            : Math.min(8, smashedLanternTiles.size()); }
     public int getAdultsGiven() { return adultsGiven; }
     public long getRuntimeMs() { return startedAt == 0L ? 0L :
             System.currentTimeMillis() - startedAt; }
@@ -673,6 +875,7 @@ public final class KspHalloween2026Script extends Script {
     public synchronized void shutdown() {
         active = false;
         paused = false;
+        Rs2Walker.clearWalkingRoute("ksp_seasonal_stopped");
         super.shutdown();
         stage = Stage.STOPPED;
         status = "Stopped - press Start";

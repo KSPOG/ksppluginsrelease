@@ -55,7 +55,7 @@ jobs:
           panel=(root/'KspSeasonalEventsPanel.java').read_text()
           overlay=(root/'KspSeasonalEventsOverlay.java').read_text()
           event=(root/'KspSeasonalEvent.java').read_text()
-          assert 'VERSION = "0.2.0"' in plugin
+          assert 'VERSION = "0.2.1"' in plugin
           assert 'KSP + "Seasonal Events"' in plugin
           assert 'kspwillowchopper' not in plugin and 'kspwillowchopper' not in script
           assert 'HALLOWEEN_2026' in event
@@ -92,6 +92,53 @@ jobs:
           assert 'script.isActive()' in overlay
           assert 'script.start(config)' in plugin and 'overlays.remove(overlay)' in plugin
           print('PASS: standalone full wiki stages, progress persistence and guarded completion')
+
+      - name: Verify Halloween lantern reconciliation and chat safety
+        shell: python
+        run: |
+          from pathlib import Path
+          root = Path('release/kspseasonalevents')
+          code = (root/'KspHalloween2026Script.java').read_text()
+          panel = (root/'KspSeasonalEventsPanel.java').read_text()
+          plugin = (root/'KspSeasonalEventsPlugin.java').read_text()
+
+          assert 'VERIFY_LANTERNS' in code
+          assert 'pendingLanternConfirmed(WorldPoint player)' in code
+          pending = code.split('private boolean pendingLanternConfirmed(WorldPoint player)', 1)[1].split('private void smashLanterns', 1)[0]
+          assert 'if (player.distanceTo(pendingLantern) > 9)' in pending
+          assert 'nearOrWalk(player, pendingLantern, 6' in pending
+          assert 'confirmSmashedLantern(clickedTile' in pending
+          assert 'clearPendingLantern()' in pending
+          assert 'if (player.distanceTo(pendingLantern) > 12) return true;' not in pending
+
+          search = code.split('private void smashLanterns(WorldPoint player)', 1)[1].split('private void scanRimmington', 1)[0]
+          assert 'Stage.VERIFY_LANTERNS' in search
+          assert 'sweepsWithoutTarget >= RIMMINGTON_SWEEP.length' in search
+          assert 'pendingLanternConfirmed(player)' in search
+          assert 'configManager.setConfiguration(GROUP, PENDING_LANTERN_KEY' in search
+
+          assert 'inspectLanternVerificationDialogue()' in code
+          assert 'verifyLanternsWithStarter(WorldPoint player)' in code
+          assert 'stopForReview("Lantern completion uncertain' in code
+          assert 'confirmAllLanterns(' in code
+          assert 'LANTERNS_VERIFIED_KEY' in code
+          assert 'parseLanternTile' in code
+          assert 'confirmLanternsManually()' in code
+          assert 'canConfirmLanternsManually()' in code
+          assert 'getLanternCount() { return lanternsVerified ? 8' in code
+          assert 'configManager.unsetConfiguration(GROUP, PENDING_LANTERN_KEY)' in code
+          assert 'configManager.unsetConfiguration(GROUP, LANTERNS_VERIFIED_KEY)' in code
+          assert 'ksp_seasonal_stage_changed' in code
+          assert 'ksp_seasonal_paused' in code
+
+          assert 'new JButton("Confirm all 8 lanterns smashed")' in panel
+          assert 'JOptionPane.YES_NO_OPTION' in panel
+          assert 'script.canConfirmLanternsManually()' in panel
+          assert 'script.confirmLanternsManually()' in panel
+          assert 'ChatMessageType.PUBLICCHAT' not in plugin
+          assert 'type == ChatMessageType.GAMEMESSAGE' in plugin
+          assert 'type == ChatMessageType.SPAM' in plugin
+          print('PASS: persisted pending smashes, bounded sweep, verified/explicit recovery and chat filtering')
 
       - name: Install Seasonal Events sources into Microbot Hub
         shell: bash

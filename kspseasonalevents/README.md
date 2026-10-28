@@ -1,4 +1,4 @@
-# KSP Seasonal Events v0.2.0
+# KSP Seasonal Events v0.2.1
 
 A **standalone Microbot plugin**, independent of Chopper, with its own
 config, navigation panel, Start / Pause / Resume / Stop / Reset progress,
@@ -33,6 +33,36 @@ may require manual review rather than repeated speculative clicks. The
 plugin logs stage transitions, visible dialogue options when unknown, NPC
 IDs and world tiles of successfully targeted event objects. No guessed
 NPC/object IDs are treated as authoritative.
+
+## Lantern progression recovery (0.2.1)
+
+The legacy 7/8 stall occurred because a pending smash could remain unconfirmed
+if the player moved out of observation range, and because the eight exploration
+waypoints could repeat without new live targets. The last dispatched lantern
+world tile is now persisted and revisited after a pause, stop or restart, so a
+missing action is checked while the tile is actually in scene range.
+
+With an existing 7/8 save and no target visible, the plugin first enters
+`VERIFY_LANTERNS` and asks Angel/Henja. It only performs a full
+discovery sweep if the starter says lanterns are still outstanding. It
+credits completion only if the
+dialogue positively confirms the lantern objective or the subsequent costume
+task. If confirmation is unavailable it stops for review rather than endlessly
+walking. The overlay may still display 7/8 while server progress is already 8/8;
+that number represents *confirmed local observations*, not a directly queried
+2026 quest varbit.
+
+A guarded **Confirm all 8 lanterns smashed** control is available in the
+side panel if seven or more have been recorded and the current objective is
+lantern smashing/verification. Only click after independently confirming that
+all eight lanterns have been smashed in-game. It preserves the stored seven
+tiles, records the player's explicit confirmation, then resumes the report
+objective. It is available while paused without unpausing the script.
+
+The plugin now processes Halloween confirmation messages only from game
+message types, not public or private chat. Stage transitions, pauses and
+stops also cancel stale walker routes. No new object IDs or fixed spawn
+coordinates are assumed.
 
 ## Progress and session behavior
 
