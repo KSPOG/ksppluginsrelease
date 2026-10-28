@@ -119,7 +119,6 @@ public class KspWillowChopperPlugin extends Plugin {
         currentForestryEvent = KspForestryEvent.NONE;
         // Enabling the RuneLite plugin must NOT start chopping or display an
         // overlay. The side-panel Start button owns the session lifecycle.
-        script.shutdown();
         purgeLegacyGlobalForestryHandlers();
         addSettingsPanel();
     }
