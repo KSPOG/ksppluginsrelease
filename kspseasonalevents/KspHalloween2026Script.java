@@ -984,10 +984,10 @@ public final class KspHalloween2026Script extends Script {
             return;
         }
 
-        if (required == Stage.SPOOK_CHILDREN && !spookedChildren.isEmpty()) {
-            // A report after a PARTIAL (e.g. 2/5) live scene search must
-            // also be bounded. Previously only 5/5 reports incremented the
-            // counter, allowing unlimited two-child/report loops.
+        if (required == Stage.SPOOK_CHILDREN) {
+            // A negative report with zero or partial (e.g. 2/5) child
+            // attempts must also be bounded. Otherwise a scene with no
+            // available children loops between scouting and the starter.
             childSpookRetries++;
             configManager.setConfiguration(GROUP, CHILD_RETRY_COUNT_KEY, childSpookRetries);
             int allowedRetries = spookedChildren.size() >= CHILD_REPORT_CHECKPOINT ? 1 : 2;
