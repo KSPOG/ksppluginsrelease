@@ -77,7 +77,15 @@ jobs:
           assert 'Rs2Npc.interact(' not in access
           assert 'Rs2Walker.walkTo(' not in access
           assert 'MIN_X = 3153' in access and 'MAX_Y = 3502' in access
-          print('PASS: canonical GE arrival, Banker-only bank and Clerk-only exchange; no remote bank-booth paths')
+          mule = Path('release/kspmule/KspMuleWorkerService.java').read_text()
+          plugin = (root / 'KspSmartSuperheatPlugin.java').read_text()
+          assert 'KspSmartSuperheatGeAccess::openLocalBank' in plugin, 'Mule must use GE-local Banker'
+          assert 'KspSmartSuperheatGeAccess::isInGrandExchange' in plugin, 'Mule requires GE-only movement fence'
+          assert 'if (!openBankForMule())' in mule, 'Mule bank fallback is not owner-aware'
+          assert 'allowedArea != null && (muleTile == null || !allowedArea.test(muleTile))' in mule, 'Mule can leave GE'
+          legacy_bank = Path('release/kspbank/KspVerifiedBank.java').read_text()
+          assert 'Rs2GameObject' not in legacy_bank, 'Shared bank dependency uses retired API'
+          print('PASS: canonical GE arrival, Banker-only banking and mule fence; no remote bank-booth paths')
 
       - name: Install Smart Superheat plus shared dependencies
         shell: bash
