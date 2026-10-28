@@ -49,6 +49,11 @@ public final class KspHalloween2026Script extends Script {
     private static final String PENDING_LANTERN_KEY = "halloweenPendingSmashTile";
     private static final String LANTERNS_VERIFIED_KEY = "halloweenLanternsVerified";
     private static final String ADULTS_KEY = "halloweenAdultsGiven";
+    private static final String SPOOKED_CHILD_IDS_KEY = "halloweenChildNpcIdsAttempted";
+    private static final String DELIVERED_ADULT_IDS_KEY = "halloweenAdultNpcIdsDelivered";
+    // Ten distinct child IDs are observed in the supplied 2026 client log.
+    // This is a report-to-starter checkpoint, never proof of game success.
+    private static final int CHILD_REPORT_CHECKPOINT = 10;
     private static final WorldArea RIMMINGTON = new WorldArea(2925, 3180, 85, 95, 0);
     private static final WorldPoint STARTER = new WorldPoint(2958, 3211, 0);
     private static final WorldPoint DIANGO = new WorldPoint(3081, 3248, 0);
@@ -126,7 +131,10 @@ public final class KspHalloween2026Script extends Script {
     private final Set<String> smashedLanternTiles = ConcurrentHashMap.newKeySet();
     private volatile boolean lanternsVerified;
     private final Set<Integer> spookedChildren = new HashSet<>();
-    private final Set<Integer> givenAdultIndexes = new HashSet<>();
+    private final Set<Integer> givenAdultIds = new HashSet<>();
+    private boolean childrenReportConfirmed;
+    private int childrenReportAttempts;
+    private int childSpookRetries;
     private int adultsGiven;
     private int sweepIndex;
     private int sweepsWithoutTarget;
@@ -176,7 +184,10 @@ public final class KspHalloween2026Script extends Script {
         holidayScrollAttempts = 0;
         holidayCloseAttempts = 0;
         spookedChildren.clear();
-        givenAdultIndexes.clear();
+        givenAdultIds.clear();
+        childrenReportConfirmed = false;
+        childrenReportAttempts = 0;
+        childSpookRetries = 0;
         sweepIndex = 0;
         sweepsWithoutTarget = 0;
         actionsAtStage = 0;
@@ -192,8 +203,12 @@ public final class KspHalloween2026Script extends Script {
         // not forgotten; there is no guaranteed game-level counter in this API.
         pendingLanternAt = 0L;
         String savedAdults = configManager.getConfiguration(GROUP, ADULTS_KEY);
-        try { adultsGiven = savedAdults == null ? 0 : Integer.parseInt(savedAdults); }
+        try { adultsGiven = savedAdults == null ? 0 : Math.max(0, Math.min(5, Integer.parseInt(savedAdults))); }
         catch (NumberFormatException e) { adultsGiven = 0; }
+        restoreNpcIds(SPOOKED_CHILD_IDS_KEY, spookedChildren);
+        restoreNpcIds(DELIVERED_ADULT_IDS_KEY, givenAdultIds);
+        log.info("Halloween saved NPC progress | attemptedChildren={} adultIds={} delivered={}",
+                spookedChildren.size(), givenAdultIds.size(), adultsGiven);
 
         Stage saved = savedStage();
         if (lanternsVerified && (saved == Stage.SMASH_LANTERNS
@@ -206,6 +221,24 @@ public final class KspHalloween2026Script extends Script {
         log.info("Halloween 2026 started | stage={} lanterns={}/8 adultsGiven={}",
                 stage, getLanternCount(), adultsGiven);
         return true;
+    }
+
+    private void restoreNpcIds(String key, Set<Integer> destination) {
+        String raw = configManager.getConfiguration(GROUP, key);
+        if (raw == null || raw.isBlank()) return;
+        for (String part : raw.split(",")) {
+            try {
+                int id = Integer.parseInt(part.trim());
+                if (id > 0) destination.add(id);
+            } catch (NumberFormatException ignored) {
+                log.warn("Invalid saved Halloween NPC ID ignored | key={} value={}", key, part);
+            }
+        }
+    }
+
+    private void persistNpcIds(String key, Set<Integer> ids) {
+        configManager.setConfiguration(GROUP, key,
+                ids.stream().sorted().map(String::valueOf).collect(Collectors.joining(",")));
     }
 
     private Stage savedStage() {
@@ -392,7 +425,9 @@ public final class KspHalloween2026Script extends Script {
     }
 
     private void talkToStarter(WorldPoint player, Stage next) {
-        if (!RIMMINGTON.contains(player) && !nearOrWalk(player, STARTER, 10, "Angel / Henja"))
+        // Being somewhere within Rimmington does not mean Angel/Henja
+        // are loaded. Return to the actual starter house before talking.
+        if (!nearOrWalk(player, STARTER, 8, "Angel / Henja's house"))
             return;
         if (!ready()) return;
         boolean clicked = Rs2Npc.getNpc("Henja") != null
