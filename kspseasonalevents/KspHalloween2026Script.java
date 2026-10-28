@@ -498,6 +498,52 @@ public final class KspHalloween2026Script extends Script {
         }
     }
 
+    private void verifyLanternsWithStarter(WorldPoint player) {
+        if (!nearOrWalk(player, STARTER, 8, "check lanterns with Angel/Henja")) return;
+        if (lastVerificationTalkAt != 0L) {
+            if (System.currentTimeMillis() - lastVerificationTalkAt > 15_000L) {
+                stopForReview("Lantern completion uncertain after visiting Angel/Henja ("
+                        + getLanternCount() + "/8 recorded). Check in-game progress.");
+            } else {
+                status = "Reading event-starter dialogue for lantern completion";
+            }
+            return;
+        }
+        if (!ready()) return;
+        boolean clicked = Rs2Npc.getNpc("Henja") != null
+                && Rs2Npc.interact("Henja", "Talk-to");
+        if (!clicked) clicked = Rs2Npc.getNpc("Angel") != null
+                && Rs2Npc.interact("Angel", "Talk-to");
+        if (clicked) {
+            lastVerificationTalkAt = System.currentTimeMillis();
+            verificationTalkAttempts++;
+            acted("Asking Angel/Henja to verify the lantern objective");
+        } else {
+            status = "Finding Angel/Henja for completion verification";
+        }
+    }
+
+    public synchronized boolean confirmLanternsManually() {
+        if (!canConfirmLanternsManually()) return false;
+        confirmAllLanterns("explicit player confirmation");
+        if (stage == Stage.PAUSED) {
+            beforePause = Stage.REPORT_LANTERNS;
+            configManager.setConfiguration(GROUP, STAGE_KEY, Stage.REPORT_LANTERNS.name());
+            status = "Lantern completion confirmed; resume to report";
+        } else {
+            change(Stage.REPORT_LANTERNS, "Lantern completion confirmed by player");
+        }
+        return true;
+    }
+
+    public boolean canConfirmLanternsManually() {
+        Stage effective = stage == Stage.PAUSED || stage == Stage.NEEDS_REVIEW
+                ? beforePause : stage;
+        return active && !lanternsVerified && getLanternCount() >= 7
+                && (effective == Stage.SMASH_LANTERNS
+                    || effective == Stage.VERIFY_LANTERNS);
+    }
+
     private int costumeCount() {
         int equipped = 0;
         for (String name : COSTUME_PIECES) {
