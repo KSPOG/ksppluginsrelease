@@ -26,7 +26,8 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.Map;
 import java.util.HashMap;
 import java.util.ArrayList;
-import java.util.concurrent.ConcurrentHashMap;
+import java.util.Collections;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
@@ -60,6 +61,8 @@ public final class KspHalloween2026Script extends Script {
     // Five NPCs per candidate age group were seen in the 2026 log.
     // Five verified child attempts trigger a report checkpoint, not success.
     private static final int CHILD_REPORT_CHECKPOINT = 5;
+    private static final int MAX_CHILD_NPC_SCOUT_STOPS = 4;
+    private static final long CHILD_SCENE_SETTLE_MS = 2_000L;
     private static final String TREATER_CHILD_GROUP_KEY = "halloweenConfirmedChildNpcGroup";
     // 2026 client logs show two groups of five NPC definition IDs. The
     // groups are NOT assigned to children or adults without live evidence.
@@ -154,6 +157,10 @@ public final class KspHalloween2026Script extends Script {
     private final Map<Integer, Integer> observedTreaterHeights = new HashMap<>();
     private TreaterGroup confirmedChildGroup = TreaterGroup.UNKNOWN;
     private long lastTreaterClassificationLogAt;
+    // Track only live-event-NPC-derived scout tiles. The generic Rimmington
+    // lantern search waypoints are never used to locate child NPCs.
+    private final Set<String> childScoutedNpcTiles = new HashSet<>();
+    private long childNoTargetSince;
     private int adultsGiven;
     private int sweepIndex;
     private int sweepsWithoutTarget;
@@ -210,6 +217,8 @@ public final class KspHalloween2026Script extends Script {
         observedTreaterHeights.clear();
         confirmedChildGroup = TreaterGroup.UNKNOWN;
         lastTreaterClassificationLogAt = 0L;
+        childScoutedNpcTiles.clear();
+        childNoTargetSince = 0L;
         sweepIndex = 0;
         sweepsWithoutTarget = 0;
         actionsAtStage = 0;
