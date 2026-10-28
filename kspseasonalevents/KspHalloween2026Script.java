@@ -26,7 +26,8 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.Map;
 import java.util.HashMap;
 import java.util.ArrayList;
-import java.util.concurrent.ConcurrentHashMap;
+import java.util.Collections;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
@@ -60,6 +61,8 @@ public final class KspHalloween2026Script extends Script {
     // Five NPCs per candidate age group were seen in the 2026 log.
     // Five verified child attempts trigger a report checkpoint, not success.
     private static final int CHILD_REPORT_CHECKPOINT = 5;
+    private static final int MAX_CHILD_NPC_SCOUT_STOPS = 4;
+    private static final long CHILD_SCENE_SETTLE_MS = 2_000L;
     private static final String TREATER_CHILD_GROUP_KEY = "halloweenConfirmedChildNpcGroup";
     // 2026 client logs show two groups of five NPC definition IDs. The
     // groups are NOT assigned to children or adults without live evidence.
@@ -154,6 +157,10 @@ public final class KspHalloween2026Script extends Script {
     private final Map<Integer, Integer> observedTreaterHeights = new HashMap<>();
     private TreaterGroup confirmedChildGroup = TreaterGroup.UNKNOWN;
     private long lastTreaterClassificationLogAt;
+    // Track only live-event-NPC-derived scout tiles. The generic Rimmington
+    // lantern search waypoints are never used to locate child NPCs.
+    private final Set<String> childScoutedNpcTiles = new HashSet<>();
+    private long childNoTargetSince;
     private int adultsGiven;
     private int sweepIndex;
     private int sweepsWithoutTarget;
@@ -210,6 +217,8 @@ public final class KspHalloween2026Script extends Script {
         observedTreaterHeights.clear();
         confirmedChildGroup = TreaterGroup.UNKNOWN;
         lastTreaterClassificationLogAt = 0L;
+        childScoutedNpcTiles.clear();
+        childNoTargetSince = 0L;
         sweepIndex = 0;
         sweepsWithoutTarget = 0;
         actionsAtStage = 0;
@@ -975,21 +984,26 @@ public final class KspHalloween2026Script extends Script {
             return;
         }
 
-        if (required == Stage.SPOOK_CHILDREN
-                && spookedChildren.size() >= CHILD_REPORT_CHECKPOINT) {
+        if (required == Stage.SPOOK_CHILDREN) {
+            // A negative report with zero or partial (e.g. 2/5) child
+            // attempts must also be bounded. Otherwise a scene with no
+            // available children loops between scouting and the starter.
             childSpookRetries++;
             configManager.setConfiguration(GROUP, CHILD_RETRY_COUNT_KEY, childSpookRetries);
-            if (childSpookRetries > 1) {
+            int allowedRetries = spookedChildren.size() >= CHILD_REPORT_CHECKPOINT ? 1 : 2;
+            if (childSpookRetries > allowedRetries) {
                 pendingStarterNext = null;
-                stopForReview("Angel/Henja still requires child scares after a retry."
-                        + " Inspect the Spook responses and NPC classifications");
+                stopForReview("Angel/Henja still requests child scares after "
+                        + childSpookRetries + " searches with no additional successful targets."
+                        + " Inspect the Spook responses and loaded NPC IDs");
                 return;
             }
-            // Previous entries are attempted clicks, not game-confirmed
-            // successful scares. Only clear them following this explicit
-            // server-side report that the child objective remains unfinished.
-            spookedChildren.clear();
-            persistNpcIds(SPOOKED_CHILD_IDS_KEY, spookedChildren);
+            if (spookedChildren.size() >= CHILD_REPORT_CHECKPOINT) {
+                // Only discard fully attempted IDs following an explicit
+                // rejection by the server. Partial attempts are preserved.
+                spookedChildren.clear();
+                persistNpcIds(SPOOKED_CHILD_IDS_KEY, spookedChildren);
+            }
         }
 
         childrenReportConfirmed = false;
@@ -1011,16 +1025,30 @@ public final class KspHalloween2026Script extends Script {
     }
 
     private void observeTreaterAges() {
-        Rs2Npc.getNpcs().filter(n -> n.getName() != null
-                && n.getName().toLowerCase(Locale.ROOT).contains("trick"))
-                .forEach(n -> {
-                    if (treaterGroup(n.getId()) == TreaterGroup.UNKNOWN) return;
-                    int height = Microbot.getClientThread()
-                            .runOnClientThreadOptional(n::getLogicalHeight).orElse(0);
-                    if (height > 0) observedTreaterHeights.put(n.getId(), height);
-                });
-
+        // Once confirmed (including after a saved resume), do not make any
+        // synchronous client-thread requests just to remeasure NPC heights.
         if (confirmedChildGroup != TreaterGroup.UNKNOWN) return;
+
+        List<Rs2NpcModel> candidates = Rs2Npc.getNpcs()
+                .filter(n -> n.getName() != null
+                        && n.getName().toLowerCase(Locale.ROOT).contains("trick")
+                        && treaterGroup(n.getId()) != TreaterGroup.UNKNOWN)
+                .collect(Collectors.toList());
+
+        // RuneLite actor heights belong to the client thread. Read the
+        // complete observed set in ONE batch instead of blocking separately
+        // for every NPC on every scheduler tick.
+        Map<Integer, Integer> heights = Microbot.getClientThread()
+                .runOnClientThreadOptional(() -> {
+                    Map<Integer, Integer> snapshot = new HashMap<>();
+                    for (Rs2NpcModel candidate : candidates) {
+                        int height = candidate.getLogicalHeight();
+                        if (height > 0) snapshot.put(candidate.getId(), height);
+                    }
+                    return snapshot;
+                }).orElse(Collections.emptyMap());
+        observedTreaterHeights.putAll(heights);
+
         List<Integer> a = new ArrayList<>();
         List<Integer> b = new ArrayList<>();
         for (Map.Entry<Integer, Integer> entry : observedTreaterHeights.entrySet()) {
@@ -1029,9 +1057,8 @@ public final class KspHalloween2026Script extends Script {
             if (group == TreaterGroup.B) b.add(entry.getValue());
         }
 
-        // No hard-coded assumption about which ID range represents children:
-        // require multiple observed actors in BOTH groups and a model-height
-        // separation. An unknown NPC must NEVER be automatically spooked.
+        // The two NPC ID ranges are not assumed to be children/adults.
+        // Verify actual relative model size using multiple live samples.
         if (a.size() >= 2 && b.size() >= 2) {
             int aMin = a.stream().mapToInt(Integer::intValue).min().orElse(0);
             int aMax = a.stream().mapToInt(Integer::intValue).max().orElse(0);
@@ -1048,20 +1075,17 @@ public final class KspHalloween2026Script extends Script {
                 log.info("Halloween child/adult NPC groups confirmed by live model heights"
                         + " | childGroup={} groupAHeights={} groupBHeights={}",
                         confirmedChildGroup, a, b);
+                return;
             }
-        }
-
-        if (confirmedChildGroup == TreaterGroup.UNKNOWN && a.size() >= 2 && b.size() >= 2) {
             stopForReview("Child/adult NPC models cannot be differentiated safely"
                     + "; groupAHeights=" + a + " groupBHeights=" + b);
             return;
         }
 
-        if (confirmedChildGroup == TreaterGroup.UNKNOWN
-                && System.currentTimeMillis() - lastTreaterClassificationLogAt > 10_000L) {
+        if (System.currentTimeMillis() - lastTreaterClassificationLogAt > 10_000L) {
             lastTreaterClassificationLogAt = System.currentTimeMillis();
             log.info("Halloween NPC age classification not yet verified"
-                    + " | observedHeights={} (no unknown NPC will be spooked)",
+                    + " | observedHeights={} (unknown NPCs excluded)",
                     observedTreaterHeights);
         }
     }
@@ -1081,6 +1105,56 @@ public final class KspHalloween2026Script extends Script {
         return group == confirmedChildGroup ? TreaterAge.CHILD : TreaterAge.ADULT;
     }
 
+    private boolean scoutVisibleTreaters(WorldPoint player, List<Rs2NpcModel> visible) {
+        // Only actual NPC positions observed through RuneLite are navigation
+        // anchors. We may scout *near* adults to load nearby children, but
+        // never click Spook on an adult or count it towards child progress.
+        if (childScoutedNpcTiles.size() >= MAX_CHILD_NPC_SCOUT_STOPS) return false;
+
+        List<Rs2NpcModel> anchors = visible.stream()
+                .filter(n -> {
+                    TreaterAge age = classifyTreater(n);
+                    return age == TreaterAge.ADULT
+                            || (age == TreaterAge.CHILD
+                                && !spookedChildren.contains(n.getId()));
+                })
+                .filter(n -> n.getWorldLocation() != null
+                        && RIMMINGTON.contains(n.getWorldLocation()))
+                .sorted(Comparator.comparingInt(n ->
+                        player.distanceTo(n.getWorldLocation())))
+                .collect(Collectors.toList());
+
+        for (Rs2NpcModel anchor : anchors) {
+            WorldPoint target = anchor.getWorldLocation();
+            String key = tileKey(target);
+            if (childScoutedNpcTiles.contains(key)) continue;
+
+            if (player.distanceTo(target) <= 7) {
+                childScoutedNpcTiles.add(key);
+                continue;
+            }
+            if (Rs2Player.isMoving()
+                    || System.currentTimeMillis() - lastWalkAt < WALK_RETRY) {
+                status = "Waiting to scout near visible trick-or-treater NPCs";
+                return true;
+            }
+            if (config == null || !config.walkToEvent()) {
+                status = "Walking disabled; unable to scout observed NPC at " + target;
+                return true;
+            }
+
+            childScoutedNpcTiles.add(key);
+            log.info("Halloween NPC-guided child search | anchorNpcId={} age={} tile={}"
+                            + " attempts={}/{} scoutStops={}/{}",
+                    anchor.getId(), classifyTreater(anchor), target,
+                    spookedChildren.size(), CHILD_REPORT_CHECKPOINT,
+                    childScoutedNpcTiles.size(), MAX_CHILD_NPC_SCOUT_STOPS);
+            nearOrWalk(player, target, 6, "visible trick-or-treater NPC location");
+            return true;
+        }
+        return false;
+    }
+
     private void spookChildren(WorldPoint player) {
         if (costumeCount() < 4) {
             change(Stage.GET_COSTUME, "Need four Halloween outfit pieces equipped");
@@ -1091,43 +1165,79 @@ public final class KspHalloween2026Script extends Script {
 
         observeTreaterAges();
         if (stage == Stage.NEEDS_REVIEW) return;
-        // Only confirmed CHILD identities contribute to the checkpoint.
-        // Adults are explicitly excluded even if they expose 'Spook'.
-        // The conversation will decide whether another sweep is required.
+
         if (spookedChildren.size() >= CHILD_REPORT_CHECKPOINT) {
             childrenReportConfirmed = false;
             change(Stage.REPORT_CHILDREN,
-                    "Five verified child Spook attempts recorded; checking Angel/Henja");
+                    "Five distinct child Spook attempts; verifying with Angel/Henja");
             return;
         }
 
-        // NPC indexes are session-local and may be reused after scene
-        // reloads. Use the observed NPC definition IDs to deduplicate clicks.
-        Rs2NpcModel child = Rs2Npc.getNpcs().filter(n -> n.getName() != null
-                && n.getName().toLowerCase(Locale.ROOT).contains("trick")
-                && classifyTreater(n) == TreaterAge.CHILD
-                && npcHasAction(n, "Spook")
-                && !spookedChildren.contains(n.getId())).findFirst().orElse(null);
+        // One live scene snapshot per tick. Child selection is based on the
+        // verified age group AND the actual Spook action. Adult NPCs are never
+        // eligible targets, even when travelling past them for discovery.
+        List<Rs2NpcModel> visibleTreaters = Rs2Npc.getNpcs()
+                .filter(n -> n.getName() != null
+                        && n.getName().toLowerCase(Locale.ROOT).contains("trick"))
+                .collect(Collectors.toList());
+
+        Rs2NpcModel child = visibleTreaters.stream()
+                .filter(n -> classifyTreater(n) == TreaterAge.CHILD
+                        && !spookedChildren.contains(n.getId())
+                        && npcHasAction(n, "Spook"))
+                .min(Comparator.comparingInt(n -> n.getWorldLocation() == null
+                        ? Integer.MAX_VALUE : player.distanceTo(n.getWorldLocation())))
+                .orElse(null);
+
         if (child != null) {
+            childNoTargetSince = 0L;
             if (ready() && Rs2Npc.interact(child, "Spook")) {
                 spookedChildren.add(child.getId());
                 persistNpcIds(SPOOKED_CHILD_IDS_KEY, spookedChildren);
+                // If new children become available after moving, previous
+                // partial-search retries should not count as stalled progress.
+                childSpookRetries = 0;
+                configManager.unsetConfiguration(GROUP, CHILD_RETRY_COUNT_KEY);
                 acted("Spook attempt | childNpcId=" + child.getId()
                         + " index=" + child.getIndex()
-                        + " distinctAttempts=" + spookedChildren.size());
-                sweepsWithoutTarget = 0;
+                        + " distinctAttempts=" + spookedChildren.size()
+                        + "/" + CHILD_REPORT_CHECKPOINT);
             }
             return;
         }
 
-        if (sweepsWithoutTarget >= RIMMINGTON_SWEEP.length) {
-            childrenReportConfirmed = false;
-            change(Stage.REPORT_CHILDREN,
-                    "No verified child targets remain; checking with Angel/Henja");
+        // NPC scene updates may lag behind a movement or Spook action.
+        // Give the scene time to settle before initiating any new route.
+        long now = System.currentTimeMillis();
+        if (childNoTargetSince == 0L) {
+            childNoTargetSince = now;
+            status = "Checking nearby child trick-or-treaters ("
+                    + spookedChildren.size() + "/" + CHILD_REPORT_CHECKPOINT
+                    + " Spook attempts)";
             return;
         }
-        scanRimmington(player, "Looking for child trick-or-treaters");
+        if (Rs2Player.isMoving() || now - childNoTargetSince < CHILD_SCENE_SETTLE_MS) {
+            status = "Waiting for visible child NPCs ("
+                    + spookedChildren.size() + "/" + CHILD_REPORT_CHECKPOINT + ")";
+            return;
+        }
+
+        if (scoutVisibleTreaters(player, visibleTreaters)) return;
+
+        String sceneDetails = visibleTreaters.stream()
+                .map(n -> n.getId() + ":" + classifyTreater(n)
+                        + ":spook=" + npcHasAction(n, "Spook")
+                        + ":tile=" + n.getWorldLocation())
+                .collect(Collectors.joining(", "));
+        log.info("Halloween no further unspooked child in loaded scene"
+                        + " | attemptedIds={} visibleTreaters=[{}] scoutedNpcTiles={}"
+                        + " => return to Angel/Henja for authoritative quest check",
+                spookedChildren, sceneDetails, childScoutedNpcTiles);
+        childrenReportConfirmed = false;
+        change(Stage.REPORT_CHILDREN,
+                "No additional child Spook targets in live scene; verifying quest dialogue");
     }
+
 
     private void solveChemist(WorldPoint player) {
         if (Rs2Inventory.hasItem("Sugar", true)
@@ -1300,6 +1410,10 @@ public final class KspHalloween2026Script extends Script {
             actionsAtStage = 0;
             sweepsWithoutTarget = 0;
             sweepIndex = 0;
+            if (next == Stage.SPOOK_CHILDREN) {
+                childNoTargetSince = 0L;
+                childScoutedNpcTiles.clear();
+            }
         }
     }
 
@@ -1369,6 +1483,8 @@ public final class KspHalloween2026Script extends Script {
         pendingLantern = null;
         lanternsVerified = false;
         spookedChildren.clear();
+        childScoutedNpcTiles.clear();
+        childNoTargetSince = 0L;
         givenAdultIds.clear();
         pendingAdultId = -1;
         childrenReportConfirmed = false;

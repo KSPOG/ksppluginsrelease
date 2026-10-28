@@ -1,4 +1,4 @@
-# KSP Seasonal Events v0.2.6
+# KSP Seasonal Events v0.2.7
 
 A **standalone Microbot plugin**, independent of Chopper, with its own
 config, navigation panel, Start / Pause / Resume / Stop / Reset progress,
@@ -33,6 +33,40 @@ may require manual review rather than repeated speculative clicks. The
 plugin logs stage transitions, visible dialogue options when unknown, NPC
 IDs and world tiles of successfully targeted event objects. No guessed
 NPC/object IDs are treated as authoritative.
+
+## NPC-guided child searching and client-thread load (0.2.7)
+
+After the client has confirmed the smaller 2026 Trick-or-treater model
+group as children, the script now stops repeatedly requesting their
+model heights from RuneLite's client thread. Initial model heights are
+captured in one client-thread batch.
+
+During `SPOOK_CHILDREN`, the script takes one visible-NPC snapshot,
+selects an **unattempted verified child** with the `Spook` action, and
+excludes adults from every Spook click. If no eligible child appears,
+it first allows a short scene-settle interval and then scouts up to
+four **actual NPC locations** discovered in the scene. It can walk near
+adults to load neighboring children, but never attempts to Spook
+adults. The previous generic eight-point Rimmington route is not
+used for this stage.
+
+If further children remain undiscoverable, it returns to Angel/Henja
+for authoritative progress verification rather than wandering
+arbitrary waypoints. A negative response is retried only a bounded
+number of times; partial 2/5 progress is preserved. The plugin logs
+currently visible NPC IDs, classification, action availability and
+world tiles when it exhausts the scene-based search.
+
+The supplied `ClientThread did not run task within 2000ms` warning
+occurred *after* the bot was paused and cannot be conclusively
+attributed to Seasonal Events. Reducing repetitive height reads
+removes an avoidable source of client-thread pressure, but it does not
+claim to fix unrelated client event-thread stalls.
+
+No reset is required. Saved lanterns, outfit, child attempted IDs,
+classification and adult progress are preserved. Live testing remains
+necessary to confirm whether all five children are accessible in the
+active scene and whether the event server accepts the attempts.
 
 ## Child scare progress in overlay and side panel (0.2.6)
 

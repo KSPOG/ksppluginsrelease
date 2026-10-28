@@ -55,7 +55,7 @@ jobs:
           panel=(root/'KspSeasonalEventsPanel.java').read_text()
           overlay=(root/'KspSeasonalEventsOverlay.java').read_text()
           event=(root/'KspSeasonalEvent.java').read_text()
-          assert 'VERSION = "0.2.6"' in plugin
+          assert 'VERSION = "0.2.7"' in plugin
           assert 'KSP + "Seasonal Events"' in plugin
           assert 'kspwillowchopper' not in plugin and 'kspwillowchopper' not in script
           assert 'HALLOWEEN_2026' in event
@@ -269,7 +269,8 @@ jobs:
           assert '&& !npcHasAction(n, "Spook")' not in adults
           age = code.split('private void observeTreaterAges()',1)[1].split('private void spookChildren(',1)[0]
           assert 'treaterGroup(n.getId())' in age
-          assert 'n::getLogicalHeight' in age
+          assert 'candidate.getLogicalHeight()' in age
+          assert 'n::getLogicalHeight' not in age
           assert 'a.size() >= 2 && b.size() >= 2' in age
           assert 'confirmedChildGroup = TreaterGroup.A' in age
           assert 'confirmedChildGroup = TreaterGroup.B' in age
@@ -286,7 +287,8 @@ jobs:
           assert 'spookedChildren.add(child.getIndex())' not in child
           assert 'persistNpcIds(SPOOKED_CHILD_IDS_KEY, spookedChildren)' in child
           assert 'change(Stage.REPORT_CHILDREN' in child
-          assert 'sweepsWithoutTarget >= RIMMINGTON_SWEEP.length' in child
+          assert 'scanRimmington(player, "Looking for child trick-or-treaters")' not in child
+          assert 'scoutVisibleTreaters(player, visibleTreaters)' in child
           assert 'childrenReportConfirmed = true;' in report
           assert 'KspHalloweenChildReport.classify(raw)' in report
           assert 'Instruction.VISIT_CHEMIST' in report
@@ -310,7 +312,7 @@ jobs:
           assert 'givenAdultIndexes' not in code
           assert 'configManager.unsetConfiguration(GROUP, SPOOKED_CHILD_IDS_KEY)' in code
           assert 'configManager.unsetConfiguration(GROUP, DELIVERED_ADULT_IDS_KEY)' in code
-          print('PASS: 10-child checkpoint, starter confirmation gate, unique adult receipt, persistence and bounded scanning')
+          print('PASS: five-child report checkpoint, NPC-only scouting, single-batch classification and adult receipts')
 
       - name: Test child-report dialogue classification with actual 2026 text
         shell: bash
@@ -340,7 +342,8 @@ jobs:
           assert 'if (pendingStarterNext == required)' in report
           assert 'pendingStarterNext = Stage.CHEMIST_RIDDLE;' in report
           assert 'configManager.setConfiguration(GROUP, CHILD_RETRY_COUNT_KEY, childSpookRetries)' in report
-          assert 'childSpookRetries > 1' in report
+          assert 'childSpookRetries > allowedRetries' in report
+          assert 'spookedChildren.size() >= CHILD_REPORT_CHECKPOINT ? 1 : 2' in report
           assert 'spookedChildren.clear();' in report
           assert 'persistNpcIds(SPOOKED_CHILD_IDS_KEY, spookedChildren);' in report
           assert 'savedRetries' in code
@@ -376,6 +379,53 @@ jobs:
           assert 'Not verified' in overlay and 'Confirmed' in overlay
           assert 'Not verified' in panel and 'Confirmed' in panel
           print('PASS: child Spook attempts and separate confirmed quest objective in both UIs')
+
+      - name: Verify scene-guided child search and one-batch client thread classification
+        shell: python
+        run: |
+          from pathlib import Path
+          code = Path('release/kspseasonalevents/KspHalloween2026Script.java').read_text()
+          age = code.split('private void observeTreaterAges()', 1)[1].split('private TreaterAge classifyTreater(', 1)[0]
+          scout = code.split('private boolean scoutVisibleTreaters(', 1)[1].split('private void spookChildren(', 1)[0]
+          child = code.split('private void spookChildren(', 1)[1].split('private void solveChemist(', 1)[0]
+          report = code.split('private void inspectChildReportDialogue()', 1)[1].split('private TreaterGroup treaterGroup(', 1)[0]
+          change = code.split('private void change(Stage next, String message)', 1)[1].split('private void stopForReview(', 1)[0]
+
+          assert 'if (confirmedChildGroup != TreaterGroup.UNKNOWN) return;' in age
+          assert age.index('if (confirmedChildGroup != TreaterGroup.UNKNOWN) return;') < age.index('Rs2Npc.getNpcs()')
+          assert age.count('runOnClientThreadOptional(') == 1
+          assert 'n::getLogicalHeight' not in age
+          assert 'candidate.getLogicalHeight()' in age
+          assert 'observedTreaterHeights.putAll(heights)' in age
+
+          assert 'MAX_CHILD_NPC_SCOUT_STOPS = 4' in code
+          assert 'CHILD_SCENE_SETTLE_MS = 2_000L' in code
+          assert 'childScoutedNpcTiles' in scout
+          assert 'classifyTreater(anchor)' in scout
+          assert 'age == TreaterAge.ADULT' in scout
+          assert 'age == TreaterAge.CHILD' in scout
+          assert 'RIMMINGTON.contains(n.getWorldLocation())' in scout
+          assert 'nearOrWalk(player, target, 6,' in scout
+          assert 'RIMMINGTON_SWEEP' not in scout
+          assert 'Rs2Npc.interact(' not in scout
+
+          assert 'Rs2Npc.getNpcs()' in child
+          assert 'classifyTreater(n) == TreaterAge.CHILD' in child
+          assert '!spookedChildren.contains(n.getId())' in child
+          assert 'npcHasAction(n, "Spook")' in child
+          assert 'Rs2Npc.interact(child, "Spook")' in child
+          assert 'CHILD_SCENE_SETTLE_MS' in child
+          assert 'scoutVisibleTreaters(player, visibleTreaters)' in child
+          assert 'scanRimmington(' not in child
+          assert 'change(Stage.REPORT_CHILDREN' in child
+          assert 'visibleTreaters=[' in child
+
+          assert 'if (required == Stage.SPOOK_CHILDREN)' in report
+          assert 'childSpookRetries > allowedRetries' in report
+          assert 'if (spookedChildren.size() >= CHILD_REPORT_CHECKPOINT)' in report
+          assert 'if (next == Stage.SPOOK_CHILDREN)' in change
+          assert 'childScoutedNpcTiles.clear();' in change
+          print('PASS: no fixed children waypoints, no adult Spook, bounded NPC-guided scout, one-batch age reads')
 
       - name: Install Seasonal Events sources into Microbot Hub
         shell: bash
