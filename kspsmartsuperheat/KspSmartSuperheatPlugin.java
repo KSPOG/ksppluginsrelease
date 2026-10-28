@@ -22,7 +22,7 @@ public class KspSmartSuperheatPlugin extends Plugin
 {
     private final KspBreakService breaks = new KspBreakService();
 
-    public static final String VERSION = "0.1.9";
+    public static final String VERSION = "0.2.0";
     @Inject private KspSmartSuperheatConfig config;
     @Inject private KspSmartSuperheatScript script;
     @Inject private KspSmartSuperheatOverlay overlay;
