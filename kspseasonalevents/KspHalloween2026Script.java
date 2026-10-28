@@ -119,6 +119,8 @@ public final class KspHalloween2026Script extends Script {
     private long lastVerificationTalkAt;
     private int verificationTalkAttempts;
     private boolean verificationDialogueSeen;
+    private boolean sweepRequiredByStarter;
+    private int starterReportedRemainingCount;
     private int pendingCandyCount = -1;
     private int pendingAdultIndex = -1;
 
@@ -134,6 +136,8 @@ public final class KspHalloween2026Script extends Script {
         lastVerificationTalkAt = 0L;
         verificationTalkAttempts = 0;
         verificationDialogueSeen = false;
+        sweepRequiredByStarter = false;
+        starterReportedRemainingCount = 0;
         pendingCandyCount = -1;
         spookedChildren.clear();
         givenAdultIndexes.clear();
