@@ -55,7 +55,7 @@ jobs:
           panel=(root/'KspSeasonalEventsPanel.java').read_text()
           overlay=(root/'KspSeasonalEventsOverlay.java').read_text()
           event=(root/'KspSeasonalEvent.java').read_text()
-          assert 'VERSION = "0.2.1"' in plugin
+          assert 'VERSION = "0.2.2"' in plugin
           assert 'KSP + "Seasonal Events"' in plugin
           assert 'kspwillowchopper' not in plugin and 'kspwillowchopper' not in script
           assert 'HALLOWEEN_2026' in event
@@ -139,6 +139,38 @@ jobs:
           assert 'type == ChatMessageType.GAMEMESSAGE' in plugin
           assert 'type == ChatMessageType.SPAM' in plugin
           print('PASS: persisted pending smashes, bounded sweep, verified/explicit recovery and chat filtering')
+
+      - name: Verify hat dialogue, deferred starter transitions and costume handling
+        shell: python
+        run: |
+          from pathlib import Path
+          src = Path('release/kspseasonalevents/KspHalloween2026Script.java').read_text()
+          tick = src.split('private void tick()', 1)[1].split('private void handleDialogueOption()', 1)[0]
+          opts = src.split('private void handleDialogueOption()', 1)[1].split('private boolean nearOrWalk(', 1)[0]
+          starter = src.split('private void talkToStarter(', 1)[1].split('private Rs2TileObjectModel lantern()', 1)[0]
+          costume = src.split('private void collectCostume(', 1)[1].split('private boolean npcHasAction(', 1)[0]
+
+          assert 'pendingStarterNext != null' in tick
+          assert 'pendingStarterDialogueSeen = true;' in tick
+          assert 'if (pendingStarterDialogueSeen)' in tick
+          assert 'change(next, "Starter dialogue completed")' in tick
+          assert 'Waiting for Angel / Henja dialogue' in tick
+          assert 'pendingStarterLastDialogueAt' in tick
+          assert 'pendingStarterLastDialogueAt < 1_500L' in tick
+
+          assert "Sure, I'll take the hat." in opts
+          assert 'Rs2Dialogue.keyPressForDialogueOption("Sure, I' in opts
+          assert 'stage == Stage.REPORT_LANTERNS' in opts
+          assert 'stage == Stage.GET_COSTUME' in opts
+          assert 'Accepted Halloween hat from Angel / Henja' in opts
+          assert 'No thanks, I don' not in opts
+          assert 'pendingStarterNext = next;' in starter
+          assert 'change(next,' not in starter
+
+          assert costume.index('for (String piece : COSTUME_PIECES)') < costume.index('nearOrWalk(player, DIANGO')
+          assert 'Rs2Npc.interact("Diango", "Holiday-items")' in costume
+          assert 'Rs2Inventory.wear(piece)' in costume
+          print('PASS: explicit accept, no premature transition, equip before travel, holiday retrieval action')
 
       - name: Install Seasonal Events sources into Microbot Hub
         shell: bash

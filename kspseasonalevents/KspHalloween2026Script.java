@@ -122,6 +122,11 @@ public final class KspHalloween2026Script extends Script {
     private int starterReportedRemainingCount;
     private int pendingCandyCount = -1;
     private int pendingAdultIndex = -1;
+    // A starter conversation is not complete just because the NPC was clicked.
+    private Stage pendingStarterNext;
+    private long pendingStarterAt;
+    private long pendingStarterLastDialogueAt;
+    private boolean pendingStarterDialogueSeen;
 
     public synchronized boolean start(KspSeasonalEventsConfig configuration) {
         if (active) return true;
@@ -136,6 +141,10 @@ public final class KspHalloween2026Script extends Script {
         sweepRequiredByStarter = false;
         starterReportedRemainingCount = 0;
         pendingCandyCount = -1;
+        pendingStarterNext = null;
+        pendingStarterAt = 0L;
+        pendingStarterLastDialogueAt = 0L;
+        pendingStarterDialogueSeen = false;
         spookedChildren.clear();
         givenAdultIndexes.clear();
         sweepIndex = 0;
@@ -197,6 +206,12 @@ public final class KspHalloween2026Script extends Script {
                 && (Rs2Dialogue.hasContinue() || Rs2Dialogue.hasSelectAnOption()))
             inspectLanternVerificationDialogue();
 
+        if (pendingStarterNext != null
+                && (Rs2Dialogue.hasContinue() || Rs2Dialogue.hasSelectAnOption())) {
+            pendingStarterDialogueSeen = true;
+            pendingStarterLastDialogueAt = System.currentTimeMillis();
+        }
+
         if (Rs2Dialogue.hasContinue()) {
             if (ready()) {
                 Rs2Dialogue.clickContinue();
@@ -208,6 +223,31 @@ public final class KspHalloween2026Script extends Script {
 
         if (Rs2Dialogue.hasSelectAnOption()) {
             handleDialogueOption();
+            return;
+        }
+
+        // Prevent the next activity (e.g. walking to Diango) from starting
+        // while the NPC is still offering a hat or explaining the next step.
+        if (pendingStarterNext != null) {
+            if (pendingStarterDialogueSeen) {
+                // Dialogue frames can disappear momentarily between NPC
+                // lines. Require a short quiet period before changing stages.
+                if (System.currentTimeMillis() - pendingStarterLastDialogueAt < 1_500L) {
+                    status = "Finishing Angel / Henja conversation";
+                    return;
+                }
+                Stage next = pendingStarterNext;
+                pendingStarterNext = null;
+                pendingStarterDialogueSeen = false;
+                change(next, "Starter dialogue completed");
+            } else if (System.currentTimeMillis() - pendingStarterAt > 8_000L) {
+                log.warn("Halloween starter click produced no visible dialogue | stage={} next={}",
+                        stage, pendingStarterNext);
+                pendingStarterNext = null;
+                pendingStarterDialogueSeen = false;
+            } else {
+                status = "Waiting for Angel / Henja dialogue";
+            }
             return;
         }
 
@@ -270,6 +310,13 @@ public final class KspHalloween2026Script extends Script {
         List<String> options = Rs2Dialogue.getDialogueOptions().stream()
                 .map(w -> w == null ? "" : w.getText())
                 .collect(Collectors.toList());
+        if ((stage == Stage.REPORT_LANTERNS || stage == Stage.GET_COSTUME
+                || stage == Stage.VERIFY_LANTERNS)
+                && Rs2Dialogue.keyPressForDialogueOption("Sure, I'll take the hat.", true)) {
+            acted("Accepted Halloween hat from Angel / Henja");
+            return;
+        }
+
         if (stage == Stage.CHEMIST_RIDDLE && Rs2Dialogue.clickOption("92")) {
             acted("Answered Chemist's COFFIN riddle: 92");
             return;
@@ -319,11 +366,12 @@ public final class KspHalloween2026Script extends Script {
             status = "Locating Angel / Henja in their Rimmington home";
             return;
         }
-        acted("Speaking to Angel / Henja");
+        acted("Speaking to Angel / Henja; waiting for dialogue");
         lastTalkAt = System.currentTimeMillis();
-        // Do not block on a fixed, unverified cutscene duration. All later
-        // stages use confirmed actions/scene state rather than blind clicks.
-        change(next, "Talked to Angel / Henja; next: " + next);
+        pendingStarterNext = next;
+        pendingStarterAt = lastTalkAt;
+        pendingStarterLastDialogueAt = 0L;
+        pendingStarterDialogueSeen = false;
     }
 
     private Rs2TileObjectModel lantern() {
@@ -569,29 +617,45 @@ public final class KspHalloween2026Script extends Script {
     }
 
     private void collectCostume(WorldPoint player) {
+        // Especially for sessions saved in GET_COSTUME by older versions:
+        // don't initiate travel during the short gap after accepting the hat.
+        if (!ready()) return;
         int equipped = costumeCount();
         if (equipped >= 4) {
             change(Stage.SPOOK_CHILDREN, "Four Halloween outfit pieces equipped");
             return;
         }
-        if (!nearOrWalk(player, DIANGO, 8, "Diango in Draynor Village")) return;
+        // Do not travel to Draynor while usable costume pieces are already
+        // in the inventory; wear them first, then only recover what is missing.
         for (String piece : COSTUME_PIECES) {
-            if (Rs2Inventory.hasItem(piece) && !Rs2Equipment.isWearing(piece, true) && ready()) {
-                Rs2Inventory.wear(piece);
-                acted("Equipping Halloween costume: " + piece);
+            if (Rs2Inventory.hasItem(piece) && !Rs2Equipment.isWearing(piece, true)) {
+                if (ready()) {
+                    Rs2Inventory.wear(piece);
+                    acted("Equipping Halloween costume: " + piece);
+                }
                 return;
             }
         }
+        if (!nearOrWalk(player, DIANGO, 8, "Diango in Draynor Village")) return;
+
+        // Diango has a dedicated Holiday-items retrieval menu action.
+        // Simply talking to him can lead to unrelated conversations.
         if (ready() && Rs2Npc.getNpc("Diango") != null
                 && System.currentTimeMillis() - lastTalkAt > 15_000L) {
+            if (Rs2Npc.interact("Diango", "Holiday-items")) {
+                lastTalkAt = System.currentTimeMillis();
+                acted("Opening Diango's Holiday Item Retrieval");
+                return;
+            }
             if (Rs2Npc.interact("Diango", "Talk-to")) {
                 lastTalkAt = System.currentTimeMillis();
-                acted("Requesting previous Halloween rewards from Diango");
+                acted("Asking Diango for previous Halloween rewards");
+                return;
             }
         }
-        // The wiki specifies *where* to get the items but not Diango's
-        // current reward interface widget IDs. Do not blindly buy/select.
-        status = "Equip 4 Halloween items from Diango (equipped: " + equipped + "/4)";
+        // Live retrieval interface widgets remain unverified. Never select
+        // arbitrary options or claim that an item has been collected.
+        status = "Recover and equip 4 Halloween items (equipped: " + equipped + "/4)";
     }
 
     private boolean npcHasAction(Rs2NpcModel npc, String action) {
