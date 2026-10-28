@@ -1,4 +1,5 @@
 package net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.combat.melee.meleescript;
+import net.runelite.client.plugins.microbot.util.walker.Rs2Walker;
 
 import net.runelite.client.plugins.microbot.kspaccountbuilder.KspAccountBuilderPauseGate;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.KspManagedScript;
@@ -26,7 +27,7 @@ import net.runelite.client.plugins.microbot.globval.enums.InterfaceTab;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.KspBankMode;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.KspTaskDebug;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.ksputil.KspLiveScene;
-import net.runelite.client.plugins.microbot.kspaccountbuilder.KspWalkerGuard;
+
 import net.runelite.client.plugins.microbot.kspaccountbuilder.ksputil.KspBankWidgetHelper;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.combat.melee.areas.CombatAreas;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.combat.melee.equipment.weapon.Weapons;
@@ -461,7 +462,7 @@ public class MeleeScript extends KspManagedScript {
         // outstanding core-walker route before preparing gear and food, or a
         // delayed route click can pull the player away from the bank again.
         // This also covers bank routes started directly by Rs2Bank, which are
-        // not registered under a KspWalkerGuard task key.
+        // not registered under a Rs2Walker task key.
         if (net.runelite.client.plugins.microbot.util.walker.Rs2Walker.getCurrentTarget() != null)
         {
             net.runelite.client.plugins.microbot.util.walker.Rs2Walker.clearWalkingRoute(
@@ -707,9 +708,9 @@ public class MeleeScript extends KspManagedScript {
             // Release the core route as soon as the attack area is reached. Leaving the old
             // route alive was visible in the log and delayed target acquisition while the
             // player kept following the final route clicks.
-            KspWalkerGuard.clearActiveWalker("ksp_account_builder_melee_reached_area");
-            KspWalkerGuard.clear("Melee:target-area");
-            KspWalkerGuard.clear("Melee:hill-giants-entry");
+            Rs2Walker.clearWalkingRoute("ksp_account_builder_melee_reached_area");
+            Rs2Walker.clearWalkingRoute("Melee:target-area");
+            Rs2Walker.clearWalkingRoute("Melee:hill-giants-entry");
             return true;
         }
         if (this.handleHillGiantDungeonEntry(targetArea)) {
@@ -722,12 +723,7 @@ public class MeleeScript extends KspManagedScript {
             return false;
         }
         this.setStatus("Walking to " + targetArea.getDisplayName());
-        if (KspWalkerGuard.walkToDestination(
-                "Melee:target-area",
-                () -> this.resolveWalkTarget(targetArea),
-                point -> this.isPlayerInsideCombatArea(point, targetArea),
-                2,
-                WEB_WALK_COOLDOWN_MS)) {
+        if (Rs2Walker.walkUntil((this.resolveWalkTarget(targetArea)), 2, () -> { WorldPoint point = Rs2Player.getWorldLocation(); return this.isPlayerInsideCombatArea(point, targetArea); })) {
             this.lastWebWalkAtMs = System.currentTimeMillis();
             this.lastWalkTarget = null;
             this.debug("Requested melee area walk | player={} area={}",
@@ -742,16 +738,15 @@ public class MeleeScript extends KspManagedScript {
         if (targetArea != CombatAreas.HILL_GIANTS || player == null) return false;
 
         if (player.getY() > 5000) {
-            KspWalkerGuard.clear("Melee:hill-giants-entry");
+            Rs2Walker.clearWalkingRoute("Melee:hill-giants-entry");
             return false;
         }
 
-        KspWalkerGuard.clear("Melee:target-area");
+        Rs2Walker.clearWalkingRoute("Melee:target-area");
 
         if (player.distanceTo(EDGEVILLE_TRAPDOOR) > EDGEVILLE_TRAPDOOR_INTERACTION_DISTANCE) {
             setStatus("Walking to Edgeville dungeon");
-            KspWalkerGuard.walkToPoint(
-                    "Melee:hill-giants-entry", EDGEVILLE_TRAPDOOR, 2, WEB_WALK_COOLDOWN_MS);
+            Rs2Walker.walkTo(EDGEVILLE_TRAPDOOR, 2);
             return true;
         }
 
@@ -813,7 +808,7 @@ public class MeleeScript extends KspManagedScript {
 
         if (gate == null || !Rs2GameObject.hasAction(gate, "Open")) return false;
 
-        KspWalkerGuard.clear("Melee:target-area");
+        Rs2Walker.clearWalkingRoute("Melee:target-area");
         setStatus("Opening gate to chickens");
         if (isWorldActionPending("chicken-gate")) return true;
         if (Rs2GameObject.interact(gate, "Open")) markWorldAction("chicken-gate");
@@ -1324,8 +1319,8 @@ public class MeleeScript extends KspManagedScript {
         this.lastWarriorCombatXp = -1;
         this.clearPendingLoot();
         this.clearPendingBury();
-        KspWalkerGuard.clear("Melee:target-area");
-        KspWalkerGuard.clear("Melee:hill-giants-entry");
+        Rs2Walker.clearWalkingRoute("Melee:target-area");
+        Rs2Walker.clearWalkingRoute("Melee:hill-giants-entry");
         this.state = CombatState.PREPARING;
         this.status = "Idle";
         super.shutdown();

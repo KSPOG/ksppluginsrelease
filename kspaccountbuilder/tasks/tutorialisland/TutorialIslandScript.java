@@ -16,7 +16,7 @@ import net.runelite.client.plugins.microbot.Script;
 import net.runelite.client.plugins.microbot.api.npc.models.Rs2NpcModel;
 import net.runelite.client.plugins.microbot.api.tileobject.models.Rs2TileObjectModel;
 import net.runelite.client.plugins.microbot.globval.enums.InterfaceTab;
-import net.runelite.client.plugins.microbot.kspaccountbuilder.KspWalkerGuard;
+
 import net.runelite.client.plugins.microbot.kspaccountbuilder.ksputil.KspBankWidgetHelper;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.ksputil.KspLiveScene;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.tutorialisland.areas.TutAreas;
@@ -384,7 +384,7 @@ public class TutorialIslandScript extends KspManagedScript
         {
             // A tutorial-stage transition invalidates any route or interaction
             // dispatched for the previous instructor/room.
-            KspWalkerGuard.clearActiveWalker("ksp_tutorial_stage_changed");
+            Rs2Walker.clearWalkingRoute("ksp_tutorial_stage_changed");
             pendingInteractionAtMs = 0L;
             pendingInteractionKey = null;
         }
@@ -909,7 +909,7 @@ public class TutorialIslandScript extends KspManagedScript
             return false;
         }
 
-        KspWalkerGuard.clearActiveWalker("ksp_account_builder_survival_expert");
+        Rs2Walker.clearWalkingRoute("ksp_account_builder_survival_expert");
 
         // This direct NPC interaction previously bypassed the tutorial's
         // existing acknowledgement guard and could issue Talk-to repeatedly
@@ -1714,7 +1714,7 @@ public class TutorialIslandScript extends KspManagedScript
             return false;
         }
 
-        KspWalkerGuard.clearActiveWalker("ksp_account_builder_tutorial_npc_interaction");
+        Rs2Walker.clearWalkingRoute("ksp_account_builder_tutorial_npc_interaction");
 
         String interactionKey = "npc:" + npc.getIndex() + ":" + action;
         if (isTutorialInteractionPending(interactionKey)
@@ -1928,7 +1928,7 @@ public class TutorialIslandScript extends KspManagedScript
             return;
         }
 
-        KspWalkerGuard.clearActiveWalker("ksp_account_builder_tutorial_fishing");
+        Rs2Walker.clearWalkingRoute("ksp_account_builder_tutorial_fishing");
 
         if (fishingSpot.click("Net"))
         {
@@ -2182,7 +2182,7 @@ public class TutorialIslandScript extends KspManagedScript
 
         if (location != null && location.distanceTo(QUEST_GUIDE_WALK_TILE) <= 1)
         {
-            KspWalkerGuard.clearActiveWalker("ksp_account_builder_tutorial_quest_door");
+            Rs2Walker.clearWalkingRoute("ksp_account_builder_tutorial_quest_door");
             return true;
         }
 
@@ -2191,7 +2191,7 @@ public class TutorialIslandScript extends KspManagedScript
         location = Rs2Player.getWorldLocation();
         if (location != null && location.distanceTo(QUEST_GUIDE_WALK_TILE) <= 1)
         {
-            KspWalkerGuard.clearActiveWalker("ksp_account_builder_tutorial_quest_door");
+            Rs2Walker.clearWalkingRoute("ksp_account_builder_tutorial_quest_door");
             return true;
         }
 
@@ -2206,7 +2206,7 @@ public class TutorialIslandScript extends KspManagedScript
 
         if (location != null && area.contains(location))
         {
-            KspWalkerGuard.clearActiveWalker("ksp_account_builder_tutorial_reached_area");
+            Rs2Walker.clearWalkingRoute("ksp_account_builder_tutorial_reached_area");
             return true;
         }
 
@@ -2229,7 +2229,7 @@ public class TutorialIslandScript extends KspManagedScript
 
         if (playerLocation.distanceTo(target) <= reach)
         {
-            KspWalkerGuard.clearActiveWalker("ksp_account_builder_tutorial_local_target_reached");
+            Rs2Walker.clearWalkingRoute("ksp_account_builder_tutorial_local_target_reached");
             return;
         }
 
@@ -2238,11 +2238,7 @@ public class TutorialIslandScript extends KspManagedScript
             return;
         }
 
-        KspWalkerGuard.walkToPoint(
-                "Tutorial Island:local-walk",
-                target,
-                reach,
-                500L);
+        Rs2Walker.walkTo(target, reach);
     }
 
     private boolean openTutorialPassage(int objectId, BooleanSupplier completed) { return openTutorialPassageAndWalk(objectId, null, 0, completed); }
@@ -2339,7 +2335,7 @@ public class TutorialIslandScript extends KspManagedScript
             return false;
         }
 
-        KspWalkerGuard.clearActiveWalker("ksp_account_builder_tutorial_object_interaction");
+        Rs2Walker.clearWalkingRoute("ksp_account_builder_tutorial_object_interaction");
         return true;
     }
 
@@ -2448,8 +2444,8 @@ public class TutorialIslandScript extends KspManagedScript
         debugEnabled = false;
         pendingInteractionAtMs = 0L;
         pendingInteractionKey = null;
-        KspWalkerGuard.clear("Tutorial Island:local-walk");
-        KspWalkerGuard.clearActiveWalker("ksp_tutorial_shutdown");
+        Rs2Walker.clearWalkingRoute("Tutorial Island:local-walk");
+        Rs2Walker.clearWalkingRoute("ksp_tutorial_shutdown");
         super.shutdown();
     }
 

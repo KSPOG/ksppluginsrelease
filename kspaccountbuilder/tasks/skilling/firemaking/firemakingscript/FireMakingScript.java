@@ -18,7 +18,7 @@ import net.runelite.client.plugins.microbot.Script;
 import net.runelite.client.plugins.microbot.api.tileobject.models.Rs2TileObjectModel;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.KspBankMode;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.KspTaskDebug;
-import net.runelite.client.plugins.microbot.kspaccountbuilder.KspWalkerGuard;
+
 import net.runelite.client.plugins.microbot.kspaccountbuilder.ksputil.KspLiveScene;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.ksputil.KspBankWidgetHelper;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.firemaking.fmarea.FireArea;
@@ -345,12 +345,7 @@ public class FireMakingScript extends KspManagedScript
         }
 
         Microbot.status = "Walking to firemaking area";
-        if (KspWalkerGuard.walkToDestination(
-                "Firemaking:target-area",
-                targetArea::getRandomPoint,
-                area::contains,
-                2,
-                WEB_WALK_COOLDOWN_MS))
+        if (Rs2Walker.walkUntil(targetArea.getRandomPoint(), 2, () -> area.contains(Rs2Player.getWorldLocation())))
         {
             lastWebWalkAtMs = System.currentTimeMillis();
             walkingToTargetArea = true;
@@ -363,8 +358,8 @@ public class FireMakingScript extends KspManagedScript
     private void clearTargetAreaWalkIfNeeded()
     {
         if (!walkingToTargetArea) return;
-        KspWalkerGuard.clearActiveWalker("ksp_account_builder_firemaking_reached_area");
-        KspWalkerGuard.clear("Firemaking:target-area");
+        Rs2Walker.clearWalkingRoute("ksp_account_builder_firemaking_reached_area");
+        Rs2Walker.clearWalkingRoute("Firemaking:target-area");
         walkingToTargetArea = false;
     }
 
@@ -392,7 +387,7 @@ public class FireMakingScript extends KspManagedScript
         if (Rs2Player.distanceTo(fireLocation) > CAMPFIRE_DISTANCE)
         {
             Microbot.status = "Walking to campfire";
-            KspWalkerGuard.walkToPoint("Firemaking:campfire", fireLocation, CAMPFIRE_DISTANCE, WEB_WALK_COOLDOWN_MS);
+            Rs2Walker.walkTo(fireLocation, CAMPFIRE_DISTANCE);
             return;
         }
 
@@ -433,12 +428,7 @@ public class FireMakingScript extends KspManagedScript
 
         if (!area.contains(player))
         {
-            KspWalkerGuard.walkToDestination(
-                    "Firemaking:target-area",
-                    targetArea::getRandomPoint,
-                    area::contains,
-                    2,
-                    WEB_WALK_COOLDOWN_MS);
+            Rs2Walker.walkUntil(targetArea.getRandomPoint(), 2, () -> area.contains(Rs2Player.getWorldLocation()));
             return;
         }
 
@@ -733,7 +723,7 @@ public class FireMakingScript extends KspManagedScript
         lastBurnPromptActionAtMs = 0L;
         activeFireInteractionLocation = null;
         activeFireInteractionId = -1;
-        KspWalkerGuard.clear("Firemaking:campfire");
+        Rs2Walker.clearWalkingRoute("Firemaking:campfire");
     }
 
     private boolean isIdleInTargetArea()
@@ -868,8 +858,8 @@ public class FireMakingScript extends KspManagedScript
         activeFireInteractionLocation = null;
         activeFireInteractionId = -1;
         walkingToTargetArea = false;
-        KspWalkerGuard.clear("Firemaking:target-area");
-        KspWalkerGuard.clear("Firemaking:campfire");
+        Rs2Walker.clearWalkingRoute("Firemaking:target-area");
+        Rs2Walker.clearWalkingRoute("Firemaking:campfire");
         super.shutdown();
     }
 

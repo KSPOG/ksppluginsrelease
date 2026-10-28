@@ -15,7 +15,7 @@ import net.runelite.client.plugins.microbot.Microbot;
 import net.runelite.client.plugins.microbot.Script;
 import net.runelite.client.plugins.microbot.api.npc.models.Rs2NpcModel;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.KspTaskDebug;
-import net.runelite.client.plugins.microbot.kspaccountbuilder.KspWalkerGuard;
+
 import net.runelite.client.plugins.microbot.kspaccountbuilder.ksputil.KspBankWidgetHelper;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.ksputil.KspLiveScene;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.runeessence.inv.Equip;
@@ -148,7 +148,7 @@ public class EssenceMining extends KspManagedScript
             // Leaving through a portal can change region mid-walk. Cancel any
             // stale instance destination before the banking path is started.
             cancelInstanceWalkerRoute("ksp_rune_essence_left_instance");
-            KspWalkerGuard.clear(WALK_KEY_PORTAL);
+            Rs2Walker.clearWalkingRoute(WALK_KEY_PORTAL);
             lastObservedInsideMine = false;
         }
         clearEssenceMiningAction();
@@ -172,16 +172,11 @@ public class EssenceMining extends KspManagedScript
 
         if (!Rs2Bank.isNearBank(bank, 8))
         {
-            KspWalkerGuard.walkToDestination(
-                    WALK_KEY_BANK,
-                    bank::getWorldPoint,
-                    point -> point != null && point.distanceTo(bankPoint) <= 8,
-                    6,
-                    WALK_REFIRE_COOLDOWN_MS);
+            Rs2Walker.walkUntil(bank.getWorldPoint(), 6, () -> { WorldPoint point = Rs2Player.getWorldLocation(); return point != null && point.distanceTo(bankPoint) <= 8; });
             return;
         }
 
-        KspWalkerGuard.clear(WALK_KEY_BANK);
+        Rs2Walker.clearWalkingRoute(WALK_KEY_BANK);
         if (bankCloseRequested)
         {
             if (Rs2Bank.isOpen())
@@ -247,7 +242,7 @@ public class EssenceMining extends KspManagedScript
         {
             state = EssenceState.TELEPORTING;
             status = "Waiting for Aubury teleport";
-            KspWalkerGuard.clear(WALK_KEY_AUBURY);
+            Rs2Walker.clearWalkingRoute(WALK_KEY_AUBURY);
             return;
         }
 
@@ -260,14 +255,13 @@ public class EssenceMining extends KspManagedScript
         {
             state = EssenceState.WALKING_TO_AUBURY;
             status = "Walking to Aubury";
-            KspWalkerGuard.walkToPoint(
-                    WALK_KEY_AUBURY, AUBURY_POSITION, NPC_REACH_DISTANCE, WALK_REFIRE_COOLDOWN_MS);
+            Rs2Walker.walkTo(AUBURY_POSITION, NPC_REACH_DISTANCE);
             return;
         }
 
         state = EssenceState.TELEPORTING;
         status = "Teleporting to rune essence mine";
-        KspWalkerGuard.clear(WALK_KEY_AUBURY);
+        Rs2Walker.clearWalkingRoute(WALK_KEY_AUBURY);
         if (!canAct()) return;
 
         if (aubury.click("Teleport")) {
@@ -488,7 +482,7 @@ public class EssenceMining extends KspManagedScript
 
     private void cancelInstanceWalkerRoute(String reason)
     {
-        KspWalkerGuard.clear(WALK_KEY_PORTAL);
+        Rs2Walker.clearWalkingRoute(WALK_KEY_PORTAL);
         // The old fallback route can survive an instance transition despite
         // its Account Builder key being cleared, especially when WebWalker is
         // calculating/continuing a previous segment.
@@ -504,7 +498,7 @@ public class EssenceMining extends KspManagedScript
     private void markPortalExit(String source, int id)
     {
         resetPortalSearch();
-        KspWalkerGuard.clear(WALK_KEY_PORTAL);
+        Rs2Walker.clearWalkingRoute(WALK_KEY_PORTAL);
         lastActionAtMs = System.currentTimeMillis();
         markWorldAction("portal");
         status = "Exiting rune essence mine via " + source + " (ID " + id + ")";
@@ -644,7 +638,7 @@ public class EssenceMining extends KspManagedScript
 
     private void clearAuburyTeleportTransition()
     {
-        KspWalkerGuard.clear(WALK_KEY_AUBURY);
+        Rs2Walker.clearWalkingRoute(WALK_KEY_AUBURY);
         if ("aubury".equals(pendingWorldAction))
         {
             pendingWorldActionAtMs = 0L;
@@ -722,8 +716,8 @@ public class EssenceMining extends KspManagedScript
         clearEssenceMiningAction();
         resetPortalSearch();
         clearAuburyTeleportTransition();
-        KspWalkerGuard.clear(WALK_KEY_BANK);
-        KspWalkerGuard.clear(WALK_KEY_PORTAL);
+        Rs2Walker.clearWalkingRoute(WALK_KEY_BANK);
+        Rs2Walker.clearWalkingRoute(WALK_KEY_PORTAL);
         lastObservedInsideMine = false;
         super.shutdown();
     }

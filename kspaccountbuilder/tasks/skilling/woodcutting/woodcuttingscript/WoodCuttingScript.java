@@ -19,7 +19,7 @@ import net.runelite.client.plugins.microbot.globval.enums.InterfaceTab;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.KspBankMode;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.KspEquipmentActionGuard;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.KspTaskDebug;
-import net.runelite.client.plugins.microbot.kspaccountbuilder.KspWalkerGuard;
+
 import net.runelite.client.plugins.microbot.kspaccountbuilder.ksputil.KspBankWidgetHelper;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.ksputil.KspLiveScene;
 import net.runelite.client.plugins.microbot.util.gameobject.Rs2GameObject;
@@ -132,8 +132,8 @@ public class WoodCuttingScript extends KspManagedScript {
         if (targetTree != null && runForestrySafely(targetTree)) {
             this.pendingObjectInteractionAtMs = 0L;
             this.walkingToTargetArea = false;
-            KspWalkerGuard.clearActiveWalker("ksp_account_builder_woodcutting_forestry");
-            KspWalkerGuard.clear("Woodcutting:target-area");
+            Rs2Walker.clearWalkingRoute("ksp_account_builder_woodcutting_forestry");
+            Rs2Walker.clearWalkingRoute("Woodcutting:target-area");
             return;
         }
 
@@ -312,12 +312,7 @@ public class WoodCuttingScript extends KspManagedScript {
         }
 
         Microbot.status = "Walking to woodcutting area";
-        if (KspWalkerGuard.walkToDestination(
-                "Woodcutting:target-area",
-                this::getAreaCenter,
-                this::isInsideActiveWoodcuttingArea,
-                1,
-                WEB_WALK_COOLDOWN_MS)) {
+        if (Rs2Walker.walkUntil(this.getAreaCenter(), 1, () -> this.isInsideActiveWoodcuttingArea(Rs2Player.getWorldLocation()))) {
             this.lastWebWalkAtMs = System.currentTimeMillis();
             this.walkingToTargetArea = true;
         }
@@ -334,12 +329,12 @@ public class WoodCuttingScript extends KspManagedScript {
 
         WorldPoint walkerTarget = Rs2Walker.getCurrentTarget();
         if (walkerTarget != null || this.walkingToTargetArea) {
-            KspWalkerGuard.clearActiveWalker("ksp_account_builder_woodcutting_already_in_area");
-            KspWalkerGuard.clear("Woodcutting:target-area");
+            Rs2Walker.clearWalkingRoute("ksp_account_builder_woodcutting_already_in_area");
+            Rs2Walker.clearWalkingRoute("Woodcutting:target-area");
         }
         this.walkingToTargetArea = false;
         this.lastBankActionAtMs = 0L;
-        KspWalkerGuard.clear("Woodcutting:target-area");
+        Rs2Walker.clearWalkingRoute("Woodcutting:target-area");
         this.lastWebWalkAtMs = 0L;
     }
 
@@ -360,8 +355,8 @@ public class WoodCuttingScript extends KspManagedScript {
         boolean localWillowBank = targetArea == TreeAreas.WILLOW_TREES_DRAYNOR
                 && isInsideActiveWoodcuttingArea(Rs2Player.getWorldLocation());
         if (localWillowBank) {
-            KspWalkerGuard.clearReachedDestination("Woodcutting:target-area", "ksp_woodcutting_willow_local_bank");
-            KspWalkerGuard.clearActiveWalker("ksp_woodcutting_willow_local_bank");
+            Rs2Walker.clearWalkingRoute("ksp_woodcutting_willow_local_bank");
+            Rs2Walker.clearWalkingRoute("ksp_woodcutting_willow_local_bank");
         }
         if (!Rs2Bank.isOpen()) {
             if (!bankActionReady()) return;
@@ -587,7 +582,7 @@ public class WoodCuttingScript extends KspManagedScript {
         pendingObjectInteractionAtMs = 0L;
         walkingToTargetArea = false;
         forestryHandler.reset();
-        KspWalkerGuard.clear("Woodcutting:target-area");
+        Rs2Walker.clearWalkingRoute("Woodcutting:target-area");
         super.shutdown();
     }
 

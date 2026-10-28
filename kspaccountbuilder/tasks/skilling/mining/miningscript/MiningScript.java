@@ -24,7 +24,7 @@ import net.runelite.client.plugins.microbot.globval.enums.InterfaceTab;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.KspBankMode;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.KspEquipmentActionGuard;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.KspTaskDebug;
-import net.runelite.client.plugins.microbot.kspaccountbuilder.KspWalkerGuard;
+
 import net.runelite.client.plugins.microbot.kspaccountbuilder.ksputil.KspBankWidgetHelper;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.ksputil.KspLiveScene;
 import net.runelite.client.plugins.microbot.util.gameobject.Rs2GameObject;
@@ -247,8 +247,8 @@ public class MiningScript extends KspManagedScript
 
             if (targetArea == Areas.SILVER_VARROCK_WEST && !canMineSilverSafely())
             {
-                KspWalkerGuard.clearActiveWalker("ksp_account_builder_silver_mugger_guard");
-                KspWalkerGuard.clear("Mining:target-area");
+                Rs2Walker.clearWalkingRoute("ksp_account_builder_silver_mugger_guard");
+                Rs2Walker.clearWalkingRoute("Mining:target-area");
                 walkingToTargetArea = false;
                 Microbot.status = "Waiting for Mugger to become passive";
                 return;
@@ -256,8 +256,8 @@ public class MiningScript extends KspManagedScript
 
             if (targetArea == Areas.IRON_VARROCK_EAST && !canMineIronSafely())
             {
-                KspWalkerGuard.clearActiveWalker("ksp_account_builder_iron_rat_guard");
-                KspWalkerGuard.clear("Mining:target-area");
+                Rs2Walker.clearWalkingRoute("ksp_account_builder_iron_rat_guard");
+                Rs2Walker.clearWalkingRoute("Mining:target-area");
                 walkingToTargetArea = false;
                 Microbot.status = "Waiting for Rat to become passive";
                 return;
@@ -466,12 +466,7 @@ public class MiningScript extends KspManagedScript
 
         Microbot.status = "Walking to " + targetArea.getDisplayName();
 
-        if (KspWalkerGuard.walkToDestination(
-                "Mining:target-area",
-                () -> targetArea == Areas.IRON_VARROCK_WEST ? new WorldPoint(3177, 3369, 0) : targetArea.getRandomPoint(),
-                area::contains,
-                3,
-                WEB_WALK_COOLDOWN_MS))
+        if (Rs2Walker.walkUntil((targetArea == Areas.IRON_VARROCK_WEST ? new WorldPoint(3177, 3369, 0) : targetArea.getRandomPoint()), 3, () -> area.contains(Rs2Player.getWorldLocation())))
         {
             lastWebWalkAtMs = System.currentTimeMillis();
             walkingToTargetArea = true;
@@ -503,8 +498,8 @@ public class MiningScript extends KspManagedScript
             return;
         }
 
-        KspWalkerGuard.clearActiveWalker("ksp_account_builder_mining_reached_area");
-        KspWalkerGuard.clear("Mining:target-area");
+        Rs2Walker.clearWalkingRoute("ksp_account_builder_mining_reached_area");
+        Rs2Walker.clearWalkingRoute("Mining:target-area");
         walkingToTargetArea = false;
     }
 
@@ -540,7 +535,7 @@ public class MiningScript extends KspManagedScript
             return;
         }
 
-        KspWalkerGuard.clear(BANK_WALK_KEY);
+        Rs2Walker.clearWalkingRoute(BANK_WALK_KEY);
         if (KspBankWidgetHelper.closeBankTutorialOverlayIfOpen()) return;
         if (!bankActionReady() || bankInventoryActionPending()) return;
 
@@ -561,16 +556,11 @@ public class MiningScript extends KspManagedScript
         if (!Rs2DepositBox.isOpen() && player.distanceTo(PORT_SARIM_DEPOSIT_TILE) > 5)
         {
             Microbot.status = "Walking to Port Sarim deposit box";
-            KspWalkerGuard.walkToDestination(
-                    DEPOSIT_BOX_WALK_KEY,
-                    () -> PORT_SARIM_DEPOSIT_TILE,
-                    point -> point != null && point.distanceTo(PORT_SARIM_DEPOSIT_TILE) <= 5,
-                    2,
-                    WEB_WALK_COOLDOWN_MS);
+            Rs2Walker.walkUntil((PORT_SARIM_DEPOSIT_TILE), 2, () -> { WorldPoint point = Rs2Player.getWorldLocation(); return point != null && point.distanceTo(PORT_SARIM_DEPOSIT_TILE) <= 5; });
             return;
         }
 
-        KspWalkerGuard.clearReachedDestination(DEPOSIT_BOX_WALK_KEY, "Mining:deposit-box-in-range");
+        Rs2Walker.clearWalkingRoute("Mining:deposit-box-in-range");
 
         if (!Rs2DepositBox.isOpen())
         {
@@ -618,7 +608,7 @@ public class MiningScript extends KspManagedScript
                 // Do not trap the entire Account Builder at Port Sarim when
                 // the deposit-box object/widget cannot be opened this trip.
                 useBankInsteadOfDepositBox = true;
-                KspWalkerGuard.clear(DEPOSIT_BOX_WALK_KEY);
+                Rs2Walker.clearWalkingRoute(DEPOSIT_BOX_WALK_KEY);
                 lastBankActionAtMs = 0L;
                 KspTaskDebug.info(log, true, "Mining",
                         "Port Sarim deposit box unavailable after {} attempts; recovering via standard bank",
@@ -1264,9 +1254,9 @@ public class MiningScript extends KspManagedScript
         initializedSelectionBand = -1;
         randomMidTierRock = null;
         walkingToTargetArea = false;
-        KspWalkerGuard.clear("Mining:target-area");
-        KspWalkerGuard.clear(BANK_WALK_KEY);
-        KspWalkerGuard.clear(DEPOSIT_BOX_WALK_KEY);
+        Rs2Walker.clearWalkingRoute("Mining:target-area");
+        Rs2Walker.clearWalkingRoute(BANK_WALK_KEY);
+        Rs2Walker.clearWalkingRoute(DEPOSIT_BOX_WALK_KEY);
         lastWebWalkAtMs = 0L;
         lastObjectInteractionAtMs = 0L;
         pendingObjectInteractionAtMs = 0L;

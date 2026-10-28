@@ -19,7 +19,7 @@ import net.runelite.client.plugins.microbot.Microbot;
 import net.runelite.client.plugins.microbot.Script;
 import net.runelite.client.plugins.microbot.api.tileobject.models.Rs2TileObjectModel;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.KspTaskDebug;
-import net.runelite.client.plugins.microbot.kspaccountbuilder.KspWalkerGuard;
+
 import net.runelite.client.plugins.microbot.kspaccountbuilder.ksputil.KspLiveScene;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.ksputil.KspBankWidgetHelper;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.smelting.barlevel.BarLevels;
@@ -331,12 +331,7 @@ public class SmeltScript extends KspManagedScript
             return true;
         }
 
-        if (KspWalkerGuard.walkToDestination(
-                "Smelting:target-area",
-                this::getAreaCenter,
-                targetArea.toWorldArea()::contains,
-                2,
-                WEB_WALK_COOLDOWN_MS))
+        if (Rs2Walker.walkUntil(this.getAreaCenter(), 2, () -> targetArea.toWorldArea().contains(Rs2Player.getWorldLocation())))
         {
             lastWebWalkAtMs = System.currentTimeMillis();
             walkingToTargetArea = true;
@@ -347,8 +342,8 @@ public class SmeltScript extends KspManagedScript
     private void clearTargetAreaWalkIfNeeded()
     {
         if (!walkingToTargetArea) return;
-        KspWalkerGuard.clearActiveWalker("ksp_account_builder_smelting_reached_area");
-        KspWalkerGuard.clear("Smelting:target-area");
+        Rs2Walker.clearWalkingRoute("ksp_account_builder_smelting_reached_area");
+        Rs2Walker.clearWalkingRoute("Smelting:target-area");
         walkingToTargetArea = false;
     }
 
@@ -598,7 +593,7 @@ public class SmeltScript extends KspManagedScript
         clearSmeltingBatch();
         clearPendingProductionAction();
         walkingToTargetArea = false;
-        KspWalkerGuard.clear("Smelting:target-area");
+        Rs2Walker.clearWalkingRoute("Smelting:target-area");
         super.shutdown();
     }
 

@@ -390,7 +390,7 @@ public class KspAccountBuilderScript extends KspManagedScript
                     manualPauseStartedAtMs = System.currentTimeMillis();
                     orderedLastSampleMs = manualPauseStartedAtMs;
                     pauseActivitySwitchTimer(manualPauseStartedAtMs);
-                    KspWalkerGuard.pauseOwnedWalker();
+                    Rs2Walker.clearWalkingRoute("ksp_account_builder_manual_pause");
                     // Keep the active child script and its state machine alive.
                     // Each child tick cooperatively checks the pause gate.
                     // shutdown()/taskStarted=false here previously restarted
@@ -420,7 +420,7 @@ public class KspAccountBuilderScript extends KspManagedScript
             }
             if (KspWorldMapGuard.closeIfOpen())
             {
-                KspWalkerGuard.clearActiveWalker("ksp_account_builder_world_map_open");
+                Rs2Walker.clearWalkingRoute("ksp_account_builder_world_map_open");
                 maybeLogStatus();
                 return;
             }
@@ -572,7 +572,7 @@ public class KspAccountBuilderScript extends KspManagedScript
                 experienceLampPausedActivityTimer = !activitySwitchTimerPaused;
                 pauseActivitySwitchTimer(System.currentTimeMillis());
                 if (taskStarted && currentTask != null) { stopCurrentTaskScript(); taskStarted = false; }
-                KspWalkerGuard.clearActiveWalker("ksp_experience_lamp_interruption");
+                Rs2Walker.clearWalkingRoute("ksp_experience_lamp_interruption");
                 debug("Paused task for experience lamp | currentTask={}", currentTask);
             }
             Microbot.status = "Using experience lamp";
@@ -1518,7 +1518,7 @@ public class KspAccountBuilderScript extends KspManagedScript
         if (!essenceMineRecoveryActive)
         {
             if (taskStarted && currentTask != null) { stopCurrentTaskScript(); taskStarted = false; }
-            KspWalkerGuard.clearActiveWalker("ksp_unexpected_essence_mine_recovery");
+            Rs2Walker.clearWalkingRoute("ksp_unexpected_essence_mine_recovery");
             essenceMineRecoveryActive = true;
             debug("Paused task to exit unexpected essence mine | currentTask={} player={}", currentTask, Rs2Player.getWorldLocation());
         }
@@ -2557,7 +2557,7 @@ public class KspAccountBuilderScript extends KspManagedScript
         currentTask = null;
         try { Rs2Antiban.resetAntibanSettings(true); }
         catch (Exception ex) { log.warn("Account Builder antiban reset failed during shutdown", ex); }
-        KspWalkerGuard.clearActiveWalker("ksp_account_builder_shutdown");
+        Rs2Walker.clearWalkingRoute("ksp_account_builder_shutdown");
     }
 
     private void refreshAccountIdentity()

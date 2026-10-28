@@ -1,4 +1,5 @@
 package net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.questing.goblindip.goblindipscript;
+import net.runelite.client.plugins.microbot.util.walker.Rs2Walker;
 
 import net.runelite.client.plugins.microbot.kspaccountbuilder.KspAccountBuilderPauseGate;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.KspManagedScript;
@@ -12,7 +13,7 @@ import net.runelite.client.plugins.microbot.Script;
 import net.runelite.client.plugins.microbot.api.npc.models.Rs2NpcModel;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.KspBankMode;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.KspTaskDebug;
-import net.runelite.client.plugins.microbot.kspaccountbuilder.KspWalkerGuard;
+
 import net.runelite.client.plugins.microbot.kspaccountbuilder.ksputil.KspBankWidgetHelper;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.ksputil.KspLiveScene;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.questing.goblindip.reqs.GobReqs;
@@ -199,7 +200,7 @@ public class GobScript extends KspManagedScript {
     private boolean handleDialogue() {
         if (!isQuestDialogueActive()) return false;
 
-        KspWalkerGuard.clearActiveWalker("ksp_goblin_diplomacy_dialogue");
+        Rs2Walker.clearWalkingRoute("ksp_goblin_diplomacy_dialogue");
         pendingNpcInteractionAtMs = 0L;
         pendingNpcIndex = -1;
         updateAcceptedMailFromInventoryLoss();
@@ -334,16 +335,11 @@ public class GobScript extends KspManagedScript {
         WorldPoint playerLocation = Rs2Player.getWorldLocation();
         WorldArea exchangeArea = GRAND_EXCHANGE.toWorldArea();
         if (playerLocation != null && exchangeArea.contains(playerLocation)) {
-            KspWalkerGuard.clear(WALK_KEY_GE);
+            Rs2Walker.clearWalkingRoute(WALK_KEY_GE);
             return true;
         }
 
-        KspWalkerGuard.walkToDestination(
-                WALK_KEY_GE,
-                GRAND_EXCHANGE::getRandomPoint,
-                exchangeArea::contains,
-                3,
-                WALK_REFIRE_COOLDOWN_MS);
+        Rs2Walker.walkUntil(GRAND_EXCHANGE.getRandomPoint(), 3, () -> exchangeArea.contains(Rs2Player.getWorldLocation()));
         return false;
     }
 
@@ -740,17 +736,12 @@ public class GobScript extends KspManagedScript {
     private boolean ensureAtGoblinVillage() {
         WorldPoint playerLocation = Rs2Player.getWorldLocation();
         if (playerLocation != null && GOBLIN_VILLAGE_AREA.contains(playerLocation)) {
-            KspWalkerGuard.clear(WALK_KEY_VILLAGE);
+            Rs2Walker.clearWalkingRoute(WALK_KEY_VILLAGE);
             return true;
         }
 
         status = "Walking to Goblin Village";
-        KspWalkerGuard.walkToDestination(
-                WALK_KEY_VILLAGE,
-                () -> GOBLIN_VILLAGE_POINT,
-                GOBLIN_VILLAGE_AREA::contains,
-                3,
-                WALK_REFIRE_COOLDOWN_MS);
+        Rs2Walker.walkUntil((GOBLIN_VILLAGE_POINT), 3, () -> GOBLIN_VILLAGE_AREA.contains(Rs2Player.getWorldLocation()));
         return false;
     }
 
@@ -758,7 +749,7 @@ public class GobScript extends KspManagedScript {
         Rs2NpcModel general = findNearestGeneral();
         if (general == null) {
             status = "Searching for goblin generals";
-            KspWalkerGuard.walkFastCanvasToPoint(WALK_KEY_GENERAL, GOBLIN_VILLAGE_POINT, NPC_REACH_DISTANCE, WALK_REFIRE_COOLDOWN_MS);
+            Rs2Walker.walkTo(GOBLIN_VILLAGE_POINT, NPC_REACH_DISTANCE);
             return false;
         }
 
@@ -768,7 +759,7 @@ public class GobScript extends KspManagedScript {
 
         if (player.distanceTo(npc) > NPC_REACH_DISTANCE) {
             status = "Walking to " + general.getName();
-            KspWalkerGuard.walkFastCanvasToPoint(WALK_KEY_GENERAL, npc, NPC_REACH_DISTANCE, WALK_REFIRE_COOLDOWN_MS);
+            Rs2Walker.walkTo(npc, NPC_REACH_DISTANCE);
             return false;
         }
 
@@ -782,7 +773,7 @@ public class GobScript extends KspManagedScript {
             pendingNpcInteractionAtMs = System.currentTimeMillis();
             pendingNpcIndex = general.getIndex();
             mailHandInInProgress = true;
-            KspWalkerGuard.clear(WALK_KEY_GENERAL);
+            Rs2Walker.clearWalkingRoute(WALK_KEY_GENERAL);
         }
         return clicked;
     }
@@ -967,9 +958,9 @@ public class GobScript extends KspManagedScript {
 
     @Override
     public void shutdown() {
-        KspWalkerGuard.clear(WALK_KEY_VILLAGE);
-        KspWalkerGuard.clear(WALK_KEY_GENERAL);
-        KspWalkerGuard.clear(WALK_KEY_GE);
+        Rs2Walker.clearWalkingRoute(WALK_KEY_VILLAGE);
+        Rs2Walker.clearWalkingRoute(WALK_KEY_GENERAL);
+        Rs2Walker.clearWalkingRoute(WALK_KEY_GE);
         pendingRequirementBuys.clear();
         activeRequirementBuys.clear();
         requirementBankAudited = false;

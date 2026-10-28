@@ -1,4 +1,5 @@
 package net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.questing.runemyst;
+import net.runelite.client.plugins.microbot.util.walker.Rs2Walker;
 
 import net.runelite.client.plugins.microbot.kspaccountbuilder.KspAccountBuilderPauseGate;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.KspManagedScript;
@@ -12,7 +13,7 @@ import net.runelite.client.plugins.microbot.Microbot;
 import net.runelite.client.plugins.microbot.Script;
 import net.runelite.client.plugins.microbot.api.npc.models.Rs2NpcModel;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.KspTaskDebug;
-import net.runelite.client.plugins.microbot.kspaccountbuilder.KspWalkerGuard;
+
 import net.runelite.client.plugins.microbot.kspaccountbuilder.ksputil.KspLiveScene;
 import net.runelite.client.plugins.microbot.util.dialogues.Rs2Dialogue;
 import net.runelite.client.plugins.microbot.util.inventory.Rs2Inventory;
@@ -168,7 +169,7 @@ public class RuneMystScript extends KspManagedScript
     {
         if (Rs2Dialogue.isInCutScene())
         {
-            KspWalkerGuard.clearActiveWalker("ksp_rune_mysteries_cutscene");
+            Rs2Walker.clearWalkingRoute("ksp_rune_mysteries_cutscene");
             status = "Waiting for Rune Mysteries cutscene";
             if (Rs2Dialogue.hasContinue())
             {
@@ -182,7 +183,7 @@ public class RuneMystScript extends KspManagedScript
             return false;
         }
 
-        KspWalkerGuard.clearActiveWalker("ksp_rune_mysteries_dialogue");
+        Rs2Walker.clearWalkingRoute("ksp_rune_mysteries_dialogue");
         pendingNpcInteractionAtMs = 0L;
         pendingNpcIndex = -1;
         status = "Handling Rune Mysteries dialogue";
@@ -253,7 +254,7 @@ public class RuneMystScript extends KspManagedScript
         {
             state = walkingState;
             status = walkingStatus;
-            KspWalkerGuard.walkToPoint(walkKey, destination, NPC_REACH_DISTANCE + 2, WALK_REFIRE_COOLDOWN_MS);
+            Rs2Walker.walkTo(destination, NPC_REACH_DISTANCE + 2);
             return;
         }
 
@@ -261,13 +262,13 @@ public class RuneMystScript extends KspManagedScript
         {
             state = walkingState;
             status = "Searching for " + npcName;
-            KspWalkerGuard.clear(walkKey);
+            Rs2Walker.clearWalkingRoute(walkKey);
             return;
         }
 
         state = talkingState;
         status = "Talking to " + npcName;
-        KspWalkerGuard.clear(walkKey);
+        Rs2Walker.clearWalkingRoute(walkKey);
         if (System.currentTimeMillis() - lastActionAtMs < ACTION_COOLDOWN_MS
                 || isNpcInteractionPending(npc)
                 || Rs2Player.isMoving()
@@ -323,9 +324,9 @@ public class RuneMystScript extends KspManagedScript
     @Override
     public void shutdown()
     {
-        KspWalkerGuard.clear(WALK_KEY_DUKE);
-        KspWalkerGuard.clear(WALK_KEY_SEDRIDOR);
-        KspWalkerGuard.clear(WALK_KEY_AUBURY);
+        Rs2Walker.clearWalkingRoute(WALK_KEY_DUKE);
+        Rs2Walker.clearWalkingRoute(WALK_KEY_SEDRIDOR);
+        Rs2Walker.clearWalkingRoute(WALK_KEY_AUBURY);
         super.shutdown();
     }
 }
