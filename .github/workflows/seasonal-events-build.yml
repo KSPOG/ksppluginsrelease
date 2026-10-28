@@ -319,7 +319,7 @@ jobs:
           mkdir -p /tmp/ksp-halloween-dialogue-test
           javac -d /tmp/ksp-halloween-dialogue-test \
             release/kspseasonalevents/KspHalloweenChildReport.java \
-            .github/tests/seasonal/KspHalloweenChildReportTest.java
+            release/.github/tests/seasonal/KspHalloweenChildReportTest.java
           java -cp /tmp/ksp-halloween-dialogue-test \
             net.runelite.client.plugins.microbot.kspseasonalevents.KspHalloweenChildReportTest
 
