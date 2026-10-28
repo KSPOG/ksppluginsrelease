@@ -1,44 +1,61 @@
-# KSP Seasonal Events 0.1.0
+# KSP Seasonal Events v0.2.0
 
 A **standalone Microbot plugin**, independent of Chopper, with its own
-config, RuneLite navigation panel, Start / Pause / Resume / Stop controls,
-runtime script and hidden-until-Start overlay.
+config, navigation panel, Start / Pause / Resume / Stop / Reset progress,
+runtime script, and hidden-until-Start overlay.
 
-## Halloween 2026 (entry beta)
+## Halloween 2026 — All Trick, No Treats
 
-**Verified:** Jagex's Old School RuneScape Halloween event on 28 October
-2026 begins by speaking with **Angel or Henja in Rimmington**. The rewards
-are Vampyre costume top/bottom/cape, monocle and fangs. The event ends
-18 November 2026. Reference: Jagex's *Halloween Event 2026* update.
+Source: https://oldschool.runescape.wiki/w/2026_Halloween_event
+The complete written walkthrough was read on 28 October 2026. This
+plugin implements a **staged workflow based on that walkthrough**; the
+live 2026 object IDs, trick-or-treater NPC IDs, Diango reward interface,
+dialogue branch strings and completion varbits remain to be verified in
+an actual Microbot client. Passing CI does not guarantee event completion.
 
-**Implemented:** WebWalker approaches Rimmington only if the player is
-outside the town and travel is enabled. It waits for a live named
-Angel/Henja NPC, talks, advances known continue prompts and accepts a
-small set of explicit affirmative options. Its result is an **entry beta**:
-if the next event step or dialogue branch is not verified, it stops further
-automatic input and shows `AWAIT_EVENT_STEP`. The script never falsely
-reports completion just because it clicked the starter NPC. Pause/Resume
-preserves state, Stop removes overlay and halts the script.
+| Stage | Wiki requirements | Implementation |
+|---|---|---|
+| Introduction | Speak to Angel or Henja in Rimmington | Start/return dialogue with existing NPC APIs |
+| Smash lanterns | Smash all eight Jack-O-Lanterns | Live scene objects with Smash action; track disappearance and persist each confirmed world tile; search Rimmington when objects not loaded |
+| Report lanterns | Speak to Angel or Henja | Return to their house |
+| Halloween costume | Obtain previous Halloween rewards from Diango in Draynor and wear at least four items | Travel to Diango, request rewards via dialogue, equip known carried costume pieces, wait for four equipped pieces; does not blindly click reward widgets |
+| Scare children | Spook *child* trick-or-treaters, not adults | NPC detection requires a live Spook menu action, ignores recently targeted NPC indexes |
+| Report children | Speak to Angel or Henja | Return and progress to Chemist |
+| Chemist | Obtain sugar by solving COFFIN periodic-table riddle: C(6)+O(8)+F(9)+F(9)+I(53)+N(7) = **92** | Talk to Chemist, select explicit 92 dialogue option when offered; otherwise log unknown widget for review |
+| Cook sugar | Cook sugar on the house range or Chemist fireplace | Resolve a live Range/Fireplace and use sugar on it; wait for Molten sugar inventory |
+| Collect onions | Gather five **old onions** from crate behind house, not ordinary onions | Live crate interaction; confirm inventory has five old onions |
+| Make candy | Combine molten sugar and old onions | Repeated inventory combination until five candy onions |
+| Serve adults | Give candy onions to five adult trick-or-treaters | Detect trick-or-treaters **without** child-only Spook action, use candy onion on each NPC, confirm decreased inventory before counting |
+| Finale | Cutscene then speak to Angel or Henja | Return for dialogue; only report completion when in-game message or Vampyre reward confirms it |
 
-**Not yet implemented:** The supplied YouTube video
-https://www.youtube.com/watch?v=VlaowZ3nv5w could not be retrieved for
-transcription or frame-by-frame verification through the available browsing
-tools. Consequently the later Halloween 2026 objectives, instance
-transitions, item IDs, correct branch choices and completion varbits are
-**not verified**. This version is NOT a full unattended event solver.
-Completing the event in-game or providing its step-by-step transcript
-is necessary to implement and validate the remaining stages safely.
+The wiki doesn't provide every precise live interaction, so certain steps
+may require manual review rather than repeated speculative clicks. The
+plugin logs stage transitions, visible dialogue options when unknown, NPC
+IDs and world tiles of successfully targeted event objects. No guessed
+NPC/object IDs are treated as authoritative.
 
-Avoid cross-contaminating this with the 2026 **RuneScape 3** Halloween
-event (Harvest Hollow, Horsemen and All Souls' Eve); they are different
-games and unrelated mechanics.
+## Progress and session behavior
 
-Future seasonal events should be added as separate event modules
-without modifying the Chopper or Account Builder plugins.
+The stage is saved in RuneLite ConfigManager under
+`KspSeasonalEvents.halloweenStage`; smashed lantern tile keys and confirmed
+adult candy deliveries are also saved so restarts don't reset objectives.
+Use **Reset progress** only while stopped to intentionally start over.
 
-## Testing
+The script starts only after **Start** is clicked. Pause keeps the current
+stage and counters. Stop removes the overlay, halts the script and keeps
+saved event progress. The side panel and overlay show lantern and adult
+candy progress.
 
-`.github/workflows/seasonal-events-build.yml` compiles the independent
-plugin using Microbot Hub Java 11 and validates lifecycle and safety
-invariants, with a downloadable JAR in Actions artifacts. CI does not
-verify live game dialogue or post-introduction quest completion.
+The wiki describes the event as running from 28 October to 18 November
+2026. New accounts with under 24 hours of playtime may have to reclaim
+their tradeable Halloween mask/pumpkin items later.
+
+**Not RuneScape 3**: This plugin does not implement Harvest Hollow or
+RuneScape 3 seasonal quests.
+
+## Validation
+
+`.github/workflows/seasonal-events-build.yml` compiles
+`KspSeasonalEventsPlugin` with Microbot Hub's Java 11 build and produces a
+JAR. A full event run against actual RuneLite scene and dialogue state
+is still necessary to validate the end-to-end workflow.
