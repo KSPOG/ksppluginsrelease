@@ -55,7 +55,7 @@ jobs:
           panel=(root/'KspSeasonalEventsPanel.java').read_text()
           overlay=(root/'KspSeasonalEventsOverlay.java').read_text()
           event=(root/'KspSeasonalEvent.java').read_text()
-          assert 'VERSION = "0.2.5"' in plugin
+          assert 'VERSION = "0.2.6"' in plugin
           assert 'KSP + "Seasonal Events"' in plugin
           assert 'kspwillowchopper' not in plugin and 'kspwillowchopper' not in script
           assert 'HALLOWEEN_2026' in event
@@ -288,10 +288,11 @@ jobs:
           assert 'change(Stage.REPORT_CHILDREN' in child
           assert 'sweepsWithoutTarget >= RIMMINGTON_SWEEP.length' in child
           assert 'childrenReportConfirmed = true;' in report
-          assert 'lower.contains("chemist")' in report
-          assert 'lower.contains("adults")' in report
-          assert 'lower.contains("still")' in report
-          assert 'change(Stage.SPOOK_CHILDREN' in report
+          assert 'KspHalloweenChildReport.classify(raw)' in report
+          assert 'Instruction.VISIT_CHEMIST' in report
+          assert 'Instruction.UNKNOWN' in report
+          assert 'pendingStarterNext = required;' in report
+          assert 'Stage.SPOOK_CHILDREN : Stage.GET_COSTUME' in report
           assert 'childrenReportConfirmed' in tick and 'next == Stage.CHEMIST_RIDDLE' in tick
           assert 'stopForReview("Angel/Henja dialogue did not confirm' in tick
           assert 'nearOrWalk(player, STARTER, 8, "Angel / Henja' in starter
@@ -310,6 +311,71 @@ jobs:
           assert 'configManager.unsetConfiguration(GROUP, SPOOKED_CHILD_IDS_KEY)' in code
           assert 'configManager.unsetConfiguration(GROUP, DELIVERED_ADULT_IDS_KEY)' in code
           print('PASS: 10-child checkpoint, starter confirmation gate, unique adult receipt, persistence and bounded scanning')
+
+      - name: Test child-report dialogue classification with actual 2026 text
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/ksp-halloween-dialogue-test
+          javac -d /tmp/ksp-halloween-dialogue-test \
+            release/kspseasonalevents/KspHalloweenChildReport.java \
+            release/.github/tests/seasonal/KspHalloweenChildReportTest.java
+          java -cp /tmp/ksp-halloween-dialogue-test \
+            net.runelite.client.plugins.microbot.kspseasonalevents.KspHalloweenChildReportTest
+
+      - name: Verify child-report stage recovery and persistent retries
+        shell: python
+        run: |
+          from pathlib import Path
+          code = Path('release/kspseasonalevents/KspHalloween2026Script.java').read_text()
+          parser = Path('release/kspseasonalevents/KspHalloweenChildReport.java').read_text()
+          tick = code.split('private void tick()',1)[1].split('private void handleDialogueOption()',1)[0]
+          report = code.split('private void inspectChildReportDialogue()',1)[1].split('private TreaterGroup treaterGroup(',1)[0]
+          assert 'KspHalloweenChildReport.classify(raw)' in report
+          assert 'SCARE_CHILDREN' in parser and 'VISIT_CHEMIST' in parser
+          assert 'Stage.SPOOK_CHILDREN : Stage.GET_COSTUME' in report
+          assert 'pendingStarterNext = required;' in report
+          assert 'pendingStarterDialogueSeen = true;' in report
+          assert 'pendingStarterLastDialogueAt = System.currentTimeMillis();' in report
+          assert 'if (pendingStarterNext == required)' in report
+          assert 'pendingStarterNext = Stage.CHEMIST_RIDDLE;' in report
+          assert 'configManager.setConfiguration(GROUP, CHILD_RETRY_COUNT_KEY, childSpookRetries)' in report
+          assert 'childSpookRetries > 1' in report
+          assert 'spookedChildren.clear();' in report
+          assert 'persistNpcIds(SPOOKED_CHILD_IDS_KEY, spookedChildren);' in report
+          assert 'savedRetries' in code
+          assert 'configManager.unsetConfiguration(GROUP, CHILD_RETRY_COUNT_KEY)' in code
+          assert 'next == Stage.CHEMIST_RIDDLE' in tick and '!childrenReportConfirmed' in tick
+          assert 'change(next, "Starter dialogue completed")' in tick
+          print('PASS: explicit spook directive, deferred stage, bounded persistent retries and confirmed Chemist gate')
+
+      - name: Verify child scare counters appear in overlay and side panel
+        shell: python
+        run: |
+          from pathlib import Path
+          root = Path('release/kspseasonalevents')
+          script = (root/'KspHalloween2026Script.java').read_text()
+          overlay = (root/'KspSeasonalEventsOverlay.java').read_text()
+          panel = (root/'KspSeasonalEventsPanel.java').read_text()
+          assert 'getChildSpookAttempts()' in script
+          assert 'getChildSpookCheckpoint()' in script
+          assert 'isChildObjectiveConfirmed()' in script
+          assert 'ConcurrentHashMap.newKeySet()' in script
+          assert 'private volatile boolean childrenReportConfirmed;' in script
+          assert 'CHILD_CONFIRMED_KEY' in script
+          assert 'configManager.setConfiguration(GROUP, CHILD_CONFIRMED_KEY, true)' in script
+          assert 'configManager.unsetConfiguration(GROUP, CHILD_CONFIRMED_KEY)' in script
+          assert 'Boolean.parseBoolean(' in script
+          for source in (overlay, panel):
+              assert 'getChildSpookAttempts()' in source
+              assert 'getChildSpookCheckpoint()' in source
+              assert 'isChildObjectiveConfirmed()' in source
+          assert 'Child Spook attempts' in overlay
+          assert 'Child objective' in overlay
+          assert 'Child Spook attempts' in panel
+          assert 'Not verified' in overlay and 'Confirmed' in overlay
+          assert 'Not verified' in panel and 'Confirmed' in panel
+          print('PASS: child Spook attempts and separate confirmed quest objective in both UIs')
 
       - name: Install Seasonal Events sources into Microbot Hub
         shell: bash
