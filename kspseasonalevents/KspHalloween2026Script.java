@@ -1215,7 +1215,10 @@ public final class KspHalloween2026Script extends Script {
         pendingLantern = null;
         lanternsVerified = false;
         spookedChildren.clear();
-        givenAdultIndexes.clear();
+        givenAdultIds.clear();
+        pendingAdultId = -1;
+        childrenReportConfirmed = false;
+        childSpookRetries = 0;
         adultsGiven = 0;
         stage = Stage.STOPPED;
         status = "Progress reset; press Start";
