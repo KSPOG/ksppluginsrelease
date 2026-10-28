@@ -22,6 +22,7 @@ import javax.inject.Singleton;
 import java.util.Arrays;
 import java.util.EnumSet;
 import java.util.HashSet;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.Map;
 import java.util.HashMap;
 import java.util.ArrayList;
@@ -54,6 +55,7 @@ public final class KspHalloween2026Script extends Script {
     private static final String ADULTS_KEY = "halloweenAdultsGiven";
     private static final String SPOOKED_CHILD_IDS_KEY = "halloweenChildNpcIdsAttempted";
     private static final String CHILD_RETRY_COUNT_KEY = "halloweenChildReportRetries";
+    private static final String CHILD_CONFIRMED_KEY = "halloweenChildObjectiveConfirmed";
     private static final String DELIVERED_ADULT_IDS_KEY = "halloweenAdultNpcIdsDelivered";
     // Five NPCs per candidate age group were seen in the 2026 log.
     // Five verified child attempts trigger a report checkpoint, not success.
@@ -143,9 +145,10 @@ public final class KspHalloween2026Script extends Script {
 
     private final Set<String> smashedLanternTiles = ConcurrentHashMap.newKeySet();
     private volatile boolean lanternsVerified;
-    private final Set<Integer> spookedChildren = new HashSet<>();
+    // Scheduler writes, while Swing panel and overlay read the attempt count.
+    private final Set<Integer> spookedChildren = ConcurrentHashMap.newKeySet();
     private final Set<Integer> givenAdultIds = new HashSet<>();
-    private boolean childrenReportConfirmed;
+    private volatile boolean childrenReportConfirmed;
     private int childrenReportAttempts;
     private int childSpookRetries;
     private final Map<Integer, Integer> observedTreaterHeights = new HashMap<>();
@@ -226,6 +229,8 @@ public final class KspHalloween2026Script extends Script {
         catch (NumberFormatException e) { adultsGiven = 0; }
         restoreNpcIds(SPOOKED_CHILD_IDS_KEY, spookedChildren);
         restoreNpcIds(DELIVERED_ADULT_IDS_KEY, givenAdultIds);
+        childrenReportConfirmed = Boolean.parseBoolean(
+                configManager.getConfiguration(GROUP, CHILD_CONFIRMED_KEY));
         String savedRetries = configManager.getConfiguration(GROUP, CHILD_RETRY_COUNT_KEY);
         try {
             childSpookRetries = savedRetries == null ? 0
@@ -949,6 +954,7 @@ public final class KspHalloween2026Script extends Script {
                         + " | starter={}", raw);
             }
             childrenReportConfirmed = true;
+            configManager.setConfiguration(GROUP, CHILD_CONFIRMED_KEY, true);
             pendingStarterNext = Stage.CHEMIST_RIDDLE;
             pendingStarterDialogueSeen = true;
             pendingStarterLastDialogueAt = System.currentTimeMillis();
@@ -987,6 +993,7 @@ public final class KspHalloween2026Script extends Script {
         }
 
         childrenReportConfirmed = false;
+        configManager.unsetConfiguration(GROUP, CHILD_CONFIRMED_KEY);
         pendingStarterNext = required;
         pendingStarterDialogueSeen = true;
         pendingStarterLastDialogueAt = System.currentTimeMillis();
@@ -1356,6 +1363,7 @@ public final class KspHalloween2026Script extends Script {
         configManager.unsetConfiguration(GROUP, SPOOKED_CHILD_IDS_KEY);
         configManager.unsetConfiguration(GROUP, DELIVERED_ADULT_IDS_KEY);
         configManager.unsetConfiguration(GROUP, CHILD_RETRY_COUNT_KEY);
+        configManager.unsetConfiguration(GROUP, CHILD_CONFIRMED_KEY);
         configManager.unsetConfiguration(GROUP, TREATER_CHILD_GROUP_KEY);
         smashedLanternTiles.clear();
         pendingLantern = null;
@@ -1376,6 +1384,16 @@ public final class KspHalloween2026Script extends Script {
     public Stage getStage() { return stage; }
     public int getLanternCount() { return lanternsVerified ? 8
             : Math.min(8, smashedLanternTiles.size()); }
+    /** A unique NPC Spook interaction was issued; not proof of a successful scare. */
+    public int getChildSpookAttempts() {
+        return Math.min(CHILD_REPORT_CHECKPOINT, spookedChildren.size());
+    }
+
+    public int getChildSpookCheckpoint() { return CHILD_REPORT_CHECKPOINT; }
+
+    /** True only after Angel/Henja confirms the next objective. */
+    public boolean isChildObjectiveConfirmed() { return childrenReportConfirmed; }
+
     public int getAdultsGiven() { return adultsGiven; }
     public long getRuntimeMs() { return startedAt == 0L ? 0L :
             System.currentTimeMillis() - startedAt; }
