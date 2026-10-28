@@ -22,12 +22,14 @@ public class KspSmartSuperheatPlugin extends Plugin
 {
     private final KspBreakService breaks = new KspBreakService();
 
-    public static final String VERSION = "0.1.9";
+    public static final String VERSION = "0.2.0";
     @Inject private KspSmartSuperheatConfig config;
     @Inject private KspSmartSuperheatScript script;
     @Inject private KspSmartSuperheatOverlay overlay;
     @Inject private OverlayManager overlays;
-    private final KspMuleWorkerService muleService = new KspMuleWorkerService("Smart Superheat");
+    private final KspMuleWorkerService muleService = new KspMuleWorkerService(
+            "Smart Superheat", KspSmartSuperheatGeAccess::openLocalBank,
+            KspSmartSuperheatGeAccess::isInGrandExchange);
 
     @Provides KspSmartSuperheatConfig provideConfig(ConfigManager manager) { return manager.getConfig(KspSmartSuperheatConfig.class); }
     KspSmartSuperheatScript getScript() { return script; }

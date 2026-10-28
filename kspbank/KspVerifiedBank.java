@@ -1,8 +1,8 @@
 package net.runelite.client.plugins.microbot.kspbank;
 
-import net.runelite.api.GameObject;
+import net.runelite.client.plugins.microbot.Microbot;
+import net.runelite.client.plugins.microbot.api.tileobject.models.Rs2TileObjectModel;
 import net.runelite.client.plugins.microbot.util.bank.Rs2Bank;
-import net.runelite.client.plugins.microbot.util.gameobject.Rs2GameObject;
 import net.runelite.client.plugins.microbot.util.grandexchange.Rs2GrandExchange;
 import net.runelite.client.plugins.microbot.util.npc.Rs2Npc;
 import net.runelite.client.plugins.microbot.util.npc.Rs2NpcModel;
@@ -42,19 +42,21 @@ public final class KspVerifiedBank
 
         // Prefer the exact booth requested by AutoMining. If it exists in the
         // scene, never fall through to a Banker NPC during this interaction.
-        GameObject preferredBooth = Rs2GameObject.getGameObject(PREFERRED_BANK_BOOTH_ID);
+        Rs2TileObjectModel preferredBooth = Microbot.getRs2TileObjectCache().query()
+                .fromWorldView().withId(PREFERRED_BANK_BOOTH_ID).nearestOnClientThread();
         if (preferredBooth != null)
         {
-            if (!Rs2GameObject.interact(preferredBooth, "Bank")) return false;
+            if (!preferredBooth.click("Bank")) return false;
             return sleepUntil(Rs2Bank::isOpen, BANK_OPEN_TIMEOUT_MS);
         }
 
         // Other KSP plugins can still use a verified Bank booth at banks whose
         // booth object has a different revision/location-specific ID.
-        GameObject booth = Rs2GameObject.get("Bank booth", true);
+        Rs2TileObjectModel booth = Microbot.getRs2TileObjectCache().query()
+                .fromWorldView().withName("Bank booth").nearestOnClientThread();
         if (booth != null)
         {
-            if (!Rs2GameObject.interact(booth, "Bank")) return false;
+            if (!booth.click("Bank")) return false;
             return sleepUntil(Rs2Bank::isOpen, BANK_OPEN_TIMEOUT_MS);
         }
 
@@ -73,7 +75,7 @@ public final class KspVerifiedBank
      *
      * The Factory's old fallback was Rs2Bank.walkToBank(), which discovers the nearest
      * bank by scanning Bank/GE scene objects. The live failure log shows that scan being
-     * interrupted inside Rs2GameObject.findGrandExchangeBooth/findBank. Instead, locate
+     * interrupted inside legacy booth discovery. Instead, locate
      * a Banker NPC directly. If no banker is currently loaded, route toward the Grand
      * Exchange and let the Factory's next tick retry the Banker interaction.
      *
