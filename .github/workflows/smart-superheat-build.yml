@@ -82,7 +82,7 @@ jobs:
           assert 'KspSmartSuperheatGeAccess::openLocalBank' in plugin, 'Mule must use GE-local Banker'
           assert 'KspSmartSuperheatGeAccess::isInGrandExchange' in plugin, 'Mule requires GE-only movement fence'
           assert 'if (!openBankForMule())' in mule, 'Mule bank fallback is not owner-aware'
-          assert 'allowedArea != null && (muleTile == null || !allowedArea.test(muleTile))' in mule, 'Mule can leave GE'
+          assert 'allowedArea != null && muleTile != null && !allowedArea.test(muleTile)' in mule, 'Mule can leave GE'
           legacy_bank = Path('release/kspbank/KspVerifiedBank.java').read_text()
           assert 'Rs2GameObject' not in legacy_bank, 'Shared bank dependency uses retired API'
           print('PASS: canonical GE arrival, Banker-only banking and mule fence; no remote bank-booth paths')
