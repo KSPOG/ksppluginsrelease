@@ -963,6 +963,79 @@ public final class KspHalloween2026Script extends Script {
         }
     }
 
+    private TreaterGroup treaterGroup(int npcId) {
+        if (npcId >= TREATER_GROUP_A_START && npcId <= TREATER_GROUP_A_END)
+            return TreaterGroup.A;
+        if (npcId >= TREATER_GROUP_B_START && npcId <= TREATER_GROUP_B_END)
+            return TreaterGroup.B;
+        return TreaterGroup.UNKNOWN;
+    }
+
+    private void observeTreaterAges() {
+        Rs2Npc.getNpcs().filter(n -> n.getName() != null
+                && n.getName().toLowerCase(Locale.ROOT).contains("trick"))
+                .forEach(n -> {
+                    if (treaterGroup(n.getId()) == TreaterGroup.UNKNOWN) return;
+                    int height = Microbot.getClientThread()
+                            .runOnClientThreadOptional(n::getLogicalHeight).orElse(0);
+                    if (height > 0) observedTreaterHeights.put(n.getId(), height);
+                });
+
+        if (confirmedChildGroup != TreaterGroup.UNKNOWN) return;
+        List<Integer> a = new ArrayList<>();
+        List<Integer> b = new ArrayList<>();
+        for (Map.Entry<Integer, Integer> entry : observedTreaterHeights.entrySet()) {
+            TreaterGroup group = treaterGroup(entry.getKey());
+            if (group == TreaterGroup.A) a.add(entry.getValue());
+            if (group == TreaterGroup.B) b.add(entry.getValue());
+        }
+
+        // No hard-coded assumption about which ID range represents children:
+        // require multiple observed actors in BOTH groups and a model-height
+        // separation. An unknown NPC must NEVER be automatically spooked.
+        if (a.size() >= 2 && b.size() >= 2) {
+            int aMin = a.stream().mapToInt(Integer::intValue).min().orElse(0);
+            int aMax = a.stream().mapToInt(Integer::intValue).max().orElse(0);
+            int bMin = b.stream().mapToInt(Integer::intValue).min().orElse(0);
+            int bMax = b.stream().mapToInt(Integer::intValue).max().orElse(0);
+            if (aMax > 0 && aMax * 100L <= bMin * 80L) {
+                confirmedChildGroup = TreaterGroup.A;
+            } else if (bMax > 0 && bMax * 100L <= aMin * 80L) {
+                confirmedChildGroup = TreaterGroup.B;
+            }
+            if (confirmedChildGroup != TreaterGroup.UNKNOWN) {
+                configManager.setConfiguration(GROUP, TREATER_CHILD_GROUP_KEY,
+                        confirmedChildGroup.name());
+                log.info("Halloween child/adult NPC groups confirmed by live model heights"
+                        + " | childGroup={} groupAHeights={} groupBHeights={}",
+                        confirmedChildGroup, a, b);
+            }
+        }
+
+        if (confirmedChildGroup == TreaterGroup.UNKNOWN
+                && System.currentTimeMillis() - lastTreaterClassificationLogAt > 10_000L) {
+            lastTreaterClassificationLogAt = System.currentTimeMillis();
+            log.info("Halloween NPC age classification not yet verified"
+                    + " | observedHeights={} (no unknown NPC will be spooked)",
+                    observedTreaterHeights);
+        }
+    }
+
+    private TreaterAge classifyTreater(Rs2NpcModel npc) {
+        if (npc == null || npc.getName() == null) return TreaterAge.UNKNOWN;
+        String name = npc.getName().toLowerCase(Locale.ROOT);
+        if (!name.contains("trick")) return TreaterAge.UNKNOWN;
+        if (name.contains("adult") || name.contains("grown-up"))
+            return TreaterAge.ADULT;
+        if (name.contains("child") || name.contains("kid"))
+            return TreaterAge.CHILD;
+        TreaterGroup group = treaterGroup(npc.getId());
+        if (group == TreaterGroup.UNKNOWN
+                || confirmedChildGroup == TreaterGroup.UNKNOWN)
+            return TreaterAge.UNKNOWN;
+        return group == confirmedChildGroup ? TreaterAge.CHILD : TreaterAge.ADULT;
+    }
+
     private void spookChildren(WorldPoint player) {
         if (costumeCount() < 4) {
             change(Stage.GET_COSTUME, "Need four Halloween outfit pieces equipped");
