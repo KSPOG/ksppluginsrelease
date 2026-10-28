@@ -1074,10 +1074,11 @@ public class TutorialIslandScript extends KspManagedScript
         long now = System.currentTimeMillis();
         if (progress != lastMiningProgress)
         {
-            debug("Mining tutorial progress {} -> {} | player={} tin={} copper={} pickaxe={}",
-                    lastMiningProgress, progress, Rs2Player.getWorldLocation(),
-                    Rs2Inventory.count("Tin ore"), Rs2Inventory.count("Copper ore"),
-                    Rs2Inventory.hasItem("Bronze pickaxe"));
+            Microbot.log("[TutIsland] Mining stage " + lastMiningProgress + " -> " + progress
+                    + " | player=" + Rs2Player.getWorldLocation()
+                    + " tin=" + Rs2Inventory.count("Tin ore")
+                    + " copper=" + Rs2Inventory.count("Copper ore")
+                    + " pickaxe=" + Rs2Inventory.hasItem("Bronze pickaxe"));
             lastMiningProgress = progress;
             lastMiningStageAtMs = now;
             pendingInteractionAtMs = 0L;
@@ -1087,10 +1088,13 @@ public class TutorialIslandScript extends KspManagedScript
         if (now - lastMiningDiagnosticAtMs >= MINING_DIAGNOSTIC_INTERVAL_MS)
         {
             lastMiningDiagnosticAtMs = now;
-            debug("Mining tutorial heartbeat | varbit281={} player={} tin={} copper={} moving={} animating={} walkerTarget={}",
-                    progress, Rs2Player.getWorldLocation(),
-                    Rs2Inventory.count("Tin ore"), Rs2Inventory.count("Copper ore"),
-                    Rs2Player.isMoving(), Rs2Player.isAnimating(), Rs2Walker.getCurrentTarget());
+            Microbot.log("[TutIsland] Mining heartbeat | progress=" + progress
+                    + " player=" + Rs2Player.getWorldLocation()
+                    + " tin=" + Rs2Inventory.count("Tin ore")
+                    + " copper=" + Rs2Inventory.count("Copper ore")
+                    + " moving=" + Rs2Player.isMoving()
+                    + " animating=" + Rs2Player.isAnimating()
+                    + " walkerTarget=" + Rs2Walker.getCurrentTarget());
         }
 
         switch (progress)
@@ -1204,7 +1208,8 @@ public class TutorialIslandScript extends KspManagedScript
                         && object.getWorldLocation().getPlane() == target.getPlane()
                         && object.getWorldLocation().distanceTo(target) <= 1
                         && object.getName() != null
-                        && object.getName().toLowerCase(java.util.Locale.ROOT).contains("rock"));
+                        && object.getName().toLowerCase(java.util.Locale.ROOT).contains("rock")
+                        && (object.hasAction("Mine") || object.hasAction("Prospect")));
     }
 
     private void interactWithTutorialMiningRock(Rs2TileObjectModel rock, String action)
@@ -1214,8 +1219,9 @@ public class TutorialIslandScript extends KspManagedScript
         if (rock.click(action))
         {
             markTutorialInteraction("mining:" + rock.getId() + ":" + action);
-            debug("Mining tutor {} | objectId={} tile={} stage={}",
-                    action, rock.getId(), rock.getWorldLocation(), lastMiningProgress);
+            Microbot.log("[TutIsland] Mining " + action + " | objectId=" + rock.getId()
+                    + " tile=" + rock.getWorldLocation()
+                    + " progress=" + lastMiningProgress);
         }
     }
 
@@ -1224,8 +1230,9 @@ public class TutorialIslandScript extends KspManagedScript
         long now = System.currentTimeMillis();
         if (now - lastMiningDiagnosticAtMs < MINING_DIAGNOSTIC_INTERVAL_MS) return;
         lastMiningDiagnosticAtMs = now;
-        debug("Mining tutor target absent | action={} expectedTile={} player={} varbit281={} - checking live scene",
-                action, target, Rs2Player.getWorldLocation(), lastMiningProgress);
+        Microbot.log("[TutIsland] Mining rock unavailable | action=" + action
+                + " target=" + target + " player=" + Rs2Player.getWorldLocation()
+                + " varbit281=" + lastMiningProgress + " - checking live scene");
     }
 
     private void rejectMainlandWalkerRoute()
