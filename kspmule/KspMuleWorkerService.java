@@ -22,6 +22,8 @@ import net.runelite.client.util.Text;
 
 import java.awt.Rectangle;
 import java.util.Locale;
+import java.util.function.BooleanSupplier;
+import java.util.function.Predicate;
 import java.util.UUID;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -44,6 +46,10 @@ public final class KspMuleWorkerService
     public enum State { IDLE, PREPARING, QUEUED, TRAVELLING, TRADING, CONFIRMING, WAITING_COMPLETE, RESTORING, FAILED }
 
     private final String ownerName;
+    // Optional owner-specific GE-only banking/location policy. Other KSP
+    // plugins retain their existing unrestricted mule behavior.
+    private final BooleanSupplier localBankOpener;
+    private final Predicate<WorldPoint> allowedArea;
     private final KspLocalMuleClient client = new KspLocalMuleClient();
     private ScheduledExecutorService executor;
     private KspMuleConfig config;
@@ -65,7 +71,35 @@ public final class KspMuleWorkerService
 
     public KspMuleWorkerService(String ownerName)
     {
+        this(ownerName, null, null);
+    }
+
+    /**
+     * GE-stationary owners can supply a banker-only opener and travel fence.
+     * This prevents transfers and bank restoration from using another bank
+     * or following a receiver to a location outside the allowed area.
+     */
+    public KspMuleWorkerService(String ownerName, BooleanSupplier localBankOpener,
+                                Predicate<WorldPoint> allowedArea)
+    {
         this.ownerName = ownerName == null || ownerName.isBlank() ? "KSP worker" : ownerName;
+        this.localBankOpener = localBankOpener;
+        this.allowedArea = allowedArea;
+    }
+
+    private boolean isAllowedToMuleHere()
+    {
+        return allowedArea == null || allowedArea.test(Rs2Player.getWorldLocation());
+    }
+
+    private boolean openBankForMule()
+    {
+        if (allowedArea == null && localBankOpener == null)
+            return KspVerifiedBank.walkToBankAndOpenBank();
+        if (!isAllowedToMuleHere()) return false;
+        if (Rs2Bank.isOpen()) return true;
+        return localBankOpener != null && localBankOpener.getAsBoolean()
+                && sleepUntil(Rs2Bank::isOpen, 4_000L);
     }
 
     /** True while any local KSP mule transfer owns interaction priority. */
@@ -151,6 +185,14 @@ public final class KspMuleWorkerService
             status = "Mule retry backoff (" + seconds + "s)";
             return;
         }
+        // Do not begin an offsite mule transfer while this owner is still
+        // walking to its permitted operating area.
+        if (!isAllowedToMuleHere())
+        {
+            state = State.IDLE;
+            status = "Waiting to reach allowed mule area";
+            return;
+        }
         long threshold = Math.max(1_000L, c.muleTransferAt());
         if (totalCoins < threshold)
         {
@@ -209,7 +251,7 @@ public final class KspMuleWorkerService
             Rs2GrandExchange.closeExchange();
             if (!sleepUntil(() -> !Rs2GrandExchange.isOpen(), 2_500)) return -1L;
         }
-        if (!KspVerifiedBank.walkToBankAndOpenBank()) return -1L;
+        if (!openBankForMule()) return -1L;
         sleep(400);
 
         long inv = Math.max(0L, Rs2Inventory.itemQuantity(COINS_ID));
@@ -326,6 +368,18 @@ public final class KspMuleWorkerService
         {
             state = State.QUEUED;
             status = "Waiting for mule identity";
+            return;
+        }
+        if (allowedArea != null && (muleTile == null || !allowedArea.test(muleTile)))
+        {
+            cancelCurrent();
+            fail("Receiver is outside allowed Grand Exchange area", true);
+            return;
+        }
+        if (!isAllowedToMuleHere())
+        {
+            cancelCurrent();
+            fail("Mule worker left its Grand Exchange area", true);
             return;
         }
         if (!prepareClientForTrade()) return;
@@ -591,7 +645,7 @@ public final class KspMuleWorkerService
     {
         KspMuleConfig c = config;
         if (c == null || !Microbot.isLoggedIn()) return;
-        if (!KspVerifiedBank.walkToBankAndOpenBank())
+        if (!openBankForMule())
         {
             status = "Transfer done - could not restore trading capital";
             return;
