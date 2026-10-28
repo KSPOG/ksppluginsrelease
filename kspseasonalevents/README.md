@@ -1,4 +1,4 @@
-# KSP Seasonal Events v0.2.2
+# KSP Seasonal Events v0.2.3
 
 A **standalone Microbot plugin**, independent of Chopper, with its own
 config, navigation panel, Start / Pause / Resume / Stop / Reset progress,
@@ -33,6 +33,31 @@ may require manual review rather than repeated speculative clicks. The
 plugin logs stage transitions, visible dialogue options when unknown, NPC
 IDs and world tiles of successfully targeted event objects. No guessed
 NPC/object IDs are treated as authoritative.
+
+## Diango Holiday Item Retrieval (0.2.3)
+
+The `GET_COSTUME` stage now handles the opened Diango Holiday Item
+Retrieval interface rather than repeatedly re-opening it. It identifies
+the *live* RuneLite widget group by the displayed interface title, then
+looks up item IDs through RuneLite's current item definitions. It selects
+only eligible Halloween clothing, beginning with a complete Skeleton
+set (boots, gloves, leggings and shirt), and filters out pieces already
+owned or worn.
+
+After each click the script waits to see that exact item in the
+inventory/equipment before counting the retrieval as successful. The
+retrieval window is closed before equipping. Item searches are bounded,
+with visible scrolling when necessary. An unrecognised or exhausted
+interface stops for review rather than guessing screen coordinates.
+
+Diango's explicit dialogue option `I'd like to check holiday items please!`
+is handled as well. The earlier 8/8 lantern state and saved
+`GET_COSTUME` stage are preserved.
+
+**Runtime validation:** RuneLite widget IDs and child layouts are discovered
+dynamically; the exact 2026 retrieval grid still requires an in-client test.
+If the grid uses an unsupported representation, the script will log
+the observed widget count and stop for review. Do not reset progress.
 
 ## Costume dialogue fix (0.2.2)
 
