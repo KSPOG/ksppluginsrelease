@@ -1,4 +1,4 @@
-# KSP Seasonal Events v0.2.4
+# KSP Seasonal Events v0.2.5
 
 A **standalone Microbot plugin**, independent of Chopper, with its own
 config, navigation panel, Start / Pause / Resume / Stop / Reset progress,
