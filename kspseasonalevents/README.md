@@ -42,8 +42,10 @@ waypoints could repeat without new live targets. The last dispatched lantern
 world tile is now persisted and revisited after a pause, stop or restart, so a
 missing action is checked while the tile is actually in scene range.
 
-After one complete no-target discovery sweep the plugin enters
-`VERIFY_LANTERNS`, asks Angel/Henja, and only credits completion if the
+With an existing 7/8 save and no target visible, the plugin first enters
+`VERIFY_LANTERNS` and asks Angel/Henja. It only performs a full
+discovery sweep if the starter says lanterns are still outstanding. It
+credits completion only if the
 dialogue positively confirms the lantern objective or the subsequent costume
 task. If confirmation is unavailable it stops for review rather than endlessly
 walking. The overlay may still display 7/8 while server progress is already 8/8;
