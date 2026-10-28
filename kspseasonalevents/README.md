@@ -1,4 +1,4 @@
-# KSP Seasonal Events v0.2.3
+# KSP Seasonal Events v0.2.4
 
 A **standalone Microbot plugin**, independent of Chopper, with its own
 config, navigation panel, Start / Pause / Resume / Stop / Reset progress,
@@ -33,6 +33,25 @@ may require manual review rather than repeated speculative clicks. The
 plugin logs stage transitions, visible dialogue options when unknown, NPC
 IDs and world tiles of successfully targeted event objects. No guessed
 NPC/object IDs are treated as authoritative.
+
+## Batch Diango costume retrieval (0.2.4)
+
+While `GET_COSTUME` is active, the Diango Holiday Item Retrieval window
+**remains open until the plugin has four different wearable costume slots**
+available across the inventory and already-worn equipment. The script
+selects and validates each missing item in sequence without closing or
+reopening the interface between withdrawals.
+
+A costume slot is one of head, torso, legs, hands or feet. Owning several
+pieces for the same slot does not satisfy the four-piece outfit objective.
+After four distinct slots have been confirmed, the plugin closes the window
+once, equips eligible inventory items, verifies four different slots are
+worn, then transitions to `SPOOK_CHILDREN`.
+
+The script still observes the per-item inventory receipt, enforces retry
+limits and stops for review on unknown widget layouts or missing inventory
+capacity. Any worn costume piece counts toward the requirement, so it is not
+withdrawn again. Saved lantern and event progress are not reset.
 
 ## Diango Holiday Item Retrieval (0.2.3)
 
