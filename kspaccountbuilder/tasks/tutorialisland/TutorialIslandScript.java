@@ -1378,6 +1378,17 @@ public class TutorialIslandScript extends KspManagedScript
         // bronze arrows. Equip each item once. Repeated clicks on a combat
         // style are not required to unlock the ranged rat attack.
         if (equipRequiredTutorialRangedGear()) return;
+        if ((!Rs2Equipment.isWearing("Shortbow")
+                    || !Rs2Equipment.isWearing("Bronze arrow"))
+                && System.currentTimeMillis() - lastRangedDiagnosticAtMs >= 6_000L)
+        {
+            lastRangedDiagnosticAtMs = System.currentTimeMillis();
+            walkAndTalk(tutorialNpc(NpcID.COMBAT_INSTRUCTOR));
+            Microbot.log("[TutIsland] Missing ranged gear at Vannaka"
+                    + " | bowEquipped=" + Rs2Equipment.isWearing("Shortbow")
+                    + " arrowsEquipped=" + Rs2Equipment.isWearing("Bronze arrow"));
+            return;
+        }
         if (System.currentTimeMillis() - lastRangedDiagnosticAtMs >= 5_000L)
         {
             lastRangedDiagnosticAtMs = System.currentTimeMillis();
@@ -1485,9 +1496,35 @@ public class TutorialIslandScript extends KspManagedScript
                 return;
             }
 
-            if (!Rs2Player.isMoving() && !Rs2Player.isInteracting())
+            // Only the Tutorial Island booth at this bank room is valid.
+            // Never use Rs2Bank.openBank/walkToBank, which can choose
+            // Lumbridge Castle's upstairs bank while still on the island.
+            if (!readyForAction()) return;
+            Rs2TileObjectModel tutorialBooth = KspLiveScene.nearestModel(
+                    playerLocation, 18, object ->
+                    object != null && object.getWorldLocation() != null
+                    && TUT_ISLAND_BANK_AREA.contains(object.getWorldLocation())
+                    && (object.getId() == ObjectID.BANK_BOOTH_10083
+                        || "Bank booth".equalsIgnoreCase(object.getName()))
+                    && object.hasAction("Bank"));
+            if (tutorialBooth == null)
             {
-                clickNearestTutorialObject(ObjectID.BANK_BOOTH_10083, "Bank");
+                if (System.currentTimeMillis() - lastTutorialWalkerWarningAtMs >= 5_000L)
+                {
+                    lastTutorialWalkerWarningAtMs = System.currentTimeMillis();
+                    Microbot.log("[TutIsland] Waiting for LOCAL bank booth"
+                            + " | progress=" + progress + " player=" + playerLocation
+                            + " allowedRoom=" + TUT_ISLAND_BANK_AREA);
+                }
+                return;
+            }
+            if (prepareTutorialObjectInteraction(tutorialBooth, 4)
+                    && tutorialBooth.click("Bank"))
+            {
+                markTutorialInteraction("tutorial:bank-booth");
+                Microbot.log("[TutIsland] Opened Tutorial Island bank booth"
+                        + " | id=" + tutorialBooth.getId()
+                        + " tile=" + tutorialBooth.getWorldLocation());
             }
             return;
         }
