@@ -28,6 +28,12 @@ public final class KspHalloweenChildReportTest {
                 KspHalloweenChildReport.Instruction.UNKNOWN);
         check("The trick-or-treaters are coming tonight!",
                 KspHalloweenChildReport.Instruction.UNKNOWN);
+        check("You've scared all the children! Now speak to the Chemist.",
+                KspHalloweenChildReport.Instruction.VISIT_CHEMIST);
+        check("You've scared all the children!",
+                KspHalloweenChildReport.Instruction.UNKNOWN);
+        check("You have scared the kids, now get molten sugar for the adults.",
+                KspHalloweenChildReport.Instruction.VISIT_CHEMIST);
         check("Go speak to the Chemist west of Rimmington.",
                 KspHalloweenChildReport.Instruction.VISIT_CHEMIST);
         check("Make molten sugar to coat old onions for the adults.",
