@@ -54,6 +54,11 @@ import static net.runelite.client.plugins.microbot.util.dialogues.Rs2Dialogue.is
 public class TutorialIslandScript extends KspManagedScript
 {
     private static final int LOOP_DELAY_MS = 100;
+    // Game's authoritative tutorial rock IDs. Always resolve in the live
+    // underground scene; no guessed tile coordinates or generic rock clicks.
+    private static final int TUTORIAL_TIN_ROCK_ID = ObjectID.TIN_ROCKS;
+    private static final int TUTORIAL_COPPER_ROCK_ID = ObjectID.COPPER_ROCKS;
+    private static final long MINING_DIAGNOSTIC_INTERVAL_MS = 5_000L;
     private static final long INTERACTION_DISPATCH_TIMEOUT_MS = 1_500L;
     private static final int DEFAULT_CAMERA_ZOOM = 377;
     private static final int RAT_PEN_GATE_ID = 9719;
@@ -151,6 +156,13 @@ public class TutorialIslandScript extends KspManagedScript
     private long pendingInteractionAtMs;
     private String pendingInteractionKey;
     private boolean windStrikeSelected;
+    private int lastMiningProgress = -1;
+    private long lastMiningStageAtMs;
+    private long lastMiningDiagnosticAtMs;
+    private long lastTutorialWalkerWarningAtMs;
+    private long lastRangedDiagnosticAtMs;
+    private long lastRangedAttackAtMs;
+    private int lastRangedTargetIndex = -1;
 
     public boolean run()
     {
@@ -173,6 +185,10 @@ public class TutorialIslandScript extends KspManagedScript
             }
 
             completeQueuedLoginIfNeeded();
+            // Mainland bank cache/bootstrap may still have an in-flight route
+            // from a previously running task. Reject foreign destinations
+            // every tutorial tick without cancelling valid island-local paths.
+            rejectMainlandWalkerRoute();
             calculateStatus();
 
             if (closeBlockingTutorialWidget()
@@ -1058,21 +1074,62 @@ public class TutorialIslandScript extends KspManagedScript
     private void miningGuide()
     {
         int progress = Microbot.getVarbitPlayerValue(281);
-        if (progress == 260 || progress == 330)
+        long now = System.currentTimeMillis();
+        if (progress != lastMiningProgress)
         {
-            walkAndTalk(tutorialNpc(NpcID.MINING_INSTRUCTOR));
-            return;
+            Microbot.log("[TutIsland] Mining stage " + lastMiningProgress + " -> " + progress
+                    + " | player=" + Rs2Player.getWorldLocation()
+                    + " tin=" + Rs2Inventory.count("Tin ore")
+                    + " copper=" + Rs2Inventory.count("Copper ore")
+                    + " pickaxe=" + Rs2Inventory.hasItem("Bronze pickaxe"));
+            lastMiningProgress = progress;
+            lastMiningStageAtMs = now;
+            pendingInteractionAtMs = 0L;
+            pendingInteractionKey = null;
+        }
+
+        if (now - lastMiningDiagnosticAtMs >= MINING_DIAGNOSTIC_INTERVAL_MS)
+        {
+            lastMiningDiagnosticAtMs = now;
+            Microbot.log("[TutIsland] Mining heartbeat | progress=" + progress
+                    + " player=" + Rs2Player.getWorldLocation()
+                    + " tin=" + Rs2Inventory.count("Tin ore")
+                    + " copper=" + Rs2Inventory.count("Copper ore")
+                    + " moving=" + Rs2Player.isMoving()
+                    + " animating=" + Rs2Player.isAnimating()
+                    + " walkerTarget=" + Rs2Walker.getCurrentTarget());
         }
 
         switch (progress)
         {
+            case 260:
+            case 290:
+            case 330:
+                walkAndTalk(tutorialNpc(NpcID.MINING_INSTRUCTOR));
+                return;
+            case 270:
+                // Legacy tutorial stages still occur on some clients, but
+                // Prospect was removed from most rocks in March 2023.
+                prospectOrMineTutorialRock(TUTORIAL_TIN_ROCK_ID, "Tin ore");
+                return;
+            case 280:
+                prospectOrMineTutorialRock(TUTORIAL_COPPER_ROCK_ID, "Copper ore");
+                return;
             case 300:
-                mineTutorialRock(ObjectID.TIN_ROCKS, "Tin ore");
+                mineTutorialRock(TUTORIAL_TIN_ROCK_ID, "Tin ore");
                 return;
             case 310:
-                mineTutorialRock(ObjectID.COPPER_ROCKS, "Copper ore");
+                mineTutorialRock(TUTORIAL_COPPER_ROCK_ID, "Copper ore");
                 return;
             case 320:
+                if (!Rs2Inventory.hasItem("Tin ore")) {
+                    mineTutorialRock(TUTORIAL_TIN_ROCK_ID, "Tin ore");
+                    return;
+                }
+                if (!Rs2Inventory.hasItem("Copper ore")) {
+                    mineTutorialRock(TUTORIAL_COPPER_ROCK_ID, "Copper ore");
+                    return;
+                }
                 smeltTutorialBronze();
                 return;
             case 340:
@@ -1090,9 +1147,101 @@ public class TutorialIslandScript extends KspManagedScript
         }
     }
 
+    private void prospectOrMineTutorialRock(int objectId, String ore)
+    {
+        Rs2TileObjectModel rock = findTutorialMiningRock(objectId, ore);
+        if (rock == null)
+        {
+            debugMiningRockMissing(objectId, ore, "Prospect or Mine");
+            return;
+        }
+        if (rock.hasAction("Prospect"))
+        {
+            interactWithTutorialMiningRock(rock, "Prospect");
+            return;
+        }
+        // Some versions lack the historical Prospect action. Mine only the
+        // correct ore; never click an unidentified rock or unrelated object.
+        if (!Rs2Inventory.hasItem(ore))
+            interactWithTutorialMiningRock(rock, "Mine");
+        else if (System.currentTimeMillis() - lastMiningStageAtMs >= 5_000L)
+            walkAndTalk(tutorialNpc(NpcID.MINING_INSTRUCTOR));
+    }
+
     private void mineTutorialRock(int objectId, String ore)
     {
-        if (!Rs2Inventory.contains(ore)) clickTutorialObject(objectId, "Mine", 4);
+        if (Rs2Inventory.hasItem(ore))
+        {
+            if (System.currentTimeMillis() - lastMiningStageAtMs >= 6_000L)
+                walkAndTalk(tutorialNpc(NpcID.MINING_INSTRUCTOR));
+            return;
+        }
+        Rs2TileObjectModel rock = findTutorialMiningRock(objectId, ore);
+        if (rock == null)
+        {
+            debugMiningRockMissing(objectId, ore, "Mine");
+            return;
+        }
+        interactWithTutorialMiningRock(rock, "Mine");
+    }
+
+    /**
+     * Select a live object by its specific ore ID, or a clearly labelled
+     * variant of that ore. Bare "Rocks" objects of an unknown ID are not
+     * eligible because copper and tin are different objectives.
+     */
+    private Rs2TileObjectModel findTutorialMiningRock(int objectId, String ore)
+    {
+        WorldPoint player = Rs2Player.getWorldLocation();
+        if (player == null || !MINING_SMITHING_AREA.contains(player)) return null;
+        String expectedName = ore.startsWith("Tin") ? "tin" : "copper";
+        return KspLiveScene.nearestModel(player, 18,
+                object -> object != null
+                        && (object.getId() == objectId
+                            || (object.getName() != null
+                                && object.getName().toLowerCase(java.util.Locale.ROOT).contains(expectedName)
+                                && object.getName().toLowerCase(java.util.Locale.ROOT).contains("rock")))
+                        && (object.hasAction("Mine") || object.hasAction("Prospect")));
+    }
+
+    private void interactWithTutorialMiningRock(Rs2TileObjectModel rock, String action)
+    {
+        if (rock == null || !rock.hasAction(action)) return;
+        if (!prepareTutorialObjectInteraction(rock, 4) || !readyForAction()) return;
+        if (rock.click(action))
+        {
+            markTutorialInteraction("mining:" + rock.getId() + ":" + action);
+            Microbot.log("[TutIsland] Mining " + action + " | objectId=" + rock.getId()
+                    + " tile=" + rock.getWorldLocation()
+                    + " progress=" + lastMiningProgress);
+        }
+    }
+
+    private void debugMiningRockMissing(int objectId, String ore, String action)
+    {
+        long now = System.currentTimeMillis();
+        if (now - lastMiningDiagnosticAtMs < MINING_DIAGNOSTIC_INTERVAL_MS) return;
+        lastMiningDiagnosticAtMs = now;
+        Microbot.log("[TutIsland] Mining rock unavailable | action=" + action
+                + " ore=" + ore + " expectedObjectId=" + objectId
+                + " player=" + Rs2Player.getWorldLocation()
+                + " varbit281=" + lastMiningProgress + " - checking live scene");
+    }
+
+    private void rejectMainlandWalkerRoute()
+    {
+        WorldPoint player = Rs2Player.getWorldLocation();
+        if (player == null || !TutAreas.contains(player)) return;
+        WorldPoint target = Rs2Walker.getCurrentTarget();
+        if (target == null || TutAreas.contains(target)) return;
+        Rs2Walker.clearWalkingRoute("ksp_tutorial_reject_mainland_bank_route");
+        long now = System.currentTimeMillis();
+        if (now - lastTutorialWalkerWarningAtMs >= 5_000L)
+        {
+            lastTutorialWalkerWarningAtMs = now;
+            debug("Tutorial Island cancelled mainland walker destination | player={} target={} progress={}",
+                    player, target, Microbot.getVarbitPlayerValue(281));
+        }
     }
 
     private void smeltTutorialBronze()
@@ -1225,31 +1374,100 @@ public class TutorialIslandScript extends KspManagedScript
 
     private void equipTutorialRangeGear()
     {
-        equipTutorialItems("Shortbow", "Bronze arrow");
-        if (!Rs2Inventory.hasItem("Shortbow") && !Rs2Inventory.hasItem("Bronze arrow"))
+        // During the tutorial 480 stage Vannaka gives a shortbow and 50
+        // bronze arrows. Equip each item once. Repeated clicks on a combat
+        // style are not required to unlock the ranged rat attack.
+        if (equipRequiredTutorialRangedGear()) return;
+        if ((!Rs2Equipment.isWearing("Shortbow")
+                    || !Rs2Equipment.isWearing("Bronze arrow"))
+                && System.currentTimeMillis() - lastRangedDiagnosticAtMs >= 6_000L)
         {
-            selectLongrangeCombatStyle();
+            lastRangedDiagnosticAtMs = System.currentTimeMillis();
+            walkAndTalk(tutorialNpc(NpcID.COMBAT_INSTRUCTOR));
+            Microbot.log("[TutIsland] Missing ranged gear at Vannaka"
+                    + " | bowEquipped=" + Rs2Equipment.isWearing("Shortbow")
+                    + " arrowsEquipped=" + Rs2Equipment.isWearing("Bronze arrow"));
+            return;
         }
+        if (System.currentTimeMillis() - lastRangedDiagnosticAtMs >= 5_000L)
+        {
+            lastRangedDiagnosticAtMs = System.currentTimeMillis();
+            Microbot.log("[TutIsland] Ranged equipment ready; awaiting next tutorial stage"
+                    + " | progress=" + Microbot.getVarbitPlayerValue(281)
+                    + " shortbow=" + Rs2Equipment.isWearing("Shortbow")
+                    + " bronzeArrows=" + Rs2Equipment.isWearing("Bronze arrow"));
+        }
+    }
+
+    /** @return true if equipping gear or waiting for it from Vannaka. */
+    private boolean equipRequiredTutorialRangedGear()
+    {
+        if (!Rs2Equipment.isWearing("Shortbow"))
+        {
+            if (Rs2Inventory.hasItem("Shortbow") && readyForAction())
+            {
+                if (Rs2Inventory.wield("Shortbow"))
+                    markTutorialInteraction("ranged:shortbow");
+                return true;
+            }
+            return true;
+        }
+        if (!Rs2Equipment.isWearing("Bronze arrow"))
+        {
+            if (Rs2Inventory.hasItem("Bronze arrow") && readyForAction())
+            {
+                if (Rs2Inventory.wield("Bronze arrow"))
+                    markTutorialInteraction("ranged:arrows");
+                return true;
+            }
+            return true;
+        }
+        return false;
     }
 
     private void attackRatWithRange()
     {
+        if (equipRequiredTutorialRangedGear())
+        {
+            if (System.currentTimeMillis() - lastRangedDiagnosticAtMs >= 5_000L)
+            {
+                lastRangedDiagnosticAtMs = System.currentTimeMillis();
+                Microbot.log("[TutIsland] Waiting for tutorial ranged gear"
+                        + " | shortbowEquipped=" + Rs2Equipment.isWearing("Shortbow")
+                        + " arrowsEquipped=" + Rs2Equipment.isWearing("Bronze arrow")
+                        + " bowInventory=" + Rs2Inventory.hasItem("Shortbow")
+                        + " arrowsInventory=" + Rs2Inventory.hasItem("Bronze arrow"));
+            }
+            return;
+        }
+
+        // All bow styles are permitted by the tutorial. The old code clicked
+        // Longrange on EVERY 100ms tick and starved Attack interactions.
+        // Never change combat style during this rat-killing stage.
         Actor target = Rs2Player.getInteracting();
-        if (target != null && "giant rat".equalsIgnoreCase(target.getName())) return;
-
-        if (!Rs2Equipment.isWearing("Shortbow") && Rs2Inventory.hasItem("Shortbow"))
+        if (target != null && "giant rat".equalsIgnoreCase(target.getName())
+                && (Rs2Player.isAnimating()
+                    || System.currentTimeMillis() - lastRangedAttackAtMs < 4_000L))
         {
-            Rs2Inventory.wield("Shortbow");
             return;
         }
-        if (Rs2Inventory.hasItem("Bronze arrow"))
+        if (!readyForAction()) return;
+        if (attackNearestRat())
         {
-            Rs2Inventory.wield("Bronze arrow");
+            lastRangedAttackAtMs = System.currentTimeMillis();
             return;
         }
-
-        selectLongrangeCombatStyle();
-        if (readyForAction()) attackNearestRat();
+        if (System.currentTimeMillis() - lastRangedDiagnosticAtMs >= 5_000L)
+        {
+            lastRangedDiagnosticAtMs = System.currentTimeMillis();
+            Microbot.log("[TutIsland] Ranged rat attack retry | progress="
+                    + Microbot.getVarbitPlayerValue(281)
+                    + " player=" + Rs2Player.getWorldLocation()
+                    + " target=" + (target == null ? "none" : target.getName())
+                    + " lastRatIndex=" + lastRangedTargetIndex
+                    + " moving=" + Rs2Player.isMoving()
+                    + " animating=" + Rs2Player.isAnimating());
+        }
     }
 
     private void bankerGuide()
@@ -1278,9 +1496,35 @@ public class TutorialIslandScript extends KspManagedScript
                 return;
             }
 
-            if (!Rs2Player.isMoving() && !Rs2Player.isInteracting())
+            // Only the Tutorial Island booth at this bank room is valid.
+            // Never use Rs2Bank.openBank/walkToBank, which can choose
+            // Lumbridge Castle's upstairs bank while still on the island.
+            if (!readyForAction()) return;
+            Rs2TileObjectModel tutorialBooth = KspLiveScene.nearestModel(
+                    playerLocation, 18, object ->
+                    object != null && object.getWorldLocation() != null
+                    && TUT_ISLAND_BANK_AREA.contains(object.getWorldLocation())
+                    && (object.getId() == ObjectID.BANK_BOOTH_10083
+                        || "Bank booth".equalsIgnoreCase(object.getName()))
+                    && object.hasAction("Bank"));
+            if (tutorialBooth == null)
             {
-                clickNearestTutorialObject(ObjectID.BANK_BOOTH_10083, "Bank");
+                if (System.currentTimeMillis() - lastTutorialWalkerWarningAtMs >= 5_000L)
+                {
+                    lastTutorialWalkerWarningAtMs = System.currentTimeMillis();
+                    Microbot.log("[TutIsland] Waiting for LOCAL bank booth"
+                            + " | progress=" + progress + " player=" + playerLocation
+                            + " allowedRoom=" + TUT_ISLAND_BANK_AREA);
+                }
+                return;
+            }
+            if (prepareTutorialObjectInteraction(tutorialBooth, 4)
+                    && tutorialBooth.click("Bank"))
+            {
+                markTutorialInteraction("tutorial:bank-booth");
+                Microbot.log("[TutIsland] Opened Tutorial Island bank booth"
+                        + " | id=" + tutorialBooth.getId()
+                        + " tile=" + tutorialBooth.getWorldLocation());
             }
             return;
         }
@@ -1690,6 +1934,13 @@ public class TutorialIslandScript extends KspManagedScript
         windStrikeSelected = false;
         pendingInteractionAtMs = 0L;
         pendingInteractionKey = null;
+        lastMiningProgress = -1;
+        lastMiningStageAtMs = 0L;
+        lastMiningDiagnosticAtMs = 0L;
+        lastTutorialWalkerWarningAtMs = 0L;
+        lastRangedDiagnosticAtMs = 0L;
+        lastRangedAttackAtMs = 0L;
+        lastRangedTargetIndex = -1;
     }
 
     // -------------------------------------------------------------------------
@@ -1811,25 +2062,14 @@ public class TutorialIslandScript extends KspManagedScript
                 || Rs2Player.isInteracting()) return false;
         if (!rat.click("Attack")) return false;
         markTutorialInteraction(key);
+        if (Microbot.getVarbitPlayerValue(281) == 490)
+        {
+            lastRangedTargetIndex = rat.getIndex();
+            Microbot.log("[TutIsland] Ranged Attack dispatched | ratId="
+                    + rat.getId() + " npcIndex=" + rat.getIndex()
+                    + " player=" + Rs2Player.getWorldLocation());
+        }
         return true;
-    }
-
-    private boolean selectLongrangeCombatStyle()
-    {
-        Widget longrange = Rs2Widget.findWidget("Longrange", true);
-
-        if (longrange == null)
-        {
-            longrange = Rs2Widget.findWidget("Long range", true);
-        }
-
-        if (longrange == null)
-        {
-            clickTab("Combat Options");
-            return false;
-        }
-
-        return Rs2Widget.clickWidget(longrange);
     }
 
     // -------------------------------------------------------------------------
