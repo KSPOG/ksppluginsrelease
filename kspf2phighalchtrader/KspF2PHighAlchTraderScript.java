@@ -6,6 +6,7 @@ import net.runelite.api.ItemComposition;
 import net.runelite.api.Skill;
 import net.runelite.api.coords.WorldPoint;
 import net.runelite.client.plugins.microbot.Microbot;
+import lombok.extern.slf4j.Slf4j;
 import net.runelite.client.plugins.microbot.kspsupport.KspBreakAwareScript;
 import net.runelite.client.plugins.microbot.util.bank.Rs2Bank;
 import net.runelite.client.plugins.microbot.util.bank.enums.BankLocation;
@@ -36,6 +37,7 @@ import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 import javax.inject.Singleton;
 
+@Slf4j
 @Singleton
 public class KspF2PHighAlchTraderScript extends KspBreakAwareScript {
     public enum State {
