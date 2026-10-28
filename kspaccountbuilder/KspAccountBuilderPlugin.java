@@ -49,7 +49,7 @@ import net.runelite.client.ui.NavigationButton;
 @SuppressWarnings("unused")
 public class KspAccountBuilderPlugin extends Plugin
 {
-    public static final String VERSION = "1.9.60";
+    public static final String VERSION = "1.9.61";
 
     @Inject
     private KspAccountBuilderScript script;
@@ -602,6 +602,24 @@ public class KspAccountBuilderPlugin extends Plugin
         }
 
         String taskName = script.getCurrentTaskName();
+
+        // GameTick enforcement runs independently of the tutorial worker.
+        // A stale bank-cache or old task worker must not retain a mainland
+        // WebWalker destination while this client is still on Tutorial Island.
+        if ("TUTORIAL_ISLAND".equals(taskName)
+                && Microbot.getClient() != null
+                && Microbot.getClient().getLocalPlayer() != null)
+        {
+            net.runelite.api.coords.WorldPoint player =
+                    Microbot.getClient().getLocalPlayer().getWorldLocation();
+            net.runelite.api.coords.WorldPoint destination = Rs2Walker.getCurrentTarget();
+            if (net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.tutorialisland.areas.TutAreas.contains(player)
+                    && destination != null
+                    && !net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.tutorialisland.areas.TutAreas.contains(destination))
+            {
+                Rs2Walker.clearWalkingRoute("ksp_tutorial_game_tick_mainland_route_rejected");
+            }
+        }
 
         // The EssenceMining worker may be inside a synchronous Rs2Walker call
         // when Aubury teleports the player into the essence mine. Cancel its
