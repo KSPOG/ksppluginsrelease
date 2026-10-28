@@ -1,4 +1,5 @@
 package net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.questing.shared;
+import net.runelite.client.plugins.microbot.util.walker.Rs2Walker;
 
 import net.runelite.client.plugins.microbot.kspaccountbuilder.KspAccountBuilderPauseGate;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.KspManagedScript;
@@ -10,7 +11,7 @@ import net.runelite.api.QuestState;
 import net.runelite.api.coords.WorldPoint;
 import net.runelite.client.plugins.microbot.Microbot;
 import net.runelite.client.plugins.microbot.Script;
-import net.runelite.client.plugins.microbot.kspaccountbuilder.KspWalkerGuard;
+
 import net.runelite.client.plugins.microbot.kspaccountbuilder.ksputil.KspLiveScene;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.ksputil.KspBankWidgetHelper;
 import net.runelite.client.plugins.microbot.util.bank.Rs2Bank;
@@ -284,7 +285,7 @@ public abstract class SimpleQuestScript extends KspManagedScript
     {
         if (!Rs2Dialogue.isInCutScene() && !Rs2Dialogue.isInDialogue()
                 && !Rs2Dialogue.hasContinue() && !Rs2Dialogue.hasSelectAnOption()) return false;
-        KspWalkerGuard.clearActiveWalker(questName + ":dialogue");
+        Rs2Walker.clearWalkingRoute(questName + ":dialogue");
         state = QuestTaskState.DIALOGUE;
         setStatus("Handling " + questName + " dialogue");
         if (Rs2Dialogue.hasContinue()) Rs2Dialogue.clickContinue();
@@ -303,12 +304,12 @@ public abstract class SimpleQuestScript extends KspManagedScript
         String key = questName + ":" + target;
         if (player != null && player.getPlane() == destination.getPlane() && player.distanceTo(destination) <= radius)
         {
-            KspWalkerGuard.clear(key);
+            Rs2Walker.clearWalkingRoute(key);
             return true;
         }
         state = QuestTaskState.WALKING;
         setStatus("Walking to " + target);
-        KspWalkerGuard.walkToPoint(key, destination, radius, 1_000L);
+        Rs2Walker.walkTo(destination, radius);
         return false;
     }
 
@@ -327,8 +328,8 @@ public abstract class SimpleQuestScript extends KspManagedScript
                 && player.distanceTo(npc.getWorldLocation()) <= 8
                 && npc.isReachable())
         {
-            KspWalkerGuard.clear(key);
-            KspWalkerGuard.clearActiveWalker(questName + ":reachable-npc:" + name);
+            Rs2Walker.clearWalkingRoute(key);
+            Rs2Walker.clearWalkingRoute(questName + ":reachable-npc:" + name);
             // A reachable NPC may already be processing the previous Talk-to.
             // Wait for movement, animation and interaction to finish before
             // dispatching another click. The existing actionSent() cooldown
@@ -367,7 +368,7 @@ public abstract class SimpleQuestScript extends KspManagedScript
                 || Rs2Player.isAnimating()
                 || Rs2Player.isInteracting()
                 || !npc.isReachable()) return;
-        KspWalkerGuard.clear(key);
+        Rs2Walker.clearWalkingRoute(key);
         state = QuestTaskState.INTERACTING;
         setStatus("Talking to " + name);
         if (npc.click("Talk-to")) actionSent();

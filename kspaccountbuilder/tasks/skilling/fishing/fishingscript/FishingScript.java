@@ -1,4 +1,5 @@
 package net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.fishing.fishingscript;
+import net.runelite.client.plugins.microbot.util.dialogues.Rs2Dialogue;
 
 import net.runelite.client.plugins.microbot.kspaccountbuilder.KspAccountBuilderPauseGate;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.KspManagedScript;
@@ -20,11 +21,11 @@ import net.runelite.client.plugins.microbot.api.tileobject.models.Rs2TileObjectM
 import net.runelite.client.plugins.microbot.globval.enums.InterfaceTab;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.KspBankMode;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.KspTaskDebug;
-import net.runelite.client.plugins.microbot.kspaccountbuilder.KspWalkerGuard;
+
 import net.runelite.client.plugins.microbot.kspaccountbuilder.ksputil.KspBankWidgetHelper;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.ksputil.KspLiveScene;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.fishing.areas.Areas;
-import net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.fishing.helper.KaramjaTravelHelper;
+
 import net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.fishing.levelreqfishing.LevelReqs;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.fishing.needed.Inventory;
 import net.runelite.client.plugins.microbot.util.bank.Rs2Bank;
@@ -145,8 +146,7 @@ public class FishingScript extends KspManagedScript
             if (Rs2Inventory.isFull())
             {
                 // Stop any prior fishing route before attempting cooking/banking.
-                KspWalkerGuard.clearReachedDestination(
-                        WALK_KEY_TO_FISHING_AREA, "fishing_inventory_full");
+                Rs2Walker.clearWalkingRoute("fishing_inventory_full");
                 if (!skipCookingUntilBanked && cookTroutOrSalmonBeforeBanking())
                 {
                     state = FishingState.COOKING;
@@ -304,7 +304,6 @@ public class FishingScript extends KspManagedScript
                     Rs2Inventory.emptySlotCount(), Rs2Walker.getCurrentTarget());
             skipCookingUntilBanked = true;
             resetCookingBatch();
-            KspWalkerGuard.clear(WALK_KEY_TO_TROUT_SALMON_FIRE);
             return false;
         }
 
@@ -343,7 +342,6 @@ public class FishingScript extends KspManagedScript
                 player, 30, object -> object.getId() == TROUT_SALMON_FIRE_ID);
         if (fire == null) {
             pendingCookingFireActionAtMs = 0L;
-            KspWalkerGuard.clear(WALK_KEY_TO_TROUT_SALMON_FIRE);
             resetCookingBatch();
             return false;
         }
@@ -355,10 +353,9 @@ public class FishingScript extends KspManagedScript
                 ? TROUT_SALMON_FIRE_APPROACH : fire.getWorldLocation();
         if (player.distanceTo(approach) > 1)
         {
-            KspWalkerGuard.walkToPoint(WALK_KEY_TO_TROUT_SALMON_FIRE, approach, 1, WEB_WALK_COOLDOWN_MS);
+            Rs2Walker.walkTo(approach, 1);
             return true;
         }
-        KspWalkerGuard.clear(WALK_KEY_TO_TROUT_SALMON_FIRE);
 
         if (pendingCookingFireActionAtMs > 0L
                 && System.currentTimeMillis() - pendingCookingFireActionAtMs < ACTION_DISPATCH_TIMEOUT_MS) {
@@ -467,16 +464,11 @@ public class FishingScript extends KspManagedScript
         if (requiresKaramjaTravel())
         {
             Microbot.status = "Traveling via Port Sarim to Karamja";
-            return KaramjaTravelHelper.travelToKaramjaFishingSpot();
+            return travelToKaramjaFishingSpot();
         }
 
         Microbot.status = "Walking to " + targetArea.getDisplayName();
-        if (KspWalkerGuard.walkToDestination(
-                WALK_KEY_TO_FISHING_AREA,
-                this::getTargetAreaWalkPoint,
-                area::contains,
-                3,
-                WEB_WALK_COOLDOWN_MS))
+        if (Rs2Walker.walkUntil(this.getTargetAreaWalkPoint(), 3, () -> area.contains(Rs2Player.getWorldLocation())))
         {
             lastWebWalkAtMs = System.currentTimeMillis();
             walkingToTargetArea = true;
@@ -516,9 +508,10 @@ public class FishingScript extends KspManagedScript
         }
 
         WorldPoint walkerTarget = Rs2Walker.getCurrentTarget();
-        KspWalkerGuard.clearReachedDestination(
-                WALK_KEY_TO_FISHING_AREA,
-                "ksp_account_builder_fishing_reached_area");
+        if (walkerTarget != null && targetArea.contains(walkerTarget))
+        {
+            Rs2Walker.clearWalkingRoute("ksp_account_builder_fishing_reached_area");
+        }
         debug("Cleared fishing walker route because player is inside task area | player={} area={} oldWalkerTarget={}",
                 playerLocation,
                 targetArea.getDisplayName(),
@@ -587,7 +580,6 @@ public class FishingScript extends KspManagedScript
     private void bankFishOnly()
     {
         resetCookingBatch();
-        KspWalkerGuard.clear(WALK_KEY_TO_TROUT_SALMON_FIRE);
         if (!ensureInventoryTabOpen()) return;
 
         if (requiresKaramjaTravel()) {
@@ -615,7 +607,7 @@ public class FishingScript extends KspManagedScript
 
     private void depositKaramjaFishOnly()
     {
-        if (!KaramjaTravelHelper.returnToPortSarimDepositPoint()) return;
+        if (!returnToPortSarimDepositPoint()) return;
 
         if (!Rs2DepositBox.isOpen()) {
             Rs2DepositBox.openDepositBox();
@@ -937,7 +929,6 @@ public class FishingScript extends KspManagedScript
         pendingBankEmptySlots = -1;
         lastWebWalkAtMs = 0L;
         state = FishingState.WAITING;
-        KspWalkerGuard.clear(WALK_KEY_TO_FISHING_AREA);
         super.shutdown();
     }
 
@@ -978,4 +969,426 @@ public class FishingScript extends KspManagedScript
 
         private List<String> getActions() { return actions; }
     }
+    // Karamja ferry-specific NPC/dialogue actions remain in FishingScript.
+    // All land navigation is delegated to native Rs2Walker.
+
+    private static final List<String> PORT_SARIM_TRAVEL_NPCS = List.of(
+            "Seaman Thresnor",
+            "Seaman Lorris",
+            "Captain Tobias"
+    );
+    private static final List<String> CUSTOMS_OFFICER_NPCS = List.of("Customs Officer");
+    private static final List<String> TRAVEL_ACTIONS = List.of(
+            "Musa Point",
+            "Port Sarim",
+            "Pay-fare",
+            "Travel",
+            "Talk-to"
+    );
+
+    // Force the script to walk to the Port Sarim customs ship first.
+    // Do not path directly to Musa Point from the mainland, otherwise WebWalker may choose
+    // unrelated transports such as the Rimmington ship network.
+    private static final WorldPoint PORT_SARIM_TRAVEL_POINT = new WorldPoint(3029, 3217, 0);
+    private static final WorldPoint PORT_SARIM_DEPOSIT_POINT = new WorldPoint(3047, 3236, 0);
+    private static final WorldPoint KARAMJA_CUSTOMS_POINT = new WorldPoint(2954, 3148, 0);
+    private static final WorldPoint KARAMJA_FISHING_POINT = new WorldPoint(2924, 3177, 0);
+
+    private static final int PORT_SARIM_CUSTOMS_MIN_X = 3039;
+    private static final int PORT_SARIM_CUSTOMS_MAX_X = 3052;
+    private static final int PORT_SARIM_CUSTOMS_MIN_Y = 3234;
+    private static final int PORT_SARIM_CUSTOMS_MAX_Y = 3237;
+
+    private static final int KARAMJA_DOCK_MIN_X = 2951;
+    private static final int KARAMJA_DOCK_MAX_X = 2957;
+    private static final int KARAMJA_DOCK_MIN_Y = 3144;
+    private static final int KARAMJA_DOCK_MAX_Y = 3151;
+
+    private static final int NPC_REACH_DISTANCE = 3;
+    private static final int FISHING_AREA_DISTANCE = 5;
+    private static final int DEPOSIT_AREA_DISTANCE = 6;
+    private static final long WALK_REFIRE_COOLDOWN_MS = 1_000L;
+    private static final long TRAVEL_TRANSITION_TIMEOUT_MS = 15_000L;
+    private static final long INTERACTION_DISPATCH_TIMEOUT_MS = 1_500L;
+
+    private static final String WALK_KEY_TO_PORT_SARIM_TRAVEL = "ksp_fishing_karamja_port_sarim_travel";
+    private static final String WALK_KEY_TO_PORT_SARIM_DEPOSIT = "ksp_fishing_karamja_port_sarim_deposit";
+    private static final String WALK_KEY_TO_KARAMJA_CUSTOMS = "ksp_fishing_karamja_customs";
+    private static final String WALK_KEY_TO_KARAMJA_FISHING = "ksp_fishing_karamja_fishing";
+    private static final String WALK_KEY_TO_PORT_SARIM_NPC = "ksp_fishing_karamja_port_sarim_npc";
+    private static final String WALK_KEY_TO_CUSTOMS_NPC = "ksp_fishing_karamja_customs_npc";
+
+    private static volatile TravelDirection pendingTravelDirection;
+    private static volatile long pendingTravelUntilMs;
+    private static volatile long pendingInteractionAtMs;
+    private static volatile String pendingInteractionKey;
+public static boolean travelToKaramjaFishingSpot()
+    {
+        if (handleTravelDialogue(TravelDirection.TO_KARAMJA))
+        {
+            return false;
+        }
+
+        WorldPoint playerLocation = Rs2Player.getWorldLocation();
+        if (playerLocation == null)
+        {
+            return false;
+        }
+
+        if (isTravelTransitionPending(TravelDirection.TO_KARAMJA, playerLocation))
+        {
+            return false;
+        }
+
+        if (isNearKaramjaFishingSpot(playerLocation))
+        {
+            clearKaramjaTravelState();
+            return true;
+        }
+
+        if (isInKaramjaArea(playerLocation))
+        {
+            Rs2Walker.walkTo(KARAMJA_FISHING_POINT, FISHING_AREA_DISTANCE);
+            return false;
+        }
+
+        if (!isNearPortSarimTravelPoint(playerLocation))
+        {
+            // Important: the only mainland target before Musa Point must be the Port Sarim boat.
+            // This prevents the global pathfinder from selecting Rimmington/charter-style routes.
+            Rs2Walker.walkTo(PORT_SARIM_TRAVEL_POINT, NPC_REACH_DISTANCE);
+            return false;
+        }
+
+        interactWithNearestNpc(
+                PORT_SARIM_TRAVEL_NPCS,
+                WALK_KEY_TO_PORT_SARIM_NPC,
+                TravelDirection.TO_KARAMJA);
+        return false;
+    }
+
+    public static boolean returnToPortSarimDepositPoint()
+    {
+        if (handleTravelDialogue(TravelDirection.TO_PORT_SARIM))
+        {
+            return false;
+        }
+
+        WorldPoint playerLocation = Rs2Player.getWorldLocation();
+        if (playerLocation == null)
+        {
+            return false;
+        }
+
+        if (isTravelTransitionPending(TravelDirection.TO_PORT_SARIM, playerLocation))
+        {
+            return false;
+        }
+
+        if (!isInKaramjaArea(playerLocation)
+                && playerLocation.distanceTo(PORT_SARIM_DEPOSIT_POINT) <= DEPOSIT_AREA_DISTANCE)
+        {
+            clearKaramjaTravelState();
+            return true;
+        }
+
+        if (isInKaramjaDockArea(playerLocation))
+        {
+            interactWithNearestNpc(
+                    CUSTOMS_OFFICER_NPCS,
+                    WALK_KEY_TO_CUSTOMS_NPC,
+                    TravelDirection.TO_PORT_SARIM);
+            return false;
+        }
+
+        if (isInKaramjaArea(playerLocation))
+        {
+            Rs2Walker.walkTo(KARAMJA_CUSTOMS_POINT, NPC_REACH_DISTANCE);
+            return false;
+        }
+
+        Rs2Walker.walkTo(PORT_SARIM_DEPOSIT_POINT, DEPOSIT_AREA_DISTANCE);
+        return false;
+    }
+
+    public static boolean isNearKaramjaFishingSpot() { return isNearKaramjaFishingSpot(Rs2Player.getWorldLocation()); }
+
+    public static boolean isNearKaramjaFishingSpot(WorldPoint location)
+    {
+        return location != null
+                && location.getPlane() == KARAMJA_FISHING_POINT.getPlane()
+                && location.distanceTo(KARAMJA_FISHING_POINT) <= FISHING_AREA_DISTANCE;
+    }
+
+    public static boolean isInKaramjaDockArea() { return isInKaramjaDockArea(Rs2Player.getWorldLocation()); }
+
+    public static boolean isInKaramjaDockArea(WorldPoint location)
+    {
+        return isWithinBounds(
+                location,
+                KARAMJA_DOCK_MIN_X,
+                KARAMJA_DOCK_MAX_X,
+                KARAMJA_DOCK_MIN_Y,
+                KARAMJA_DOCK_MAX_Y
+        );
+    }
+
+    public static boolean isNearPortSarimTravelPoint() { return isNearPortSarimTravelPoint(Rs2Player.getWorldLocation()); }
+
+    public static boolean isNearPortSarimTravelPoint(WorldPoint location)
+    {
+        return location != null
+                && location.getPlane() == PORT_SARIM_TRAVEL_POINT.getPlane()
+                && location.distanceTo2D(PORT_SARIM_TRAVEL_POINT) <= NPC_REACH_DISTANCE;
+    }
+
+    public static boolean isInPortSarimCustomsArea() { return isInPortSarimCustomsArea(Rs2Player.getWorldLocation()); }
+
+    public static boolean isInPortSarimCustomsArea(WorldPoint location)
+    {
+        return isWithinBounds(
+                location,
+                PORT_SARIM_CUSTOMS_MIN_X,
+                PORT_SARIM_CUSTOMS_MAX_X,
+                PORT_SARIM_CUSTOMS_MIN_Y,
+                PORT_SARIM_CUSTOMS_MAX_Y
+        );
+    }
+
+    public static boolean isInKaramjaArea() { return isInKaramjaArea(Rs2Player.getWorldLocation()); }
+
+    public static boolean isInKaramjaArea(WorldPoint location)
+    {
+        return location != null
+                && location.getPlane() == 0
+                && location.getX() < 3000
+                && location.getY() < 3200;
+    }
+
+    public static WorldPoint getKaramjaFishingPoint() { return KARAMJA_FISHING_POINT; }
+
+    public static WorldPoint getKaramjaCustomsPoint() { return KARAMJA_CUSTOMS_POINT; }
+
+    public static WorldPoint getPortSarimTravelPoint() { return PORT_SARIM_TRAVEL_POINT; }
+
+    public static WorldPoint getPortSarimDepositPoint() { return PORT_SARIM_DEPOSIT_POINT; }
+
+    public static void clearKaramjaTravelState()
+    {
+        clearPendingTravel();
+        clearPendingInteraction();
+        // Core WebWalker owns route state; the ferry step has no keyed walks.
+        if (Rs2Walker.getCurrentTarget() != null)
+        {
+            Rs2Walker.clearWalkingRoute("ksp_fishing_karamja_arrived");
+        }
+    }
+
+    private static boolean handleTravelDialogue(TravelDirection direction)
+    {
+        if (Rs2Dialogue.hasContinue())
+        {
+            if (isInteractionPending("dialogue-continue")) return true;
+            Rs2Dialogue.clickContinue();
+            markInteraction("dialogue-continue");
+            return true;
+        }
+
+        if (!Rs2Dialogue.hasSelectAnOption())
+        {
+            return false;
+        }
+
+        boolean clicked = Rs2Dialogue.clickOption(
+                "Yes please",
+                "Yes",
+                "Musa Point",
+                "Karamja",
+                "Port Sarim",
+                "pay",
+                "travel",
+                "sail"
+        );
+        if (clicked)
+        {
+            markTravelPending(direction);
+        }
+        return clicked;
+    }
+
+    
+
+    
+
+    private static boolean interactWithNearestNpc(
+            List<String> npcNames,
+            String walkKey,
+            TravelDirection direction)
+    {
+        Rs2NpcModel npc = findNearestNpc(npcNames);
+        if (npc == null)
+        {
+            return false;
+        }
+
+        WorldPoint playerLocation = Rs2Player.getWorldLocation();
+        WorldPoint npcLocation = npc.getWorldLocation();
+        if (playerLocation == null || npcLocation == null)
+        {
+            return false;
+        }
+
+        if (playerLocation.distanceTo(npcLocation) > NPC_REACH_DISTANCE)
+        {
+            Rs2Walker.walkTo(npcLocation, NPC_REACH_DISTANCE);
+            return false;
+        }
+
+        String action = getKaramjaNpcAvailableAction(npc, TRAVEL_ACTIONS);
+        if (action.isEmpty())
+        {
+            return false;
+        }
+
+        String interactionKey = "npc:" + npc.getIndex() + ":" + action;
+        if (isInteractionPending(interactionKey)
+                || Rs2Player.isMoving()
+                || Rs2Player.isAnimating()
+                || Rs2Player.isInteracting())
+        {
+            return false;
+        }
+
+        boolean clicked = npc.click(action);
+        if (clicked)
+        {
+            markInteraction(interactionKey);
+            if (!"Talk-to".equalsIgnoreCase(action))
+            {
+                markTravelPending(direction);
+            }
+        }
+        return clicked;
+    }
+
+    private static boolean isInteractionPending(String key)
+    {
+        if (pendingInteractionAtMs == 0L || pendingInteractionKey == null) return false;
+        if (!pendingInteractionKey.equals(key)) return false;
+        if (System.currentTimeMillis() - pendingInteractionAtMs < INTERACTION_DISPATCH_TIMEOUT_MS) return true;
+        clearPendingInteraction();
+        return false;
+    }
+
+    private static void markInteraction(String key)
+    {
+        pendingInteractionKey = key;
+        pendingInteractionAtMs = System.currentTimeMillis();
+    }
+
+    private static void clearPendingInteraction()
+    {
+        pendingInteractionAtMs = 0L;
+        pendingInteractionKey = null;
+    }
+
+    private static boolean isTravelTransitionPending(TravelDirection direction, WorldPoint playerLocation)
+    {
+        TravelDirection pendingDirection = pendingTravelDirection;
+        if (pendingDirection == null)
+        {
+            return false;
+        }
+
+        boolean arrived = pendingDirection == TravelDirection.TO_KARAMJA
+                ? isInKaramjaArea(playerLocation)
+                : !isInKaramjaArea(playerLocation);
+        if (arrived || System.currentTimeMillis() >= pendingTravelUntilMs)
+        {
+            clearPendingTravel();
+            return false;
+        }
+
+        return pendingDirection == direction;
+    }
+
+    private static void markTravelPending(TravelDirection direction)
+    {
+        pendingTravelDirection = direction;
+        pendingTravelUntilMs = System.currentTimeMillis() + TRAVEL_TRANSITION_TIMEOUT_MS;
+    }
+
+    private static void clearPendingTravel()
+    {
+        pendingTravelDirection = null;
+        pendingTravelUntilMs = 0L;
+    }
+
+    private static Rs2NpcModel findNearestNpc(List<String> npcNames)
+    {
+        if (npcNames == null || npcNames.isEmpty())
+        {
+            return null;
+        }
+
+        return KspLiveScene.nearestNpcModel(Rs2Player.getWorldLocation(), 30,
+                npc -> npc.getName() != null
+                        && npcNames.stream().anyMatch(name -> name.equalsIgnoreCase(npc.getName())));
+    }
+
+    private static String getKaramjaNpcAvailableAction(Rs2NpcModel npc, List<String> preferredActions)
+    {
+        if (npc == null || preferredActions == null || preferredActions.isEmpty())
+        {
+            return "";
+        }
+
+        return Microbot.getClientThread().runOnClientThreadOptional(() -> {
+            if (Microbot.getClient() == null)
+            {
+                return "";
+            }
+
+            NPCComposition composition = Microbot.getClient().getNpcDefinition(npc.getId());
+            if (composition == null || composition.getActions() == null)
+            {
+                return "";
+            }
+
+            for (String preferredAction : preferredActions)
+            {
+                for (String action : composition.getActions())
+                {
+                    if (action != null && action.equalsIgnoreCase(preferredAction))
+                    {
+                        return action;
+                    }
+                }
+            }
+
+            return "";
+        }).orElse("");
+    }
+
+    private static boolean isWithinBounds(
+            WorldPoint location,
+            int minX,
+            int maxX,
+            int minY,
+            int maxY)
+    {
+        return location != null
+                && location.getPlane() == 0
+                && location.getX() >= minX
+                && location.getX() <= maxX
+                && location.getY() >= minY
+                && location.getY() <= maxY;
+    }
+
+    private enum TravelDirection
+    {
+        TO_KARAMJA,
+        TO_PORT_SARIM
+    }
+
 }

@@ -1,4 +1,5 @@
 package net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.selling.sellscript;
+import net.runelite.client.plugins.microbot.util.walker.Rs2Walker;
 
 import net.runelite.client.plugins.microbot.kspaccountbuilder.KspAccountBuilderPauseGate;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.KspManagedScript;
@@ -30,7 +31,7 @@ import net.runelite.client.plugins.microbot.kspaccountbuilder.KspAccountPlayTime
 import net.runelite.client.plugins.microbot.kspaccountbuilder.KspAccountBuilderConfig;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.KspTrainSingleSkillTask;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.KspTaskDebug;
-import net.runelite.client.plugins.microbot.kspaccountbuilder.KspWalkerGuard;
+
 import net.runelite.client.plugins.microbot.kspaccountbuilder.KspWorldMapGuard;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.ksputil.KspBankWidgetHelper;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.questing.cooksassistant.reqs.Items;
@@ -179,7 +180,7 @@ public class SellScript extends KspManagedScript
             return;
         }
 
-        KspWalkerGuard.clear(WALK_KEY);
+        Rs2Walker.clearWalkingRoute(WALK_KEY);
 
         // Once a bank batch starts, keep ownership of the state until every
         // eligible item that fits has been withdrawn and the bank is closed.
@@ -204,8 +205,7 @@ public class SellScript extends KspManagedScript
     private void walkToGe()
     {
         Microbot.status = "Walking to GE";
-        KspWalkerGuard.walkToDestination(WALK_KEY, targetArea::getRandomPoint,
-                targetArea.toWorldArea()::contains, 2, 0L);
+        Rs2Walker.walkUntil(targetArea.getRandomPoint(), 2, () -> targetArea.toWorldArea().contains(Rs2Player.getWorldLocation()));
     }
 
     private void bankSellItems()
@@ -1164,7 +1164,7 @@ public class SellScript extends KspManagedScript
     @Override
     public void shutdown()
     {
-        KspWalkerGuard.clear(WALK_KEY);
+        Rs2Walker.clearWalkingRoute(WALK_KEY);
         state = SellState.GOING_TO_GE;
         complete = false;
         bankInventoryPrepared = false;

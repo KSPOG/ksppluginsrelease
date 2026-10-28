@@ -1,4 +1,5 @@
 package net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.cooking.cookingscript;
+import net.runelite.client.plugins.microbot.util.walker.Rs2Walker;
 
 import net.runelite.client.plugins.microbot.kspaccountbuilder.KspAccountBuilderPauseGate;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.KspManagedScript;
@@ -15,7 +16,7 @@ import net.runelite.client.plugins.microbot.Microbot;
 import net.runelite.client.plugins.microbot.Script;
 import net.runelite.client.plugins.microbot.api.tileobject.models.Rs2TileObjectModel;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.KspTaskDebug;
-import net.runelite.client.plugins.microbot.kspaccountbuilder.KspWalkerGuard;
+
 import net.runelite.client.plugins.microbot.kspaccountbuilder.ksputil.KspBankWidgetHelper;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.ksputil.KspLiveScene;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.cooking.areas.Areas;
@@ -243,7 +244,6 @@ public class CookingScript extends KspManagedScript
     {
         if (targetArea != Areas.EDGEVILLE_RANGE)
         {
-            KspWalkerGuard.clear(EXIT_WALK_KEY);
             lastDoorInteractionAtMs = 0L;
         lastStoveInteractionAtMs = 0L;
             return false;
@@ -252,7 +252,6 @@ public class CookingScript extends KspManagedScript
         WorldPoint playerLocation = Rs2Player.getWorldLocation();
         if (!targetArea.getArea().contains(playerLocation))
         {
-            KspWalkerGuard.clear(EXIT_WALK_KEY);
             lastDoorInteractionAtMs = 0L;
             return false;
         }
@@ -275,7 +274,7 @@ public class CookingScript extends KspManagedScript
         }
 
         lastDoorInteractionAtMs = now;
-        KspWalkerGuard.clearActiveWalker("ksp_cooking_opening_exit_door");
+        Rs2Walker.clearWalkingRoute("ksp_cooking_opening_exit_door");
         Microbot.status = "Opening cooking area door";
         debug("Opened cooking area exit door | doorId={} door={} player={}",
                 COOKING_EXIT_DOOR_ID,
@@ -292,11 +291,7 @@ public class CookingScript extends KspManagedScript
         }
 
         Microbot.status = "Leaving cooking area";
-        KspWalkerGuard.walkFastCanvasToPoint(
-                EXIT_WALK_KEY,
-                COOKING_EXIT_OUTSIDE_POINT,
-                1,
-                1_000L);
+        Rs2Walker.walkTo(COOKING_EXIT_OUTSIDE_POINT, 1);
     }
 
     private boolean ensureInCookingArea()
@@ -304,20 +299,13 @@ public class CookingScript extends KspManagedScript
         WorldPoint playerLocation = Rs2Player.getWorldLocation();
         if (targetArea.getArea().contains(playerLocation))
         {
-            KspWalkerGuard.clearReachedDestination(
-                    WALK_KEY,
-                    "ksp_cooking_reached_cooking_area");
-            KspWalkerGuard.clearActiveWalker("ksp_cooking_inside_cooking_area");
+            Rs2Walker.clearWalkingRoute("ksp_cooking_reached_cooking_area");
+            Rs2Walker.clearWalkingRoute("ksp_cooking_inside_cooking_area");
             return true;
         }
 
         Microbot.status = "Walking to " + targetArea.getDisplayName();
-        KspWalkerGuard.walkToDestination(
-                WALK_KEY,
-                this::getCookingTile,
-                targetArea.getArea()::contains,
-                1,
-                WALK_COOLDOWN_MS);
+        Rs2Walker.walkUntil(this.getCookingTile(), 1, () -> targetArea.getArea().contains(Rs2Player.getWorldLocation()));
         return false;
     }
 
@@ -488,8 +476,6 @@ public class CookingScript extends KspManagedScript
         pendingWorldAction = null;
         pendingBankActionAtMs = 0L;
         pendingBankEmptySlots = -1;
-        KspWalkerGuard.clear(EXIT_WALK_KEY);
-        KspWalkerGuard.clear(WALK_KEY);
         super.shutdown();
     }
 }

@@ -1,4 +1,5 @@
 package net.runelite.client.plugins.microbot.kspaccountbuilder;
+import net.runelite.client.plugins.microbot.util.walker.Rs2Walker;
 
 import com.google.inject.Provides;
 import lombok.extern.slf4j.Slf4j;
@@ -613,8 +614,8 @@ public class KspAccountBuilderPlugin extends Plugin
                 && Microbot.getClient().getLocalPlayer().getWorldLocation() != null
                 && Microbot.getClient().getLocalPlayer().getWorldLocation().getRegionID() == 11595)
         {
-            KspWalkerGuard.clear("Rune Essence:aubury");
-            KspWalkerGuard.clear("Rune Essence:bank");
+            Rs2Walker.clearWalkingRoute("Rune Essence:aubury");
+            Rs2Walker.clearWalkingRoute("Rune Essence:bank");
         }
         boolean useAntiban = config.useAntiban();
         int chance = Math.max(0, Math.min(100, config.antibanChancePercent()));
@@ -700,8 +701,8 @@ public class KspAccountBuilderPlugin extends Plugin
             {
                 try
                 {
-                    KspWalkerGuard.clearActiveWalker("ksp_account_builder_" + reason);
-                    KspWalkerGuard.clear("Woodcutting:target-area");
+                    Rs2Walker.clearWalkingRoute("ksp_account_builder_" + reason);
+                    Rs2Walker.clearWalkingRoute("Woodcutting:target-area");
                 }
                 catch (Exception ex) { log.warn("Unable to clear walker during shutdown", ex); }
             }

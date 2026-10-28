@@ -1,4 +1,5 @@
 package net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.selling.buyscript;
+import net.runelite.client.plugins.microbot.util.walker.Rs2Walker;
 
 import net.runelite.client.plugins.microbot.kspaccountbuilder.KspAccountBuilderPauseGate;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.KspManagedScript;
@@ -22,7 +23,7 @@ import net.runelite.client.plugins.microbot.Script;
 import net.runelite.client.plugins.microbot.globval.enums.InterfaceTab;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.ksputil.KspBankWidgetHelper;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.KspTaskDebug;
-import net.runelite.client.plugins.microbot.kspaccountbuilder.KspWalkerGuard;
+
 import net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.combat.melee.food.Food;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.selling.gearea.GEArea;
 import net.runelite.client.plugins.microbot.util.bank.Rs2Bank;
@@ -317,7 +318,7 @@ public class BuyScript extends KspManagedScript {
 
     private boolean ensureInTargetArea() {
         if (this.targetArea.toWorldArea().contains(Rs2Player.getWorldLocation())) {
-            KspWalkerGuard.clear("GE Buy:target-area");
+            Rs2Walker.clearWalkingRoute("GE Buy:target-area");
             return true;
         }
 
@@ -327,12 +328,7 @@ public class BuyScript extends KspManagedScript {
 
         Microbot.status = "Walking to GE";
 
-        if (KspWalkerGuard.walkToDestination(
-                "GE Buy:target-area",
-                this.targetArea::getRandomPoint,
-                this.targetArea.toWorldArea()::contains,
-                2,
-                WEB_WALK_COOLDOWN_MS)) {
+        if (Rs2Walker.walkUntil(this.targetArea.getRandomPoint(), 2, () -> this.targetArea.toWorldArea().contains(Rs2Player.getWorldLocation()))) {
             this.lastWebWalkAtMs = System.currentTimeMillis();
             this.debug(
                     "Requested GE buy area walk | player={} area={}",
@@ -2757,7 +2753,7 @@ public class BuyScript extends KspManagedScript {
 
         this.complete = false;
         this.insufficientCoinsForMissingBuys = false;
-        KspWalkerGuard.clear("GE Buy:target-area");
+        Rs2Walker.clearWalkingRoute("GE Buy:target-area");
 
         super.shutdown();
     }

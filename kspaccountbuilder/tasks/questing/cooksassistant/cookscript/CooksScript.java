@@ -1,4 +1,5 @@
 package net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.questing.cooksassistant.cookscript;
+import net.runelite.client.plugins.microbot.util.walker.Rs2Walker;
 
 import net.runelite.client.plugins.microbot.kspaccountbuilder.KspAccountBuilderPauseGate;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.KspManagedScript;
@@ -12,7 +13,7 @@ import net.runelite.client.plugins.microbot.Script;
 import net.runelite.client.plugins.microbot.api.npc.models.Rs2NpcModel;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.KspBankMode;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.KspTaskDebug;
-import net.runelite.client.plugins.microbot.kspaccountbuilder.KspWalkerGuard;
+
 import net.runelite.client.plugins.microbot.kspaccountbuilder.ksputil.KspBankWidgetHelper;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.ksputil.KspLiveScene;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.questing.cooksassistant.reqs.Items;
@@ -166,7 +167,7 @@ public class CooksScript extends KspManagedScript {
             return false;
         }
 
-        KspWalkerGuard.clearActiveWalker("ksp_cooks_assistant_dialogue");
+        Rs2Walker.clearWalkingRoute("ksp_cooks_assistant_dialogue");
         pendingNpcInteractionAtMs = 0L;
         pendingNpcIndex = -1;
         state = CooksState.TALKING_TO_COOK;
@@ -297,16 +298,11 @@ public class CooksScript extends KspManagedScript {
         WorldPoint playerLocation = Rs2Player.getWorldLocation();
         WorldArea exchangeArea = GRAND_EXCHANGE.toWorldArea();
         if (playerLocation != null && exchangeArea.contains(playerLocation)) {
-            KspWalkerGuard.clear(WALK_KEY_GE);
+            Rs2Walker.clearWalkingRoute(WALK_KEY_GE);
             return true;
         }
 
-        KspWalkerGuard.walkToDestination(
-                WALK_KEY_GE,
-                GRAND_EXCHANGE::getRandomPoint,
-                exchangeArea::contains,
-                3,
-                WALK_REFIRE_COOLDOWN_MS);
+        Rs2Walker.walkUntil(GRAND_EXCHANGE.getRandomPoint(), 3, () -> exchangeArea.contains(Rs2Player.getWorldLocation()));
         return false;
     }
 
@@ -618,17 +614,12 @@ public class CooksScript extends KspManagedScript {
     private boolean ensureAtCook() {
         WorldPoint playerLocation = Rs2Player.getWorldLocation();
         if (playerLocation != null && LUMBRIDGE_KITCHEN_AREA.contains(playerLocation)) {
-            KspWalkerGuard.clear(WALK_KEY_COOK);
+            Rs2Walker.clearWalkingRoute(WALK_KEY_COOK);
             return true;
         }
 
         status = "Walking to Lumbridge cook";
-        KspWalkerGuard.walkToDestination(
-                WALK_KEY_COOK,
-                () -> LUMBRIDGE_COOK_POINT,
-                LUMBRIDGE_KITCHEN_AREA::contains,
-                3,
-                WALK_REFIRE_COOLDOWN_MS);
+        Rs2Walker.walkUntil((LUMBRIDGE_COOK_POINT), 3, () -> LUMBRIDGE_KITCHEN_AREA.contains(Rs2Player.getWorldLocation()));
         return false;
     }
 
@@ -636,7 +627,7 @@ public class CooksScript extends KspManagedScript {
         Rs2NpcModel cook = findNearestCook();
         if (cook == null) {
             status = "Searching for Cook";
-            KspWalkerGuard.walkFastCanvasToPoint(WALK_KEY_COOK, LUMBRIDGE_COOK_POINT, NPC_REACH_DISTANCE, WALK_REFIRE_COOLDOWN_MS);
+            Rs2Walker.walkTo(LUMBRIDGE_COOK_POINT, NPC_REACH_DISTANCE);
             return false;
         }
 
@@ -646,7 +637,7 @@ public class CooksScript extends KspManagedScript {
 
         if (player.distanceTo(npc) > NPC_REACH_DISTANCE) {
             status = "Walking to Cook";
-            KspWalkerGuard.walkFastCanvasToPoint(WALK_KEY_COOK, npc, NPC_REACH_DISTANCE, WALK_REFIRE_COOLDOWN_MS);
+            Rs2Walker.walkTo(npc, NPC_REACH_DISTANCE);
             return false;
         }
 
@@ -658,7 +649,7 @@ public class CooksScript extends KspManagedScript {
         if (clicked) {
             pendingNpcInteractionAtMs = System.currentTimeMillis();
             pendingNpcIndex = cook.getIndex();
-            KspWalkerGuard.clear(WALK_KEY_COOK);
+            Rs2Walker.clearWalkingRoute(WALK_KEY_COOK);
         }
         return clicked;
     }
@@ -712,8 +703,8 @@ public class CooksScript extends KspManagedScript {
 
     @Override
     public void shutdown() {
-        KspWalkerGuard.clear(WALK_KEY_COOK);
-        KspWalkerGuard.clear(WALK_KEY_GE);
+        Rs2Walker.clearWalkingRoute(WALK_KEY_COOK);
+        Rs2Walker.clearWalkingRoute(WALK_KEY_GE);
         pendingRequirementBuys.clear();
         activeRequirementBuys.clear();
         requirementBankAudited = false;

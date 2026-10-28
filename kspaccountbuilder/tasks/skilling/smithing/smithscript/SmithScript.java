@@ -31,7 +31,7 @@ import net.runelite.client.plugins.microbot.Script;
 import net.runelite.client.plugins.microbot.api.tileobject.models.Rs2TileObjectModel;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.KspBankMode;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.KspTaskDebug;
-import net.runelite.client.plugins.microbot.kspaccountbuilder.KspWalkerGuard;
+
 import net.runelite.client.plugins.microbot.kspaccountbuilder.ksputil.KspLiveScene;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.ksputil.KspBankWidgetHelper;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.smithing.recipes.SmithRecipe;
@@ -309,12 +309,7 @@ extends KspManagedScript {
 
         this.markExistingTargetAreaWalkIfActive();
 
-        if (KspWalkerGuard.walkToDestination(
-                TARGET_AREA_WALK_KEY,
-                this::getTargetAreaWalkPoint,
-                this.targetArea.toWorldArea()::contains,
-                2,
-                WEB_WALK_COOLDOWN_MS)) {
+        if (Rs2Walker.walkUntil(this.getTargetAreaWalkPoint(), 2, () -> this.targetArea.toWorldArea().contains(Rs2Player.getWorldLocation()))) {
             this.lastWebWalkAtMs = System.currentTimeMillis();
             this.lastWalkTarget = Rs2Walker.getCurrentTarget();
             this.walkingToTargetArea = true;
@@ -358,7 +353,7 @@ extends KspManagedScript {
                 || this.isSameDestination(walkerTarget, this.lastWalkTarget, 2);
 
         if (shouldClearWalkerRoute) {
-            KspWalkerGuard.clearActiveWalker("ksp_account_builder_smithing_reached_area");
+            Rs2Walker.clearWalkingRoute("ksp_account_builder_smithing_reached_area");
 
             this.debug("Cleared smithing target-area walk | player={} area={} oldWalkerTarget={} lastWalkTarget={} walkingToTargetArea={}",
                     playerLocation,
@@ -368,7 +363,6 @@ extends KspManagedScript {
                     this.walkingToTargetArea);
         }
 
-        KspWalkerGuard.clear(TARGET_AREA_WALK_KEY);
         this.lastWalkTarget = null;
         this.lastWebWalkAtMs = 0L;
         this.walkingToTargetArea = false;
@@ -432,8 +426,7 @@ extends KspManagedScript {
         }
 
         if (player.distanceTo(anvil.getWorldLocation()) > ANVIL_APPROACH_DISTANCE) {
-            KspWalkerGuard.walkFastCanvasToPoint(
-                    ANVIL_WALK_KEY, anvil.getWorldLocation(), ANVIL_APPROACH_DISTANCE, WEB_WALK_COOLDOWN_MS);
+            Rs2Walker.walkTo(anvil.getWorldLocation(), ANVIL_APPROACH_DISTANCE);
             return;
         }
 
@@ -711,8 +704,6 @@ extends KspManagedScript {
         this.pendingWorldAction = null;
         this.clearInventoryAction();
         this.walkingToTargetArea = false;
-        KspWalkerGuard.clear(TARGET_AREA_WALK_KEY);
-        KspWalkerGuard.clear(ANVIL_WALK_KEY);
         super.shutdown();
     }
 

@@ -1,4 +1,5 @@
 package net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.crafting.craftingscript;
+import net.runelite.client.plugins.microbot.util.walker.Rs2Walker;
 
 import net.runelite.client.plugins.microbot.kspaccountbuilder.KspAccountBuilderPauseGate;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.KspManagedScript;
@@ -13,7 +14,7 @@ import net.runelite.client.plugins.microbot.Script;
 import net.runelite.client.plugins.microbot.api.tileobject.models.Rs2TileObjectModel;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.KspBankMode;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.KspTaskDebug;
-import net.runelite.client.plugins.microbot.kspaccountbuilder.KspWalkerGuard;
+
 import net.runelite.client.plugins.microbot.kspaccountbuilder.ksputil.KspLiveScene;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.ksputil.KspBankWidgetHelper;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.skilling.crafting.areas.Areas;
@@ -392,17 +393,12 @@ public class CraftingScript extends KspManagedScript
         WorldPoint playerLocation = Rs2Player.getWorldLocation();
         if (area.getArea().contains(playerLocation))
         {
-            KspWalkerGuard.clear(walkKey);
+            Rs2Walker.clearWalkingRoute(walkKey);
             return true;
         }
 
         Microbot.status = "Walking to " + area.getDisplayName();
-        KspWalkerGuard.walkToDestination(
-                walkKey,
-                area.getArea()::getRandomPoint,
-                area.getArea()::contains,
-                2,
-                WALK_COOLDOWN_MS);
+        Rs2Walker.walkUntil(area.getArea().getRandomPoint(), 2, () -> area.getArea().contains(Rs2Player.getWorldLocation()));
         return false;
     }
 
@@ -855,8 +851,8 @@ public class CraftingScript extends KspManagedScript
         lastActionAtMs = 0L;
         expectingXpDrop = false;
         bankInventoryReset = false;
-        KspWalkerGuard.clear(BANK_WALK_KEY);
-        KspWalkerGuard.clear(FURNACE_WALK_KEY);
+        Rs2Walker.clearWalkingRoute(BANK_WALK_KEY);
+        Rs2Walker.clearWalkingRoute(FURNACE_WALK_KEY);
         super.shutdown();
     }
 

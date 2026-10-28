@@ -1,4 +1,5 @@
 package net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.questing.romeoandjuliet.romeoscript;
+import net.runelite.client.plugins.microbot.util.walker.Rs2Walker;
 
 import net.runelite.client.plugins.microbot.kspaccountbuilder.KspAccountBuilderPauseGate;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.KspManagedScript;
@@ -15,7 +16,7 @@ import net.runelite.client.plugins.microbot.Microbot;
 import net.runelite.client.plugins.microbot.Script;
 import net.runelite.client.plugins.microbot.api.npc.models.Rs2NpcModel;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.KspTaskDebug;
-import net.runelite.client.plugins.microbot.kspaccountbuilder.KspWalkerGuard;
+
 import net.runelite.client.plugins.microbot.kspaccountbuilder.ksputil.KspLiveScene;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.questing.romeoandjuliet.romeinv.Inv;
 import net.runelite.client.plugins.microbot.questhelper.questinfo.QuestVarPlayer;
@@ -114,13 +115,13 @@ public class RomeoScript extends KspManagedScript
             complete = true;
             state = RomeoState.COMPLETE;
             status = "Romeo and Juliet complete";
-            KspWalkerGuard.clearActiveWalker("ksp_romeo_complete");
+            Rs2Walker.clearWalkingRoute("ksp_romeo_complete");
             return;
         }
 
         if (stage != lastStage)
         {
-            KspWalkerGuard.clearActiveWalker("ksp_romeo_stage_changed_" + stage);
+            Rs2Walker.clearWalkingRoute("ksp_romeo_stage_changed_" + stage);
             clearPendingInteraction();
             lastStage = stage;
         }
@@ -136,7 +137,7 @@ public class RomeoScript extends KspManagedScript
         {
             state = RomeoState.WAITING_FOR_CUTSCENE;
             status = "Waiting for cutscene";
-            KspWalkerGuard.clearActiveWalker("ksp_romeo_cutscene");
+            Rs2Walker.clearWalkingRoute("ksp_romeo_cutscene");
             return;
         }
 
@@ -163,7 +164,7 @@ public class RomeoScript extends KspManagedScript
 
             state = RomeoState.PREPARING;
             status = "Closing bank before quest route";
-            KspWalkerGuard.clear(WALK_JULIET);
+            Rs2Walker.clearWalkingRoute(WALK_JULIET);
             if (System.currentTimeMillis() - lastBankActionAtMs >= BANK_ACTION_COOLDOWN_MS)
             {
                 Rs2Bank.closeBank();
@@ -252,7 +253,7 @@ public class RomeoScript extends KspManagedScript
                 && !Rs2Dialogue.hasContinue()
                 && !Rs2Dialogue.hasSelectAnOption()) return false;
 
-        KspWalkerGuard.clearActiveWalker("ksp_romeo_dialogue");
+        Rs2Walker.clearWalkingRoute("ksp_romeo_dialogue");
         clearPendingInteraction();
 
         if (Rs2Dialogue.hasContinue())
@@ -398,7 +399,7 @@ public class RomeoScript extends KspManagedScript
         {
             state = potion ? RomeoState.RETURNING_POTION_TO_JULIET : RomeoState.WALKING_TO_JULIET_HALLWAY;
             status = "Leaving upper floor for Juliet";
-            KspWalkerGuard.walkToPoint(WALK_JULIET, JULIET_STAIR_ORIGIN, 2, WALK_REFIRE_COOLDOWN_MS);
+            Rs2Walker.walkTo(JULIET_STAIR_ORIGIN, 2);
             return;
         }
 
@@ -408,8 +409,8 @@ public class RomeoScript extends KspManagedScript
                 && player.distanceTo(juliet.getWorldLocation()) <= 8
                 && juliet.isReachable())
         {
-            KspWalkerGuard.clear(WALK_JULIET);
-            KspWalkerGuard.clearActiveWalker("ksp_romeo_reachable_juliet");
+            Rs2Walker.clearWalkingRoute(WALK_JULIET);
+            Rs2Walker.clearWalkingRoute("ksp_romeo_reachable_juliet");
             if (!Rs2Player.isMoving() && interactionReady())
             {
                 state = RomeoState.TALKING_TO_JULIET;
@@ -428,11 +429,11 @@ public class RomeoScript extends KspManagedScript
         {
             state = potion ? RomeoState.RETURNING_POTION_TO_JULIET : RomeoState.WALKING_TO_JULIET_HALLWAY;
             status = "Walking to Juliet's room";
-            KspWalkerGuard.walkToPoint(WALK_JULIET, JULIET_POSITION, NPC_REACH_DISTANCE, WALK_REFIRE_COOLDOWN_MS);
+            Rs2Walker.walkTo(JULIET_POSITION, NPC_REACH_DISTANCE);
             return;
         }
 
-        KspWalkerGuard.clear(WALK_JULIET);
+        Rs2Walker.clearWalkingRoute(WALK_JULIET);
         if (juliet == null || !interactionReady()) return;
 
         state = RomeoState.TALKING_TO_JULIET;
@@ -451,14 +452,14 @@ public class RomeoScript extends KspManagedScript
         if (player.distanceTo(JULIET_STAIR_APPROACH) > 3)
         {
             status = "WebWalking to Juliet staircase";
-            KspWalkerGuard.walkToPoint(WALK_JULIET, JULIET_STAIR_APPROACH, 3, WALK_REFIRE_COOLDOWN_MS);
+            Rs2Walker.walkTo(JULIET_STAIR_APPROACH, 3);
             return;
         }
 
         // We are at the known reachable approach tile. Release walker ownership
         // immediately and let the quest object interaction take over.
-        KspWalkerGuard.clear(WALK_JULIET);
-        KspWalkerGuard.clearActiveWalker("ksp_romeo_at_juliet_staircase");
+        Rs2Walker.clearWalkingRoute(WALK_JULIET);
+        Rs2Walker.clearWalkingRoute("ksp_romeo_at_juliet_staircase");
         if (Rs2Player.isMoving()) return;
         if (!interactionReady()) return;
 
@@ -478,11 +479,11 @@ public class RomeoScript extends KspManagedScript
         if (player.distanceTo(JULIET_TOP_STAIR) > 3)
         {
             status = "Walking to Juliet staircase";
-            KspWalkerGuard.walkToPoint(WALK_JULIET, JULIET_TOP_STAIR, 3, WALK_REFIRE_COOLDOWN_MS);
+            Rs2Walker.walkTo(JULIET_TOP_STAIR, 3);
             return;
         }
 
-        KspWalkerGuard.clear(WALK_JULIET);
+        Rs2Walker.clearWalkingRoute(WALK_JULIET);
         if (!interactionReady()) return;
 
         status = "Climbing down from Juliet's house";
@@ -508,7 +509,7 @@ public class RomeoScript extends KspManagedScript
 
         if (player.distanceTo(JULIET_ROOM_INNER_POSITION) > 1)
         {
-            KspWalkerGuard.walkToPoint(WALK_JULIET, JULIET_ROOM_INNER_POSITION, 1, WALK_REFIRE_COOLDOWN_MS);
+            Rs2Walker.walkTo(JULIET_ROOM_INNER_POSITION, 1);
             return true;
         }
         return false;
@@ -530,8 +531,8 @@ public class RomeoScript extends KspManagedScript
                 && player.distanceTo(npc.getWorldLocation()) <= 8
                 && npc.isReachable())
         {
-            KspWalkerGuard.clear(walkKey);
-            KspWalkerGuard.clearActiveWalker("ksp_romeo_reachable_npc_" + name);
+            Rs2Walker.clearWalkingRoute(walkKey);
+            Rs2Walker.clearWalkingRoute("ksp_romeo_reachable_npc_" + name);
             if (!Rs2Player.isMoving() && interactionReady())
             {
                 state = talkingState;
@@ -549,18 +550,18 @@ public class RomeoScript extends KspManagedScript
         {
             state = walkingState;
             status = "Walking near " + name;
-            KspWalkerGuard.walkToPoint(walkKey, destination, NPC_REACH_DISTANCE, WALK_REFIRE_COOLDOWN_MS);
+            Rs2Walker.walkTo(destination, NPC_REACH_DISTANCE);
             return;
         }
 
         if (npc == null || npc.getWorldLocation() == null)
         {
-            KspWalkerGuard.clear(walkKey);
+            Rs2Walker.clearWalkingRoute(walkKey);
             status = "Searching for " + name;
             return;
         }
 
-        KspWalkerGuard.clear(walkKey);
+        Rs2Walker.clearWalkingRoute(walkKey);
         if (!interactionReady()) return;
 
         state = talkingState;
@@ -577,11 +578,11 @@ public class RomeoScript extends KspManagedScript
         if (player.distanceTo(CADAVA_BUSH_POSITION) > 3)
         {
             status = "WebWalking to Cadava berries";
-            KspWalkerGuard.walkToPoint(WALK_BERRIES, CADAVA_BUSH_POSITION, 2, WALK_REFIRE_COOLDOWN_MS);
+            Rs2Walker.walkTo(CADAVA_BUSH_POSITION, 2);
             return;
         }
 
-        KspWalkerGuard.clear(WALK_BERRIES);
+        Rs2Walker.clearWalkingRoute(WALK_BERRIES);
         if (!interactionReady()) return;
 
         state = RomeoState.PICKING_CADAVA_BERRIES;
@@ -649,11 +650,11 @@ public class RomeoScript extends KspManagedScript
     @Override
     public void shutdown()
     {
-        KspWalkerGuard.clear(WALK_ROMEO);
-        KspWalkerGuard.clear(WALK_LAWRENCE);
-        KspWalkerGuard.clear(WALK_APOTHECARY);
-        KspWalkerGuard.clear(WALK_BERRIES);
-        KspWalkerGuard.clear(WALK_JULIET);
+        Rs2Walker.clearWalkingRoute(WALK_ROMEO);
+        Rs2Walker.clearWalkingRoute(WALK_LAWRENCE);
+        Rs2Walker.clearWalkingRoute(WALK_APOTHECARY);
+        Rs2Walker.clearWalkingRoute(WALK_BERRIES);
+        Rs2Walker.clearWalkingRoute(WALK_JULIET);
         clearPendingInteraction();
         lastActionAtMs = 0L;
         lastBankActionAtMs = 0L;

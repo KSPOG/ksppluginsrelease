@@ -9,7 +9,7 @@ import net.runelite.api.TileObject;
 import net.runelite.api.coords.WorldPoint;
 import net.runelite.client.plugins.microbot.Microbot;
 import net.runelite.client.plugins.microbot.Script;
-import net.runelite.client.plugins.microbot.kspaccountbuilder.KspWalkerGuard;
+
 import net.runelite.client.plugins.microbot.kspaccountbuilder.ksputil.KspLiveScene;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.stronghold.areas.Areas;
 import net.runelite.client.plugins.microbot.kspaccountbuilder.tasks.stronghold.inventory.InvFood;
@@ -147,8 +147,8 @@ public class SoCScript extends KspManagedScript
                 && location.getY() <= GATE_OF_WAR_SOUTH_TILE.getY())
         {
             gateOfWarAdvancePending = true;
-            KspWalkerGuard.clear(WALK_KEY);
-            KspWalkerGuard.clearActiveWalker("ksp_stronghold_gate_of_war_crossed");
+            Rs2Walker.clearWalkingRoute(WALK_KEY);
+            Rs2Walker.clearWalkingRoute("ksp_stronghold_gate_of_war_crossed");
         }
 
         if (!gateOfWarAdvancePending)
@@ -159,18 +159,12 @@ public class SoCScript extends KspManagedScript
         if (location.distanceTo(GATE_OF_WAR_ADVANCE_TILE) <= 1)
         {
             gateOfWarAdvancePending = false;
-            KspWalkerGuard.clearReachedDestination(
-                    GATE_OF_WAR_WALK_KEY,
-                    "ksp_stronghold_gate_of_war_advanced");
+            Rs2Walker.clearWalkingRoute("ksp_stronghold_gate_of_war_advanced");
             return false;
         }
 
         Microbot.status = "Moving past Gate of War";
-        KspWalkerGuard.walkFastCanvasToPoint(
-                GATE_OF_WAR_WALK_KEY,
-                GATE_OF_WAR_ADVANCE_TILE,
-                1,
-                WALK_REFIRE_MS);
+        Rs2Walker.walkTo(GATE_OF_WAR_ADVANCE_TILE, 1);
         return true;
     }
 
@@ -181,16 +175,11 @@ public class SoCScript extends KspManagedScript
         {
             resetRewardInteraction();
             Microbot.status = "Walking to " + area.getDisplayName();
-            KspWalkerGuard.walkToDestination(
-                    WALK_KEY,
-                    area.getArea()::getRandomPoint,
-                    area.getArea()::contains,
-                    2,
-                    WALK_REFIRE_MS);
+            Rs2Walker.walkUntil(area.getArea().getRandomPoint(), 2, () -> area.getArea().contains(Rs2Player.getWorldLocation()));
             return;
         }
 
-        KspWalkerGuard.clear(WALK_KEY);
+        Rs2Walker.clearWalkingRoute(WALK_KEY);
         if (!rewardInteractionStarted)
         {
             Microbot.status = "Claiming " + area.getDisplayName();
@@ -229,7 +218,7 @@ public class SoCScript extends KspManagedScript
         TileObject object = Rs2GameObject.findObjectByLocation(location);
         if (object == null || object.getId() != objectId)
         {
-            KspWalkerGuard.walkToPoint(WALK_KEY, location, 1, WALK_REFIRE_MS);
+            Rs2Walker.walkTo(location, 1);
             return false;
         }
 
@@ -281,8 +270,8 @@ public class SoCScript extends KspManagedScript
         }
 
         securityDoorDialogueActive = false;
-        KspWalkerGuard.clear(WALK_KEY);
-        KspWalkerGuard.clearActiveWalker("ksp_stronghold_security_door_crossed");
+        Rs2Walker.clearWalkingRoute(WALK_KEY);
+        Rs2Walker.clearWalkingRoute("ksp_stronghold_security_door_crossed");
         Microbot.status = "Continuing through Stronghold";
         return true;
     }
@@ -383,11 +372,11 @@ public class SoCScript extends KspManagedScript
         securityDoorDialogueActive = false;
         gateOfWarAdvancePending = false;
         resetRewardInteraction();
-        KspWalkerGuard.clear(WALK_KEY);
-        KspWalkerGuard.clear(GATE_OF_WAR_WALK_KEY);
+        Rs2Walker.clearWalkingRoute(WALK_KEY);
+        Rs2Walker.clearWalkingRoute(GATE_OF_WAR_WALK_KEY);
         if (Rs2Walker.getCurrentTarget() != null)
         {
-            KspWalkerGuard.clearActiveWalker("ksp_stronghold_shutdown");
+            Rs2Walker.clearWalkingRoute("ksp_stronghold_shutdown");
         }
         super.shutdown();
     }
