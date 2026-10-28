@@ -109,6 +109,46 @@ jobs:
           assert 'if (progress >= 680)' in mage and 'castLumbridgeHomeTeleport();' in mage
           print('PASS: Tutorial Island preempts mainland teleport/bank tasks and uses client-thread location + stage')
           
+      - name: Verify Mining/Ranged/Banker Tutorial Island regression fixes
+        shell: python
+        run: |
+          from pathlib import Path
+          root = Path('release/kspaccountbuilder')
+          tutorial = (root / 'tasks/tutorialisland/TutorialIslandScript.java').read_text()
+          plugin = (root / 'KspAccountBuilderPlugin.java').read_text()
+          assert 'VERSION = "1.9.61"' in plugin
+
+          mining = tutorial.split('private void miningGuide()', 1)[1].split('private void smeltTutorialBronze()', 1)[0]
+          for state in (260, 270, 280, 290, 300, 310, 320, 330, 340, 350):
+              assert 'case ' + str(state) + ':' in mining, 'Missing mining tutorial progress ' + str(state)
+          assert 'ObjectID.TIN_ROCKS' in tutorial and 'ObjectID.COPPER_ROCKS' in tutorial
+          assert 'KspLiveScene.nearestModel(player, 18' in mining
+          assert 'object.getId() == objectId' in mining
+          assert 'object.hasAction("Mine")' in mining
+          assert 'Rs2Inventory.hasItem("Tin ore")' in mining
+          assert 'Rs2Inventory.hasItem("Copper ore")' in mining
+          assert 'Mining heartbeat' in mining
+          assert 'lastMiningProgress' in mining
+          assert 'TUTORIAL_TIN_ROCK = new WorldPoint(' not in tutorial, 'No unverified hardcoded ore tiles'
+
+          ranged = tutorial.split('private void attackRatWithRange()', 1)[1].split('private void bankerGuide()', 1)[0]
+          assert 'equipRequiredTutorialRangedGear()' in ranged
+          assert 'if (attackNearestRat())' in ranged
+          assert 'selectLongrangeCombatStyle()' not in ranged, 'Never spam attack style in ranged stage'
+          assert 'Ranged Attack dispatched' in tutorial
+          assert 'Rs2Equipment.isWearing("Shortbow")' in tutorial
+          assert 'Rs2Equipment.isWearing("Bronze arrow")' in tutorial
+
+          banker = tutorial.split('private void bankerGuide()', 1)[1].split('private void prayerGuide()', 1)[0]
+          assert 'TUT_ISLAND_BANK_AREA.contains(object.getWorldLocation())' in banker
+          assert 'object.hasAction("Bank")' in banker
+          assert 'ObjectID.BANK_BOOTH_10083' in banker
+          assert 'Rs2Bank.openBank()' not in banker and 'Rs2Bank.walkToBank' not in banker
+          assert 'ksp_tutorial_reject_mainland_bank_route' in tutorial
+          assert 'ksp_tutorial_game_tick_mainland_route_rejected' in plugin
+          assert 'TutAreas.contains(destination)' in plugin
+          print('PASS: mining progress/live ore targeting, ranged rat attack and Tutorial Island banker-only routing')
+
       - name: Verify all Rune Essence portal variants and shared recovery
         shell: python
         run: |
