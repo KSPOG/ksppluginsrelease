@@ -1126,6 +1126,11 @@ public final class KspHalloween2026Script extends Script {
             }
             return;
         }
+        if (sweepsWithoutTarget >= RIMMINGTON_SWEEP.length) {
+            stopForReview("Adult search exhausted at " + adultsGiven
+                    + "/5 deliveries; inspect available NPC actions");
+            return;
+        }
         scanRimmington(player, "Looking for adult trick-or-treaters");
     }
 
