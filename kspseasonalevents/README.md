@@ -34,6 +34,22 @@ plugin logs stage transitions, visible dialogue options when unknown, NPC
 IDs and world tiles of successfully targeted event objects. No guessed
 NPC/object IDs are treated as authoritative.
 
+## Child scare progress in overlay and side panel (0.2.6)
+
+The overlay and sidebar previously omitted child progress entirely.
+They now display **Child Spook attempts: X/5** and a separate
+**Child objective: Not verified / Confirmed** status. Five is the
+known checkpoint for returning to Angel/Henja, not proof that the game
+accepted every scare. A Spook click increases *attempted* progress,
+while only the event starter's verified next-objective dialogue marks
+the child objective **Confirmed**.
+
+Attempted child NPC IDs remain saved across Source Loader refreshes.
+A confirmed next stage is also saved and displayed after restarting.
+A reply explicitly instructing more scares can clear the old attempt
+set for a bounded retry. Do not interpret 0/5 after such a reset as
+the game undoing earlier animation attempts.
+
 ## Explicit Angel/Henja child-objective instructions (0.2.6)
 
 When reporting the child-scaring objective, Angel/Henja may reply:
