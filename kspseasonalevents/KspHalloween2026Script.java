@@ -434,11 +434,17 @@ public final class KspHalloween2026Script extends Script {
             }
             return;
         }
-        // At 7/8, a previous session may have missed the eighth
-        // acknowledgment even though the game accepted the final smash.
-        // One complete local discovery sweep is enough before asking the
-        // event starter for authoritative progression instead of looping.
+        // Consult the starter immediately at 7/8 if no target is visible;
+        // the eighth smash may have succeeded in a previous session.
+        if (smashedLanternTiles.size() >= 7 && !sweepRequiredByStarter) {
+            lastVerificationTalkAt = 0L;
+            change(Stage.VERIFY_LANTERNS,
+                    "Checking missed eighth lantern with Angel/Henja");
+            return;
+        }
+        // Search all areas only if the starter specifically says one remains.
         if (sweepsWithoutTarget >= RIMMINGTON_SWEEP.length) {
+            sweepRequiredByStarter = false;
             verificationTalkAttempts = 0;
             lastVerificationTalkAt = 0L;
             verificationDialogueSeen = false;
