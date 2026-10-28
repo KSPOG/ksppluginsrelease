@@ -18,6 +18,7 @@ final class KspSeasonalEventsPanel extends PluginPanel {
     private final JButton start = new JButton("Start");
     private final JButton pause = new JButton("Pause");
     private final JButton stop = new JButton("Stop");
+    private final JButton reset = new JButton("Reset progress");
     private final JLabel state = new JLabel("", SwingConstants.CENTER);
     private final Timer timer;
 
@@ -38,10 +39,12 @@ final class KspSeasonalEventsPanel extends PluginPanel {
         buttons.add(pause);
         buttons.add(stop);
         add(buttons);
+        add(reset);
+        reset.addActionListener(e -> { script.resetProgress(); update(); });
         state.setForeground(Color.LIGHT_GRAY);
         add(state);
-        JLabel warning = new JLabel("<html><center>Halloween 2026 entry beta.<br>"
-                + "Stops at unverified quest stages;<br>no invented walkthrough actions.</center></html>",
+        JLabel warning = new JLabel("<html><center>Halloween 2026 wiki walkthrough.<br>"
+                + "Unrecognised quest interfaces pause<br>for review instead of random clicks.</center></html>",
                 SwingConstants.CENTER);
         warning.setForeground(new Color(245, 182, 103));
         add(warning);
@@ -58,8 +61,11 @@ final class KspSeasonalEventsPanel extends PluginPanel {
         start.setEnabled(!running);
         stop.setEnabled(running);
         pause.setEnabled(running);
+        reset.setEnabled(!running);
         pause.setText(script.isPaused() ? "Resume" : "Pause");
         state.setText("<html><center>" + script.getStage() + "<br>"
+                + "Lanterns: " + script.getLanternCount() + "/8 | Adults: "
+                + script.getAdultsGiven() + "/5<br>"
                 + script.getStatus() + "</center></html>");
     }
 

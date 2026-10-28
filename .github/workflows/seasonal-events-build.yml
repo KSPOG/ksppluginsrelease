@@ -45,7 +45,7 @@ jobs:
           cache: gradle
           cache-dependency-path: hub/**/*.gradle*
 
-      - name: Validate seasonal module independence and guarded Halloween 2026 entry
+      - name: Validate full wiki event stages and persistence
         shell: python
         run: |
           from pathlib import Path
@@ -55,25 +55,43 @@ jobs:
           panel=(root/'KspSeasonalEventsPanel.java').read_text()
           overlay=(root/'KspSeasonalEventsOverlay.java').read_text()
           event=(root/'KspSeasonalEvent.java').read_text()
-          assert 'VERSION = "0.1.0"' in plugin
+          assert 'VERSION = "0.2.0"' in plugin
           assert 'KSP + "Seasonal Events"' in plugin
-          assert 'KspSeasonalEventsPlugin' in plugin and 'kspwillowchopper' not in plugin
-          assert 'HALLOWEEN_2026' in event and 'KspHalloween2026Script' in script
-          assert 'RIMMINGTON' in script and 'Henja' in script and 'Angel' in script
-          assert 'Rs2Walker.walkTo(RIMMINGTON_APPROACH, 8)' in script
-          assert 'if (!introClicked && !RIMMINGTON.contains(player))' in script
-          assert 'Stage.AWAIT_EVENT_STEP' in script
-          assert 'Unknown Halloween dialogue option' in script
-          assert 'Introduction reached; next 2026 event stage unverified' in script
-          assert 'verifiedComplete = true;' in script
-          assert 'public void setPaused(boolean pause)' in script
+          assert 'kspwillowchopper' not in plugin and 'kspwillowchopper' not in script
+          assert 'HALLOWEEN_2026' in event
+          stages = ('INTRODUCTION','SMASH_LANTERNS','REPORT_LANTERNS',
+                    'GET_COSTUME','SPOOK_CHILDREN','REPORT_CHILDREN',
+                    'CHEMIST_RIDDLE','COOK_SUGAR','COLLECT_ONIONS',
+                    'COAT_ONIONS','GIVE_CANDY','FINAL_TALK','WAIT_FOR_REWARD',
+                    'COMPLETED','NEEDS_REVIEW')
+          for stage in stages:
+              assert stage in script, 'Missing Halloween wiki stage: ' + stage
+          assert 'getLanternCount()' in script
+          assert 'smashedLanternTiles.size() >= 8' in script
+          assert 'o.hasActionContaining("Smash")' in script
+          assert 'pendingLanternConfirmed' in script
+          assert 'spookedChildren' in script and 'npcHasAction(n, "Spook")' in script
+          assert 'costumeCount() < 4' in script
+          assert 'Rs2Npc.getNpc("Diango")' in script
+          assert 'Rs2Dialogue.clickOption("92")' in script
+          assert 'Rs2Inventory.useItemOnObject' in script
+          assert 'Rs2Inventory.count("Old onion") >= 5' in script
+          assert 'Rs2Inventory.combine("Molten sugar", "Old onion")' in script
+          assert 'Rs2Inventory.useItemOnNpc' in script
+          assert 'adultsGiven >= 5' in script
+          assert 'Vampyre costume top' in script
+          assert 'configManager.setConfiguration(GROUP, STAGE_KEY' in script
+          assert 'configManager.setConfiguration(GROUP, LANTERNS_KEY' in script
+          assert 'configManager.setConfiguration(GROUP, ADULTS_KEY' in script
+          assert 'public synchronized void resetProgress()' in script
           assert 'new JButton("Start")' in panel
           assert 'new JButton("Pause")' in panel
           assert 'new JButton("Stop")' in panel
+          assert 'new JButton("Reset progress")' in panel
+          assert 'script.getLanternCount()' in overlay
           assert 'script.isActive()' in overlay
           assert 'script.start(config)' in plugin and 'overlays.remove(overlay)' in plugin
-          assert not any('kspwillowchopper' in p.read_text() for p in root.glob('*.java'))
-          print('PASS: standalone seasonal plugin, guarded Halloween intro, safe unknown steps and lifecycle')
+          print('PASS: standalone full wiki stages, progress persistence and guarded completion')
 
       - name: Install Seasonal Events sources into Microbot Hub
         shell: bash

@@ -33,6 +33,10 @@ public final class KspSeasonalEventsOverlay extends OverlayPanel {
                 .left("Event").right("Halloween 2026").build());
         panelComponent.getChildren().add(LineComponent.builder()
                 .left("Stage").right(script.getStage().toString()).build());
+        panelComponent.getChildren().add(LineComponent.builder()
+                .left("Lanterns").right(script.getLanternCount() + "/8").build());
+        panelComponent.getChildren().add(LineComponent.builder()
+                .left("Adults").right(script.getAdultsGiven() + "/5").build());
         return super.render(graphics);
     }
 }

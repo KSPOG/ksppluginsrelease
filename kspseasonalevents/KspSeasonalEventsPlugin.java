@@ -17,7 +17,7 @@ import net.runelite.client.ui.overlay.OverlayManager;
 
 @PluginDescriptor(
         name = PluginConstants.KSP + "Seasonal Events",
-        description = "Independent seasonal event workflows; Halloween 2026 entry beta",
+        description = "Independent seasonal event workflows; Halloween 2026 staged wiki walkthrough",
         tags = {"ksp","holiday","seasonal","halloween","event","f2p"},
         authors = {"KSP"},
         version = KspSeasonalEventsPlugin.VERSION,
@@ -25,7 +25,7 @@ import net.runelite.client.ui.overlay.OverlayManager;
         enabledByDefault = PluginConstants.DEFAULT_ENABLED,
         isExternal = PluginConstants.IS_EXTERNAL)
 public final class KspSeasonalEventsPlugin extends Plugin {
-    public static final String VERSION = "0.1.0";
+    public static final String VERSION = "0.2.0";
     @Inject private ClientToolbar toolbar;
     @Inject private OverlayManager overlays;
     @Inject private KspSeasonalEventsOverlay overlay;
