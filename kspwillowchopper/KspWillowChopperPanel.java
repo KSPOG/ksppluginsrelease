@@ -7,6 +7,7 @@ import net.runelite.client.ui.PluginPanel;
 import javax.swing.JCheckBox;
 import javax.swing.JComboBox;
 import javax.swing.JComponent;
+import javax.swing.JButton;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.SwingConstants;
@@ -15,6 +16,7 @@ import javax.swing.border.EmptyBorder;
 import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Font;
+import java.awt.GridLayout;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.BooleanSupplier;
@@ -27,6 +29,10 @@ final class KspWillowChopperPanel extends PluginPanel {
     private final KspWillowChopperConfig config;
     private final ConfigManager configManager;
     private final KspWillowChopperScript script;
+    private final KspWillowChopperPlugin plugin;
+    private final JButton startButton = new JButton("Start");
+    private final JButton stopButton = new JButton("Stop");
+    private final JButton pauseButton = new JButton("Pause");
     private final JComboBox<KspTree> treeSelector = new JComboBox<>(KspTree.values());
     private final JComboBox<KspChopperMode> modeSelector = new JComboBox<>(KspChopperMode.values());
     private final JCheckBox overlayToggle = new JCheckBox("Show in-game overlay");
@@ -38,10 +44,11 @@ final class KspWillowChopperPanel extends PluginPanel {
     private boolean refreshing;
 
     KspWillowChopperPanel(KspWillowChopperConfig config, ConfigManager configManager,
-                          KspWillowChopperScript script) {
+                          KspWillowChopperScript script, KspWillowChopperPlugin plugin) {
         this.config = config;
         this.configManager = configManager;
         this.script = script;
+        this.plugin = plugin;
 
         JLabel title = new JLabel("KSP Chopper", SwingConstants.CENTER);
         title.setForeground(Color.WHITE);
@@ -52,6 +59,26 @@ final class KspWillowChopperPanel extends PluginPanel {
                 SwingConstants.CENTER);
         subtitle.setForeground(Color.LIGHT_GRAY);
         add(subtitle);
+
+        add(heading("Controls"));
+        JPanel buttons = new JPanel(new GridLayout(1, 3, 5, 0));
+        buttons.setBackground(ColorScheme.DARK_GRAY_COLOR);
+        buttons.add(startButton);
+        buttons.add(pauseButton);
+        buttons.add(stopButton);
+        add(buttons);
+        startButton.addActionListener(event -> {
+            plugin.startChopping();
+            refreshStatus();
+        });
+        pauseButton.addActionListener(event -> {
+            plugin.togglePauseChopping();
+            refreshStatus();
+        });
+        stopButton.addActionListener(event -> {
+            plugin.stopChopping();
+            refreshStatus();
+        });
 
         add(heading("Resource collection"));
         treeSelector.setMaximumRowCount(12);
@@ -166,8 +193,13 @@ final class KspWillowChopperPanel extends PluginPanel {
 
     private void refreshStatus() {
         if (script != null) {
-            status.setText("<html><b>" + script.getState() + "</b><br>"
-                    + script.getStatus() + "</html>");
+            boolean started = script.hasSessionStarted();
+            startButton.setEnabled(!started);
+            stopButton.setEnabled(started);
+            pauseButton.setEnabled(started);
+            pauseButton.setText(script.isUserPaused() ? "Resume" : "Pause");
+            status.setText("<html><b>" + (started ? script.getState() : "Stopped")
+                    + "</b><br>" + (started ? script.getStatus() : "Press Start to chop") + "</html>");
         }
     }
 
