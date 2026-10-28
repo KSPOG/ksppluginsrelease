@@ -25,20 +25,31 @@ final class KspHalloweenChildReport {
                 || message.contains("children") || message.contains("kids");
         boolean tellsUsToScare = message.contains("scare")
                 || message.contains("spook") || message.contains("frighten");
-        boolean childInstruction = refersToChildren && tellsUsToScare;
         boolean explicitlyIncomplete = refersToChildren
                 && (message.contains("more") || message.contains("still")
                     || message.contains("haven't") || message.contains("not all")
                     || message.contains("not yet") || message.contains("keep trying"));
-        if (childInstruction || explicitlyIncomplete)
+        boolean clearlyCompleted = refersToChildren
+                && (message.contains("you've scared")
+                    || message.contains("you have scared")
+                    || message.contains("have been scared")
+                    || message.contains("all scared off"));
+        boolean nextObjective = message.contains("chemist")
+                || message.contains("molten sugar") || message.contains("candy onion")
+                || message.contains("old onion")
+                || (message.contains("sugar")
+                    && (message.contains("adult") || message.contains("onion")));
+
+        if (explicitlyIncomplete)
+            return Instruction.SCARE_CHILDREN;
+        if (clearlyCompleted)
+            return nextObjective ? Instruction.VISIT_CHEMIST : Instruction.UNKNOWN;
+        if (refersToChildren && tellsUsToScare)
             return Instruction.SCARE_CHILDREN;
 
-        // Mentions of adults alone are not enough: an explanation about
-        // adults ignoring costumes can occur during the child objective.
-        if (message.contains("chemist") || message.contains("molten sugar")
-                || message.contains("candy onion") || message.contains("old onion")
-                || (message.contains("sugar")
-                    && (message.contains("adult") || message.contains("onion"))))
+        // Merely mentioning adults is not evidence of progression. Require
+        // the Chemist or the candy/sugar/onion task.
+        if (nextObjective)
             return Instruction.VISIT_CHEMIST;
 
         return Instruction.UNKNOWN;
