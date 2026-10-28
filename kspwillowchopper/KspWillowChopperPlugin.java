@@ -72,7 +72,7 @@ import java.util.regex.Pattern;
 public class KspWillowChopperPlugin extends Plugin {
     private final KspBreakService breaks = new KspBreakService();
 
-    public static final String VERSION = "0.1.5";
+    public static final String VERSION = "0.1.6";
 
     private static final String LEGACY_FORESTRY_PACKAGE =
             "net.runelite.client.plugins.microbot.kspwillowchopper.forestry.";
