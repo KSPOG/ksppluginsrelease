@@ -1,0 +1,154 @@
+name: Build KSP Chopper
+
+on:
+  pull_request:
+    paths:
+      - 'kspwillowchopper/**'
+      - 'kspsupport/**'
+      - 'kspmule/**'
+      - 'kspbank/**'
+      - '.github/tests/chopper/**'
+      - '.github/workflows/chopper-build.yml'
+  push:
+    branches: [main, dev]
+    paths:
+      - 'kspwillowchopper/**'
+      - 'kspsupport/**'
+      - 'kspmule/**'
+      - 'kspbank/**'
+      - '.github/tests/chopper/**'
+      - '.github/workflows/chopper-build.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ksp-chopper-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Compile and test KspWillowChopperPlugin
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout KSP plugins
+        uses: actions/checkout@v4
+        with:
+          path: release
+
+      - name: Checkout Microbot Hub
+        uses: actions/checkout@v4
+        with:
+          repository: chsami/Microbot-Hub
+          ref: main
+          path: hub
+
+      - name: Set up Java 11
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '11'
+          cache: gradle
+          cache-dependency-path: hub/**/*.gradle*
+
+      - name: Validate Chopper controls and strict assigned areas
+        shell: python
+        run: |
+          from pathlib import Path
+          root = Path('release/kspwillowchopper')
+          plugin = (root / 'KspWillowChopperPlugin.java').read_text()
+          panel = (root / 'KspWillowChopperPanel.java').read_text()
+          script = (root / 'KspWillowChopperScript.java').read_text()
+          overlay = (root / 'KspWillowChopperOverlay.java').read_text()
+          tiers = (root / 'KspProgressiveTreeSelection.java').read_text()
+
+          assert 'script.run(config);' in plugin
+          assert plugin.index('script.run(config);') > plugin.index('void startChopping()')
+          assert plugin.index('script.run(config);') < plugin.index('void stopChopping()')
+          assert 'void togglePauseChopping()' in plugin
+          assert 'stopChopping();' in plugin
+          for control in ('startButton', 'pauseButton', 'stopButton'):
+              assert control in panel
+          assert 'script.isUserPaused() ? "Resume" : "Pause"' in panel
+          assert '!script.hasSessionStarted()' in overlay
+          assert 'if (userPaused)' in script and 'public void setUserPaused(boolean paused)' in script
+          assert 'isInAssignedArea(activeTree, player)' in script
+          assert 'KspProgressiveTreeSelection.isInAssignedArea(' in script
+          assert 'findNextChoppableTree(WorldPoint avoidLocation)' in script
+          for area in (
+              'new WorldArea(3149, 3449, 23, 16, 0)',
+              'new WorldArea(3159, 3409, 13, 12, 0)',
+              'new WorldArea(3056, 3250, 8, 7, 0)',
+              'new WorldArea(3085, 3468, 5, 15, 0)'):
+              assert area in tiers, 'Missing exact progressive area: ' + area
+          assert 'KspTree.MAGIC' not in tiers and 'KspTree.REDWOOD' not in tiers
+          print('PASS: control lifecycle, strict progressive zones and overlay gating')
+
+      - name: Install Chopper and shared KSP dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT='hub/src/main/java/net/runelite/client/plugins/microbot'
+          for pkg in kspwillowchopper kspsupport kspmule kspbank; do
+            rm -rf "$ROOT/$pkg"
+            cp -R "release/$pkg" "$ROOT/$pkg"
+          done
+
+      - name: Add shared KSP dependencies to Chopper source set
+        shell: python
+        run: |
+          from pathlib import Path
+          file = Path('hub/gradle/plugin-utils.gradle')
+          source = file.read_text(encoding='utf-8')
+          needle = 'include "${project.ext.getPluginsIncludePath()}/${plugin.dir.name}/**"'
+          replacement = needle + '''
+                    if (plugin.name == "KspWillowChopperPlugin") {
+                        include "${project.ext.getPluginsIncludePath()}/kspsupport/**"
+                        include "${project.ext.getPluginsIncludePath()}/kspmule/**"
+                        include "${project.ext.getPluginsIncludePath()}/kspbank/**"
+                    }'''
+          if needle not in source:
+              raise SystemExit('Microbot-Hub source include rule changed')
+          file.write_text(source.replace(needle, replacement, 1), encoding='utf-8')
+
+      - name: Install Chopper progressive regression suite
+        shell: bash
+        run: |
+          set -euo pipefail
+          DEST='hub/src/test/java/net/runelite/client/plugins/microbot/kspwillowchopper'
+          mkdir -p "$DEST"
+          cp release/.github/tests/chopper/KspProgressiveTreeSelectionTest.java "$DEST/"
+          cat > "$DEST/KspProgressiveJUnitTest.java" <<'EOF'
+          package net.runelite.client.plugins.microbot.kspwillowchopper;
+
+          import org.junit.jupiter.api.Test;
+
+          class KspProgressiveJUnitTest {
+              @Test void assignedAreaAndModeRegressions() {
+                  KspProgressiveTreeSelectionTest.main(new String[0]);
+              }
+          }
+          EOF
+
+      - name: Build and run Chopper regressions
+        working-directory: hub
+        run: |
+          chmod +x gradlew
+          ./gradlew clean build -PpluginList=KspWillowChopperPlugin --stacktrace --no-daemon
+
+      - name: Verify compiled plugin JAR
+        shell: bash
+        run: |
+          set -euo pipefail
+          ls -lh hub/build/libs
+          test -n "$(find hub/build/libs -maxdepth 1 -type f -name 'KspWillowChopperPlugin-*.jar' -print -quit)"
+
+      - name: Upload Chopper JAR
+        uses: actions/upload-artifact@v4
+        with:
+          name: KspWillowChopperPlugin-${{ github.sha }}
+          path: hub/build/libs/KspWillowChopperPlugin-*.jar
+          if-no-files-found: error
+          retention-days: 7
