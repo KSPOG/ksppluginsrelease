@@ -481,8 +481,14 @@ public final class KspHalloween2026Script extends Script {
                     || lower.contains("haven't") || lower.contains("not all")
                     || lower.contains("remaining"));
         if (remaining) {
-            log.info("Halloween starter requests more lanterns | text={}", text);
-            change(Stage.SMASH_LANTERNS, "Starter reports remaining lanterns");
+            starterReportedRemainingCount++;
+            log.info("Halloween starter reports unfinished lanterns | text={}", text);
+            if (starterReportedRemainingCount >= 2) {
+                stopForReview("Starter still reports remaining lanterns after another search");
+            } else {
+                sweepRequiredByStarter = true;
+                change(Stage.SMASH_LANTERNS, "Starter requests remaining lanterns; rescan");
+            }
             return;
         }
         boolean nextTask = lower.contains("diango") || lower.contains("costume")
