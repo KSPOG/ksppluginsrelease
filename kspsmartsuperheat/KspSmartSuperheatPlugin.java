@@ -27,7 +27,9 @@ public class KspSmartSuperheatPlugin extends Plugin
     @Inject private KspSmartSuperheatScript script;
     @Inject private KspSmartSuperheatOverlay overlay;
     @Inject private OverlayManager overlays;
-    private final KspMuleWorkerService muleService = new KspMuleWorkerService("Smart Superheat");
+    private final KspMuleWorkerService muleService = new KspMuleWorkerService(
+            "Smart Superheat", KspSmartSuperheatGeAccess::openLocalBank,
+            KspSmartSuperheatGeAccess::isInGrandExchange);
 
     @Provides KspSmartSuperheatConfig provideConfig(ConfigManager manager) { return manager.getConfig(KspSmartSuperheatConfig.class); }
     KspSmartSuperheatScript getScript() { return script; }
