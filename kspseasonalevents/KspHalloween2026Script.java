@@ -15,6 +15,7 @@ import net.runelite.client.plugins.microbot.util.keyboard.Rs2Keyboard;
 import net.runelite.client.plugins.microbot.util.npc.Rs2Npc;
 import net.runelite.client.plugins.microbot.util.player.Rs2Player;
 import net.runelite.client.plugins.microbot.util.walker.Rs2Walker;
+import java.awt.event.KeyEvent;
 
 import javax.inject.Inject;
 import javax.inject.Singleton;
@@ -62,15 +63,33 @@ public final class KspHalloween2026Script extends Script {
     };
     private static final long ACTION_GAP = 1_400L;
     private static final long WALK_RETRY = 10_000L;
+    // Prefer a complete outfit using distinct equipment slots.
+    // Match each item against live RuneLite item composition names.
+    private static final List<String> DIANGO_COSTUME_PRIORITY = Arrays.asList(
+        "skeleton boots", "skeleton gloves", "skeleton leggings", "skeleton shirt",
+        "skeleton mask", "spooky boots", "spooky gloves", "spooky skirt",
+        "spooky robe", "spooky hood", "spookier boots", "spookier gloves",
+        "spookier skirt", "spookier robe", "spookier hood",
+        "grim reaper gloves", "grim reaper bottoms", "grim reaper top",
+        "grim reaper hood", "gravedigger boots", "gravedigger gloves",
+        "gravedigger leggings", "gravedigger top", "gravedigger mask",
+        "witch boots", "witch robes", "witch top", "witch hat",
+        "jack lantern mask", "halloween wig", "ugly halloween jumper (orange)"
+    );
     private static final String[] COSTUME_PIECES = {
         "Skeleton mask", "Skeleton shirt", "Skeleton leggings", "Skeleton boots",
         "Skeleton gloves", "Grim reaper hood", "Grim reaper top",
         "Grim reaper bottoms", "Grim reaper gloves",
         "Zombie head", "Zombie shirt", "Zombie trousers",
-        "Zombie boots", "Zombie gloves", "Scythe",
-        "Spooky pumpkin lantern", "Halloween scarecrow", "Jack lantern mask",
+        "Zombie boots", "Zombie gloves", "Jack lantern mask",
         "Black h'ween mask", "Red halloween mask", "Blue halloween mask",
-        "Green halloween mask", "Ghostly hood", "Ghostly robe"
+        "Green halloween mask", "Ghostly hood", "Ghostly robe",
+        "Spooky boots", "Spooky gloves", "Spooky skirt", "Spooky robe", "Spooky hood",
+        "Spookier boots", "Spookier gloves", "Spookier skirt", "Spookier robe",
+        "Spookier hood", "Gravedigger boots", "Gravedigger gloves",
+        "Gravedigger leggings", "Gravedigger top", "Gravedigger mask",
+        "Witch boots", "Witch robes", "Witch top", "Witch hat",
+        "Halloween wig", "Ugly halloween jumper (orange)"
     };
 
     public enum Stage {
@@ -122,6 +141,11 @@ public final class KspHalloween2026Script extends Script {
     private int starterReportedRemainingCount;
     private int pendingCandyCount = -1;
     private int pendingAdultIndex = -1;
+    private String pendingHolidayItem;
+    private long pendingHolidayItemAt;
+    private int holidayRetrievalTimeouts;
+    private int holidayScrollAttempts;
+    private int holidayCloseAttempts;
     // A starter conversation is not complete just because the NPC was clicked.
     private Stage pendingStarterNext;
     private long pendingStarterAt;
@@ -145,6 +169,11 @@ public final class KspHalloween2026Script extends Script {
         pendingStarterAt = 0L;
         pendingStarterLastDialogueAt = 0L;
         pendingStarterDialogueSeen = false;
+        pendingHolidayItem = null;
+        pendingHolidayItemAt = 0L;
+        holidayRetrievalTimeouts = 0;
+        holidayScrollAttempts = 0;
+        holidayCloseAttempts = 0;
         spookedChildren.clear();
         givenAdultIndexes.clear();
         sweepIndex = 0;
@@ -310,6 +339,13 @@ public final class KspHalloween2026Script extends Script {
         List<String> options = Rs2Dialogue.getDialogueOptions().stream()
                 .map(w -> w == null ? "" : w.getText())
                 .collect(Collectors.toList());
+        if (stage == Stage.GET_COSTUME
+                && Rs2Dialogue.keyPressForDialogueOption(
+                        "I'd like to check holiday items please!", true)) {
+            acted("Selected Diango's holiday-item retrieval dialogue");
+            return;
+        }
+
         if ((stage == Stage.REPORT_LANTERNS || stage == Stage.GET_COSTUME
                 || stage == Stage.VERIFY_LANTERNS)
                 && Rs2Dialogue.keyPressForDialogueOption("Sure, I'll take the hat.", true)) {
