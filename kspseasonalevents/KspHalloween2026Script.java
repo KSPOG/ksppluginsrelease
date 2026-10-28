@@ -43,6 +43,8 @@ public final class KspHalloween2026Script extends Script {
     private static final String GROUP = "KspSeasonalEvents";
     private static final String STAGE_KEY = "halloweenStage";
     private static final String LANTERNS_KEY = "halloweenSmashTiles";
+    private static final String PENDING_LANTERN_KEY = "halloweenPendingSmashTile";
+    private static final String LANTERNS_VERIFIED_KEY = "halloweenLanternsVerified";
     private static final String ADULTS_KEY = "halloweenAdultsGiven";
     private static final WorldArea RIMMINGTON = new WorldArea(2925, 3180, 85, 95, 0);
     private static final WorldPoint STARTER = new WorldPoint(2958, 3211, 0);
@@ -74,6 +76,7 @@ public final class KspHalloween2026Script extends Script {
         STOPPED,
         INTRODUCTION,
         SMASH_LANTERNS,
+        VERIFY_LANTERNS,
         REPORT_LANTERNS,
         GET_COSTUME,
         SPOOK_CHILDREN,
@@ -100,6 +103,7 @@ public final class KspHalloween2026Script extends Script {
     private volatile long startedAt;
 
     private final Set<String> smashedLanternTiles = new HashSet<>();
+    private volatile boolean lanternsVerified;
     private final Set<Integer> spookedChildren = new HashSet<>();
     private final Set<Integer> givenAdultIndexes = new HashSet<>();
     private int adultsGiven;
@@ -112,6 +116,9 @@ public final class KspHalloween2026Script extends Script {
     private long lastDiagnosticAt;
     private WorldPoint pendingLantern;
     private long pendingLanternAt;
+    private long lastVerificationTalkAt;
+    private int verificationTalkAttempts;
+    private boolean verificationDialogueSeen;
     private int pendingCandyCount = -1;
     private int pendingAdultIndex = -1;
 
@@ -123,6 +130,10 @@ public final class KspHalloween2026Script extends Script {
         this.startedAt = System.currentTimeMillis();
         lastActionAt = lastWalkAt = lastTalkAt = lastDiagnosticAt = 0L;
         pendingLantern = null;
+        pendingLanternAt = 0L;
+        lastVerificationTalkAt = 0L;
+        verificationTalkAttempts = 0;
+        verificationDialogueSeen = false;
         pendingCandyCount = -1;
         spookedChildren.clear();
         givenAdultIndexes.clear();
@@ -134,17 +145,26 @@ public final class KspHalloween2026Script extends Script {
         String savedTiles = configManager.getConfiguration(GROUP, LANTERNS_KEY);
         if (savedTiles != null && !savedTiles.isBlank())
             smashedLanternTiles.addAll(Arrays.asList(savedTiles.split(",")));
+        lanternsVerified = Boolean.parseBoolean(
+                configManager.getConfiguration(GROUP, LANTERNS_VERIFIED_KEY));
+        pendingLantern = parseLanternTile(configManager.getConfiguration(GROUP, PENDING_LANTERN_KEY));
+        // A click recorded before a pause/restart must be checked on location,
+        // not forgotten; there is no guaranteed game-level counter in this API.
+        pendingLanternAt = 0L;
         String savedAdults = configManager.getConfiguration(GROUP, ADULTS_KEY);
         try { adultsGiven = savedAdults == null ? 0 : Integer.parseInt(savedAdults); }
         catch (NumberFormatException e) { adultsGiven = 0; }
 
         Stage saved = savedStage();
+        if (lanternsVerified && (saved == Stage.SMASH_LANTERNS
+                || saved == Stage.VERIFY_LANTERNS))
+            saved = Stage.REPORT_LANTERNS;
         change(saved == Stage.STOPPED || saved == Stage.PAUSED || saved == Stage.NEEDS_REVIEW
                 ? Stage.INTRODUCTION : saved, "Resuming Halloween 2026 walkthrough");
         mainScheduledFuture = scheduledExecutorService.scheduleWithFixedDelay(
                 this::safeTick, 0L, 600L, TimeUnit.MILLISECONDS);
         log.info("Halloween 2026 started | stage={} lanterns={}/8 adultsGiven={}",
-                stage, smashedLanternTiles.size(), adultsGiven);
+                stage, getLanternCount(), adultsGiven);
         return true;
     }
 
@@ -172,6 +192,10 @@ public final class KspHalloween2026Script extends Script {
         if (player == null) { status = "Waiting for player location"; return; }
         if (stage == Stage.COMPLETED || stage == Stage.NEEDS_REVIEW) return;
 
+        if (stage == Stage.VERIFY_LANTERNS
+                && (Rs2Dialogue.hasContinue() || Rs2Dialogue.hasSelectAnOption()))
+            inspectLanternVerificationDialogue();
+
         if (Rs2Dialogue.hasContinue()) {
             if (ready()) {
                 Rs2Dialogue.clickContinue();
@@ -192,6 +216,9 @@ public final class KspHalloween2026Script extends Script {
                 break;
             case SMASH_LANTERNS:
                 smashLanterns(player);
+                break;
+            case VERIFY_LANTERNS:
+                verifyLanternsWithStarter(player);
                 break;
             case REPORT_LANTERNS:
                 talkToStarter(player, Stage.GET_COSTUME);
@@ -310,6 +337,44 @@ public final class KspHalloween2026Script extends Script {
 
     private static String tileKey(WorldPoint point) {
         return point.getX() + ":" + point.getY() + ":" + point.getPlane();
+    }
+
+    private static WorldPoint parseLanternTile(String value) {
+        if (value == null || value.isBlank()) return null;
+        try {
+            String[] parts = value.split(":");
+            if (parts.length != 3) return null;
+            WorldPoint tile = new WorldPoint(Integer.parseInt(parts[0]),
+                    Integer.parseInt(parts[1]), Integer.parseInt(parts[2]));
+            return RIMMINGTON.contains(tile) ? tile : null;
+        } catch (NumberFormatException ex) {
+            return null;
+        }
+    }
+
+    private void clearPendingLantern() {
+        pendingLantern = null;
+        pendingLanternAt = 0L;
+        configManager.unsetConfiguration(GROUP, PENDING_LANTERN_KEY);
+    }
+
+    private void confirmSmashedLantern(WorldPoint tile, String evidence) {
+        if (tile == null) return;
+        if (smashedLanternTiles.add(tileKey(tile))) {
+            configManager.setConfiguration(GROUP, LANTERNS_KEY,
+                    String.join(",", smashedLanternTiles));
+            log.info("Halloween lantern smash confirmed | tile={} evidence={} count={}/8",
+                    tile, evidence, getLanternCount());
+        }
+        clearPendingLantern();
+    }
+
+    private void confirmAllLanterns(String evidence) {
+        lanternsVerified = true;
+        clearPendingLantern();
+        configManager.setConfiguration(GROUP, LANTERNS_VERIFIED_KEY, true);
+        log.info("Halloween all eight lanterns verified | evidence={} recordedTiles={}",
+                evidence, smashedLanternTiles.size());
     }
 
     private boolean pendingLanternConfirmed(WorldPoint player) {
