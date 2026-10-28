@@ -65,6 +65,10 @@ public class TutorialIslandScript extends KspManagedScript
     private static final int RAT_PEN_INNER_BOUNDARY_X = 3110;
     private static final int ACCOUNT_GUIDE_DOOR_ID = 9721;
     private static final int ACCOUNT_GUIDE_ROOM_MIN_X = 3125;
+    private static final int CHAPEL_PASSAGE_DOOR_ID = 9722;
+    private static final int MAGIC_PASSAGE_DOOR_ID = 9723;
+    private static final int CHAPEL_INTERIOR_DOOR_ID = 1524;
+    private static final int CHAPEL_INTERIOR_OPEN_DOOR_ID = 1525;
     private static final int COMPLETION_LOGOUT_RETRY_MS = 6000;
     private static final int QUEUE_LOGIN_RETRY_MS = 10000;
     private static final int QUEUE_LOGIN_SKIP_MS = 60000;
@@ -125,6 +129,8 @@ public class TutorialIslandScript extends KspManagedScript
     private static final WorldArea TUT_ISLAND_BANK_AREA  = TutAreas.TUT_ISLAND_BANK_AREA;
     private static final WorldArea CHURCH_AREA           = TutAreas.CHURCH_AREA;
     private static final WorldArea TUTORIAL_END_AREA     = TutAreas.TUTORIAL_END_AREA;
+    private static final WorldPoint CHAPEL_INSTRUCTOR_TILE = new WorldPoint(3128, 3106, 0);
+    private static final WorldPoint MAGIC_INSTRUCTOR_TILE = new WorldPoint(3141, 3090, 0);
 
     private String lastGeneratedName = "None";
     private boolean nameLookupPending;
@@ -161,6 +167,7 @@ public class TutorialIslandScript extends KspManagedScript
     private long lastMiningDiagnosticAtMs;
     private long lastTutorialWalkerWarningAtMs;
     private long lastRangedDiagnosticAtMs;
+    private long lastTutorialTransitionDiagnosticAtMs;
     private long lastRangedAttackAtMs;
     private int lastRangedTargetIndex = -1;
 
@@ -881,23 +888,24 @@ public class TutorialIslandScript extends KspManagedScript
 
     private boolean walkToAccountGuideRoomAndTalk(Rs2NpcModel npc)
     {
-        if (npc == null || npc.getWorldLocation() == null)
-        {
-            return false;
-        }
-
         WorldPoint playerLocation = Rs2Player.getWorldLocation();
         if (playerLocation == null)
         {
             return false;
         }
 
+        // The Account Guide may only load after entering the room.
         if (playerLocation.getX() < ACCOUNT_GUIDE_ROOM_MIN_X)
         {
             clickNearestTutorialObject(ACCOUNT_GUIDE_DOOR_ID, "Open");
             return false;
         }
 
+        if (npc == null || npc.getWorldLocation() == null)
+        {
+            logTutorialTransition("Account Guide not visible", Microbot.getVarbitPlayerValue(281));
+            return false;
+        }
         return walkAndTalk(npc, 1);
     }
 
@@ -1558,14 +1566,94 @@ public class TutorialIslandScript extends KspManagedScript
         }
     }
 
+    private void advanceThroughTutorialDoor(int doorId, WorldPoint destination, int progress)
+    {
+        Rs2TileObjectModel door = tutorialObject(doorId);
+        if (door != null && door.hasAction("Open"))
+        {
+            if (clickTutorialObject(doorId, "Open", 4))
+            {
+                logTutorialTransition("Opened progression door " + doorId, progress);
+            }
+            return;
+        }
+
+        // Opening can morph/remove the closed door. Only then walk toward
+        // the next section; do not blindly click a different object.
+        walkTutorialLocal(destination, 3);
+        logTutorialTransition("Waiting for door " + doorId + " or next room", progress);
+    }
+
+    private boolean ensurePrayerChapelEntrance(Rs2NpcModel npc)
+    {
+        WorldPoint player = Rs2Player.getWorldLocation();
+        if (player == null)
+        {
+            return false;
+        }
+        if (player.distanceTo(CHAPEL_INSTRUCTOR_TILE) > 6)
+        {
+            walkTutorialLocal(CHAPEL_INSTRUCTOR_TILE, 5);
+            return false;
+        }
+
+        // The inner chapel entrance is distinct from door 9722 and can
+        // remain closed after the tutorial advances from 540 to 550.
+        Rs2TileObjectModel innerDoor = KspLiveScene.nearestModel(player, 9,
+                object -> object != null && object.getWorldLocation() != null
+                        && (object.getId() == CHAPEL_INTERIOR_DOOR_ID
+                            || object.getId() == CHAPEL_INTERIOR_OPEN_DOOR_ID)
+                        && object.getWorldLocation().distanceTo(CHAPEL_INSTRUCTOR_TILE) <= 5
+                        && object.hasAction("Open"));
+        if (innerDoor != null)
+        {
+            if (prepareTutorialObjectInteraction(innerDoor, 3)
+                    && readyForAction() && innerDoor.click("Open"))
+            {
+                markTutorialInteraction("chapel:inner-door");
+                logTutorialTransition("Opened inner chapel door " + innerDoor.getId(), 550);
+            }
+            return false;
+        }
+
+        if (npc == null || npc.getWorldLocation() == null)
+        {
+            walkTutorialLocal(CHAPEL_INSTRUCTOR_TILE, 2);
+            logTutorialTransition("Brother Brace not visible", 550);
+            return false;
+        }
+        return true;
+    }
+
+    private void logTutorialTransition(String message, int progress)
+    {
+        long now = System.currentTimeMillis();
+        if (now - lastTutorialTransitionDiagnosticAtMs < 5_000L)
+        {
+            return;
+        }
+        lastTutorialTransitionDiagnosticAtMs = now;
+        Microbot.log("[TutIsland] " + message + " | progress=" + progress
+                + " player=" + Rs2Player.getWorldLocation());
+    }
+
     private void prayerGuide()
     {
         Rs2NpcModel npc = tutorialNpc(NpcID.BROTHER_BRACE);
         int progress = Microbot.getVarbitPlayerValue(281);
 
-        if (progress == 540 || progress == 550)
+        if (progress == 540)
         {
-            walkAndTalk(npc);
+            advanceThroughTutorialDoor(CHAPEL_PASSAGE_DOOR_ID, CHAPEL_INSTRUCTOR_TILE, progress);
+            return;
+        }
+
+        if (progress == 550)
+        {
+            if (ensurePrayerChapelEntrance(npc))
+            {
+                walkAndTalk(npc);
+            }
             return;
         }
 
@@ -1587,6 +1675,12 @@ public class TutorialIslandScript extends KspManagedScript
             return;
         }
 
+        if (progress == 590)
+        {
+            clickTab("Ignore list");
+            return;
+        }
+
         if (progress == 600)
         {
             walkAndTalk(npc);
@@ -1598,8 +1692,20 @@ public class TutorialIslandScript extends KspManagedScript
         Rs2NpcModel npc = tutorialNpc(NpcID.MAGIC_INSTRUCTOR);
         int progress = Microbot.getVarbitPlayerValue(281);
 
-        if (progress == 610 || progress == 620)
+        if (progress == 610)
         {
+            advanceThroughTutorialDoor(MAGIC_PASSAGE_DOOR_ID, MAGIC_INSTRUCTOR_TILE, progress);
+            return;
+        }
+
+        if (progress == 620)
+        {
+            if (npc == null)
+            {
+                walkTutorialLocal(MAGIC_INSTRUCTOR_TILE, 3);
+                logTutorialTransition("Magic Instructor not visible", progress);
+                return;
+            }
             walkAndTalk(npc);
             return;
         }
@@ -1644,14 +1750,41 @@ public class TutorialIslandScript extends KspManagedScript
     {
         if (hasSelectAnOption())
         {
+            // The subsequent Ironman question can have the same varbit
+            // value as the mainland question. Only select known safe text.
+            if (Rs2Dialogue.keyPressForDialogueOption("No, I'm not planning to do that.")) return;
+            if (Rs2Dialogue.keyPressForDialogueOption("No, I'm not planning to do that")) return;
+            if (Rs2Dialogue.keyPressForDialogueOption("No, I don't want to be an Ironman")) return;
+            if (Rs2Dialogue.keyPressForDialogueOption("No, I don't want to become an Ironman")) return;
+
             if (Rs2Dialogue.keyPressForDialogueOption("Yes, I'd like to go to the mainland")) return;
             if (Rs2Dialogue.keyPressForDialogueOption("Yes, send me to the mainland")) return;
-            if (Rs2Dialogue.keyPressForDialogueOption("Yes")) return;
-            Rs2Dialogue.keyPressForDialogueOption(1);
+
+            // Accept the short 'Yes.' only when the visible prompt is
+            // explicitly about travelling to the mainland, not account type.
+            String prompt = Rs2Dialogue.getQuestion();
+            if (prompt == null || prompt.isEmpty())
+            {
+                prompt = Rs2Dialogue.getDialogueText();
+            }
+            String text = prompt == null ? "" : prompt.toLowerCase(java.util.Locale.ROOT);
+            if (text.contains("mainland") && !text.contains("ironman"))
+            {
+                if (Rs2Dialogue.keyPressForDialogueOption("Yes.")) return;
+            }
+
+            logTutorialTransition("Unrecognized final dialogue; no option selected"
+                    + " question=" + prompt
+                    + " options=" + Rs2Dialogue.getDialogueOptions().stream()
+                            .map(Widget::getText).collect(java.util.stream.Collectors.toList()),
+                    Microbot.getVarbitPlayerValue(281));
             return;
         }
 
-        Rs2Dialogue.clickContinue();
+        if (hasContinue())
+        {
+            Rs2Dialogue.clickContinue();
+        }
     }
 
     private boolean castLumbridgeHomeTeleport()
