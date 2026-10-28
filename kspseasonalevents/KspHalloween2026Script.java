@@ -53,6 +53,7 @@ public final class KspHalloween2026Script extends Script {
     private static final String LANTERNS_VERIFIED_KEY = "halloweenLanternsVerified";
     private static final String ADULTS_KEY = "halloweenAdultsGiven";
     private static final String SPOOKED_CHILD_IDS_KEY = "halloweenChildNpcIdsAttempted";
+    private static final String CHILD_RETRY_COUNT_KEY = "halloweenChildReportRetries";
     private static final String DELIVERED_ADULT_IDS_KEY = "halloweenAdultNpcIdsDelivered";
     // Five NPCs per candidate age group were seen in the 2026 log.
     // Five verified child attempts trigger a report checkpoint, not success.
@@ -225,6 +226,13 @@ public final class KspHalloween2026Script extends Script {
         catch (NumberFormatException e) { adultsGiven = 0; }
         restoreNpcIds(SPOOKED_CHILD_IDS_KEY, spookedChildren);
         restoreNpcIds(DELIVERED_ADULT_IDS_KEY, givenAdultIds);
+        String savedRetries = configManager.getConfiguration(GROUP, CHILD_RETRY_COUNT_KEY);
+        try {
+            childSpookRetries = savedRetries == null ? 0
+                    : Math.max(0, Math.min(2, Integer.parseInt(savedRetries)));
+        } catch (NumberFormatException ignored) {
+            childSpookRetries = 0;
+        }
         String childGroupConfig = configManager.getConfiguration(GROUP, TREATER_CHILD_GROUP_KEY);
         if ("A".equals(childGroupConfig)) confirmedChildGroup = TreaterGroup.A;
         else if ("B".equals(childGroupConfig)) confirmedChildGroup = TreaterGroup.B;
@@ -1323,6 +1331,7 @@ public final class KspHalloween2026Script extends Script {
         configManager.unsetConfiguration(GROUP, ADULTS_KEY);
         configManager.unsetConfiguration(GROUP, SPOOKED_CHILD_IDS_KEY);
         configManager.unsetConfiguration(GROUP, DELIVERED_ADULT_IDS_KEY);
+        configManager.unsetConfiguration(GROUP, CHILD_RETRY_COUNT_KEY);
         configManager.unsetConfiguration(GROUP, TREATER_CHILD_GROUP_KEY);
         smashedLanternTiles.clear();
         pendingLantern = null;
