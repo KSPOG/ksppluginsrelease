@@ -25,7 +25,7 @@ public final class KspSeasonalEventsOverlay extends OverlayPanel {
     @Override public Dimension render(Graphics2D graphics) {
         if (!script.isActive() || !config.showOverlay()) return null;
         panelComponent.getChildren().clear();
-        panelComponent.setPreferredSize(new Dimension(260, 105));
+        panelComponent.setPreferredSize(new Dimension(270, 143));
         panelComponent.setBackgroundColor(new Color(17, 13, 22, 200));
         panelComponent.getChildren().add(TitleComponent.builder()
                 .text("KSP Seasonal Events").color(Color.WHITE).build());
@@ -35,6 +35,13 @@ public final class KspSeasonalEventsOverlay extends OverlayPanel {
                 .left("Stage").right(script.getStage().toString()).build());
         panelComponent.getChildren().add(LineComponent.builder()
                 .left("Lanterns").right(script.getLanternCount() + "/8").build());
+        panelComponent.getChildren().add(LineComponent.builder()
+                .left("Child Spook attempts")
+                .right(script.getChildSpookAttempts() + "/"
+                        + script.getChildSpookCheckpoint()).build());
+        panelComponent.getChildren().add(LineComponent.builder()
+                .left("Child objective")
+                .right(script.isChildObjectiveConfirmed() ? "Confirmed" : "Not verified").build());
         panelComponent.getChildren().add(LineComponent.builder()
                 .left("Adults").right(script.getAdultsGiven() + "/5").build());
         return super.render(graphics);
