@@ -81,7 +81,11 @@ final class KspSeasonalEventsPanel extends PluginPanel {
         state.setText("<html><center>" + script.getStage() + "<br>"
                 + "Lanterns: " + script.getLanternCount() + "/8 | Adults: "
                 + script.getAdultsGiven() + "/5<br>"
-                + script.getStatus() + "</center></html>");
+                + "Child Spook attempts: " + script.getChildSpookAttempts()
+                + "/" + script.getChildSpookCheckpoint()
+                + " | Objective: "
+                + (script.isChildObjectiveConfirmed() ? "Confirmed" : "Not verified")
+                + "<br>" + script.getStatus() + "</center></html>");
     }
 
     void dispose() { timer.stop(); }
