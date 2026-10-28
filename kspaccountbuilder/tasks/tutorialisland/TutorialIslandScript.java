@@ -274,7 +274,13 @@ public class TutorialIslandScript extends KspManagedScript
                 return true;
             }
 
-            return Microbot.getVarbitPlayerValue(281) < 1000;
+            // Valid unfinished varbit progress is independent evidence for
+            // Tutorial Island, even if a transitional or instanced client
+            // WorldPoint is temporarily not within the static island areas.
+            // Zero is ambiguous when the varbit cache is uninitialized, so
+            // it must be accompanied by an island position or setup widget.
+            int progress = Microbot.getVarbitPlayerValue(281);
+            return progress > 0 && progress < 1000;
         }
         catch (Exception ignored)
         {
@@ -311,14 +317,18 @@ public class TutorialIslandScript extends KspManagedScript
 
     private static WorldPoint getLocalPlayerWorldLocationSafe()
     {
+        // Tutorial detection is called from the Account Builder worker thread.
+        // Query RuneLite player coordinates on the client thread; reading the
+        // live Client/Actor directly from a scheduler thread can throw or
+        // return an incomplete snapshot, making the island look undetected.
         try
         {
-            Client client = Microbot.getClient();
-            if (client == null || client.getLocalPlayer() == null)
+            return Microbot.getClientThread().runOnClientThreadOptional(() ->
             {
-                return null;
-            }
-            return client.getLocalPlayer().getWorldLocation();
+                Client client = Microbot.getClient();
+                return client == null || client.getLocalPlayer() == null
+                        ? null : client.getLocalPlayer().getWorldLocation();
+            }).orElse(null);
         }
         catch (Exception ignored)
         {
