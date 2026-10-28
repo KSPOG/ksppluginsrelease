@@ -1,4 +1,4 @@
-# KSP Seasonal Events v0.2.1
+# KSP Seasonal Events v0.2.2
 
 A **standalone Microbot plugin**, independent of Chopper, with its own
 config, navigation panel, Start / Pause / Resume / Stop / Reset progress,
@@ -33,6 +33,23 @@ may require manual review rather than repeated speculative clicks. The
 plugin logs stage transitions, visible dialogue options when unknown, NPC
 IDs and world tiles of successfully targeted event objects. No guessed
 NPC/object IDs are treated as authoritative.
+
+## Costume dialogue fix (0.2.2)
+
+When Angel/Henja offers a hat after all eight lanterns, the script now
+selects the observed exact response **"Sure, I'll take the hat."** and
+continues the conversation. The starter stage only advances after an actual
+dialogue has been observed and completed, rather than on the initial
+NPC click. This avoids travelling to Diango while the quest dialogue is
+still active. Existing saved `GET_COSTUME` sessions can also resolve the
+hat question without resetting the event.
+
+The costume task equips usable Halloween items already carried before
+attempting to travel to Draynor. If more pieces are needed, the script
+prefers Diango's `Holiday-items` action over repeatedly starting an
+unrelated conversation. The specific live Holiday Item Retrieval interface
+widgets still require in-game confirmation; this version does not claim
+fully automatic selection from that interface.
 
 ## Lantern progression recovery (0.2.1)
 
