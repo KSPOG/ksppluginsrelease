@@ -12,6 +12,7 @@ import net.runelite.api.gameval.ItemID;
 import net.runelite.client.plugins.microbot.Microbot;
 import net.runelite.client.plugins.microbot.kspsupport.KspBreakAwareScript;
 import net.runelite.client.plugins.microbot.util.bank.Rs2Bank;
+import net.runelite.client.plugins.microbot.util.bank.enums.BankLocation;
 import net.runelite.client.plugins.microbot.util.equipment.Rs2Equipment;
 import net.runelite.client.plugins.microbot.util.grandexchange.GrandExchangeAction;
 import net.runelite.client.plugins.microbot.util.grandexchange.GrandExchangeRequest;
@@ -38,6 +39,8 @@ import static net.runelite.client.plugins.microbot.util.Global.sleepUntil;
 public class KspSmartSuperheatScript extends KspBreakAwareScript
 {
     private static final int LOOP_MS = 650, BANK_GROUP = 12, BANK_ROOT = 1, GE_PRICE_X_CHILD = 12, MAX_GE_ATTEMPTS = 5;
+    private static final long GE_WALK_RETRY_MS = 4_000L;
+    private static final long GE_WALK_RECHECK_MS = 15_000L;
     private static final String[] FIRE_STAVES = {"Staff of fire", "Fire battlestaff", "Mystic fire staff", "Lava battlestaff", "Mystic lava staff", "Steam battlestaff", "Mystic steam staff", "Smoke battlestaff", "Mystic smoke staff"};
 
     private KspSmartSuperheatConfig config;
@@ -55,6 +58,8 @@ public class KspSmartSuperheatScript extends KspBreakAwareScript
     private GeOrder geOrder;
     private SuperheatRecipe saleRecipe;
     private int castFailures;
+    private long lastGeWalkAttemptAt;
+    private boolean geWalkOwned;
 
     public boolean run(KspSmartSuperheatConfig config)
     {
@@ -72,6 +77,8 @@ public class KspSmartSuperheatScript extends KspBreakAwareScript
         unsold.clear();
         buyQueue.clear();
         geOrder = null;
+        lastGeWalkAttemptAt = 0L;
+        geWalkOwned = false;
         mainScheduledFuture = scheduledExecutorService.scheduleWithFixedDelay(() -> {
             try { if (super.run() && Microbot.isLoggedIn()) tick(); }
             catch (Exception e)
@@ -89,6 +96,9 @@ public class KspSmartSuperheatScript extends KspBreakAwareScript
     {
         state = SmartSuperheatState.STOPPED;
         status = "Stopped";
+        if (geWalkOwned && Rs2Walker.getCurrentTarget() != null)
+            Rs2Walker.clearWalkingRoute("ksp_smart_superheat_stopped");
+        geWalkOwned = false;
         buyQueue.clear();
         geOrder = null;
         saleRecipe = null;
@@ -97,19 +107,33 @@ public class KspSmartSuperheatScript extends KspBreakAwareScript
 
     private void tick()
     {
-        // Smart Superheat is a GE-stationary workflow. In particular, never
-        // let a generic bank helper route to Varrock West/East bank booths.
+        // Outside GE: intentionally walk ONLY to Microbot's canonical GE
+        // BankLocation. Once inside: stop our approach route and never select
+        // another bank or target a location outside the GE.
         WorldPoint player = Rs2Player.getWorldLocation();
+        if (player == null)
+        {
+            status = "Waiting for player position";
+            return;
+        }
         if (!KspSmartSuperheatGeAccess.isInGrandExchange(player))
         {
-            status = "Move into Grand Exchange to run Smart Superheat (no walking)";
+            approachGrandExchange();
             return;
+        }
+        if (geWalkOwned)
+        {
+            geWalkOwned = false;
+            lastGeWalkAttemptAt = 0L;
+            if (Rs2Walker.getCurrentTarget() != null)
+                Rs2Walker.clearWalkingRoute("ksp_smart_superheat_ge_arrived");
+            log.info("Smart Superheat arrived at Grand Exchange; using Banker NPC only");
         }
         WorldPoint walkerTarget = Rs2Walker.getCurrentTarget();
         if (walkerTarget != null && !KspSmartSuperheatGeAccess.isInGrandExchange(walkerTarget))
         {
             Rs2Walker.clearWalkingRoute("ksp_smart_superheat_ge_only");
-            log.warn("Blocked Smart Superheat navigation outside Grand Exchange: target={}", walkerTarget);
+            log.warn("Blocked walking destination outside Grand Exchange: target={}", walkerTarget);
         }
         switch (state)
         {
@@ -122,6 +146,36 @@ public class KspSmartSuperheatScript extends KspBreakAwareScript
             case WAITING_FOR_PROFIT: if (System.currentTimeMillis() >= nextScanAt) state = SmartSuperheatState.SCANNING_MARKET; break;
             default: break;
         }
+    }
+
+    private void approachGrandExchange()
+    {
+        WorldPoint canonicalGe = BankLocation.GRAND_EXCHANGE.getWorldPoint();
+        long now = System.currentTimeMillis();
+        WorldPoint currentTarget = Rs2Walker.getCurrentTarget();
+
+        if (currentTarget != null && !canonicalGe.equals(currentTarget))
+        {
+            // This includes an inherited Cooking Guild bank-booth route from
+            // an old Smart Superheat or unrelated Microbot bank recovery.
+            Rs2Walker.clearWalkingRoute("ksp_smart_superheat_redirect_to_ge");
+            currentTarget = null;
+        }
+
+        status = "Walking to Grand Exchange";
+        if (geWalkOwned && canonicalGe.equals(currentTarget)
+                && now - lastGeWalkAttemptAt < GE_WALK_RECHECK_MS) return;
+        if (lastGeWalkAttemptAt > 0L
+                && now - lastGeWalkAttemptAt < GE_WALK_RETRY_MS) return;
+
+        lastGeWalkAttemptAt = now;
+        geWalkOwned = true;
+        log.info("Smart Superheat approaching Grand Exchange | destination={} current={}",
+                canonicalGe, Rs2Player.getWorldLocation());
+        // The one intentional global route this plugin is allowed to start:
+        // Rs2GrandExchange delegates to BankLocation.GRAND_EXCHANGE.
+        if (!Rs2GrandExchange.walkToGrandExchange())
+            status = "Approaching Grand Exchange";
     }
 
     private void start()
