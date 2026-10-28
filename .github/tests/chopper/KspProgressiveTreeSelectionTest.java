@@ -1,36 +1,38 @@
 package net.runelite.client.plugins.microbot.kspwillowchopper;
 
+import net.runelite.api.coords.WorldArea;
+import net.runelite.api.coords.WorldPoint;
+
 /**
- * Standalone regression checks for the progression decision table.
- * Run as a Java main when compiling this package with the Microbot dependencies.
+ * Dependency-free entrypoint; compiled with the latest Microbot Hub in CI.
+ * Covers all three Progressive modes, including fixed area enforcement.
  */
 public final class KspProgressiveTreeSelectionTest {
     private KspProgressiveTreeSelectionTest() {}
 
     public static void main(String[] args) {
-        check(1, 1, false, false, KspTree.TREE);
-        check(15, 1, false, false, KspTree.OAK);
-        check(29, 99, false, false, KspTree.OAK);
-        check(30, 99, false, false, KspTree.WILLOW);
-        check(45, 99, false, false, KspTree.WILLOW);
-        check(60, 1, false, false, KspTree.YEW);
-        check(99, 99, false, false, KspTree.YEW);
+        for (boolean members : new boolean[] {false, true}) {
+            check(1, 99, members, false, KspTree.TREE);
+            check(14, 99, members, false, KspTree.TREE);
+            check(15, 99, members, false, KspTree.OAK);
+            check(29, 99, members, false, KspTree.OAK);
+            check(30, 99, members, false, KspTree.WILLOW);
+            check(59, 99, members, false, KspTree.WILLOW);
+            check(60, 99, members, false, KspTree.YEW);
+            check(99, 99, members, false, KspTree.YEW);
 
-        check(44, 99, true, false, KspTree.WILLOW);
-        check(45, 99, true, false, KspTree.MAPLE);
-        check(60, 99, true, false, KspTree.YEW);
-        check(75, 99, true, false, KspTree.MAGIC);
-        check(90, 99, true, false, KspTree.REDWOOD);
+            // Progressive Burn must respect Firemaking and the same four zones.
+            check(99, 1, members, true, KspTree.TREE);
+            check(99, 15, members, true, KspTree.OAK);
+            check(99, 30, members, true, KspTree.WILLOW);
+            check(99, 60, members, true, KspTree.YEW);
+            check(99, 99, members, true, KspTree.YEW);
+        }
 
-        // Progressive Burn must never choose logs above the current FM level.
-        check(90, 1, true, true, KspTree.TREE);
-        check(90, 15, true, true, KspTree.OAK);
-        check(90, 30, true, true, KspTree.WILLOW);
-        check(90, 45, true, true, KspTree.MAPLE);
-        check(90, 60, true, true, KspTree.YEW);
-        check(90, 75, true, true, KspTree.MAGIC);
-        check(90, 90, true, true, KspTree.REDWOOD);
-        check(99, 45, false, true, KspTree.WILLOW);
+        area(KspTree.TREE, 3149, 3449, 23, 16);
+        area(KspTree.OAK, 3159, 3409, 13, 12);
+        area(KspTree.WILLOW, 3056, 3250, 8, 7);
+        area(KspTree.YEW, 3085, 3468, 5, 15);
 
         for (KspChopperMode mode : KspChopperMode.values()) {
             if (mode.isProgressive() == (mode == KspChopperMode.CHOP_BANK
@@ -39,19 +41,35 @@ public final class KspProgressiveTreeSelectionTest {
                 throw new AssertionError("Wrong progressive flag for " + mode);
             }
             int strategies = (mode.isBank() ? 1 : 0)
-                    + (mode.isBurn() ? 1 : 0)
-                    + (mode.isDrop() ? 1 : 0);
+                    + (mode.isBurn() ? 1 : 0) + (mode.isDrop() ? 1 : 0);
             if (strategies != 1) {
                 throw new AssertionError("Mode must map to exactly one strategy: " + mode);
             }
         }
 
-        for (KspTree tree : new KspTree[] { KspTree.TREE, KspTree.OAK,
-                KspTree.WILLOW, KspTree.MAPLE, KspTree.YEW, KspTree.MAGIC,
-                KspTree.REDWOOD }) {
-            if (KspProgressiveTreeSelection.anchor(tree) == null) {
-                throw new AssertionError("No travel anchor for " + tree);
-            }
+        System.out.println("PASS: four progressive areas, exact boundaries, level tiers and modes");
+    }
+
+    private static void area(KspTree tree, int x, int y, int width, int height) {
+        WorldArea area = KspProgressiveTreeSelection.area(tree);
+        if (area.getX() != x || area.getY() != y || area.getWidth() != width
+                || area.getHeight() != height || area.getPlane() != 0)
+            throw new AssertionError("Invalid area for " + tree + ": " + area);
+        for (WorldPoint inside : new WorldPoint[] {
+                new WorldPoint(x, y, 0),
+                new WorldPoint(x + width - 1, y + height - 1, 0),
+                KspProgressiveTreeSelection.anchor(tree) }) {
+            if (!KspProgressiveTreeSelection.isInAssignedArea(tree, inside))
+                throw new AssertionError("Expected inside: " + tree + " " + inside);
+        }
+        for (WorldPoint outside : new WorldPoint[] {
+                new WorldPoint(x - 1, y, 0),
+                new WorldPoint(x, y - 1, 0),
+                new WorldPoint(x + width, y, 0),
+                new WorldPoint(x, y + height, 0),
+                new WorldPoint(x, y, 1) }) {
+            if (KspProgressiveTreeSelection.isInAssignedArea(tree, outside))
+                throw new AssertionError("Expected outside: " + tree + " " + outside);
         }
     }
 
