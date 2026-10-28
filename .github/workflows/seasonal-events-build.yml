@@ -349,6 +349,34 @@ jobs:
           assert 'change(next, "Starter dialogue completed")' in tick
           print('PASS: explicit spook directive, deferred stage, bounded persistent retries and confirmed Chemist gate')
 
+      - name: Verify child scare counters appear in overlay and side panel
+        shell: python
+        run: |
+          from pathlib import Path
+          root = Path('release/kspseasonalevents')
+          script = (root/'KspHalloween2026Script.java').read_text()
+          overlay = (root/'KspSeasonalEventsOverlay.java').read_text()
+          panel = (root/'KspSeasonalEventsPanel.java').read_text()
+          assert 'getChildSpookAttempts()' in script
+          assert 'getChildSpookCheckpoint()' in script
+          assert 'isChildObjectiveConfirmed()' in script
+          assert 'ConcurrentHashMap.newKeySet()' in script
+          assert 'private volatile boolean childrenReportConfirmed;' in script
+          assert 'CHILD_CONFIRMED_KEY' in script
+          assert 'configManager.setConfiguration(GROUP, CHILD_CONFIRMED_KEY, true)' in script
+          assert 'configManager.unsetConfiguration(GROUP, CHILD_CONFIRMED_KEY)' in script
+          assert 'Boolean.parseBoolean(' in script
+          for source in (overlay, panel):
+              assert 'getChildSpookAttempts()' in source
+              assert 'getChildSpookCheckpoint()' in source
+              assert 'isChildObjectiveConfirmed()' in source
+          assert 'Child Spook attempts' in overlay
+          assert 'Child objective' in overlay
+          assert 'Child Spook attempts' in panel
+          assert 'Not verified' in overlay and 'Confirmed' in overlay
+          assert 'Not verified' in panel and 'Confirmed' in panel
+          print('PASS: child Spook attempts and separate confirmed quest objective in both UIs')
+
       - name: Install Seasonal Events sources into Microbot Hub
         shell: bash
         run: |
