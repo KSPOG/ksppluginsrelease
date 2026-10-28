@@ -20,6 +20,7 @@ import java.awt.event.KeyEvent;
 import javax.inject.Inject;
 import javax.inject.Singleton;
 import java.util.Arrays;
+import java.util.EnumSet;
 import java.util.HashSet;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.List;
@@ -644,12 +645,38 @@ public final class KspHalloween2026Script extends Script {
                     || effective == Stage.VERIFY_LANTERNS);
     }
 
-    private int costumeCount() {
-        int equipped = 0;
-        for (String name : COSTUME_PIECES) {
-            if (Rs2Equipment.isWearing(name, true)) equipped++;
+    // An outfit requires four *different equipment slots*. Retrieving four
+    // masks or multiple robes does not satisfy the Halloween costume task.
+    private enum CostumeSlot { HEAD, BODY, LEGS, HANDS, FEET }
+
+    private CostumeSlot costumeSlot(String item) {
+        if (item == null) return null;
+        String name = item.toLowerCase(Locale.ROOT);
+        if (name.contains("boots")) return CostumeSlot.FEET;
+        if (name.contains("gloves")) return CostumeSlot.HANDS;
+        if (name.contains("leggings") || name.contains("trousers")
+                || name.contains("bottoms") || name.contains("skirt")) return CostumeSlot.LEGS;
+        if (name.contains("shirt") || name.contains("top") || name.contains("robe")
+                || name.contains("jumper")) return CostumeSlot.BODY;
+        if (name.contains("mask") || name.contains("hood") || name.contains("wig")
+                || name.contains("hat") || name.contains("head")) return CostumeSlot.HEAD;
+        return null;
+    }
+
+    private Set<CostumeSlot> heldCostumeSlots(boolean includeInventory) {
+        Set<CostumeSlot> slots = EnumSet.noneOf(CostumeSlot.class);
+        for (String piece : COSTUME_PIECES) {
+            CostumeSlot slot = costumeSlot(piece);
+            if (slot != null && (Rs2Equipment.isWearing(piece, true)
+                    || (includeInventory && Rs2Inventory.hasItem(piece, true)))) {
+                slots.add(slot);
+            }
         }
-        return equipped;
+        return slots;
+    }
+
+    private int costumeCount() {
+        return heldCostumeSlots(false).size();
     }
 
     private void collectCostume(WorldPoint player) {
@@ -663,30 +690,30 @@ public final class KspHalloween2026Script extends Script {
                 closeHolidayRetrieval(window);
                 return;
             }
-            change(Stage.SPOOK_CHILDREN, "Four wearable Halloween costume items equipped");
+            change(Stage.SPOOK_CHILDREN, "Four distinct Halloween costume slots equipped");
             return;
         }
 
-        // A click isn't proof of withdrawal. Confirm the selected item
-        // appears in inventory or equipment before attempting another.
+        // One pending withdrawal at a time. Keep the modal open until the
+        // item is actually in inventory; a click alone does not count.
         if (pendingHolidayItem != null) {
             if (Rs2Inventory.hasItem(pendingHolidayItem, true)
                     || Rs2Equipment.isWearing(pendingHolidayItem, true)) {
-                log.info("Diango retrieval confirmed | item={} equipped={}/4",
-                        pendingHolidayItem, equipped);
+                log.info("Diango withdrawal confirmed | item={}", pendingHolidayItem);
                 pendingHolidayItem = null;
                 pendingHolidayItemAt = 0L;
                 holidayRetrievalTimeouts = 0;
                 holidayScrollAttempts = 0;
             } else if (System.currentTimeMillis() - pendingHolidayItemAt < 5_000L) {
-                status = "Waiting for Diango item: " + pendingHolidayItem;
+                status = "Waiting for holiday item: " + pendingHolidayItem
+                        + " (retrieval remains open)";
                 return;
             } else {
                 holidayRetrievalTimeouts++;
-                log.warn("Diango retrieval not confirmed | item={} attempts={}",
+                log.warn("Diango withdrawal unconfirmed | item={} attempts={}",
                         pendingHolidayItem, holidayRetrievalTimeouts);
                 if (holidayRetrievalTimeouts >= 3) {
-                    stopForReview("Diango item was not received: " + pendingHolidayItem);
+                    stopForReview("Diango item not received: " + pendingHolidayItem);
                     return;
                 }
                 pendingHolidayItem = null;
@@ -694,27 +721,45 @@ public final class KspHalloween2026Script extends Script {
             }
         }
 
-        // Equip already-carried items before acquiring further holiday
-        // rewards. The large retrieval interface blocks inventory clicks.
-        for (String piece : COSTUME_PIECES) {
-            if (!Rs2Inventory.hasItem(piece, true)
-                    || Rs2Equipment.isWearing(piece, true)) continue;
+        Set<CostumeSlot> ownedSlots = heldCostumeSlots(true);
+
+        // Do NOT close Diango's window after retrieving just one item.
+        // Collect all four different wearable slots first, in one session.
+        if (ownedSlots.size() >= 4) {
             if (window.open) {
+                log.info("Diango costume batch complete | ownedSlots={} equipped={}/4; closing once",
+                        ownedSlots, equipped);
                 closeHolidayRetrieval(window);
                 return;
             }
-            if (Rs2Inventory.wear(piece)) {
-                acted("Equipping Halloween costume: " + piece);
-            } else {
-                status = "Unable to equip costume item: " + piece;
+
+            // Once the entire batch is held, equip without opening Diango
+            // again. Never replace an already-equipped Halloween slot.
+            Set<CostumeSlot> wornSlots = heldCostumeSlots(false);
+            for (String piece : COSTUME_PIECES) {
+                CostumeSlot slot = costumeSlot(piece);
+                if (slot == null || wornSlots.contains(slot)
+                        || !Rs2Inventory.hasItem(piece, true)) continue;
+                if (Rs2Inventory.wear(piece)) {
+                    acted("Equipping collected costume: " + piece
+                            + " (" + wornSlots.size() + "/4 slots worn)");
+                } else {
+                    status = "Failed to equip collected costume: " + piece;
+                }
+                return;
             }
+
+            // Do not reopen Diango when all planned items are already owned.
+            stopForReview("Four costume slots owned but fewer than four equipped;"
+                    + " check inventory/equipment actions");
             return;
         }
 
         if (window.open) {
-            // Don't repeatedly talk to Diango while his modal is visible.
+            // Stay here until the complete missing batch is in inventory.
+            // Never interact with Diango while his retrieval modal is up.
             if (Rs2Inventory.getEmptySlots() <= 0) {
-                stopForReview("Free an inventory slot to retrieve Halloween clothing");
+                stopForReview("Inventory full before collecting four distinct Halloween pieces");
                 return;
             }
             if (window.itemName != null && window.itemBounds != null) {
@@ -722,24 +767,28 @@ public final class KspHalloween2026Script extends Script {
                     pendingHolidayItem = window.itemName;
                     pendingHolidayItemAt = System.currentTimeMillis();
                     holidayScrollAttempts = 0;
-                    acted("Retrieving Halloween item from Diango: " + pendingHolidayItem);
+                    acted("Collecting Halloween piece " + (ownedSlots.size() + 1)
+                            + "/4: " + pendingHolidayItem + " (keeping Diango open)");
                 }
                 return;
             }
             if (holidayScrollAttempts < 24 && window.canScrollDown()) {
                 if (KspDiangoHolidayRetrieval.scrollDown(window)) {
                     holidayScrollAttempts++;
-                    acted("Scanning Diango holiday items (scroll " + holidayScrollAttempts + ")");
+                    acted("Searching additional missing costume slots; scroll "
+                            + holidayScrollAttempts);
                 }
                 return;
             }
-            log.warn("Diango retrieval: no eligible wearable item | items={} scroll={}/{}"
-                    + " equipped={}/4", window.itemWidgets,
-                    window.scrollY, window.scrollMax, equipped);
-            stopForReview("No eligible holiday costume item found in Diango retrieval");
+            log.warn("Diango batch cannot be completed | ownedSlots={} itemWidgets={}"
+                            + " scroll={}/{}", ownedSlots, window.itemWidgets,
+                    window.scrollY, window.scrollMax);
+            stopForReview("Diango has no additional suitable wearable costume pieces");
             return;
         }
 
+        // Only reopen the modal if it closed before the complete batch was
+        // acquired (e.g. human intervention or a client UI interruption).
         holidayScrollAttempts = 0;
         holidayCloseAttempts = 0;
         if (!nearOrWalk(player, DIANGO, 8, "Diango in Draynor Village")) return;
@@ -747,7 +796,7 @@ public final class KspHalloween2026Script extends Script {
                 && System.currentTimeMillis() - lastTalkAt > 6_000L) {
             if (Rs2Npc.interact("Diango", "Holiday-items")) {
                 lastTalkAt = System.currentTimeMillis();
-                acted("Opening Diango's Holiday Item Retrieval");
+                acted("Opening Diango to collect missing costume pieces");
                 return;
             }
             if (Rs2Npc.interact("Diango", "Talk-to")) {
@@ -756,26 +805,32 @@ public final class KspHalloween2026Script extends Script {
                 return;
             }
         }
-        status = "Retrieving 4 wearable costume pieces (equipped: " + equipped + "/4)";
+        status = "Collecting complete Halloween outfit (" + ownedSlots.size()
+                + "/4 slots already owned)";
     }
 
     private List<String> missingCostumeRetrievalNames() {
+        Set<CostumeSlot> ownedSlots = heldCostumeSlots(true);
         return DIANGO_COSTUME_PRIORITY.stream()
-                .filter(item -> !Rs2Inventory.hasItem(item, true)
-                        && !Rs2Equipment.isWearing(item, true))
+                .filter(item -> {
+                    CostumeSlot slot = costumeSlot(item);
+                    return slot != null && !ownedSlots.contains(slot)
+                            && !Rs2Inventory.hasItem(item, true)
+                            && !Rs2Equipment.isWearing(item, true);
+                })
                 .collect(Collectors.toList());
     }
 
     private void closeHolidayRetrieval(KspDiangoHolidayRetrieval.Snapshot window) {
         if (holidayCloseAttempts >= 3) {
-            stopForReview("Unable to close Diango retrieval interface for equipping");
+            stopForReview("Unable to close Diango retrieval after collecting full costume");
             return;
         }
         if (!KspDiangoHolidayRetrieval.close(window)) {
             Rs2Keyboard.keyPress(KeyEvent.VK_ESCAPE);
         }
         holidayCloseAttempts++;
-        acted("Closing Diango retrieval to equip Halloween costume");
+        acted("Closing Diango after full four-slot costume batch");
     }
 
     private boolean npcHasAction(Rs2NpcModel npc, String action) {
