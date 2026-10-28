@@ -1044,8 +1044,9 @@ public final class KspHalloween2026Script extends Script {
         if (!RIMMINGTON.contains(player)
                 && !nearOrWalk(player, STARTER, 12, "child trick-or-treaters")) return;
 
-        // Once the observed set of ten has been attempted, consult
-        // Angel/Henja immediately, rather than scanning arbitrary waypoints.
+        observeTreaterAges();
+        // Only confirmed CHILD identities contribute to the checkpoint.
+        // Adults are explicitly excluded even if they expose 'Spook'.
         // The conversation will decide whether another sweep is required.
         if (spookedChildren.size() >= CHILD_REPORT_CHECKPOINT) {
             childrenReportConfirmed = false;
@@ -1058,6 +1059,7 @@ public final class KspHalloween2026Script extends Script {
         // reloads. Use the observed NPC definition IDs to deduplicate clicks.
         Rs2NpcModel child = Rs2Npc.getNpcs().filter(n -> n.getName() != null
                 && n.getName().toLowerCase(Locale.ROOT).contains("trick")
+                && classifyTreater(n) == TreaterAge.CHILD
                 && npcHasAction(n, "Spook")
                 && !spookedChildren.contains(n.getId())).findFirst().orElse(null);
         if (child != null) {
@@ -1075,7 +1077,7 @@ public final class KspHalloween2026Script extends Script {
         if (sweepsWithoutTarget >= RIMMINGTON_SWEEP.length) {
             childrenReportConfirmed = false;
             change(Stage.REPORT_CHILDREN,
-                    "No other child targets located; checking with Angel/Henja");
+                    "No verified child targets remain; checking with Angel/Henja");
             return;
         }
         scanRimmington(player, "Looking for child trick-or-treaters");
@@ -1202,9 +1204,10 @@ public final class KspHalloween2026Script extends Script {
         }
         if (!RIMMINGTON.contains(player)
                 && !nearOrWalk(player, STARTER, 10, "adult trick-or-treaters")) return;
+        observeTreaterAges();
         Rs2NpcModel adult = Rs2Npc.getNpcs().filter(n -> n.getName() != null
                 && n.getName().toLowerCase(Locale.ROOT).contains("trick")
-                && !npcHasAction(n, "Spook")
+                && classifyTreater(n) == TreaterAge.ADULT
                 && !spookedChildren.contains(n.getId())
                 && !givenAdultIds.contains(n.getId())
                 && (npcHasAction(n, "Talk-to") || npcHasAction(n, "Trick-or-treat")))
