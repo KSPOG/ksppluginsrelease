@@ -155,6 +155,8 @@ jobs:
           assert 'if (pendingStarterDialogueSeen)' in tick
           assert 'change(next, "Starter dialogue completed")' in tick
           assert 'Waiting for Angel / Henja dialogue' in tick
+          assert 'pendingStarterLastDialogueAt' in tick
+          assert 'pendingStarterLastDialogueAt < 1_500L' in tick
 
           assert "Sure, I'll take the hat." in opts
           assert 'Rs2Dialogue.keyPressForDialogueOption("Sure, I' in opts
