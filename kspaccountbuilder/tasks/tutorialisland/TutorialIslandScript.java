@@ -1756,21 +1756,27 @@ public class TutorialIslandScript extends KspManagedScript
             if (Rs2Dialogue.keyPressForDialogueOption("No, I'm not planning to do that")) return;
             if (Rs2Dialogue.keyPressForDialogueOption("No, I don't want to be an Ironman")) return;
             if (Rs2Dialogue.keyPressForDialogueOption("No, I don't want to become an Ironman")) return;
-            if (Rs2Dialogue.keyPressForDialogueOption("No, I don't")) return;
 
             if (Rs2Dialogue.keyPressForDialogueOption("Yes, I'd like to go to the mainland")) return;
             if (Rs2Dialogue.keyPressForDialogueOption("Yes, send me to the mainland")) return;
 
             // Accept the short 'Yes.' only when the visible prompt is
             // explicitly about travelling to the mainland, not account type.
-            String prompt = Rs2Dialogue.getDialogueText();
+            String prompt = Rs2Dialogue.getQuestion();
+            if (prompt == null || prompt.isEmpty())
+            {
+                prompt = Rs2Dialogue.getDialogueText();
+            }
             String text = prompt == null ? "" : prompt.toLowerCase(java.util.Locale.ROOT);
             if (text.contains("mainland") && !text.contains("ironman"))
             {
                 if (Rs2Dialogue.keyPressForDialogueOption("Yes.")) return;
             }
 
-            logTutorialTransition("Unrecognized final dialogue; no option selected",
+            logTutorialTransition("Unrecognized final dialogue; no option selected"
+                    + " question=" + prompt
+                    + " options=" + Rs2Dialogue.getDialogueOptions().stream()
+                            .map(Widget::getText).collect(java.util.stream.Collectors.toList()),
                     Microbot.getVarbitPlayerValue(281));
             return;
         }
