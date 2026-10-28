@@ -99,7 +99,7 @@ public final class KspMuleWorkerService
         if (!isAllowedToMuleHere()) return false;
         if (Rs2Bank.isOpen()) return true;
         return localBankOpener != null && localBankOpener.getAsBoolean()
-                && sleepUntil(Rs2Bank::isOpen, 4_000L);
+                && sleepUntil(Rs2Bank::isOpen, 4_000);
     }
 
     /** True while any local KSP mule transfer owns interaction priority. */
