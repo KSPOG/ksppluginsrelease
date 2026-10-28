@@ -55,7 +55,7 @@ jobs:
           panel=(root/'KspSeasonalEventsPanel.java').read_text()
           overlay=(root/'KspSeasonalEventsOverlay.java').read_text()
           event=(root/'KspSeasonalEvent.java').read_text()
-          assert 'VERSION = "0.2.2"' in plugin
+          assert 'VERSION = "0.2.3"' in plugin
           assert 'KSP + "Seasonal Events"' in plugin
           assert 'kspwillowchopper' not in plugin and 'kspwillowchopper' not in script
           assert 'HALLOWEEN_2026' in event
@@ -171,6 +171,46 @@ jobs:
           assert 'Rs2Npc.interact("Diango", "Holiday-items")' in costume
           assert 'Rs2Inventory.wear(piece)' in costume
           print('PASS: explicit accept, no premature transition, equip before travel, holiday retrieval action')
+
+      - name: Verify Diango widget selection, inventory confirmation and safe modal handling
+        shell: python
+        run: |
+          from pathlib import Path
+          root=Path('release/kspseasonalevents')
+          script=(root/'KspHalloween2026Script.java').read_text()
+          widget=(root/'KspDiangoHolidayRetrieval.java').read_text()
+          costume=script.split('private void collectCostume(WorldPoint player)',1)[1].split('private boolean npcHasAction(',1)[0]
+          dialogue=script.split('private void handleDialogueOption()',1)[1].split('private boolean nearOrWalk(',1)[0]
+
+          assert "Diango's Holiday Item Retrieval" in widget
+          assert 'Rs2Widget.findWidget(TITLE, true)' in widget
+          assert 'Microbot.getClientThread().runOnClientThreadOptional' in widget
+          assert 'Microbot.getClient().getWidgetRoots()' in widget
+          assert '(candidate.getId() >>> 16) == interfaceGroup' in widget
+          assert 'widget.getItemId()' in widget
+          assert 'Microbot.getClient().getItemDefinition(id)' in widget
+          assert 'viewport.intersects(bounds)' in widget
+          assert 'getScrollY()' in widget and 'getScrollHeight()' in widget
+          assert 'Microbot.getMouse().scrollDown(snapshot.scrollPoint)' in widget
+          assert 'Microbot.getMouse().click(snapshot.itemBounds)' in widget
+
+          assert "I'd like to check holiday items please!" in dialogue
+          assert 'KspDiangoHolidayRetrieval.inspect(missingCostumeRetrievalNames())' in costume
+          assert 'pendingHolidayItemAt < 5_000L' in costume
+          assert 'Rs2Inventory.hasItem(pendingHolidayItem, true)' in costume
+          assert 'holidayRetrievalTimeouts >= 3' in costume
+          assert 'KspDiangoHolidayRetrieval.select(window)' in costume
+          assert 'KspDiangoHolidayRetrieval.scrollDown(window)' in costume
+          assert 'KspDiangoHolidayRetrieval.close(window)' in costume
+          assert 'Rs2Keyboard.keyPress(KeyEvent.VK_ESCAPE)' in costume
+          assert 'holidayScrollAttempts < 24' in costume
+          assert 'Rs2Inventory.getEmptySlots() <= 0' in costume
+          assert costume.index('if (window.open) {') < costume.index('if (!nearOrWalk(player, DIANGO')
+          assert 'Rs2Npc.interact("Diango", "Holiday-items")' in costume
+          assert 'change(Stage.SPOOK_CHILDREN' in costume
+          assert 'skeleton boots' in script and 'skeleton shirt' in script
+          assert 'No eligible holiday costume item found in Diango retrieval' in costume
+          print('PASS: Diango live widgets, restricted item selection, receipt verification and bounded recovery')
 
       - name: Install Seasonal Events sources into Microbot Hub
         shell: bash
