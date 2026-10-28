@@ -96,6 +96,7 @@ public class KspWillowChopperScript extends KspBreakAwareScript {
     private volatile RuntimeState state = RuntimeState.IDLE;
     private volatile String status = "Idle";
     private volatile boolean sessionStarted;
+    private volatile boolean userPaused;
     private volatile KspTree activeTree = KspTree.WILLOW;
     private volatile KspChopperMode activeMode = KspChopperMode.CHOP_BANK;
     private volatile boolean campfireNearby;
@@ -165,6 +166,7 @@ public class KspWillowChopperScript extends KspBreakAwareScript {
         state = RuntimeState.CHOPPING;
         status = "Starting";
         sessionStarted = true;
+        userPaused = false;
         campfireNearby = false;
         burningActive = false;
         burnBatchActive = false;
@@ -213,6 +215,12 @@ public class KspWillowChopperScript extends KspBreakAwareScript {
     private void tick(KspWillowChopperConfig config) {
         try {
             if (!sessionStarted) return;
+
+            if (userPaused) {
+                state = RuntimeState.PAUSED;
+                status = "Paused by user";
+                return;
+            }
 
             if (!Microbot.isLoggedIn()) {
                 state = RuntimeState.PAUSED;
@@ -363,28 +371,21 @@ public class KspWillowChopperScript extends KspBreakAwareScript {
             return false;
         }
 
-        // Honour an existing suitable group of trees when the player starts
-        // locally, rather than forcing a walk to one hard-coded site.
-        Rs2TileObjectModel nearby = findNextChoppableTree(null);
-        if (nearby != null && nearby.getWorldLocation() != null
-                && nearby.getWorldLocation().distanceTo(player) <= 18) {
+        // Area membership is authoritative. A matching tree at a nearby or
+        // totally different grove must NEVER short-circuit progressive travel.
+        if (KspProgressiveTreeSelection.isInAssignedArea(activeTree, player)) {
             clearProgressiveWalk();
             return true;
         }
 
         WorldPoint anchor = KspProgressiveTreeSelection.anchor(activeTree);
-        if (player.getPlane() == anchor.getPlane() && player.distanceTo(anchor) <= 22) {
-            clearProgressiveWalk();
-            return true;
-        }
-
         state = RuntimeState.CHOPPING;
-        status = "Walking to " + activeTree + " trees";
+        status = "Walking to assigned " + activeTree + " area";
         long now = System.currentTimeMillis();
         if (!Rs2Player.isMoving() && now - lastProgressiveWalkAttemptMillis >= 12_000L) {
             lastProgressiveWalkAttemptMillis = now;
             progressiveWalkIssued = true;
-            Rs2Walker.walkTo(anchor, 7);
+            Rs2Walker.walkTo(anchor, 3);
         }
         return false;
     }
@@ -681,6 +682,9 @@ public class KspWillowChopperScript extends KspBreakAwareScript {
                 .withName(objectName)
                 .where(object -> object != null
                         && KspTileObjectSupport.hasAction(object, action)
+                        && (!activeMode.isProgressive()
+                                || KspProgressiveTreeSelection.isInAssignedArea(
+                                        activeTree, object.getWorldLocation()))
                         && (avoidLocation == null || !avoidLocation.equals(object.getWorldLocation())))
                 .nearestOnClientThread();
     }
@@ -695,6 +699,9 @@ public class KspWillowChopperScript extends KspBreakAwareScript {
                 .where(object -> object != null
                         && object.getId() == objectId
                         && location.equals(object.getWorldLocation())
+                        && (!activeMode.isProgressive()
+                                || KspProgressiveTreeSelection.isInAssignedArea(
+                                        activeTree, object.getWorldLocation()))
                         && KspTileObjectSupport.hasAction(object, activeTree.getAction()))
                 .nearestOnClientThread();
     }
@@ -714,11 +721,22 @@ public class KspWillowChopperScript extends KspBreakAwareScript {
                 .query()
                 .where(object -> object != null
                         && location.equals(object.getWorldLocation())
+                        && (!activeMode.isProgressive()
+                                || KspProgressiveTreeSelection.isInAssignedArea(
+                                        activeTree, object.getWorldLocation()))
                         && object.getId() != previousId)
                 .nearestOnClientThread();
     }
 
     private void rememberActiveTreeTarget(Rs2TileObjectModel tree) {
+        if (tree != null && activeMode.isProgressive()
+                && !KspProgressiveTreeSelection.isInAssignedArea(
+                        activeTree, tree.getWorldLocation())) {
+            log.warn("Rejected tree outside assigned progressive area: {} at {}",
+                    activeTree, tree.getWorldLocation());
+            clearActiveTreeTarget();
+            return;
+        }
         if (tree == null) {
             clearActiveTreeTarget();
             return;
@@ -1479,7 +1497,7 @@ public class KspWillowChopperScript extends KspBreakAwareScript {
     }
 
     public void enterForestryEvent(KspForestryEvent event) {
-        if (!sessionStarted || event == null || event == KspForestryEvent.NONE) {
+        if (!sessionStarted || userPaused || event == null || event == KspForestryEvent.NONE) {
             return;
         }
         clearActiveTreeTarget();
@@ -1500,6 +1518,26 @@ public class KspWillowChopperScript extends KspBreakAwareScript {
         }
     }
 
+    public boolean isUserPaused() { return userPaused; }
+
+    /**
+     * Manual Pause preserves session counters, chosen tree and inventory
+     * state so Resume continues from the current state. Stop calls shutdown.
+     */
+    public void setUserPaused(boolean paused) {
+        if (!sessionStarted) return;
+        userPaused = paused;
+        if (paused) {
+            clearProgressiveWalk();
+            state = RuntimeState.PAUSED;
+            status = "Paused by user";
+        } else {
+            state = RuntimeState.CHOPPING;
+            status = "Resuming " + activeTree;
+            resetActionLatches();
+        }
+    }
+
     @Override
     public synchronized void shutdown() {
         super.shutdown();
@@ -1514,6 +1552,7 @@ public class KspWillowChopperScript extends KspBreakAwareScript {
 
         runtimeConfig = null;
         sessionStarted = false;
+        userPaused = false;
         clearProgressiveWalk();
         state = RuntimeState.IDLE;
         status = "Idle";
