@@ -6,7 +6,7 @@ import net.runelite.api.coords.WorldPoint;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.plugins.microbot.Microbot;
 import net.runelite.client.plugins.microbot.Script;
-import net.runelite.client.plugins.microbot.api.npc.models.Rs2NpcModel;
+import net.runelite.client.plugins.microbot.util.npc.Rs2NpcModel;
 import net.runelite.client.plugins.microbot.api.tileobject.models.Rs2TileObjectModel;
 import net.runelite.client.plugins.microbot.util.dialogues.Rs2Dialogue;
 import net.runelite.client.plugins.microbot.util.equipment.Rs2Equipment;
@@ -84,6 +84,7 @@ public final class KspHalloween2026Script extends Script {
         COAT_ONIONS,
         GIVE_CANDY,
         FINAL_TALK,
+        WAIT_FOR_REWARD,
         COMPLETED,
         NEEDS_REVIEW,
         PAUSED
@@ -220,7 +221,15 @@ public final class KspHalloween2026Script extends Script {
                 giveCandy(player);
                 break;
             case FINAL_TALK:
-                talkToStarter(player, Stage.COMPLETED);
+                talkToStarter(player, Stage.WAIT_FOR_REWARD);
+                break;
+            case WAIT_FOR_REWARD:
+                if (Rs2Inventory.hasItem("Vampyre costume top")
+                        || Rs2Equipment.isWearing("Vampyre costume top", true)) {
+                    change(Stage.COMPLETED, "Vampyre event reward confirmed in inventory/equipment");
+                } else {
+                    status = "Waiting for Halloween final cutscene and reward confirmation";
+                }
                 break;
             default:
                 break;
@@ -424,7 +433,7 @@ public final class KspHalloween2026Script extends Script {
                 && npcHasAction(n, "Spook")
                 && !spookedChildren.contains(n.getIndex())).findFirst().orElse(null);
         if (child != null) {
-            if (ready() && child.click("Spook")) {
+            if (ready() && Rs2Npc.interact(child, "Spook")) {
                 spookedChildren.add(child.getIndex());
                 acted("Spooking child trick-or-treater npcId=" + child.getId()
                         + " index=" + child.getIndex());
@@ -481,7 +490,7 @@ public final class KspHalloween2026Script extends Script {
             status = "Locating range in children's house or Chemist fireplace";
             return;
         }
-        net.runelite.client.plugins.microbot.api.inventory.Rs2ItemModel sugar =
+        net.runelite.client.plugins.microbot.util.inventory.Rs2ItemModel sugar =
                 Rs2Inventory.get("Sugar", true);
         if (sugar != null && ready()
                 && Rs2Inventory.useItemOnObject(sugar.getId(), surface.getId())) {
@@ -561,7 +570,7 @@ public final class KspHalloween2026Script extends Script {
                 && n.getName().toLowerCase(Locale.ROOT).contains("trick")
                 && !npcHasAction(n, "Spook")
                 && !givenAdultIndexes.contains(n.getIndex())).findFirst().orElse(null);
-        net.runelite.client.plugins.microbot.api.inventory.Rs2ItemModel item =
+        net.runelite.client.plugins.microbot.util.inventory.Rs2ItemModel item =
                 Rs2Inventory.get("Candy onion");
         if (adult != null && item != null) {
             if (ready() && Rs2Inventory.useItemOnNpc(item.getId(), adult)) {
