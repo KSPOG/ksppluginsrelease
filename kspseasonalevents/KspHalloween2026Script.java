@@ -379,25 +379,31 @@ public final class KspHalloween2026Script extends Script {
 
     private boolean pendingLanternConfirmed(WorldPoint player) {
         if (pendingLantern == null) return false;
-        if (System.currentTimeMillis() - pendingLanternAt < 1_100L) return true;
-        if (player.distanceTo(pendingLantern) > 12) return true;
+        // Never treat a missing object as smashed when its tile is out of
+        // scene range. Revisit the exact clicked tile after any interruption.
+        if (player.distanceTo(pendingLantern) > 9) {
+            nearOrWalk(player, pendingLantern, 6, "confirm clicked jack-o'-lantern");
+            return true;
+        }
+        if (pendingLanternAt != 0L
+                && System.currentTimeMillis() - pendingLanternAt < 1_100L) return true;
+        final WorldPoint clickedTile = pendingLantern;
         boolean stillPresent = Microbot.getRs2TileObjectCache().query().fromWorldView()
-                .where(o -> o != null && pendingLantern.equals(o.getWorldLocation())
+                .where(o -> o != null && clickedTile.equals(o.getWorldLocation())
                         && o.getName() != null
                         && o.getName().toLowerCase(Locale.ROOT).contains("lantern")
                         && o.hasActionContaining("Smash"))
                 .nearestOnClientThread() != null;
         if (!stillPresent) {
-            smashedLanternTiles.add(tileKey(pendingLantern));
-            configManager.setConfiguration(GROUP, LANTERNS_KEY,
-                    String.join(",", smashedLanternTiles));
-            log.info("Halloween lantern confirmed smashed | tile={} count={}/8",
-                    pendingLantern, smashedLanternTiles.size());
-            pendingLantern = null;
+            confirmSmashedLantern(clickedTile, "smash action disappeared at loaded tile");
             return false;
         }
-        if (System.currentTimeMillis() - pendingLanternAt > 7_500L)
-            pendingLantern = null; // Retry when the object persists.
+        if (pendingLanternAt == 0L
+                || System.currentTimeMillis() - pendingLanternAt > 7_500L) {
+            log.info("Halloween smash still available | tile={} retry allowed", clickedTile);
+            clearPendingLantern(); // Only retry a verified still-smashable object.
+            return false;
+        }
         return true;
     }
 
@@ -405,7 +411,8 @@ public final class KspHalloween2026Script extends Script {
         if (!RIMMINGTON.contains(player)
                 && !nearOrWalk(player, STARTER, 12, "Rimmington lanterns")) return;
         if (pendingLanternConfirmed(player)) return;
-        if (smashedLanternTiles.size() >= 8) {
+        if (lanternsVerified || smashedLanternTiles.size() >= 8) {
+            confirmAllLanterns("eight unique smashed locations");
             change(Stage.REPORT_LANTERNS, "All eight lanterns confirmed; return to children");
             return;
         }
@@ -416,9 +423,22 @@ public final class KspHalloween2026Script extends Script {
             if (ready() && target.click(target.findAction("Smash"))) {
                 pendingLantern = location;
                 pendingLanternAt = System.currentTimeMillis();
+                configManager.setConfiguration(GROUP, PENDING_LANTERN_KEY, tileKey(location));
                 lastActionAt = pendingLanternAt;
                 log.info("Halloween smash click | id={} tile={}", target.getId(), location);
             }
+            return;
+        }
+        // At 7/8, a previous session may have missed the eighth
+        // acknowledgment even though the game accepted the final smash.
+        // One complete local discovery sweep is enough before asking the
+        // event starter for authoritative progression instead of looping.
+        if (sweepsWithoutTarget >= RIMMINGTON_SWEEP.length) {
+            verificationTalkAttempts = 0;
+            lastVerificationTalkAt = 0L;
+            verificationDialogueSeen = false;
+            change(Stage.VERIFY_LANTERNS,
+                    "No smashable lantern in full Rimmington sweep; checking with Angel/Henja");
             return;
         }
         scanRimmington(player, "Searching for remaining jack-o'-lanterns");
@@ -434,6 +454,12 @@ public final class KspHalloween2026Script extends Script {
         if (player.distanceTo(next) <= 7) {
             sweepIndex++;
             sweepsWithoutTarget++;
+            if (stage == Stage.SMASH_LANTERNS
+                    && sweepsWithoutTarget >= RIMMINGTON_SWEEP.length) {
+                change(Stage.VERIFY_LANTERNS,
+                        "Sweep exhausted; checking Halloween lantern progress with children");
+                return;
+            }
             next = RIMMINGTON_SWEEP[sweepIndex % RIMMINGTON_SWEEP.length];
         }
         status = purpose + " (" + (sweepIndex % RIMMINGTON_SWEEP.length + 1) + "/8 areas)";
