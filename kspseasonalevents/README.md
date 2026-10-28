@@ -1,4 +1,4 @@
-# KSP Seasonal Events v0.2.4
+# KSP Seasonal Events v0.2.5
 
 A **standalone Microbot plugin**, independent of Chopper, with its own
 config, navigation panel, Start / Pause / Resume / Stop / Reset progress,
@@ -33,6 +33,26 @@ may require manual review rather than repeated speculative clicks. The
 plugin logs stage transitions, visible dialogue options when unknown, NPC
 IDs and world tiles of successfully targeted event objects. No guessed
 NPC/object IDs are treated as authoritative.
+
+## Scaring children and identifying adults (0.2.5)
+
+The child-spooking stage must not target adult trick-or-treaters.
+The 2026 client logs contain two distinct NPC ID groups, but do not
+independently establish which group is children.
+
+The plugin therefore classifies the groups from observed RuneLite NPC
+model heights. It requires multiple samples per group and a clear size
+separation, then saves the child-group result across sessions. NPCs with
+unverified age are skipped, even if they offer a Spook action.
+
+After five distinct eligible child attempts it returns to Angel/Henja
+to verify progression. Five is a verification checkpoint, not a claim
+that the event is complete. Candy onions are offered only to verified
+adult targets, and delivery still requires inventory confirmation.
+
+If model heights do not distinguish the NPC groups, the script reports
+the observed data and cannot safely guess. A live session will be
+needed to verify the correct groups and the resulting quest dialogue.
 
 ## Batch Diango costume retrieval (0.2.4)
 
