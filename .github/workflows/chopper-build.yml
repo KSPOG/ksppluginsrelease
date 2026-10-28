@@ -84,6 +84,10 @@ jobs:
               'new WorldArea(3085, 3468, 5, 15, 0)'):
               assert area in tiers, 'Missing exact progressive area: ' + area
           assert 'KspTree.MAGIC' not in tiers and 'KspTree.REDWOOD' not in tiers
+          assert 'KspTree selected = activeMode.isProgressive()' in script, 'Retarget callback must use progressive tier'
+          assert 'if (selected != activeTree)' in script and 'Main tick handles intentional inter-area travel.' in script
+          assert 'userPaused' in script.split('private boolean canImmediateRetarget()',1)[1].split('private void requestImmediateCampfireRecreate',1)[0]
+          assert 'KspProgressiveTreeSelection.isInAssignedArea(\n                    activeTree, Rs2Player.getWorldLocation())' in script, 'Pre-walk area recheck missing'
           print('PASS: control lifecycle, strict progressive zones and overlay gating')
 
       - name: Install Chopper and shared KSP dependencies
@@ -119,7 +123,7 @@ jobs:
           set -euo pipefail
           DEST='hub/src/test/java/net/runelite/client/plugins/microbot/kspwillowchopper'
           mkdir -p "$DEST"
-          cp release/.github/tests/chopper/KspProgressiveTreeSelectionTest.java "$DEST/"
+          cp release/.github/tests/chopper/KspProgressiveTreeSelectionTest.java.txt "$DEST/KspProgressiveTreeSelectionTest.java"
           cat > "$DEST/KspProgressiveJUnitTest.java" <<'EOF'
           package net.runelite.client.plugins.microbot.kspwillowchopper;
 
