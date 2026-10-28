@@ -274,12 +274,13 @@ public class TutorialIslandScript extends KspManagedScript
                 return true;
             }
 
-            // Varbit 281 is the tutorial progress state. Only a valid
-            // unfinished value is a fallback when client position is not yet
-            // available (e.g. login handoff). The zero/uninitialized value
-            // alone must not classify a mainland account as a tutorial user.
+            // Valid unfinished varbit progress is independent evidence for
+            // Tutorial Island, even if a transitional or instanced client
+            // WorldPoint is temporarily not within the static island areas.
+            // Zero is ambiguous when the varbit cache is uninitialized, so
+            // it must be accompanied by an island position or setup widget.
             int progress = Microbot.getVarbitPlayerValue(281);
-            return progress > 0 && progress < 1000 && location == null;
+            return progress > 0 && progress < 1000;
         }
         catch (Exception ignored)
         {
