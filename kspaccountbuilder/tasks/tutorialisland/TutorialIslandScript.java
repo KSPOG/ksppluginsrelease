@@ -1750,14 +1750,35 @@ public class TutorialIslandScript extends KspManagedScript
     {
         if (hasSelectAnOption())
         {
+            // The subsequent Ironman question can have the same varbit
+            // value as the mainland question. Only select known safe text.
+            if (Rs2Dialogue.keyPressForDialogueOption("No, I'm not planning to do that.")) return;
+            if (Rs2Dialogue.keyPressForDialogueOption("No, I'm not planning to do that")) return;
+            if (Rs2Dialogue.keyPressForDialogueOption("No, I don't want to be an Ironman")) return;
+            if (Rs2Dialogue.keyPressForDialogueOption("No, I don't want to become an Ironman")) return;
+            if (Rs2Dialogue.keyPressForDialogueOption("No, I don't")) return;
+
             if (Rs2Dialogue.keyPressForDialogueOption("Yes, I'd like to go to the mainland")) return;
             if (Rs2Dialogue.keyPressForDialogueOption("Yes, send me to the mainland")) return;
-            if (Rs2Dialogue.keyPressForDialogueOption("Yes")) return;
-            Rs2Dialogue.keyPressForDialogueOption(1);
+
+            // Accept the short 'Yes.' only when the visible prompt is
+            // explicitly about travelling to the mainland, not account type.
+            String prompt = Rs2Dialogue.getDialogueText();
+            String text = prompt == null ? "" : prompt.toLowerCase(java.util.Locale.ROOT);
+            if (text.contains("mainland") && !text.contains("ironman"))
+            {
+                if (Rs2Dialogue.keyPressForDialogueOption("Yes.")) return;
+            }
+
+            logTutorialTransition("Unrecognized final dialogue; no option selected",
+                    Microbot.getVarbitPlayerValue(281));
             return;
         }
 
-        Rs2Dialogue.clickContinue();
+        if (hasContinue())
+        {
+            Rs2Dialogue.clickContinue();
+        }
     }
 
     private boolean castLumbridgeHomeTeleport()
