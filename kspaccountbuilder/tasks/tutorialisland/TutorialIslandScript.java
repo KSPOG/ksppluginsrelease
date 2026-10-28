@@ -160,6 +160,9 @@ public class TutorialIslandScript extends KspManagedScript
     private long lastMiningStageAtMs;
     private long lastMiningDiagnosticAtMs;
     private long lastTutorialWalkerWarningAtMs;
+    private long lastRangedDiagnosticAtMs;
+    private long lastRangedAttackAtMs;
+    private int lastRangedTargetIndex = -1;
 
     public boolean run()
     {
@@ -1381,31 +1384,89 @@ public class TutorialIslandScript extends KspManagedScript
 
     private void equipTutorialRangeGear()
     {
-        equipTutorialItems("Shortbow", "Bronze arrow");
-        if (!Rs2Inventory.hasItem("Shortbow") && !Rs2Inventory.hasItem("Bronze arrow"))
+        // During the tutorial 480 stage Vannaka gives a shortbow and 50
+        // bronze arrows. Equip each item once. Repeated clicks on a combat
+        // style are not required to unlock the ranged rat attack.
+        if (equipRequiredTutorialRangedGear()) return;
+        if (System.currentTimeMillis() - lastRangedDiagnosticAtMs >= 5_000L)
         {
-            selectLongrangeCombatStyle();
+            lastRangedDiagnosticAtMs = System.currentTimeMillis();
+            Microbot.log("[TutIsland] Ranged equipment ready; awaiting next tutorial stage"
+                    + " | progress=" + Microbot.getVarbitPlayerValue(281)
+                    + " shortbow=" + Rs2Equipment.isWearing("Shortbow")
+                    + " bronzeArrows=" + Rs2Equipment.isWearing("Bronze arrow"));
         }
+    }
+
+    /** @return true if equipping gear or waiting for it from Vannaka. */
+    private boolean equipRequiredTutorialRangedGear()
+    {
+        if (!Rs2Equipment.isWearing("Shortbow"))
+        {
+            if (Rs2Inventory.hasItem("Shortbow") && readyForAction())
+            {
+                if (Rs2Inventory.wield("Shortbow"))
+                    markTutorialInteraction("ranged:shortbow");
+                return true;
+            }
+            return true;
+        }
+        if (!Rs2Equipment.isWearing("Bronze arrow"))
+        {
+            if (Rs2Inventory.hasItem("Bronze arrow") && readyForAction())
+            {
+                if (Rs2Inventory.wield("Bronze arrow"))
+                    markTutorialInteraction("ranged:arrows");
+                return true;
+            }
+            return true;
+        }
+        return false;
     }
 
     private void attackRatWithRange()
     {
+        if (equipRequiredTutorialRangedGear())
+        {
+            if (System.currentTimeMillis() - lastRangedDiagnosticAtMs >= 5_000L)
+            {
+                lastRangedDiagnosticAtMs = System.currentTimeMillis();
+                Microbot.log("[TutIsland] Waiting for tutorial ranged gear"
+                        + " | shortbowEquipped=" + Rs2Equipment.isWearing("Shortbow")
+                        + " arrowsEquipped=" + Rs2Equipment.isWearing("Bronze arrow")
+                        + " bowInventory=" + Rs2Inventory.hasItem("Shortbow")
+                        + " arrowsInventory=" + Rs2Inventory.hasItem("Bronze arrow"));
+            }
+            return;
+        }
+
+        // All bow styles are permitted by the tutorial. The old code clicked
+        // Longrange on EVERY 100ms tick and starved Attack interactions.
+        // Never change combat style during this rat-killing stage.
         Actor target = Rs2Player.getInteracting();
-        if (target != null && "giant rat".equalsIgnoreCase(target.getName())) return;
-
-        if (!Rs2Equipment.isWearing("Shortbow") && Rs2Inventory.hasItem("Shortbow"))
+        if (target != null && "giant rat".equalsIgnoreCase(target.getName())
+                && (Rs2Player.isAnimating()
+                    || System.currentTimeMillis() - lastRangedAttackAtMs < 4_000L))
         {
-            Rs2Inventory.wield("Shortbow");
             return;
         }
-        if (Rs2Inventory.hasItem("Bronze arrow"))
+        if (!readyForAction()) return;
+        if (attackNearestRat())
         {
-            Rs2Inventory.wield("Bronze arrow");
+            lastRangedAttackAtMs = System.currentTimeMillis();
             return;
         }
-
-        selectLongrangeCombatStyle();
-        if (readyForAction()) attackNearestRat();
+        if (System.currentTimeMillis() - lastRangedDiagnosticAtMs >= 5_000L)
+        {
+            lastRangedDiagnosticAtMs = System.currentTimeMillis();
+            Microbot.log("[TutIsland] Ranged rat attack retry | progress="
+                    + Microbot.getVarbitPlayerValue(281)
+                    + " player=" + Rs2Player.getWorldLocation()
+                    + " target=" + (target == null ? "none" : target.getName())
+                    + " lastRatIndex=" + lastRangedTargetIndex
+                    + " moving=" + Rs2Player.isMoving()
+                    + " animating=" + Rs2Player.isAnimating());
+        }
     }
 
     private void bankerGuide()
@@ -1850,6 +1911,9 @@ public class TutorialIslandScript extends KspManagedScript
         lastMiningStageAtMs = 0L;
         lastMiningDiagnosticAtMs = 0L;
         lastTutorialWalkerWarningAtMs = 0L;
+        lastRangedDiagnosticAtMs = 0L;
+        lastRangedAttackAtMs = 0L;
+        lastRangedTargetIndex = -1;
     }
 
     // -------------------------------------------------------------------------
@@ -1971,25 +2035,14 @@ public class TutorialIslandScript extends KspManagedScript
                 || Rs2Player.isInteracting()) return false;
         if (!rat.click("Attack")) return false;
         markTutorialInteraction(key);
+        if (Microbot.getVarbitPlayerValue(281) == 490)
+        {
+            lastRangedTargetIndex = rat.getIndex();
+            Microbot.log("[TutIsland] Ranged Attack dispatched | ratId="
+                    + rat.getId() + " npcIndex=" + rat.getIndex()
+                    + " player=" + Rs2Player.getWorldLocation());
+        }
         return true;
-    }
-
-    private boolean selectLongrangeCombatStyle()
-    {
-        Widget longrange = Rs2Widget.findWidget("Longrange", true);
-
-        if (longrange == null)
-        {
-            longrange = Rs2Widget.findWidget("Long range", true);
-        }
-
-        if (longrange == null)
-        {
-            clickTab("Combat Options");
-            return false;
-        }
-
-        return Rs2Widget.clickWidget(longrange);
     }
 
     // -------------------------------------------------------------------------
