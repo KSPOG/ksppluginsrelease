@@ -54,6 +54,11 @@ import static net.runelite.client.plugins.microbot.util.dialogues.Rs2Dialogue.is
 public class TutorialIslandScript extends KspManagedScript
 {
     private static final int LOOP_DELAY_MS = 100;
+    // Tutorial Island's copper/tin rocks; require live world-view models,
+    // never blindly click a generic rock with the same name elsewhere.
+    private static final WorldPoint TUTORIAL_TIN_ROCK = new WorldPoint(3077, 9504, 0);
+    private static final WorldPoint TUTORIAL_COPPER_ROCK = new WorldPoint(3083, 9501, 0);
+    private static final long MINING_DIAGNOSTIC_INTERVAL_MS = 5_000L;
     private static final long INTERACTION_DISPATCH_TIMEOUT_MS = 1_500L;
     private static final int DEFAULT_CAMERA_ZOOM = 377;
     private static final int RAT_PEN_GATE_ID = 9719;
@@ -151,6 +156,10 @@ public class TutorialIslandScript extends KspManagedScript
     private long pendingInteractionAtMs;
     private String pendingInteractionKey;
     private boolean windStrikeSelected;
+    private int lastMiningProgress = -1;
+    private long lastMiningStageAtMs;
+    private long lastMiningDiagnosticAtMs;
+    private long lastTutorialWalkerWarningAtMs;
 
     public boolean run()
     {
@@ -173,6 +182,10 @@ public class TutorialIslandScript extends KspManagedScript
             }
 
             completeQueuedLoginIfNeeded();
+            // Mainland bank cache/bootstrap may still have an in-flight route
+            // from a previously running task. Reject foreign destinations
+            // every tutorial tick without cancelling valid island-local paths.
+            rejectMainlandWalkerRoute();
             calculateStatus();
 
             if (closeBlockingTutorialWidget()
@@ -1058,21 +1071,58 @@ public class TutorialIslandScript extends KspManagedScript
     private void miningGuide()
     {
         int progress = Microbot.getVarbitPlayerValue(281);
-        if (progress == 260 || progress == 330)
+        long now = System.currentTimeMillis();
+        if (progress != lastMiningProgress)
         {
-            walkAndTalk(tutorialNpc(NpcID.MINING_INSTRUCTOR));
-            return;
+            debug("Mining tutorial progress {} -> {} | player={} tin={} copper={} pickaxe={}",
+                    lastMiningProgress, progress, Rs2Player.getWorldLocation(),
+                    Rs2Inventory.count("Tin ore"), Rs2Inventory.count("Copper ore"),
+                    Rs2Inventory.hasItem("Bronze pickaxe"));
+            lastMiningProgress = progress;
+            lastMiningStageAtMs = now;
+            pendingInteractionAtMs = 0L;
+            pendingInteractionKey = null;
+        }
+
+        if (now - lastMiningDiagnosticAtMs >= MINING_DIAGNOSTIC_INTERVAL_MS)
+        {
+            lastMiningDiagnosticAtMs = now;
+            debug("Mining tutorial heartbeat | varbit281={} player={} tin={} copper={} moving={} animating={} walkerTarget={}",
+                    progress, Rs2Player.getWorldLocation(),
+                    Rs2Inventory.count("Tin ore"), Rs2Inventory.count("Copper ore"),
+                    Rs2Player.isMoving(), Rs2Player.isAnimating(), Rs2Walker.getCurrentTarget());
         }
 
         switch (progress)
         {
+            case 260:
+            case 290:
+            case 330:
+                walkAndTalk(tutorialNpc(NpcID.MINING_INSTRUCTOR));
+                return;
+            case 270:
+                // Legacy tutorial stages still occur on some clients, but
+                // Prospect was removed from most rocks in March 2023.
+                prospectOrMineTutorialRock(TUTORIAL_TIN_ROCK, "Tin ore");
+                return;
+            case 280:
+                prospectOrMineTutorialRock(TUTORIAL_COPPER_ROCK, "Copper ore");
+                return;
             case 300:
-                mineTutorialRock(ObjectID.TIN_ROCKS, "Tin ore");
+                mineTutorialRock(TUTORIAL_TIN_ROCK, "Tin ore");
                 return;
             case 310:
-                mineTutorialRock(ObjectID.COPPER_ROCKS, "Copper ore");
+                mineTutorialRock(TUTORIAL_COPPER_ROCK, "Copper ore");
                 return;
             case 320:
+                if (!Rs2Inventory.hasItem("Tin ore")) {
+                    mineTutorialRock(TUTORIAL_TIN_ROCK, "Tin ore");
+                    return;
+                }
+                if (!Rs2Inventory.hasItem("Copper ore")) {
+                    mineTutorialRock(TUTORIAL_COPPER_ROCK, "Copper ore");
+                    return;
+                }
                 smeltTutorialBronze();
                 return;
             case 340:
@@ -1090,9 +1140,108 @@ public class TutorialIslandScript extends KspManagedScript
         }
     }
 
-    private void mineTutorialRock(int objectId, String ore)
+    private void prospectOrMineTutorialRock(WorldPoint target, String ore)
     {
-        if (!Rs2Inventory.contains(ore)) clickTutorialObject(objectId, "Mine", 4);
+        Rs2TileObjectModel rock = findTutorialMiningRock(target);
+        if (rock == null)
+        {
+            debugMiningRockMissing(target, "Prospect or Mine");
+            walkTutorialLocal(target, 3);
+            return;
+        }
+        if (rock.hasAction("Prospect"))
+        {
+            interactWithTutorialMiningRock(rock, "Prospect");
+            return;
+        }
+        // Modern rock compositions normally offer Mine but not Prospect.
+        // Do not deadlock on a menu option that no longer exists.
+        if (!Rs2Inventory.hasItem(ore))
+        {
+            interactWithTutorialMiningRock(rock, "Mine");
+        }
+        else if (System.currentTimeMillis() - lastMiningStageAtMs >= 5_000L)
+        {
+            walkAndTalk(tutorialNpc(NpcID.MINING_INSTRUCTOR));
+        }
+    }
+
+    private void mineTutorialRock(WorldPoint target, String ore)
+    {
+        if (Rs2Inventory.hasItem(ore))
+        {
+            // An ore can arrive before varbit 281 updates. Wait briefly for
+            // the authoritative stage change, then ask the instructor again
+            // rather than idling indefinitely on an already completed task.
+            if (System.currentTimeMillis() - lastMiningStageAtMs >= 6_000L)
+                walkAndTalk(tutorialNpc(NpcID.MINING_INSTRUCTOR));
+            return;
+        }
+        Rs2TileObjectModel rock = findTutorialMiningRock(target);
+        if (rock == null)
+        {
+            debugMiningRockMissing(target, "Mine");
+            walkTutorialLocal(target, 3);
+            return;
+        }
+        interactWithTutorialMiningRock(rock, "Mine");
+    }
+
+    /**
+     * The ore models on the tutorial are real scene entities: identify the
+     * correct rock by its assigned tile (including adjacent multi-tile
+     * placement), then verify its live menu action before clicking. Some
+     * clients use variant object IDs so ObjectID.TIN_ROCKS/COPPER_ROCKS
+     * alone must not be the selection policy.
+     */
+    private Rs2TileObjectModel findTutorialMiningRock(WorldPoint target)
+    {
+        WorldPoint player = Rs2Player.getWorldLocation();
+        if (player == null || !MINING_SMITHING_AREA.contains(player)) return null;
+        return KspLiveScene.nearestModel(player, 18,
+                object -> object != null
+                        && object.getWorldLocation() != null
+                        && object.getWorldLocation().getPlane() == target.getPlane()
+                        && object.getWorldLocation().distanceTo(target) <= 1
+                        && object.getName() != null
+                        && object.getName().toLowerCase(java.util.Locale.ROOT).contains("rock"));
+    }
+
+    private void interactWithTutorialMiningRock(Rs2TileObjectModel rock, String action)
+    {
+        if (rock == null || !rock.hasAction(action)) return;
+        if (!prepareTutorialObjectInteraction(rock, 4) || !readyForAction()) return;
+        if (rock.click(action))
+        {
+            markTutorialInteraction("mining:" + rock.getId() + ":" + action);
+            debug("Mining tutor {} | objectId={} tile={} stage={}",
+                    action, rock.getId(), rock.getWorldLocation(), lastMiningProgress);
+        }
+    }
+
+    private void debugMiningRockMissing(WorldPoint target, String action)
+    {
+        long now = System.currentTimeMillis();
+        if (now - lastMiningDiagnosticAtMs < MINING_DIAGNOSTIC_INTERVAL_MS) return;
+        lastMiningDiagnosticAtMs = now;
+        debug("Mining tutor target absent | action={} expectedTile={} player={} varbit281={} - checking live scene",
+                action, target, Rs2Player.getWorldLocation(), lastMiningProgress);
+    }
+
+    private void rejectMainlandWalkerRoute()
+    {
+        WorldPoint player = Rs2Player.getWorldLocation();
+        if (player == null || !TutAreas.contains(player)) return;
+        WorldPoint target = Rs2Walker.getCurrentTarget();
+        if (target == null || TutAreas.contains(target)) return;
+        Rs2Walker.clearWalkingRoute("ksp_tutorial_reject_mainland_bank_route");
+        long now = System.currentTimeMillis();
+        if (now - lastTutorialWalkerWarningAtMs >= 5_000L)
+        {
+            lastTutorialWalkerWarningAtMs = now;
+            debug("Tutorial Island cancelled mainland walker destination | player={} target={} progress={}",
+                    player, target, Microbot.getVarbitPlayerValue(281));
+        }
     }
 
     private void smeltTutorialBronze()
@@ -1690,6 +1839,10 @@ public class TutorialIslandScript extends KspManagedScript
         windStrikeSelected = false;
         pendingInteractionAtMs = 0L;
         pendingInteractionKey = null;
+        lastMiningProgress = -1;
+        lastMiningStageAtMs = 0L;
+        lastMiningDiagnosticAtMs = 0L;
+        lastTutorialWalkerWarningAtMs = 0L;
     }
 
     // -------------------------------------------------------------------------
