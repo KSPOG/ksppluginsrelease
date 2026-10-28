@@ -467,6 +467,7 @@ public final class KspHalloween2026Script extends Script {
             sweepsWithoutTarget++;
             if (stage == Stage.SMASH_LANTERNS
                     && sweepsWithoutTarget >= RIMMINGTON_SWEEP.length) {
+                sweepRequiredByStarter = false;
                 change(Stage.VERIFY_LANTERNS,
                         "Sweep exhausted; checking Halloween lantern progress with children");
                 return;
