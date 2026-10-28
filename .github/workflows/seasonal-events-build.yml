@@ -276,6 +276,9 @@ jobs:
           assert 'TreaterAge.UNKNOWN' in age
           assert 'TREATER_CHILD_GROUP_KEY' in age
           assert 'confirmedChildGroup == TreaterGroup.UNKNOWN' in age
+          assert 'Child/adult NPC models cannot be differentiated safely' in age
+          assert 'if (stage == Stage.NEEDS_REVIEW) return;' in child
+          assert 'if (stage == Stage.NEEDS_REVIEW) return;' in adults
           assert 'TREATER_GROUP_A_START = 16778' in code
           assert 'TREATER_GROUP_B_START = 16794' in code
           assert 'configManager.unsetConfiguration(GROUP, TREATER_CHILD_GROUP_KEY)' in code
