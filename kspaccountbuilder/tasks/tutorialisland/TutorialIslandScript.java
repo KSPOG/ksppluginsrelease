@@ -65,6 +65,10 @@ public class TutorialIslandScript extends KspManagedScript
     private static final int RAT_PEN_INNER_BOUNDARY_X = 3110;
     private static final int ACCOUNT_GUIDE_DOOR_ID = 9721;
     private static final int ACCOUNT_GUIDE_ROOM_MIN_X = 3125;
+    private static final int CHAPEL_PASSAGE_DOOR_ID = 9722;
+    private static final int MAGIC_PASSAGE_DOOR_ID = 9723;
+    private static final int CHAPEL_INTERIOR_DOOR_ID = 1524;
+    private static final int CHAPEL_INTERIOR_OPEN_DOOR_ID = 1525;
     private static final int COMPLETION_LOGOUT_RETRY_MS = 6000;
     private static final int QUEUE_LOGIN_RETRY_MS = 10000;
     private static final int QUEUE_LOGIN_SKIP_MS = 60000;
@@ -125,6 +129,8 @@ public class TutorialIslandScript extends KspManagedScript
     private static final WorldArea TUT_ISLAND_BANK_AREA  = TutAreas.TUT_ISLAND_BANK_AREA;
     private static final WorldArea CHURCH_AREA           = TutAreas.CHURCH_AREA;
     private static final WorldArea TUTORIAL_END_AREA     = TutAreas.TUTORIAL_END_AREA;
+    private static final WorldPoint CHAPEL_INSTRUCTOR_TILE = new WorldPoint(3128, 3106, 0);
+    private static final WorldPoint MAGIC_INSTRUCTOR_TILE = new WorldPoint(3141, 3090, 0);
 
     private String lastGeneratedName = "None";
     private boolean nameLookupPending;
@@ -161,6 +167,7 @@ public class TutorialIslandScript extends KspManagedScript
     private long lastMiningDiagnosticAtMs;
     private long lastTutorialWalkerWarningAtMs;
     private long lastRangedDiagnosticAtMs;
+    private long lastTutorialTransitionDiagnosticAtMs;
     private long lastRangedAttackAtMs;
     private int lastRangedTargetIndex = -1;
 
@@ -881,23 +888,24 @@ public class TutorialIslandScript extends KspManagedScript
 
     private boolean walkToAccountGuideRoomAndTalk(Rs2NpcModel npc)
     {
-        if (npc == null || npc.getWorldLocation() == null)
-        {
-            return false;
-        }
-
         WorldPoint playerLocation = Rs2Player.getWorldLocation();
         if (playerLocation == null)
         {
             return false;
         }
 
+        // The Account Guide may only load after entering the room.
         if (playerLocation.getX() < ACCOUNT_GUIDE_ROOM_MIN_X)
         {
             clickNearestTutorialObject(ACCOUNT_GUIDE_DOOR_ID, "Open");
             return false;
         }
 
+        if (npc == null || npc.getWorldLocation() == null)
+        {
+            logTutorialTransition("Account Guide not visible", Microbot.getVarbitPlayerValue(281));
+            return false;
+        }
         return walkAndTalk(npc, 1);
     }
 
@@ -1563,9 +1571,18 @@ public class TutorialIslandScript extends KspManagedScript
         Rs2NpcModel npc = tutorialNpc(NpcID.BROTHER_BRACE);
         int progress = Microbot.getVarbitPlayerValue(281);
 
-        if (progress == 540 || progress == 550)
+        if (progress == 540)
         {
-            walkAndTalk(npc);
+            advanceThroughTutorialDoor(CHAPEL_PASSAGE_DOOR_ID, CHAPEL_INSTRUCTOR_TILE, progress);
+            return;
+        }
+
+        if (progress == 550)
+        {
+            if (ensurePrayerChapelEntrance(npc))
+            {
+                walkAndTalk(npc);
+            }
             return;
         }
 
@@ -1587,6 +1604,12 @@ public class TutorialIslandScript extends KspManagedScript
             return;
         }
 
+        if (progress == 590)
+        {
+            clickTab("Ignore list");
+            return;
+        }
+
         if (progress == 600)
         {
             walkAndTalk(npc);
@@ -1598,8 +1621,20 @@ public class TutorialIslandScript extends KspManagedScript
         Rs2NpcModel npc = tutorialNpc(NpcID.MAGIC_INSTRUCTOR);
         int progress = Microbot.getVarbitPlayerValue(281);
 
-        if (progress == 610 || progress == 620)
+        if (progress == 610)
         {
+            advanceThroughTutorialDoor(MAGIC_PASSAGE_DOOR_ID, MAGIC_INSTRUCTOR_TILE, progress);
+            return;
+        }
+
+        if (progress == 620)
+        {
+            if (npc == null)
+            {
+                walkTutorialLocal(MAGIC_INSTRUCTOR_TILE, 3);
+                logTutorialTransition("Magic Instructor not visible", progress);
+                return;
+            }
             walkAndTalk(npc);
             return;
         }
