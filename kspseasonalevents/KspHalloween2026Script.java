@@ -117,8 +117,6 @@ public final class KspHalloween2026Script extends Script {
     private WorldPoint pendingLantern;
     private long pendingLanternAt;
     private long lastVerificationTalkAt;
-    private int verificationTalkAttempts;
-    private boolean verificationDialogueSeen;
     private boolean sweepRequiredByStarter;
     private int starterReportedRemainingCount;
     private int pendingCandyCount = -1;
@@ -134,8 +132,6 @@ public final class KspHalloween2026Script extends Script {
         pendingLantern = null;
         pendingLanternAt = 0L;
         lastVerificationTalkAt = 0L;
-        verificationTalkAttempts = 0;
-        verificationDialogueSeen = false;
         sweepRequiredByStarter = false;
         starterReportedRemainingCount = 0;
         pendingCandyCount = -1;
@@ -445,9 +441,7 @@ public final class KspHalloween2026Script extends Script {
         // Search all areas only if the starter specifically says one remains.
         if (sweepsWithoutTarget >= RIMMINGTON_SWEEP.length) {
             sweepRequiredByStarter = false;
-            verificationTalkAttempts = 0;
             lastVerificationTalkAt = 0L;
-            verificationDialogueSeen = false;
             change(Stage.VERIFY_LANTERNS,
                     "No smashable lantern in full Rimmington sweep; checking with Angel/Henja");
             return;
@@ -538,7 +532,6 @@ public final class KspHalloween2026Script extends Script {
                 && Rs2Npc.interact("Angel", "Talk-to");
         if (clicked) {
             lastVerificationTalkAt = System.currentTimeMillis();
-            verificationTalkAttempts++;
             acted("Asking Angel/Henja to verify the lantern objective");
         } else {
             status = "Finding Angel/Henja for completion verification";
