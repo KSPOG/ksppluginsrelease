@@ -1,0 +1,104 @@
+name: Build KSP Seasonal Events
+
+on:
+  pull_request:
+    paths:
+      - 'kspseasonalevents/**'
+      - '.github/workflows/seasonal-events-build.yml'
+  push:
+    branches: [main, dev]
+    paths:
+      - 'kspseasonalevents/**'
+      - '.github/workflows/seasonal-events-build.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: seasonal-events-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Compile KspSeasonalEventsPlugin
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout KSP sources
+        uses: actions/checkout@v4
+        with:
+          path: release
+
+      - name: Checkout Microbot Hub
+        uses: actions/checkout@v4
+        with:
+          repository: chsami/Microbot-Hub
+          ref: main
+          path: hub
+
+      - name: Set up Java 11
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '11'
+          cache: gradle
+          cache-dependency-path: hub/**/*.gradle*
+
+      - name: Validate seasonal module independence and guarded Halloween 2026 entry
+        shell: python
+        run: |
+          from pathlib import Path
+          root=Path('release/kspseasonalevents')
+          plugin=(root/'KspSeasonalEventsPlugin.java').read_text()
+          script=(root/'KspHalloween2026Script.java').read_text()
+          panel=(root/'KspSeasonalEventsPanel.java').read_text()
+          overlay=(root/'KspSeasonalEventsOverlay.java').read_text()
+          event=(root/'KspSeasonalEvent.java').read_text()
+          assert 'VERSION = "0.1.0"' in plugin
+          assert 'KSP + "Seasonal Events"' in plugin
+          assert 'KspSeasonalEventsPlugin' in plugin and 'kspwillowchopper' not in plugin
+          assert 'HALLOWEEN_2026' in event and 'KspHalloween2026Script' in script
+          assert 'RIMMINGTON' in script and 'Henja' in script and 'Angel' in script
+          assert 'Rs2Walker.walkTo(RIMMINGTON_APPROACH, 8)' in script
+          assert 'if (!introClicked && !RIMMINGTON.contains(player))' in script
+          assert 'Stage.AWAIT_EVENT_STEP' in script
+          assert 'Unknown Halloween dialogue option' in script
+          assert 'Introduction reached; next 2026 event stage unverified' in script
+          assert 'verifiedComplete = true;' in script
+          assert 'public void setPaused(boolean pause)' in script
+          assert 'new JButton("Start")' in panel
+          assert 'new JButton("Pause")' in panel
+          assert 'new JButton("Stop")' in panel
+          assert 'script.isActive()' in overlay
+          assert 'script.start(config)' in plugin and 'overlays.remove(overlay)' in plugin
+          assert not any('kspwillowchopper' in p.read_text() for p in root.glob('*.java'))
+          print('PASS: standalone seasonal plugin, guarded Halloween intro, safe unknown steps and lifecycle')
+
+      - name: Install Seasonal Events sources into Microbot Hub
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT='hub/src/main/java/net/runelite/client/plugins/microbot'
+          rm -rf "$ROOT/kspseasonalevents"
+          cp -R release/kspseasonalevents "$ROOT/kspseasonalevents"
+
+      - name: Compile and package Seasonal Events
+        working-directory: hub
+        run: |
+          chmod +x gradlew
+          ./gradlew clean build -PpluginList=KspSeasonalEventsPlugin --stacktrace --no-daemon
+
+      - name: Verify compiled seasonal plugin
+        shell: bash
+        run: |
+          ls -lh hub/build/libs
+          test -n "$(find hub/build/libs -maxdepth 1 -type f -name 'KspSeasonalEventsPlugin-*.jar' -print -quit)"
+
+      - name: Upload Seasonal Events JAR
+        uses: actions/upload-artifact@v4
+        with:
+          name: KspSeasonalEventsPlugin-${{ github.sha }}
+          path: hub/build/libs/KspSeasonalEventsPlugin-*.jar
+          if-no-files-found: error
+          retention-days: 7
