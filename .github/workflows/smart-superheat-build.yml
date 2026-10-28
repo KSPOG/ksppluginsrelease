@@ -63,6 +63,13 @@ jobs:
           assert 'Rs2Bank.walkToBank' not in script
           assert 'Rs2Walker.walkTo(' not in script
           assert 'isInGrandExchange(player)' in script
+          assert 'Rs2GrandExchange.walkToGrandExchange()' in script, 'Out-of-GE approach must use canonical GE route'
+          assert 'BankLocation.GRAND_EXCHANGE.getWorldPoint()' in script, 'Must use Microbot GE bank destination'
+          assert 'geWalkOwned' in script and 'ksp_smart_superheat_ge_arrived' in script, 'Arrival route cancellation missing'
+          assert 'isExpectedActor(npcName, clerkOnly)' in access, 'Strict banker/clerk name check missing'
+          assert '"Banker".equalsIgnoreCase' in access, 'Banking must only target Banker NPC'
+          assert '"Grand Exchange Clerk".equalsIgnoreCase' in access, 'Exchange must only target GE Clerk'
+          assert 'KspSmartSuperheatPlugin.VERSION' in (Path('release/kspsmartsuperheat') / 'KspSmartSuperheatPlugin.java').read_text()
           assert 'Rs2Walker.clearWalkingRoute(' in script
           assert 'openLocalBank()' in script and 'openLocalExchange()' in script
           assert 'isAllowedActor(player.getWorldLocation(), npc.getWorldLocation())' in access
@@ -70,7 +77,7 @@ jobs:
           assert 'Rs2Npc.interact(' not in access
           assert 'Rs2Walker.walkTo(' not in access
           assert 'MIN_X = 3153' in access and 'MAX_Y = 3502' in access
-          print('PASS: Smart Superheat never selects or walks to a non-GE banking target')
+          print('PASS: canonical GE arrival, Banker-only bank and Clerk-only exchange; no remote bank-booth paths')
 
       - name: Install Smart Superheat plus shared dependencies
         shell: bash
