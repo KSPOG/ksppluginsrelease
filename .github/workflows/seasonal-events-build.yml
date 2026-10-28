@@ -209,7 +209,7 @@ jobs:
           assert 'Rs2Npc.interact("Diango", "Holiday-items")' in costume
           assert 'change(Stage.SPOOK_CHILDREN' in costume
           assert 'skeleton boots' in script and 'skeleton shirt' in script
-          assert 'No eligible holiday costume item found in Diango retrieval' in costume
+          assert 'Diango has no additional suitable wearable costume pieces' in costume
           print('PASS: Diango live widgets, restricted item selection, receipt verification and bounded recovery')
 
       - name: Verify Diango stays open until four distinct costume slots are held
