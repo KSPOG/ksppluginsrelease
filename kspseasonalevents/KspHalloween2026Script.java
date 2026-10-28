@@ -950,6 +950,16 @@ public final class KspHalloween2026Script extends Script {
         if (!RIMMINGTON.contains(player)
                 && !nearOrWalk(player, STARTER, 12, "child trick-or-treaters")) return;
 
+        // Once the observed set of ten has been attempted, consult
+        // Angel/Henja immediately, rather than scanning arbitrary waypoints.
+        // The conversation will decide whether another sweep is required.
+        if (spookedChildren.size() >= CHILD_REPORT_CHECKPOINT) {
+            childrenReportConfirmed = false;
+            change(Stage.REPORT_CHILDREN,
+                    "Ten child Spook attempts recorded; checking Angel/Henja");
+            return;
+        }
+
         // NPC indexes are session-local and may be reused after scene
         // reloads. Use the observed NPC definition IDs to deduplicate clicks.
         Rs2NpcModel child = Rs2Npc.getNpcs().filter(n -> n.getName() != null
@@ -965,16 +975,6 @@ public final class KspHalloween2026Script extends Script {
                         + " distinctAttempts=" + spookedChildren.size());
                 sweepsWithoutTarget = 0;
             }
-            return;
-        }
-
-        // After the 10 distinct IDs observed in the supplied 2026 run,
-        // do not walk eight arbitrary waypoints. Verify with Angel/Henja.
-        // Attempts are not counted as game-confirmed successful scares.
-        if (spookedChildren.size() >= CHILD_REPORT_CHECKPOINT) {
-            childrenReportConfirmed = false;
-            change(Stage.REPORT_CHILDREN,
-                    "Ten distinct Spook actions attempted; checking with Angel/Henja");
             return;
         }
 
