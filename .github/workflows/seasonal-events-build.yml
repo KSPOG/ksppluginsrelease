@@ -288,10 +288,11 @@ jobs:
           assert 'change(Stage.REPORT_CHILDREN' in child
           assert 'sweepsWithoutTarget >= RIMMINGTON_SWEEP.length' in child
           assert 'childrenReportConfirmed = true;' in report
-          assert 'lower.contains("chemist")' in report
-          assert 'lower.contains("adults")' in report
-          assert 'lower.contains("still")' in report
-          assert 'change(Stage.SPOOK_CHILDREN' in report
+          assert 'KspHalloweenChildReport.classify(raw)' in report
+          assert 'Instruction.VISIT_CHEMIST' in report
+          assert 'Instruction.UNKNOWN' in report
+          assert 'pendingStarterNext = required;' in report
+          assert 'Stage.SPOOK_CHILDREN : Stage.GET_COSTUME' in report
           assert 'childrenReportConfirmed' in tick and 'next == Stage.CHEMIST_RIDDLE' in tick
           assert 'stopForReview("Angel/Henja dialogue did not confirm' in tick
           assert 'nearOrWalk(player, STARTER, 8, "Angel / Henja' in starter
