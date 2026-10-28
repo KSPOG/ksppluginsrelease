@@ -328,13 +328,13 @@ public class WoodCuttingScript extends KspManagedScript {
         if (playerLocation == null || !isInsideActiveWoodcuttingArea(playerLocation)) return;
 
         WorldPoint walkerTarget = Rs2Walker.getCurrentTarget();
-        if (walkerTarget != null || this.walkingToTargetArea) {
+        // Never cancel an unrelated native route (for example banking) just because
+        // the player is still inside the woodcutting area.
+        if (walkerTarget != null && isInsideActiveWoodcuttingArea(walkerTarget)) {
             Rs2Walker.clearWalkingRoute("ksp_account_builder_woodcutting_already_in_area");
-            Rs2Walker.clearWalkingRoute("Woodcutting:target-area");
         }
         this.walkingToTargetArea = false;
         this.lastBankActionAtMs = 0L;
-        Rs2Walker.clearWalkingRoute("Woodcutting:target-area");
         this.lastWebWalkAtMs = 0L;
     }
 
@@ -354,10 +354,8 @@ public class WoodCuttingScript extends KspManagedScript {
         if (!ensureInventoryTabOpen()) return;
         boolean localWillowBank = targetArea == TreeAreas.WILLOW_TREES_DRAYNOR
                 && isInsideActiveWoodcuttingArea(Rs2Player.getWorldLocation());
-        if (localWillowBank) {
-            Rs2Walker.clearWalkingRoute("ksp_woodcutting_willow_local_bank");
-            Rs2Walker.clearWalkingRoute("ksp_woodcutting_willow_local_bank");
-        }
+        // The native walker owns its route; opening the adjacent bank must not
+        // clear a route just because the player is close to willow trees.
         if (!Rs2Bank.isOpen()) {
             if (!bankActionReady()) return;
             boolean opened = localWillowBank ? Rs2Bank.openBank() : Rs2Bank.openBank() || Rs2Bank.walkToBankAndUseBank();

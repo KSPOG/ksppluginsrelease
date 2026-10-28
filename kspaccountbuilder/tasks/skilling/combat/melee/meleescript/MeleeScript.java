@@ -709,8 +709,6 @@ public class MeleeScript extends KspManagedScript {
             // route alive was visible in the log and delayed target acquisition while the
             // player kept following the final route clicks.
             Rs2Walker.clearWalkingRoute("ksp_account_builder_melee_reached_area");
-            Rs2Walker.clearWalkingRoute("Melee:target-area");
-            Rs2Walker.clearWalkingRoute("Melee:hill-giants-entry");
             return true;
         }
         if (this.handleHillGiantDungeonEntry(targetArea)) {
@@ -738,11 +736,9 @@ public class MeleeScript extends KspManagedScript {
         if (targetArea != CombatAreas.HILL_GIANTS || player == null) return false;
 
         if (player.getY() > 5000) {
-            Rs2Walker.clearWalkingRoute("Melee:hill-giants-entry");
             return false;
         }
 
-        Rs2Walker.clearWalkingRoute("Melee:target-area");
 
         if (player.distanceTo(EDGEVILLE_TRAPDOOR) > EDGEVILLE_TRAPDOOR_INTERACTION_DISTANCE) {
             setStatus("Walking to Edgeville dungeon");
@@ -808,7 +804,6 @@ public class MeleeScript extends KspManagedScript {
 
         if (gate == null || !Rs2GameObject.hasAction(gate, "Open")) return false;
 
-        Rs2Walker.clearWalkingRoute("Melee:target-area");
         setStatus("Opening gate to chickens");
         if (isWorldActionPending("chicken-gate")) return true;
         if (Rs2GameObject.interact(gate, "Open")) markWorldAction("chicken-gate");
@@ -1319,8 +1314,6 @@ public class MeleeScript extends KspManagedScript {
         this.lastWarriorCombatXp = -1;
         this.clearPendingLoot();
         this.clearPendingBury();
-        Rs2Walker.clearWalkingRoute("Melee:target-area");
-        Rs2Walker.clearWalkingRoute("Melee:hill-giants-entry");
         this.state = CombatState.PREPARING;
         this.status = "Idle";
         super.shutdown();

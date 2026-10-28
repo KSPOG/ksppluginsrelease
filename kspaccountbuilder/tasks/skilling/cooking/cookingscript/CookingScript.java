@@ -244,7 +244,6 @@ public class CookingScript extends KspManagedScript
     {
         if (targetArea != Areas.EDGEVILLE_RANGE)
         {
-            Rs2Walker.clearWalkingRoute(EXIT_WALK_KEY);
             lastDoorInteractionAtMs = 0L;
         lastStoveInteractionAtMs = 0L;
             return false;
@@ -253,7 +252,6 @@ public class CookingScript extends KspManagedScript
         WorldPoint playerLocation = Rs2Player.getWorldLocation();
         if (!targetArea.getArea().contains(playerLocation))
         {
-            Rs2Walker.clearWalkingRoute(EXIT_WALK_KEY);
             lastDoorInteractionAtMs = 0L;
             return false;
         }
@@ -478,8 +476,6 @@ public class CookingScript extends KspManagedScript
         pendingWorldAction = null;
         pendingBankActionAtMs = 0L;
         pendingBankEmptySlots = -1;
-        Rs2Walker.clearWalkingRoute(EXIT_WALK_KEY);
-        Rs2Walker.clearWalkingRoute(WALK_KEY);
         super.shutdown();
     }
 }

@@ -248,7 +248,6 @@ public class MiningScript extends KspManagedScript
             if (targetArea == Areas.SILVER_VARROCK_WEST && !canMineSilverSafely())
             {
                 Rs2Walker.clearWalkingRoute("ksp_account_builder_silver_mugger_guard");
-                Rs2Walker.clearWalkingRoute("Mining:target-area");
                 walkingToTargetArea = false;
                 Microbot.status = "Waiting for Mugger to become passive";
                 return;
@@ -257,7 +256,6 @@ public class MiningScript extends KspManagedScript
             if (targetArea == Areas.IRON_VARROCK_EAST && !canMineIronSafely())
             {
                 Rs2Walker.clearWalkingRoute("ksp_account_builder_iron_rat_guard");
-                Rs2Walker.clearWalkingRoute("Mining:target-area");
                 walkingToTargetArea = false;
                 Microbot.status = "Waiting for Rat to become passive";
                 return;
@@ -499,7 +497,6 @@ public class MiningScript extends KspManagedScript
         }
 
         Rs2Walker.clearWalkingRoute("ksp_account_builder_mining_reached_area");
-        Rs2Walker.clearWalkingRoute("Mining:target-area");
         walkingToTargetArea = false;
     }
 
@@ -535,7 +532,6 @@ public class MiningScript extends KspManagedScript
             return;
         }
 
-        Rs2Walker.clearWalkingRoute(BANK_WALK_KEY);
         if (KspBankWidgetHelper.closeBankTutorialOverlayIfOpen()) return;
         if (!bankActionReady() || bankInventoryActionPending()) return;
 
@@ -560,7 +556,6 @@ public class MiningScript extends KspManagedScript
             return;
         }
 
-        Rs2Walker.clearWalkingRoute("Mining:deposit-box-in-range");
 
         if (!Rs2DepositBox.isOpen())
         {
@@ -608,7 +603,6 @@ public class MiningScript extends KspManagedScript
                 // Do not trap the entire Account Builder at Port Sarim when
                 // the deposit-box object/widget cannot be opened this trip.
                 useBankInsteadOfDepositBox = true;
-                Rs2Walker.clearWalkingRoute(DEPOSIT_BOX_WALK_KEY);
                 lastBankActionAtMs = 0L;
                 KspTaskDebug.info(log, true, "Mining",
                         "Port Sarim deposit box unavailable after {} attempts; recovering via standard bank",
@@ -1254,9 +1248,6 @@ public class MiningScript extends KspManagedScript
         initializedSelectionBand = -1;
         randomMidTierRock = null;
         walkingToTargetArea = false;
-        Rs2Walker.clearWalkingRoute("Mining:target-area");
-        Rs2Walker.clearWalkingRoute(BANK_WALK_KEY);
-        Rs2Walker.clearWalkingRoute(DEPOSIT_BOX_WALK_KEY);
         lastWebWalkAtMs = 0L;
         lastObjectInteractionAtMs = 0L;
         pendingObjectInteractionAtMs = 0L;

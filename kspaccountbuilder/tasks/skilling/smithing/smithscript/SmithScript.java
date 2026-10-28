@@ -363,7 +363,6 @@ extends KspManagedScript {
                     this.walkingToTargetArea);
         }
 
-        Rs2Walker.clearWalkingRoute(TARGET_AREA_WALK_KEY);
         this.lastWalkTarget = null;
         this.lastWebWalkAtMs = 0L;
         this.walkingToTargetArea = false;
@@ -705,8 +704,6 @@ extends KspManagedScript {
         this.pendingWorldAction = null;
         this.clearInventoryAction();
         this.walkingToTargetArea = false;
-        Rs2Walker.clearWalkingRoute(TARGET_AREA_WALK_KEY);
-        Rs2Walker.clearWalkingRoute(ANVIL_WALK_KEY);
         super.shutdown();
     }
 

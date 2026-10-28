@@ -304,7 +304,6 @@ public class FishingScript extends KspManagedScript
                     Rs2Inventory.emptySlotCount(), Rs2Walker.getCurrentTarget());
             skipCookingUntilBanked = true;
             resetCookingBatch();
-            Rs2Walker.clearWalkingRoute(WALK_KEY_TO_TROUT_SALMON_FIRE);
             return false;
         }
 
@@ -343,7 +342,6 @@ public class FishingScript extends KspManagedScript
                 player, 30, object -> object.getId() == TROUT_SALMON_FIRE_ID);
         if (fire == null) {
             pendingCookingFireActionAtMs = 0L;
-            Rs2Walker.clearWalkingRoute(WALK_KEY_TO_TROUT_SALMON_FIRE);
             resetCookingBatch();
             return false;
         }
@@ -358,7 +356,6 @@ public class FishingScript extends KspManagedScript
             Rs2Walker.walkTo(approach, 1);
             return true;
         }
-        Rs2Walker.clearWalkingRoute(WALK_KEY_TO_TROUT_SALMON_FIRE);
 
         if (pendingCookingFireActionAtMs > 0L
                 && System.currentTimeMillis() - pendingCookingFireActionAtMs < ACTION_DISPATCH_TIMEOUT_MS) {
@@ -511,7 +508,10 @@ public class FishingScript extends KspManagedScript
         }
 
         WorldPoint walkerTarget = Rs2Walker.getCurrentTarget();
-        Rs2Walker.clearWalkingRoute("ksp_account_builder_fishing_reached_area");
+        if (walkerTarget != null && targetArea.getArea().contains(walkerTarget))
+        {
+            Rs2Walker.clearWalkingRoute("ksp_account_builder_fishing_reached_area");
+        }
         debug("Cleared fishing walker route because player is inside task area | player={} area={} oldWalkerTarget={}",
                 playerLocation,
                 targetArea.getDisplayName(),
@@ -580,7 +580,6 @@ public class FishingScript extends KspManagedScript
     private void bankFishOnly()
     {
         resetCookingBatch();
-        Rs2Walker.clearWalkingRoute(WALK_KEY_TO_TROUT_SALMON_FIRE);
         if (!ensureInventoryTabOpen()) return;
 
         if (requiresKaramjaTravel()) {
@@ -930,7 +929,6 @@ public class FishingScript extends KspManagedScript
         pendingBankEmptySlots = -1;
         lastWebWalkAtMs = 0L;
         state = FishingState.WAITING;
-        Rs2Walker.clearWalkingRoute(WALK_KEY_TO_FISHING_AREA);
         super.shutdown();
     }
 
@@ -1058,7 +1056,6 @@ public static boolean travelToKaramjaFishingSpot()
         {
             // Important: the only mainland target before Musa Point must be the Port Sarim boat.
             // This prevents the global pathfinder from selecting Rimmington/charter-style routes.
-            Rs2Walker.clearWalkingRoute(WALK_KEY_TO_KARAMJA_FISHING);
             Rs2Walker.walkTo(PORT_SARIM_TRAVEL_POINT, NPC_REACH_DISTANCE);
             return false;
         }
@@ -1180,12 +1177,11 @@ public static boolean travelToKaramjaFishingSpot()
     {
         clearPendingTravel();
         clearPendingInteraction();
-        Rs2Walker.clearWalkingRoute(WALK_KEY_TO_PORT_SARIM_TRAVEL);
-        Rs2Walker.clearWalkingRoute(WALK_KEY_TO_PORT_SARIM_DEPOSIT);
-        Rs2Walker.clearWalkingRoute(WALK_KEY_TO_KARAMJA_CUSTOMS);
-        Rs2Walker.clearWalkingRoute(WALK_KEY_TO_KARAMJA_FISHING);
-        Rs2Walker.clearWalkingRoute(WALK_KEY_TO_PORT_SARIM_NPC);
-        Rs2Walker.clearWalkingRoute(WALK_KEY_TO_CUSTOMS_NPC);
+        // Core WebWalker owns route state; the ferry step has no keyed walks.
+        if (Rs2Walker.getCurrentTarget() != null)
+        {
+            Rs2Walker.clearWalkingRoute("ksp_fishing_karamja_arrived");
+        }
     }
 
     private static boolean handleTravelDialogue(TravelDirection direction)
@@ -1267,7 +1263,6 @@ public static boolean travelToKaramjaFishingSpot()
         if (clicked)
         {
             markInteraction(interactionKey);
-            Rs2Walker.clearWalkingRoute(walkKey);
             if (!"Talk-to".equalsIgnoreCase(action))
             {
                 markTravelPending(direction);

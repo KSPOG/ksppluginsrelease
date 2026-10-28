@@ -359,7 +359,6 @@ public class FireMakingScript extends KspManagedScript
     {
         if (!walkingToTargetArea) return;
         Rs2Walker.clearWalkingRoute("ksp_account_builder_firemaking_reached_area");
-        Rs2Walker.clearWalkingRoute("Firemaking:target-area");
         walkingToTargetArea = false;
     }
 
@@ -723,7 +722,6 @@ public class FireMakingScript extends KspManagedScript
         lastBurnPromptActionAtMs = 0L;
         activeFireInteractionLocation = null;
         activeFireInteractionId = -1;
-        Rs2Walker.clearWalkingRoute("Firemaking:campfire");
     }
 
     private boolean isIdleInTargetArea()
@@ -858,8 +856,6 @@ public class FireMakingScript extends KspManagedScript
         activeFireInteractionLocation = null;
         activeFireInteractionId = -1;
         walkingToTargetArea = false;
-        Rs2Walker.clearWalkingRoute("Firemaking:target-area");
-        Rs2Walker.clearWalkingRoute("Firemaking:campfire");
         super.shutdown();
     }
 
