@@ -1,4 +1,4 @@
-# KSP High Alch Trader — Grand Exchange-only access (v0.3.8)
+# KSP High Alch Trader — Grand Exchange-only access (v0.3.9)
 
 Banking and trading for the High Alch Trader are **restricted to the Grand Exchange**.
 
@@ -22,8 +22,31 @@ Banking and trading for the High Alch Trader are **restricted to the Grand Excha
   interface). WorldPoint checks cover the GE paved square: x=3153..3178,
   y=3477..3502, plane=0.
 
-The startup log must show **v0.3.8** after updating the installed
+The startup log must show **v0.3.9** after updating the installed
 source/JAR. A different version indicates that an older loaded build is
 still running. The GitHub Actions workflow builds the plugin and provides
 its compiled JAR as an artifact. Runtime interaction with GE bankers and
 mule transfers still requires an in-client test.
+
+## Clerk opening and GE offer diagnostic improvements (v0.3.9)
+
+- Deselect any active inventory item before trying to open the nearby GE
+  clerk; a selected item otherwise changes the NPC action to `Use`.
+- Use a live RuneLite `NPC` and transformed NPC definition to find the
+  actual `Exchange` or `Bank` menu action, including current world-view
+  and actor index. Never pick a distant bank booth or walk outside the GE.
+- Expose **why** opening failed in both plugin status and client logs:
+  player position, absence of a matching clerk, missing NPC menu actions,
+  dispatched action, GE overview timeout, or a visible bank-PIN prompt.
+- Filter item **31454** (Ball of cotton) from the F2P/members catalog.
+  This is an unobtainable cache/development item that appears tradeable
+  in item metadata but has no real market price.
+- A failed Microbot GE quantity/setup now logs item name, ID, requested
+  quantity, unit price, and visible interface state. Retry at most
+  three times with a backoff, then stop with actionable status instead of
+  repeatedly cycling through the same three failed quantity entries.
+
+**Known limit:** Microbot's generic `Rs2GrandExchange.setQuantity`
+widget-input code is used for buys; this release adds bounded recovery and
+diagnostics, but does not claim to repair every underlying client widget
+failure. Confirm the real clerk click and buy flow with a live client test.

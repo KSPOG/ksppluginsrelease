@@ -11,6 +11,11 @@ import java.util.concurrent.ConcurrentHashMap;
 final class F2PAlchCatalog {
     private F2PAlchCatalog() {}
 
+    // Unobtainable developer/cache leftovers can appear in OSRS Wiki's
+    // tradeable mapping with a positive high-alch value, but have no live
+    // market price and cannot be purchased. Do not continually query them.
+    private static final Set<Integer> UNOBTAINABLE_IDS = Set.of(31454); // Ball of cotton
+
     /** F2P candidates in the original Rune -> Adamant -> Mithril -> Steel -> Black -> green d'hide order. */
     private static final int[] F2P_ALCH = {
             1079, 1093, 1113, 1127, 1147, 1163, 1185, 1201, 1275, 1289, 1303, 1319, 1333, 1347, 1359, 1373, 1432,
@@ -48,8 +53,12 @@ final class F2PAlchCatalog {
     private static volatile Set<Integer> discoveredMembers = Collections.emptySet();
 
     static void updateDiscoveredCandidates(Set<Integer> f2p, Set<Integer> members) {
-        discoveredF2p = Collections.unmodifiableSet(new LinkedHashSet<>(f2p));
-        discoveredMembers = Collections.unmodifiableSet(new LinkedHashSet<>(members));
+        Set<Integer> availableF2p = new LinkedHashSet<>(f2p);
+        Set<Integer> availableMembers = new LinkedHashSet<>(members);
+        availableF2p.removeAll(UNOBTAINABLE_IDS);
+        availableMembers.removeAll(UNOBTAINABLE_IDS);
+        discoveredF2p = Collections.unmodifiableSet(availableF2p);
+        discoveredMembers = Collections.unmodifiableSet(availableMembers);
     }
 
     static Set<Integer> discoveredIds() {
@@ -73,6 +82,7 @@ final class F2PAlchCatalog {
         Set<Integer> excluded = new LinkedHashSet<>();
         addParsedIds(excluded, config.excludedCandidateIds());
         result.removeAll(excluded);
+        result.removeAll(UNOBTAINABLE_IDS);
         return result;
     }
 
