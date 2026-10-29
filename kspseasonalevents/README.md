@@ -1,4 +1,4 @@
-# KSP Seasonal Events v0.2.11
+# KSP Seasonal Events v0.2.12
 
 A **standalone Microbot plugin**, independent of Chopper, with its own
 config, navigation panel, Start / Pause / Resume / Stop / Reset progress,
@@ -15,7 +15,7 @@ an actual Microbot client. Passing CI does not guarantee event completion.
 
 | Stage | Wiki requirements | Implementation |
 |---|---|---|
-| Introduction | Speak to Angel or Henja in Rimmington | Start/return dialogue with existing NPC APIs |
+| Introduction | Speak to Angel or Henja in Rimmington | Read live RuneLite dialogue widgets; interact with the in-scene NPC before requesting travel; recover candy stage directly from event-exclusive inventory |
 | Smash lanterns | Smash all eight Jack-O-Lanterns | Live scene objects with Smash action; track disappearance and persist each confirmed world tile; search Rimmington when objects not loaded |
 | Report lanterns | Speak to Angel or Henja | Return to their house |
 | Halloween costume | Obtain previous Halloween rewards from Diango in Draynor and wear at least four items | Travel to Diango, request rewards via dialogue, equip known carried costume pieces, wait for four equipped pieces; does not blindly click reward widgets |
@@ -23,8 +23,8 @@ an actual Microbot client. Passing CI does not guarantee event completion.
 | Report children | Speak to Angel or Henja | Return and progress to Chemist |
 | Chemist | Obtain sugar by solving COFFIN periodic-table riddle: C(6)+O(8)+F(9)+F(9)+I(53)+N(7) = **92** | Talk to Chemist, select explicit 92 dialogue option when offered; otherwise log unknown widget for review |
 | Cook sugar | Cook sugar on the house range or Chemist fireplace | Resolve a live Range/Fireplace and use sugar on it; wait for Molten sugar inventory |
-| Collect onions | Gather five **old onions** from crate behind house, not ordinary onions | Live crate interaction; confirm inventory has five old onions |
-| Make candy | Combine molten sugar and old onions | Repeated inventory combination until five candy onions |
+| Collect onions | Collect five event onions from **Crate of onions** behind the house; inventory displays **Old inion** | Prioritize visible crate without WebWalker; require inventory receipt; count remaining Old inion + prepared Candy onions + verified deliveries toward five |
+| Make candy | Combine molten sugar with Old inion | Use the observed inventory item name, accept `Old onion` as client-name fallback, and verify each Candy onion receipt |
 | Serve adults | Give candy onions to five adult trick-or-treaters | Detect trick-or-treaters **without** child-only Spook action, use candy onion on each NPC, confirm decreased inventory before counting |
 | Finale | Cutscene then speak to Angel or Henja | Return for dialogue; only report completion when in-game message or Vampyre reward confirms it |
 
@@ -33,6 +33,29 @@ may require manual review rather than repeated speculative clicks. The
 plugin logs stage transitions, visible dialogue options when unknown, NPC
 IDs and world tiles of successfully targeted event objects. No guessed
 NPC/object IDs are treated as authoritative.
+
+## Onion collection and inventory-state recovery (0.2.12)
+
+The **Crate of onions** is detected by its exact live name and location near
+Angel/Henja's house, before issuing any walking command. The item has been
+observed as **Old inion** (with **Old onion** accepted as a compatibility
+spelling). Collect only the outstanding amount required for five total:
+`Old inion` still held + `Candy onion` still held + **verified** deliveries.
+Each crate interaction waits for the next inventory receipt. If the crate is
+not loaded and the player is already near the house, the script logs the
+missing crate instead of repeatedly WebWalking to the starter waypoint.
+
+The event stage is also reconciled from inventory (sugar, molten sugar, Old
+inion, candy onions) once the adult-candy objective is established. On
+restart, unique candy-objective inventory can resume the local stage
+without a needless visit to Angel/Henja. Ordinary sugar alone is used
+for this purpose only when the saved Angel/Henja dialogue already
+confirmed the adult-candy objective.
+
+For all named event NPCs (Angel/Henja, Chemist, Diango and adult targets),
+the script prioritizes loaded scene targets and interaction before any
+fallback to WebWalker. Server-side dialogue remains authoritative for
+the overall event objective when inventory evidence is inconclusive.
 
 ## Angel/Henja visible dialogue capture and recovery (0.2.11)
 
