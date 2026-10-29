@@ -220,6 +220,29 @@ jobs:
           assert 'Rs2Inventory.contains("Bronze bar")' in furnace
           print('PASS: full WebWalker for island routes; no Lumbridge banked detours; direct furnace Use and verified progress')
 
+      - name: Verify explicit Cinematic and Legacy overlay switching
+        shell: python
+        run: |
+          from pathlib import Path
+          root = Path('release/kspaccountbuilder')
+          panel = (root / 'KspAccountBuilderPanel.java').read_text()
+          overlay = (root / 'KSPAccountBuilderOverlay.java').read_text()
+          config = (root / 'KspAccountBuilderConfig.java').read_text()
+          plugin = (root / 'KspAccountBuilderPlugin.java').read_text()
+          assert 'new String[]{"Cinematic overlay", "Legacy overlay"}' in panel
+          assert 'addControl(quick, "Overlay style", overlayStyle);' in panel
+          assert '"cinematicHud", overlayStyle.getSelectedIndex() == 0' in panel
+          assert 'overlayStyle.setSelectedIndex(config.cinematicHud() ? 0 : 1)' in panel
+          assert 'if (!updating)' in panel
+          assert 'keyName = "cinematicHud"' in config
+          assert 'default boolean cinematicHud() { return true; }' in config
+          assert 'if (config.cinematicHud() && config.hudFitChatbox())' in overlay
+          assert 'if (config.cinematicHud()) return cinematic.render(graphics);' in overlay
+          assert 'if (!config.cinematicHud()) return renderOriginalPanel(graphics);' in overlay
+          assert 'private Dimension renderOriginalPanel(Graphics2D graphics)' in overlay
+          assert 'overlayManager.add(overlay);' in plugin
+          print('PASS: sidebar offers Legacy explicitly, preserves saved preference and both renderers remain functional')
+
       - name: Verify Tutorial Island prayer/magic exits and regular-account dialogue
         shell: python
         run: |
