@@ -122,6 +122,8 @@ public class KspF2PHighAlchTraderScript extends KspBreakAwareScript {
     private int pendingBoughtAtAbort;
     private boolean pendingAborted;
     private GrandExchangeSlots pendingSlot;
+    private int offerSetupFailures;
+    private long nextOfferSetupAttemptAt;
 
     private volatile boolean shuttingDown = false;
     private long nextGeTravelAttemptAt = 0L;
@@ -139,6 +141,8 @@ public class KspF2PHighAlchTraderScript extends KspBreakAwareScript {
         this.shuttingDown = false;
         this.geTravelOwned = false;
         this.nextGeTravelAttemptAt = 0L;
+        this.offerSetupFailures = 0;
+        this.nextOfferSetupAttemptAt = 0L;
         this.config = config;
         this.startedAt = System.currentTimeMillis();
         this.lastMarketScanAt = 0L;
@@ -809,6 +813,8 @@ public class KspF2PHighAlchTraderScript extends KspBreakAwareScript {
         pendingPrice = price;
         pendingSlot = null;
         pendingOfferStartedAt = 0L;
+        offerSetupFailures = 0;
+        nextOfferSetupAttemptAt = 0L;
 
         long required = (long) quantity * price;
         long maxRequired = Math.min(Integer.MAX_VALUE, required + config.reserveCoins());
@@ -879,6 +885,10 @@ public class KspF2PHighAlchTraderScript extends KspBreakAwareScript {
     }
 
     private void placePendingBuy() {
+        if (System.currentTimeMillis() < nextOfferSetupAttemptAt) {
+            status = "Waiting to retry GE offer setup (" + offerSetupFailures + "/3)";
+            return;
+        }
         if (pendingItemName == null || pendingQuantity <= 0 || pendingPrice <= 0) {
             state = State.ERROR;
             status = "Invalid pending purchase";
@@ -906,10 +916,22 @@ public class KspF2PHighAlchTraderScript extends KspBreakAwareScript {
                     + ", price=" + pendingPrice + ", overview="
                     + Rs2GrandExchange.isOpen() + ", offerScreen="
                     + Rs2GrandExchange.isOfferScreenOpen() + ")";
-            log.warn("High Alch Trader offer setup failed | {}", status);
+            if (++offerSetupFailures >= 3) {
+                state = State.ERROR;
+                status = "GE quantity/offer setup failed 3 times: " + pendingItemName
+                        + "; inspect Grand Exchange chatbox/widget before restart";
+                log.error("High Alch Trader stopped to avoid infinite GE setup loop | {}", status);
+            } else {
+                nextOfferSetupAttemptAt = System.currentTimeMillis()
+                        + GE_TRAVEL_RETRY_MS * offerSetupFailures;
+                log.warn("High Alch Trader offer setup failed | {} | retry={}/3",
+                        status, offerSetupFailures);
+            }
             return;
         }
 
+        offerSetupFailures = 0;
+        nextOfferSetupAttemptAt = 0L;
         pendingSlot = placedSlot;
         pendingOfferStartedAt = System.currentTimeMillis();
         state = State.WAITING_FOR_BUY;
@@ -1638,6 +1660,11 @@ public class KspF2PHighAlchTraderScript extends KspBreakAwareScript {
         }
         boolean opened = sleepUntil(Rs2GrandExchange::isOpen, 4_000);
         if (!opened) {
+            if (Rs2Bank.isBankPinWidgetVisible()) {
+                status = "GE bank PIN prompt visible; unlock before continuing";
+                log.warn("High Alch Trader GE bank PIN prompt detected");
+                return false;
+            }
             status = "GE Clerk interaction not confirmed: "
                     + KspHighAlchGeAccess.lastDiagnostic();
             log.warn("High Alch Trader GE overview did not appear | {}", status);
@@ -1689,6 +1716,8 @@ public class KspF2PHighAlchTraderScript extends KspBreakAwareScript {
         pendingBoughtAtAbort = 0;
         pendingAborted = false;
         pendingSlot = null;
+        offerSetupFailures = 0;
+        nextOfferSetupAttemptAt = 0L;
     }
 
     public State getState() {
