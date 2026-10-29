@@ -883,11 +883,8 @@ public class TutorialIslandScript extends KspManagedScript
             passageAttemptAtMs = System.currentTimeMillis();
         }
         walkTutorialLocal(destination, reach);
-        if (player.distanceTo(destination) <= reach)
-        {
-            passageAttemptKey = null;
-            return false;
-        }
+        // Reaching a closed barrier's near-side tile is not evidence that
+        // the passage was traversed: let the state/area predicate decide.
         return !Rs2Player.isMoving()
                 && System.currentTimeMillis() - passageAttemptAtMs >= PASSAGE_FALLBACK_DELAY_MS;
     }
@@ -2879,7 +2876,10 @@ public class TutorialIslandScript extends KspManagedScript
             return false;
         }
 
-        if (target != null && !walkerFirstPassage("passage-" + objectId, target, reach))
+        Rs2TileObjectModel passageObject = tutorialObject(objectId);
+        WorldPoint destination = target != null ? target
+                : passageObject == null ? null : passageObject.getWorldLocation();
+        if (!walkerFirstPassage("passage-" + objectId, destination, Math.max(1, reach)))
             return completed.getAsBoolean();
         WorldPoint player = Rs2Player.getWorldLocation();
         if (player != null && KspLiveScene.interact(objectId, player, 45, "Open"))
