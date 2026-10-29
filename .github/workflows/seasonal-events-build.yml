@@ -55,7 +55,7 @@ jobs:
           panel=(root/'KspSeasonalEventsPanel.java').read_text()
           overlay=(root/'KspSeasonalEventsOverlay.java').read_text()
           event=(root/'KspSeasonalEvent.java').read_text()
-          assert 'VERSION = "0.2.12"' in plugin
+          assert 'VERSION = "0.2.13"' in plugin
           assert 'KSP + "Seasonal Events"' in plugin
           assert 'kspwillowchopper' not in plugin and 'kspwillowchopper' not in script
           assert 'HALLOWEEN_2026' in event
@@ -489,6 +489,38 @@ jobs:
           assert chemist.index('Rs2Npc.getNpc("Chemist")') < chemist.index('nearOrWalk(player, CHEMIST')
           assert adult.index('Rs2Npc.getNpcs()') < adult.index('nearOrWalk(player, STARTER')
           print('PASS: exact event item/crate, verified five-total receipts, inventory reconciliation and NPC-first interaction')
+
+      - name: Verify adult candy delivery without blind scene sweeps
+        shell: python
+        run: |
+          from pathlib import Path
+          code = Path('release/kspseasonalevents/KspHalloween2026Script.java').read_text()
+          capture = code.split('private void observeTreaterAges()', 1)[1].split('private TreaterAge classifyTreater(', 1)[0]
+          classify = code.split('private TreaterAge classifyTreater(', 1)[1].split('private boolean scoutVisibleTreaters(', 1)[0]
+          delivery = code.split('private void giveCandy(WorldPoint player)', 1)[1].split('private void acted(', 1)[0]
+          assert 'private final Map<Integer, Set<String>> observedTreaterActions' in code
+          assert 'candidate.getTransformedComposition()' in capture
+          assert 'observedTreaterActions.putAll(actions);' in capture
+          assert 'treaterCostumeReady = costumeCount() >= 4;' in capture
+          assert capture.count('runOnClientThreadOptional(') == 1
+          assert 'spookGroups.size() == 1' in capture
+          assert 'observedTreaterHeights.putAll(heights)' in capture
+          assert 'observedTreaterActions.get(npc.getId())' in classify
+          assert 'if (actions.contains("spook")) return TreaterAge.CHILD;' in classify
+          assert 'actions.contains("talk-to")' in classify
+          assert 'actions.contains("trick-or-treat")' in classify
+          assert 'treaterCostumeReady' in classify
+          assert 'stage == Stage.GIVE_CANDY' in classify
+          assert delivery.index('Rs2Npc.getNpcs()') < delivery.index('scanRimmington(')
+          assert delivery.index('if (adult != null && item != null)') < delivery.index('if (!unknown.isEmpty())') < delivery.index('scanRimmington(')
+          assert 'Rs2Walker.clearWalkingRoute("ksp_halloween_adult_visible")' in delivery
+          assert 'Rs2Inventory.useItemOnNpc(item.getId(), adult)' in delivery
+          assert 'pendingCandyCount = candyCount;' in delivery
+          assert 'pendingAdultId = adult.getId();' in delivery
+          assert 'adultUnknownSince >= 12_000L' in delivery or '>= 12_000L' in delivery
+          assert 'stopForReview("Visible trick-or-treater NPCs could not be verified"' in delivery
+          assert 'npcHasAction(n, "Talk-to") || npcHasAction(n, "Trick-or-treat")' in delivery
+          print('PASS: action-based adult selection, visible-first interaction, confirmed receipt, no blind sweep')
 
       - name: Install Seasonal Events sources into Microbot Hub
         shell: bash
