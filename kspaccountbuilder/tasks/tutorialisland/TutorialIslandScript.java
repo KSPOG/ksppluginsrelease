@@ -1452,7 +1452,21 @@ public class TutorialIslandScript extends KspManagedScript
                 attackRatWithRange();
                 return;
             case 500:
-                clickTutorialObject("Ladder", "Climb-up", 4);
+                // Clicking the live ladder lets the game client approach and
+                // climb it without the island -> Lumbridge bank detour.
+                if (!readyForAction()) return;
+                Rs2TileObjectModel exitLadder = tutorialObject("Ladder");
+                if (exitLadder == null || !exitLadder.hasAction("Climb-up"))
+                {
+                    logMissingTutorialObject("Ladder (Climb-up)", -1);
+                    return;
+                }
+                if (exitLadder.click("Climb-up"))
+                {
+                    markTutorialInteraction("combat:ladder-climb-up");
+                    Microbot.log("[TutIsland] Combat ladder dispatched | tile="
+                            + exitLadder.getWorldLocation() + " progress=" + progress);
+                }
                 return;
             default:
         }
@@ -1601,7 +1615,6 @@ public class TutorialIslandScript extends KspManagedScript
                 return;
             }
 
-            WorldPoint bankEntrance = new WorldPoint(3120, 3124, 0);
             WorldPoint playerLocation = Rs2Player.getWorldLocation();
 
             if (playerLocation == null)
@@ -1609,12 +1622,9 @@ public class TutorialIslandScript extends KspManagedScript
                 return;
             }
 
-            if (playerLocation.distanceTo(bankEntrance) > 5)
-            {
-                walkTutorialLocal(bankEntrance, 5);
-                return;
-            }
-
+            // Resolve the live booth before any movement. WebWalker's
+            // short-distance detour can incorrectly bootstrap Lumbridge bank
+            // routes even from the Tutorial Island surface.
             // Only the Tutorial Island booth at this bank room is valid.
             // Never use Rs2Bank.openBank/walkToBank, which can choose
             // Lumbridge Castle's upstairs bank while still on the island.
@@ -1641,8 +1651,9 @@ public class TutorialIslandScript extends KspManagedScript
                 }
                 return;
             }
-            if (prepareTutorialObjectInteraction(tutorialBooth, 4)
-                    && readyForAction())
+            // A live booth click handles approach and interaction; do not
+            // route to its tile with WebWalker first.
+            if (readyForAction())
             {
                 String boothAction = tutorialBooth.hasAction("Use") ? "Use" : "Bank";
                 if (tutorialBooth.click(boothAction))
