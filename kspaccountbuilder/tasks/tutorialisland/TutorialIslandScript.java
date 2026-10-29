@@ -1381,21 +1381,30 @@ public class TutorialIslandScript extends KspManagedScript
     {
         if (Rs2Widget.isSmithingWidgetOpen() || Rs2Player.isAnimating()) return;
         Rs2TileObjectModel anvil = tutorialObject("Anvil");
-        if (anvil == null) logMissingTutorialObject("Anvil", -1);
-        if (!prepareTutorialObjectInteraction(anvil, 4) || !readyForAction()) return;
-
-        // Wait for the previous interaction to be acknowledged before
-        // attempting another item-on-object or Smith interaction.
-        if (Rs2Inventory.hasItem(ItemID.BRONZE_BAR))
+        if (anvil == null)
         {
-            if (!useTutorialItemOnLiveObject(ItemID.BRONZE_BAR, anvil,
-                    "object:anvil:bronze-bar"))
-                logTutorialInteractionPending("anvil", anvil, ItemID.BRONZE_BAR);
+            logMissingTutorialObject("Anvil", -1);
+            return;
         }
-        else if (anvil.click("Smith"))
+
+        // Direct live-scene click lets the client approach the anvil.
+        // Do not invoke the short-distance WebWalker bank comparison.
+        if (!readyForAction()) return;
+        if (anvil.hasAction("Smith") && anvil.click("Smith"))
         {
             markTutorialInteraction("object:anvil:Smith");
+            Microbot.log("[TutIsland] Anvil Smith dispatched | objectId="
+                    + anvil.getId() + " tile=" + anvil.getWorldLocation()
+                    + " progress=" + Microbot.getVarbitPlayerValue(281));
+            return;
         }
+
+        // Only use the original bronze-bar interaction if direct Smith
+        // is missing or fails. Keep the rest of smithing unchanged.
+        if (Rs2Inventory.hasItem(ItemID.BRONZE_BAR)
+                && !useTutorialItemOnLiveObject(ItemID.BRONZE_BAR, anvil,
+                        "object:anvil:bronze-bar"))
+            logTutorialInteractionPending("anvil", anvil, ItemID.BRONZE_BAR);
     }
 
     private void smithTutorialDagger()
