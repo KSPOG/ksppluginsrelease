@@ -375,10 +375,12 @@ public final class KspHalloween2026Script extends Script {
         if (stage == Stage.CHEMIST_RIDDLE && handleChemistAnswerPrompt()) return;
 
         boolean dialogueVisible = Rs2Dialogue.hasContinue() || Rs2Dialogue.hasSelectAnOption();
+        String currentStarterText = "";
         if (starterConversationActive) {
             // The RuneLite dialogue helpers sometimes report no Continue,
             // even while NPC text is visibly rendered in the chatbox.
             List<String> samples = starterDialogueSamples();
+            currentStarterText = String.join(" | ", samples);
             dialogueVisible = dialogueVisible || !samples.isEmpty();
             if (dialogueVisible) {
                 starterInterfaceSeen = true;
@@ -390,7 +392,8 @@ public final class KspHalloween2026Script extends Script {
 
         if (Rs2Dialogue.hasContinue()) {
             if (stage == Stage.CHEMIST_RIDDLE) clearChemistOptionPending();
-            String signature = stage + "|continue|" + Rs2Dialogue.getDialogueText();
+            String signature = stage + "|continue|" + (starterConversationActive
+                    ? currentStarterText : Rs2Dialogue.getDialogueText());
             if (canDispatchDialogue(signature)) {
                 Rs2Dialogue.clickContinue();
                 dialogueActed("Advancing " + stage + " dialogue", signature);
@@ -402,8 +405,21 @@ public final class KspHalloween2026Script extends Script {
             handleDialogueOption();
             return;
         }
-        // No menu/continue is visible: the next NPC/object state may be
-        // processed immediately. A fresh menu signature is unlocked on sight.
+
+        // If the text widget is visible but Microbot misses its Continue
+        // component, advance once per observed text state via canvas keyboard.
+        // This avoids freezing on a valid Angel/Henja dialogue variant.
+        if (starterConversationActive && dialogueVisible) {
+            String signature = stage + "|starter-visible|" + currentStarterText;
+            if (canDispatchDialogue(signature)) {
+                Rs2Keyboard.keyPress(KeyEvent.VK_SPACE);
+                dialogueActed("Advancing visible Angel / Henja dialogue", signature);
+            }
+            return;
+        }
+
+        // The interface really disappeared: do not carry a stale dialogue
+        // signature into the next separate NPC or object interaction.
         lastGenericDialogueSignature = "";
         lastGenericDialogueAttempts = 0;
 
