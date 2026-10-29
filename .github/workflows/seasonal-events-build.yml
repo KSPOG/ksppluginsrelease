@@ -55,7 +55,7 @@ jobs:
           panel=(root/'KspSeasonalEventsPanel.java').read_text()
           overlay=(root/'KspSeasonalEventsOverlay.java').read_text()
           event=(root/'KspSeasonalEvent.java').read_text()
-          assert 'VERSION = "0.2.11"' in plugin
+          assert 'VERSION = "0.2.12"' in plugin
           assert 'KSP + "Seasonal Events"' in plugin
           assert 'kspwillowchopper' not in plugin and 'kspwillowchopper' not in script
           assert 'HALLOWEEN_2026' in event
@@ -76,8 +76,10 @@ jobs:
           assert 'KspHalloweenChemistDialogue.findOptionIndex(options)' in script
           assert 'Rs2Widget.clickWidget(liveOptions.get(optionIndex))' in script
           assert 'Rs2Inventory.useItemOnObject' in script
-          assert 'Rs2Inventory.count("Old onion") >= 5' in script
-          assert 'Rs2Inventory.combine("Molten sugar", "Old onion")' in script
+          assert 'OLD_ONION_CRATE_NAME = "Crate of onions"' in script
+          assert '"Old inion", "Old onion"' in script
+          assert 'int old = oldInionCount();' in script
+          assert 'Rs2Inventory.combine("Molten sugar", oldItemName)' in script
           assert 'Rs2Inventory.useItemOnNpc' in script
           assert 'adultsGiven >= 5' in script
           assert 'Vampyre costume top' in script
@@ -170,7 +172,7 @@ jobs:
           assert 'change(' not in starter
 
           assert costume.index('for (String piece : COSTUME_PIECES)') < costume.index('nearOrWalk(player, DIANGO')
-          assert 'Rs2Npc.interact("Diango", "Holiday-items")' in costume
+          assert 'Rs2Npc.interact(diango, "Holiday-items")' in costume
           assert 'Rs2Inventory.wear(piece)' in costume
           print('PASS: explicit accept, no premature transition, equip before travel, holiday retrieval action')
 
@@ -207,8 +209,8 @@ jobs:
           assert 'Rs2Keyboard.keyPress(KeyEvent.VK_ESCAPE)' in costume
           assert 'holidayScrollAttempts < 24' in costume
           assert 'Rs2Inventory.getEmptySlots() <= 0' in costume
-          assert costume.index('if (window.open) {') < costume.index('if (!nearOrWalk(player, DIANGO')
-          assert 'Rs2Npc.interact("Diango", "Holiday-items")' in costume
+          assert costume.index('if (window.open) {') < costume.index('if (diango == null)')
+          assert 'Rs2Npc.interact(diango, "Holiday-items")' in costume
           assert 'change(Stage.SPOOK_CHILDREN' in costume
           assert 'skeleton boots' in script and 'skeleton shirt' in script
           assert 'Diango has no additional suitable wearable costume pieces' in costume
@@ -236,7 +238,7 @@ jobs:
           wear = batch.index('Rs2Inventory.wear(piece)', full_batch)
           partial_batch = batch.index('if (window.open)', wear)
           next_retrieval = batch.index('KspDiangoHolidayRetrieval.select(window)', partial_batch)
-          reopen = batch.index('Rs2Npc.interact("Diango", "Holiday-items")', next_retrieval)
+          reopen = batch.index('Rs2Npc.interact(diango, "Holiday-items")', next_retrieval)
           assert pending < full_batch < close < wear < partial_batch < next_retrieval < reopen
           assert 'Set<CostumeSlot> ownedSlots = heldCostumeSlots(true)' in batch
           assert 'Set<CostumeSlot> wornSlots = heldCostumeSlots(false)' in batch
@@ -451,6 +453,42 @@ jobs:
           assert 'pendingStarterLastDialogueAt < 1_500L' not in code
           print('PASS: event advances on widget/NPC/inventory changes without global delays')
           PY
+
+      - name: Verify exact onion crate targeting, five-total accounting and inventory-driven stage
+        shell: python
+        run: |
+          from pathlib import Path
+          source = Path('release/kspseasonalevents/KspHalloween2026Script.java').read_text()
+          onion = source.split('private void collectOnions(WorldPoint player)', 1)[1].split('private void coatOnions()', 1)[0]
+          reconcile = source.split('private Stage stageForAdultCandyObjective()', 1)[1].split('public synchronized boolean requestStarterStateCheck()', 1)[0]
+          start = source.split('public synchronized boolean start(', 1)[1].split('private void restoreNpcIds(', 1)[0]
+          tick = source.split('private void tick()', 1)[1].split('private static boolean isCandyStage(', 1)[0]
+          starter = source.split('private void talkToStarter(WorldPoint player)', 1)[1].split('private Rs2TileObjectModel lantern()', 1)[0]
+          chemist = source.split('private void solveChemist(WorldPoint player)', 1)[1].split('private Rs2TileObjectModel cookingSurface()', 1)[0]
+          adult = source.split('private void giveCandy(WorldPoint player)', 1)[1].split('private void acted(', 1)[0]
+          assert 'private int oldInionCount()' in source
+          assert 'Rs2Inventory.count(itemName, true)' in source
+          assert 'OLD_ONION_CRATE_NAME = "Crate of onions"' in source
+          assert 'totalOnionsAccountedFor()' in source
+          assert 'oldInionCount() + Rs2Inventory.count("Candy onion", true) + adultsGiven' in source
+          assert 'if (total >= ONIONS_REQUIRED)' in onion
+          assert onion.index('Rs2TileObjectModel crate = oldOnionCrate();') < onion.index('nearOrWalk(player, STARTER')
+          assert 'crate.click(action)' in onion
+          assert 'pendingOldOnionCount = count' in onion
+          assert 'WORLD_ACTION_STALL_TIMEOUT_MS' in onion
+          assert 'OLD_ONION_CRATE_MISSING_REVIEW_MS' in onion
+          assert 'STARTER.distanceTo(o.getWorldLocation()) <= OLD_ONION_CRATE_SEARCH_RADIUS' in source
+          assert 'int oldOnions = oldInionCount();' in reconcile
+          assert 'Stage.COAT_ONIONS' in reconcile and 'Stage.GIVE_CANDY' in reconcile
+          assert 'hasUniqueCandyObjectiveInventory()' in start
+          assert 'stageForAdultCandyObjective()' in start
+          assert 'isCandyStage(stage)' in tick and 'stageForAdultCandyObjective()' in tick
+          assert 'Rs2Npc.getNpc("Henja")' in starter and 'Rs2Npc.getNpc("Angel")' in starter
+          assert starter.index('Rs2Npc.getNpc("Henja")') < starter.index('nearOrWalk(player, STARTER')
+          assert 'Rs2Npc.getNpc("Chemist")' in chemist
+          assert chemist.index('Rs2Npc.getNpc("Chemist")') < chemist.index('nearOrWalk(player, CHEMIST')
+          assert adult.index('Rs2Npc.getNpcs()') < adult.index('nearOrWalk(player, STARTER')
+          print('PASS: exact event item/crate, verified five-total receipts, inventory reconciliation and NPC-first interaction')
 
       - name: Install Seasonal Events sources into Microbot Hub
         shell: bash
