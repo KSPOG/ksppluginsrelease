@@ -186,6 +186,8 @@ public final class KspHalloween2026Script extends Script {
     private long pendingStarterAt;
     private long pendingStarterLastDialogueAt;
     private boolean pendingStarterDialogueSeen;
+    private boolean starterConversationActive;
+    private String lastStarterDialogue = "";
 
     public synchronized boolean start(KspSeasonalEventsConfig configuration) {
         if (active) return true;
@@ -204,6 +206,8 @@ public final class KspHalloween2026Script extends Script {
         pendingStarterAt = 0L;
         pendingStarterLastDialogueAt = 0L;
         pendingStarterDialogueSeen = false;
+        starterConversationActive = false;
+        lastStarterDialogue = "";
         pendingHolidayItem = null;
         pendingHolidayItemAt = 0L;
         holidayRetrievalTimeouts = 0;
@@ -254,19 +258,16 @@ public final class KspHalloween2026Script extends Script {
                 spookedChildren.size(), givenAdultIds.size(), adultsGiven);
 
         Stage saved = savedStage();
-        if (saved == Stage.SPOOK_CHILDREN && spookedChildren.isEmpty()
-                && configManager.getConfiguration(GROUP, SPOOKED_CHILD_IDS_KEY) == null) {
-            // Upgrade from v0.2.4, where spooked children were never saved.
-            // Ask Angel/Henja for the authoritative next step before doing
-            // another full Rimmington loop.
-            saved = Stage.REPORT_CHILDREN;
-            log.info("Halloween legacy child-stage resume | verifying with starter");
+        if (saved == Stage.COMPLETED) {
+            change(Stage.COMPLETED, "Previously confirmed Halloween completion");
+        } else {
+            // Saved stages and local counters are recovery hints only.
+            // Every non-completed start synchronizes with Angel/Henja so the
+            // server's dialogue decides the current event objective.
+            change(Stage.INTRODUCTION,
+                    "Synchronizing Halloween event state with Angel / Henja");
+            log.info("Halloween saved stage {} deferred to starter dialogue", saved);
         }
-        if (lanternsVerified && (saved == Stage.SMASH_LANTERNS
-                || saved == Stage.VERIFY_LANTERNS))
-            saved = Stage.REPORT_LANTERNS;
-        change(saved == Stage.STOPPED || saved == Stage.PAUSED || saved == Stage.NEEDS_REVIEW
-                ? Stage.INTRODUCTION : saved, "Resuming Halloween 2026 walkthrough");
         mainScheduledFuture = scheduledExecutorService.scheduleWithFixedDelay(
                 this::safeTick, 0L, 600L, TimeUnit.MILLISECONDS);
         log.info("Halloween 2026 started | stage={} lanterns={}/8 adultsGiven={}",
@@ -316,20 +317,12 @@ public final class KspHalloween2026Script extends Script {
         if (player == null) { status = "Waiting for player location"; return; }
         if (stage == Stage.COMPLETED || stage == Stage.NEEDS_REVIEW) return;
 
-        if (stage == Stage.VERIFY_LANTERNS
-                && (Rs2Dialogue.hasContinue() || Rs2Dialogue.hasSelectAnOption()))
-            inspectLanternVerificationDialogue();
-
-        if (stage == Stage.REPORT_CHILDREN
-                && (Rs2Dialogue.hasContinue() || Rs2Dialogue.hasSelectAnOption())) {
-            inspectChildReportDialogue();
-            if (stage != Stage.REPORT_CHILDREN) return;
-        }
-
-        if (pendingStarterNext != null
+        if (starterConversationActive
                 && (Rs2Dialogue.hasContinue() || Rs2Dialogue.hasSelectAnOption())) {
             pendingStarterDialogueSeen = true;
             pendingStarterLastDialogueAt = System.currentTimeMillis();
+            inspectStarterDialogue();
+            if (stage == Stage.NEEDS_REVIEW || stage == Stage.COMPLETED) return;
         }
 
         if (Rs2Dialogue.hasContinue()) {
@@ -346,32 +339,31 @@ public final class KspHalloween2026Script extends Script {
             return;
         }
 
-        // Prevent the next activity (e.g. walking to Diango) from starting
-        // while the NPC is still offering a hat or explaining the next step.
-        if (pendingStarterNext != null) {
+        // Angel/Henja are authoritative for the event objective. Never
+        // resume a preselected stage just because their dialogue closed.
+        if (starterConversationActive) {
             if (pendingStarterDialogueSeen) {
-                // Dialogue frames can disappear momentarily between NPC
-                // lines. Require a short quiet period before changing stages.
                 if (System.currentTimeMillis() - pendingStarterLastDialogueAt < 1_500L) {
                     status = "Finishing Angel / Henja conversation";
+                    return;
+                }
+                if (pendingStarterNext == null) {
+                    starterConversationActive = false;
+                    stopForReview("Angel/Henja dialogue did not identify a known Halloween objective;"
+                            + " lastDialogue=" + lastStarterDialogue);
                     return;
                 }
                 Stage next = pendingStarterNext;
                 pendingStarterNext = null;
                 pendingStarterDialogueSeen = false;
-                if (stage == Stage.REPORT_CHILDREN
-                        && next == Stage.CHEMIST_RIDDLE
-                        && !childrenReportConfirmed) {
-                    stopForReview("Angel/Henja dialogue did not confirm the Chemist/adult objective;"
-                            + " cannot advance without quest evidence");
-                    return;
-                }
-                change(next, "Starter dialogue completed");
+                starterConversationActive = false;
+                change(next, "Angel / Henja dialogue resolved event state");
             } else if (System.currentTimeMillis() - pendingStarterAt > 8_000L) {
-                log.warn("Halloween starter click produced no visible dialogue | stage={} next={}",
-                        stage, pendingStarterNext);
+                log.warn("Halloween starter click produced no visible dialogue | stage={}", stage);
+                starterConversationActive = false;
                 pendingStarterNext = null;
                 pendingStarterDialogueSeen = false;
+                lastActionAt = 0L; // permit a clean Talk-to retry
             } else {
                 status = "Waiting for Angel / Henja dialogue";
             }
@@ -380,16 +372,16 @@ public final class KspHalloween2026Script extends Script {
 
         switch (stage) {
             case INTRODUCTION:
-                talkToStarter(player, Stage.SMASH_LANTERNS);
+                talkToStarter(player);
                 break;
             case SMASH_LANTERNS:
                 smashLanterns(player);
                 break;
             case VERIFY_LANTERNS:
-                verifyLanternsWithStarter(player);
+                talkToStarter(player);
                 break;
             case REPORT_LANTERNS:
-                talkToStarter(player, Stage.GET_COSTUME);
+                talkToStarter(player);
                 break;
             case GET_COSTUME:
                 collectCostume(player);
@@ -398,7 +390,7 @@ public final class KspHalloween2026Script extends Script {
                 spookChildren(player);
                 break;
             case REPORT_CHILDREN:
-                talkToStarter(player, Stage.CHEMIST_RIDDLE);
+                talkToStarter(player);
                 break;
             case CHEMIST_RIDDLE:
                 solveChemist(player);
@@ -416,7 +408,7 @@ public final class KspHalloween2026Script extends Script {
                 giveCandy(player);
                 break;
             case FINAL_TALK:
-                talkToStarter(player, Stage.WAIT_FOR_REWARD);
+                talkToStarter(player);
                 break;
             case WAIT_FOR_REWARD:
                 if (Rs2Inventory.hasItem("Vampyre costume top")
@@ -488,9 +480,7 @@ public final class KspHalloween2026Script extends Script {
         return false;
     }
 
-    private void talkToStarter(WorldPoint player, Stage next) {
-        // Being somewhere within Rimmington does not mean Angel/Henja
-        // are loaded. Return to the actual starter house before talking.
+    private void talkToStarter(WorldPoint player) {
         if (!nearOrWalk(player, STARTER, 8, "Angel / Henja's house"))
             return;
         if (!ready()) return;
@@ -502,12 +492,14 @@ public final class KspHalloween2026Script extends Script {
             status = "Locating Angel / Henja in their Rimmington home";
             return;
         }
-        acted("Speaking to Angel / Henja; waiting for dialogue");
+        acted("Speaking to Angel / Henja to resolve current event state");
         lastTalkAt = System.currentTimeMillis();
-        pendingStarterNext = next;
+        pendingStarterNext = null;
         pendingStarterAt = lastTalkAt;
         pendingStarterLastDialogueAt = 0L;
         pendingStarterDialogueSeen = false;
+        starterConversationActive = true;
+        lastStarterDialogue = "";
     }
 
     private Rs2TileObjectModel lantern() {
