@@ -11,6 +11,7 @@ import net.runelite.api.ObjectID;
 import net.runelite.api.coords.WorldArea;
 import net.runelite.api.coords.WorldPoint;
 import net.runelite.api.widgets.Widget;
+import net.runelite.client.config.ConfigManager;
 import net.runelite.client.plugins.microbot.Microbot;
 import net.runelite.client.plugins.microbot.Script;
 import net.runelite.client.plugins.microbot.api.npc.models.Rs2NpcModel;
@@ -35,6 +36,7 @@ import net.runelite.client.plugins.microbot.util.tile.Rs2Tile;
 import net.runelite.client.plugins.microbot.util.walker.Rs2Walker;
 import net.runelite.client.plugins.microbot.util.widget.Rs2Widget;
 
+import javax.inject.Inject;
 import javax.inject.Singleton;
 import java.awt.event.KeyEvent;
 import java.util.ArrayList;
@@ -60,6 +62,8 @@ public class TutorialIslandScript extends KspManagedScript
     private static final int TUTORIAL_COPPER_ROCK_ID = ObjectID.COPPER_ROCKS;
     private static final long MINING_DIAGNOSTIC_INTERVAL_MS = 5_000L;
     private static final long INTERACTION_DISPATCH_TIMEOUT_MS = 1_500L;
+    private static final String WALKER_CONFIG_GROUP = "shortestpath";
+    private static final String WALKER_BANKED_TRANSPORT_KEY = "walkWithBankedTransports";
     private static final int DEFAULT_CAMERA_ZOOM = 377;
     private static final int RAT_PEN_GATE_ID = 9719;
     private static final int RAT_PEN_INNER_BOUNDARY_X = 3110;
@@ -132,6 +136,12 @@ public class TutorialIslandScript extends KspManagedScript
     private static final WorldPoint CHAPEL_INSTRUCTOR_TILE = new WorldPoint(3128, 3106, 0);
     private static final WorldPoint MAGIC_INSTRUCTOR_TILE = new WorldPoint(3141, 3090, 0);
 
+    @Inject private ConfigManager configManager;
+    // Full WebWalker consults the global banked-transport preference even for
+    // 5-tile walks. Override ONLY during the Tutorial Island run and restore
+    // the original persisted preference when the script is shut down.
+    private String savedBankedTransportSetting;
+    private boolean tutorialBankedTransportOverride;
     private String lastGeneratedName = "None";
     private boolean nameLookupPending;
     private boolean nameSetPending;
@@ -175,6 +185,7 @@ public class TutorialIslandScript extends KspManagedScript
     {
         shutdown();
         resetAccountState();
+        ensureTutorialDirectWebWalker();
         mainScheduledFuture = scheduledExecutorService.scheduleWithFixedDelay(
                 this::runLoop, 0, LOOP_DELAY_MS, TimeUnit.MILLISECONDS);
         return true;
@@ -192,6 +203,7 @@ public class TutorialIslandScript extends KspManagedScript
             }
 
             completeQueuedLoginIfNeeded();
+            ensureTutorialDirectWebWalker();
             // Mainland bank cache/bootstrap may still have an in-flight route
             // from a previously running task. Reject foreign destinations
             // every tutorial tick without cancelling valid island-local paths.
@@ -1239,6 +1251,49 @@ public class TutorialIslandScript extends KspManagedScript
                 + " varbit281=" + lastMiningProgress + " - checking live scene");
     }
 
+    /**
+     * Use Microbot's complete blocking WebWalker, including its doors and
+     * transports. Its global banked-transports setting can otherwise send
+     * Tutorial Island walks toward Lumbridge's bank to bootstrap a cache.
+     * Keep the original user preference untouched outside this task.
+     */
+    private void ensureTutorialDirectWebWalker()
+    {
+        if (configManager == null) return;
+        String configured = configManager.getConfiguration(
+                WALKER_CONFIG_GROUP, WALKER_BANKED_TRANSPORT_KEY);
+        if (!tutorialBankedTransportOverride && Boolean.parseBoolean(configured))
+        {
+            savedBankedTransportSetting = configured;
+            tutorialBankedTransportOverride = true;
+            Microbot.log("[TutIsland] Temporarily disabling WebWalker banked transports"
+                    + " while Tutorial Island is active; original setting will be restored");
+        }
+        if (tutorialBankedTransportOverride && Boolean.parseBoolean(configured))
+            configManager.setConfiguration(WALKER_CONFIG_GROUP,
+                    WALKER_BANKED_TRANSPORT_KEY, false);
+    }
+
+    private void restoreTutorialWebWalkerPreference()
+    {
+        if (!tutorialBankedTransportOverride || configManager == null) return;
+        try
+        {
+            if (!Boolean.parseBoolean(configManager.getConfiguration(
+                    WALKER_CONFIG_GROUP, WALKER_BANKED_TRANSPORT_KEY)))
+            {
+                configManager.setConfiguration(WALKER_CONFIG_GROUP,
+                        WALKER_BANKED_TRANSPORT_KEY, savedBankedTransportSetting);
+                Microbot.log("[TutIsland] Restored WebWalker banked transports setting");
+            }
+        }
+        finally
+        {
+            tutorialBankedTransportOverride = false;
+            savedBankedTransportSetting = null;
+        }
+    }
+
     private void rejectMainlandWalkerRoute()
     {
         WorldPoint player = Rs2Player.getWorldLocation();
@@ -1272,8 +1327,33 @@ public class TutorialIslandScript extends KspManagedScript
         }
 
         int ore = Rs2Inventory.hasItem(ItemID.TIN_ORE) ? ItemID.TIN_ORE : ItemID.COPPER_ORE;
+        // Tutorial Island's furnace uses the direct "Use" action, rather
+        // than a mainland Smelt menu. Prefer the advertised live action;
+        // fall back to ore-on-furnace only if this variant lacks Use.
+        // Clear any stale selected item before invoking a normal object
+        // option; otherwise the model sends WIDGET_TARGET_ON_GAME_OBJECT.
+        if (furnace.hasAction("Use"))
+        {
+            if (Rs2Inventory.isItemSelected())
+            {
+                Rs2Inventory.deselect();
+                return;
+            }
+            if (furnace.click("Use"))
+            {
+                markTutorialInteraction("object:furnace:use");
+                Microbot.log("[TutIsland] Furnace Use dispatched | objectId="
+                        + furnace.getId() + " tile=" + furnace.getWorldLocation()
+                        + " tin=" + Rs2Inventory.count("Tin ore")
+                        + " copper=" + Rs2Inventory.count("Copper ore")
+                        + " progress=" + Microbot.getVarbitPlayerValue(281)
+                        + " (waiting for bronze bar or tutorial progress)");
+            }
+            else logTutorialInteractionPending("furnace:Use", furnace, ore);
+            return;
+        }
         if (!useTutorialItemOnLiveObject(ore, furnace, "object:furnace:smelt-bronze"))
-            logTutorialInteractionPending("furnace", furnace, ore);
+            logTutorialInteractionPending("furnace:ore-fallback", furnace, ore);
     }
 
     private void openTutorialAnvil()
@@ -2640,25 +2720,16 @@ public class TutorialIslandScript extends KspManagedScript
             return;
         }
 
-        // The normal blocking walkTo() can invoke bank detour comparison
-        // even for a 5-tile walk in the Tutorial Island instance, planning
-        // an impossible trip to Lumbridge and being canceled every tick.
-        // walkStep() uses Microbot's route planner but does not run its
-        // bank/cache/transport optimization or block the tutorial loop.
-        // Explicit tutorial gates and doors are handled by the stage logic.
-        if (TutAreas.contains(playerLocation) && TutAreas.contains(target))
-        {
-            Rs2Walker.walkStep(target, reach);
-            return;
-        }
-
-        // Never allow a mainland route while the tutorial is active.
-        if (TutAreas.contains(playerLocation))
+        // Never hand the walker a mainland destination from a live
+        // Tutorial Island scene. All local walking uses the FULL Microbot
+        // WebWalker (doors/transports), not walkStep's no-door subset.
+        if (TutAreas.contains(playerLocation) && !TutAreas.contains(target))
         {
             debug("Tutorial Island refused nonlocal route | player={} target={}",
                     playerLocation, target);
             return;
         }
+        ensureTutorialDirectWebWalker();
         Rs2Walker.walkTo(target, reach);
     }
 
@@ -2921,7 +2992,14 @@ public class TutorialIslandScript extends KspManagedScript
         pendingInteractionKey = null;
         Rs2Walker.clearWalkingRoute("Tutorial Island:local-walk");
         Rs2Walker.clearWalkingRoute("ksp_tutorial_shutdown");
-        super.shutdown();
+        try
+        {
+            super.shutdown();
+        }
+        finally
+        {
+            restoreTutorialWebWalkerPreference();
+        }
     }
 
     // -------------------------------------------------------------------------
