@@ -352,7 +352,7 @@ jobs:
           age = code.split('private void observeTreaterAges()', 1)[1].split('private TreaterAge classifyTreater(', 1)[0]
           scout = code.split('private boolean scoutVisibleTreaters(', 1)[1].split('private void spookChildren(', 1)[0]
           child = code.split('private void spookChildren(', 1)[1].split('private void solveChemist(', 1)[0]
-          report = code.split('private void inspectChildReportDialogue()', 1)[1].split('private TreaterGroup treaterGroup(', 1)[0]
+          report = code.split('private void inspectStarterDialogue()', 1)[1].split('private Stage stageForAdultCandyObjective()', 1)[0]
           change = code.split('private void change(Stage next, String message)', 1)[1].split('private void stopForReview(', 1)[0]
 
           assert 'if (confirmedChildGroup != TreaterGroup.UNKNOWN) return;' in age
