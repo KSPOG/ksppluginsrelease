@@ -6,6 +6,8 @@ import java.awt.Graphics2D;
 import java.awt.image.BufferedImage;
 import javax.inject.Inject;
 import net.runelite.api.events.ChatMessage;
+import net.runelite.api.events.GameTick;
+import javax.swing.SwingUtilities;
 import net.runelite.api.ChatMessageType;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.eventbus.Subscribe;
@@ -18,7 +20,7 @@ import net.runelite.client.ui.overlay.OverlayManager;
 
 @PluginDescriptor(
         name = PluginConstants.KSP + "Seasonal Events",
-        description = "Independent seasonal event workflows; Halloween 2026 staged wiki walkthrough",
+        description = "Independent, year-updatable seasonal event workflows",
         tags = {"ksp","holiday","seasonal","halloween","event","f2p"},
         authors = {"KSP"},
         version = KspSeasonalEventsPlugin.VERSION,
@@ -26,8 +28,9 @@ import net.runelite.client.ui.overlay.OverlayManager;
         enabledByDefault = PluginConstants.DEFAULT_ENABLED,
         isExternal = PluginConstants.IS_EXTERNAL)
 public final class KspSeasonalEventsPlugin extends Plugin {
-    public static final String VERSION = "0.2.14";
+    public static final String VERSION = "0.2.15";
     @Inject private ClientToolbar toolbar;
+    @Inject private ConfigManager configManager;
     @Inject private OverlayManager overlays;
     @Inject private KspSeasonalEventsOverlay overlay;
     @Inject private KspSeasonalEventsConfig config;
@@ -40,6 +43,16 @@ public final class KspSeasonalEventsPlugin extends Plugin {
     }
 
     @Override protected void startUp() {
+        // RuneLite persists enum names, so migrate existing 2026 selections
+        // to the reusable holiday slot without clearing event progress.
+        if ("HALLOWEEN_2026".equals(configManager.getConfiguration(
+                "KspSeasonalEvents", "event"))) {
+            configManager.setConfiguration("KspSeasonalEvents", "event", "HALLOWEEN");
+        }
+        script.setCompletionCallback(() -> SwingUtilities.invokeLater(() -> {
+            if (script.isActive() && script.getStage() == KspHalloween2026Script.Stage.COMPLETED)
+                stopEvent();
+        }));
         // Loading the plugin never starts an event or puts an overlay on screen.
         panel = new KspSeasonalEventsPanel(this, script);
         navigation = NavigationButton.builder().tooltip("KSP Seasonal Events")
@@ -57,7 +70,7 @@ public final class KspSeasonalEventsPlugin extends Plugin {
 
     void startEvent() {
         if (script.isActive()) return;
-        if (config.event() != KspSeasonalEvent.HALLOWEEN_2026) return;
+        if (config.event() != KspSeasonalEvent.HALLOWEEN) return;
         if (script.start(config)) overlays.add(overlay);
     }
 
@@ -68,6 +81,12 @@ public final class KspSeasonalEventsPlugin extends Plugin {
     void stopEvent() {
         script.shutdown();
         overlays.remove(overlay);
+    }
+
+    // Game ticks also check completion while the script is paused.
+    // The high-frequency script loop checks the same exact widget during play.
+    @Subscribe public void onGameTick(GameTick event) {
+        if (script.isActive()) script.checkForEventComplete();
     }
 
     @Subscribe public void onChatMessage(ChatMessage event) {
