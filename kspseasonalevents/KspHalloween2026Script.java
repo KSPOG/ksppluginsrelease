@@ -2049,10 +2049,11 @@ public final class KspHalloween2026Script extends Script {
                         && RIMMINGTON.contains(n.getWorldLocation()))
                 .collect(Collectors.toList());
         Rs2NpcModel adult = visibleTreaters.stream()
+                // A verified adult can receive a selected inventory item
+                // even if the NPC has no ordinary Talk-to menu entry.
                 .filter(n -> classifyTreater(n) == TreaterAge.ADULT
                         && !spookedChildren.contains(n.getId())
-                        && !givenAdultIds.contains(n.getId())
-                        && (npcHasAction(n, "Talk-to") || npcHasAction(n, "Trick-or-treat")))
+                        && !givenAdultIds.contains(n.getId()))
                 .min(Comparator.comparingInt(n -> player.distanceTo(n.getWorldLocation())))
                 .orElse(null);
         net.runelite.client.plugins.microbot.util.inventory.Rs2ItemModel item =
