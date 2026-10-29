@@ -51,7 +51,7 @@ final class KspSeasonalEventsPanel extends PluginPanel {
         });
         state.setForeground(Color.LIGHT_GRAY);
         add(state);
-        JLabel warning = new JLabel("<html><center>Halloween 2026 wiki walkthrough.<br>"
+        JLabel warning = new JLabel("<html><center>Halloween event walkthrough.<br>"
                 + "Unrecognised quest interfaces pause<br>for review instead of random clicks.</center></html>",
                 SwingConstants.CENTER);
         warning.setForeground(new Color(245, 182, 103));
