@@ -314,10 +314,18 @@ public final class KspHalloween2026Script extends Script {
         Stage saved = savedStage();
         if (saved == Stage.COMPLETED) {
             change(Stage.COMPLETED, "Previously confirmed Halloween completion");
+        } else if (hasUniqueCandyObjectiveInventory()) {
+            // Event-exclusive items are direct evidence that this character
+            // has reached the adult-candy subtask. Do not force a pointless
+            // walk to Angel/Henja when the required items are already held.
+            Stage next = stageForAdultCandyObjective();
+            change(next, "Recovered Halloween candy objective from live inventory"
+                    + " (oldInion=" + oldInionCount()
+                    + " candy=" + Rs2Inventory.count("Candy onion", true)
+                    + " molten=" + Rs2Inventory.hasItem("Molten sugar") + ")");
         } else {
-            // Saved stages and local counters are recovery hints only.
-            // Every non-completed start synchronizes with Angel/Henja so the
-            // server's dialogue decides the current event objective.
+            // Without event-exclusive item evidence, Angel/Henja remain
+            // authoritative for whether the child/lantern tasks are complete.
             change(Stage.INTRODUCTION,
                     "Synchronizing Halloween event state with Angel / Henja");
             log.info("Halloween saved stage {} deferred to starter dialogue", saved);
@@ -370,6 +378,22 @@ public final class KspHalloween2026Script extends Script {
         WorldPoint player = Rs2Player.getWorldLocation();
         if (player == null) { status = "Waiting for player location"; return; }
         if (stage == Stage.COMPLETED || stage == Stage.NEEDS_REVIEW) return;
+
+        // An observed inventory transition is a stronger signal for the
+        // current candy subtask than a persisted local stage. Never redirect
+        // away from an active dialogue or an unconfirmed item-use action.
+        if (isCandyStage(stage) && !starterConversationActive
+                && pendingOldOnionCount < 0 && pendingCoatCandyCount < 0
+                && pendingCandyCount < 0 && !pendingCook) {
+            Stage correct = stageForAdultCandyObjective();
+            if (correct != stage) {
+                change(correct, "Inventory reconciliation: oldInion=" + oldInionCount()
+                        + " candy=" + Rs2Inventory.count("Candy onion", true)
+                        + " adultsGiven=" + adultsGiven
+                        + " molten=" + Rs2Inventory.hasItem("Molten sugar"));
+                return;
+            }
+        }
 
         // Check the Chemist's free-text input BEFORE generic Continue/option
         // handling. A riddle answer field is not a selectable "92" option.
@@ -515,6 +539,12 @@ public final class KspHalloween2026Script extends Script {
             default:
                 break;
         }
+    }
+
+    private static boolean isCandyStage(Stage value) {
+        return value == Stage.CHEMIST_RIDDLE || value == Stage.COOK_SUGAR
+                || value == Stage.COLLECT_ONIONS || value == Stage.COAT_ONIONS
+                || value == Stage.GIVE_CANDY;
     }
 
     private void handleDialogueOption() {
@@ -1145,6 +1175,12 @@ public final class KspHalloween2026Script extends Script {
                 || text.equalsIgnoreCase("Select an Option")
                 || output.contains(text)) return;
         output.add(text);
+    }
+
+    private boolean hasUniqueCandyObjectiveInventory() {
+        return oldInionCount() > 0
+                || Rs2Inventory.count("Candy onion", true) > 0
+                || Rs2Inventory.hasItem("Molten sugar");
     }
 
     private Stage stageForAdultCandyObjective() {
