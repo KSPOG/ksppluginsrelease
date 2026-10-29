@@ -77,6 +77,13 @@ final class KspHalloweenStarterState {
                 || text.contains("remaining") || text.contains("haven't")
                 || text.contains("not all") || text.contains("need to")
                 || text.contains("have to");
+        boolean completedLanternStatement = lantern && !unfinished
+                && (text.contains("you've smashed all")
+                    || text.contains("you have smashed all")
+                    || text.contains("all the lanterns are smashed")
+                    || text.contains("all eight") || text.contains("all 8"));
+        if (completedLanternStatement)
+            return Objective.UNKNOWN;
         if (lantern && (smash || unfinished))
             return Objective.SMASH_LANTERNS;
 
