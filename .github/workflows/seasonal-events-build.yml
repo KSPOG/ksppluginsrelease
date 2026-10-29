@@ -519,7 +519,8 @@ jobs:
           assert 'pendingAdultId = adult.getId();' in delivery
           assert 'adultUnknownSince >= 12_000L' in delivery or '>= 12_000L' in delivery
           assert 'stopForReview("Visible trick-or-treater NPCs could not be verified"' in delivery
-          assert 'npcHasAction(n, "Talk-to") || npcHasAction(n, "Trick-or-treat")' in delivery
+          assert 'classifyTreater(n) == TreaterAge.ADULT' in delivery
+          assert 'verified adult can receive' not in delivery.lower() or 'Talk-to menu entry' in delivery
           print('PASS: action-based adult selection, visible-first interaction, confirmed receipt, no blind sweep')
 
       - name: Install Seasonal Events sources into Microbot Hub
