@@ -1183,7 +1183,11 @@ public final class KspHalloween2026Script extends Script {
     private boolean hasUniqueCandyObjectiveInventory() {
         return oldInionCount() > 0
                 || Rs2Inventory.count("Candy onion", true) > 0
-                || Rs2Inventory.hasItem("Molten sugar");
+                || Rs2Inventory.hasItem("Molten sugar")
+                // Sugar alone is not proof of Halloween progress, but it
+                // becomes actionable when Angel/Henja previously confirmed
+                // the adult-candy objective.
+                || (childrenReportConfirmed && Rs2Inventory.hasItem("Sugar", true));
     }
 
     private Stage stageForAdultCandyObjective() {
