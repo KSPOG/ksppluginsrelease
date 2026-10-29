@@ -88,9 +88,10 @@ public final class KspHalloween2026Script extends Script {
         new WorldPoint(2970, 3193, 0), new WorldPoint(2948, 3198, 0),
         new WorldPoint(2941, 3230, 0), new WorldPoint(2970, 3250, 0)
     };
-    private static final long ACTION_GAP = 900L; // NPC/world actions; live-state confirmation gates retries
-    private static final long DIALOGUE_GAP_MS = 320L;
-    private static final long CHEMIST_OPTION_RETRY_MS = 900L;
+    // Timeouts are only failure recovery, never pacing between valid state changes.
+    private static final long DIALOGUE_STALL_TIMEOUT_MS = 4_000L;
+    private static final long WORLD_ACTION_STALL_TIMEOUT_MS = 6_000L;
+    private static final int MAX_UNCONFIRMED_ACTIONS = 3;
     private static final long WALK_RETRY = 10_000L;
     // Prefer a complete outfit using distinct equipment slots.
     // Match each item against live RuneLite item composition names.
@@ -171,9 +172,9 @@ public final class KspHalloween2026Script extends Script {
     private int sweepsWithoutTarget;
     private int actionsAtStage;
     private long lastActionAt;
-    private long lastDialogueActionAt;
     private String lastGenericDialogueSignature = "";
-    private long lastGenericDialogueAt;    private long lastWalkAt;
+    private long lastGenericDialogueAt;
+    private int lastGenericDialogueAttempts;    private long lastWalkAt;
     private long lastTalkAt;
     private long lastDiagnosticAt;
     private volatile WorldPoint pendingLantern;
@@ -204,6 +205,21 @@ public final class KspHalloween2026Script extends Script {
     // necessarily selected from a list of dialogue options.
     private long chemistConversationAt;
     private long chemistAnswerSubmittedAt;
+    private boolean pendingCook;
+    private long pendingCookAt;
+    private int pendingCookFailures;
+    private int pendingOldOnionCount = -1;
+    private long pendingOldOnionAt;
+    private int pendingOldOnionFailures;
+    private int pendingCoatCandyCount = -1;
+    private long pendingCoatAt;
+    private int pendingCoatFailures;
+    private String pendingEquipItem;
+    private long pendingEquipAt;
+    private boolean pendingHolidayClose;
+    private long pendingHolidayCloseAt;
+    private int pendingHolidayScrollY = -1;
+    private long pendingHolidayScrollAt;
     private boolean chemistAnswerPromptObserved;
     private int chemistAnswerSubmissions;
 
@@ -214,9 +230,10 @@ public final class KspHalloween2026Script extends Script {
         this.paused = false;
         this.startedAt = System.currentTimeMillis();
         lastActionAt = lastWalkAt = lastTalkAt = lastDiagnosticAt = 0L;
-        lastDialogueActionAt = 0L;
         lastGenericDialogueSignature = "";
         lastGenericDialogueAt = 0L;
+        lastGenericDialogueAttempts = 0;
+        clearStagePendingActions();
         pendingLantern = null;
         pendingLanternAt = 0L;
         lastVerificationTalkAt = 0L;
@@ -294,7 +311,7 @@ public final class KspHalloween2026Script extends Script {
             log.info("Halloween saved stage {} deferred to starter dialogue", saved);
         }
         mainScheduledFuture = scheduledExecutorService.scheduleWithFixedDelay(
-                this::safeTick, 0L, 300L, TimeUnit.MILLISECONDS);
+                this::safeTick, 0L, 150L, TimeUnit.MILLISECONDS);
         log.info("Halloween 2026 started | stage={} lanterns={}/8 adultsGiven={}",
                 stage, getLanternCount(), adultsGiven);
         return true;
@@ -356,10 +373,10 @@ public final class KspHalloween2026Script extends Script {
 
         if (Rs2Dialogue.hasContinue()) {
             if (stage == Stage.CHEMIST_RIDDLE) clearChemistOptionPending();
-            if (readyDialogue()) {
+            String signature = stage + "|continue|" + Rs2Dialogue.getDialogueText();
+            if (canDispatchDialogue(signature)) {
                 Rs2Dialogue.clickContinue();
-                lastDialogueActionAt = System.currentTimeMillis();
-                status = "Advancing " + stage + " dialogue";
+                dialogueActed("Advancing " + stage + " dialogue", signature);
             }
             return;
         }
@@ -368,6 +385,10 @@ public final class KspHalloween2026Script extends Script {
             handleDialogueOption();
             return;
         }
+        // No menu/continue is visible: the next NPC/object state may be
+        // processed immediately. A fresh menu signature is unlocked on sight.
+        lastGenericDialogueSignature = "";
+        lastGenericDialogueAttempts = 0;
 
         // Angel/Henja are authoritative for the event objective. Never
         // resume a preselected stage just because their dialogue closed.
@@ -458,17 +479,24 @@ public final class KspHalloween2026Script extends Script {
     }
 
     private void handleDialogueOption() {
-        if (!readyDialogue()) return;
         // Enumerate unknown choices for accurate follow-up debugging.
         List<String> options = Rs2Dialogue.getDialogueOptions().stream()
                 .map(w -> w == null ? "" : w.getText())
                 .collect(Collectors.toList());
         String signature = stage + "|" + Rs2Dialogue.getQuestion() + "|" + options;
-        // An unchanged option menu may still be processing the previous
-        // input. Repeating it every scheduler tick can skip NPC branches.
-        if (signature.equals(lastGenericDialogueSignature)
-                && System.currentTimeMillis() - lastGenericDialogueAt < 900L)
+        // Never replay an unchanged option menu while the client is
+        // processing it. A changed widget/question is immediately actionable.
+        if (stage == Stage.CHEMIST_RIDDLE) {
+            if (handleChemistDialogueOption(options)) return;
+            if (System.currentTimeMillis() - lastDiagnosticAt > 5_000L) {
+                lastDiagnosticAt = System.currentTimeMillis();
+                log.warn("Halloween Chemist dialogue requires review | question={} options={}",
+                        Rs2Dialogue.getQuestion(), options);
+            }
+            status = "Waiting for Chemist Halloween / 92 option; see dialogue logs";
             return;
+        }
+        if (!canDispatchDialogue(signature)) return;
         if (stage == Stage.GET_COSTUME
                 && Rs2Dialogue.keyPressForDialogueOption(
                         "I'd like to check holiday items please!", true)) {
@@ -483,18 +511,6 @@ public final class KspHalloween2026Script extends Script {
             return;
         }
 
-        if (stage == Stage.CHEMIST_RIDDLE) {
-            // Wiki-confirmed conversation: select Halloween, then solve COFFIN = 92.
-            // Never choose unrelated Chemist topics or a random numeric option.
-            if (handleChemistDialogueOption(options)) return;
-            if (System.currentTimeMillis() - lastDiagnosticAt > 5_000L) {
-                lastDiagnosticAt = System.currentTimeMillis();
-                log.warn("Halloween Chemist dialogue requires review | question={} options={}",
-                        Rs2Dialogue.getQuestion(), options);
-            }
-            status = "Waiting for Chemist Halloween / 92 option; see dialogue logs";
-            return;
-        }
         String[] choices = {
             "Yes", "Sure", "I'd like to help", "Of course", "Let's do it",
             "I'll help", "I can help", "Okay", "Halloween", "Trick or treat"
@@ -534,7 +550,7 @@ public final class KspHalloween2026Script extends Script {
         }
 
         long now = System.currentTimeMillis();
-        if (pendingChemistOptionAt != 0L && now - pendingChemistOptionAt < CHEMIST_OPTION_RETRY_MS) {
+        if (pendingChemistOptionAt != 0L && now - pendingChemistOptionAt < DIALOGUE_STALL_TIMEOUT_MS) {
             status = "Waiting for Chemist menu to change after "
                     + options.get(optionIndex) + " (" + pendingChemistOptionAttempts + " attempts)";
             return true;
@@ -544,8 +560,6 @@ public final class KspHalloween2026Script extends Script {
                     + options.get(optionIndex) + "; options=" + options);
             return true;
         }
-        if (!readyDialogue()) return true;
-
         List<Widget> liveOptions = Rs2Dialogue.getDialogueOptions();
         if (optionIndex >= liveOptions.size()) {
             status = "Chemist options changed while reading widgets; retrying";
@@ -563,7 +577,6 @@ public final class KspHalloween2026Script extends Script {
         pendingChemistOptionAt = now;
         if (selected) {
             chemistConversationAt = now;
-            lastDialogueActionAt = System.currentTimeMillis();
             status = "Selected Chemist " + options.get(optionIndex)
                     + " via " + (viaWidget ? "option widget" : "option keybinding")
                     + "; awaiting dialogue change";
@@ -647,18 +660,12 @@ public final class KspHalloween2026Script extends Script {
                     + " inspect game dialogue before another submission");
             return true;
         }
-        if (!readyDialogue()) {
-            status = "Waiting to enter Chemist riddle answer 92";
-            return true;
-        }
-
         // One submission per observed prompt. Do not type additional digits
         // while the same input is visible; prevent accidental 9292 responses.
         chemistAnswerSubmittedAt = now;
         chemistAnswerSubmissions++;
         Rs2Keyboard.typeString("92");
         Rs2Keyboard.enter();
-        lastDialogueActionAt = System.currentTimeMillis();
         status = "Submitted Chemist COFFIN riddle answer 92; awaiting game response";
         log.info("Halloween dialogue action | stage={} | {}", stage, status);
         return true;
@@ -1612,16 +1619,30 @@ public final class KspHalloween2026Script extends Script {
         return System.currentTimeMillis() - lastActionAt >= ACTION_GAP;
     }
 
-    // Dialogue may advance faster than NPC/world interactions, but never
-    // blindly spam the chatbox while waiting for the game to update.
-    private boolean readyDialogue() {
-        return System.currentTimeMillis() - lastDialogueActionAt >= DIALOGUE_GAP_MS;
+    private boolean canDispatchDialogue(String signature) {
+        if (!signature.equals(lastGenericDialogueSignature)) {
+            lastGenericDialogueSignature = signature;
+            lastGenericDialogueAt = 0L;
+            lastGenericDialogueAttempts = 0;
+        }
+        if (lastGenericDialogueAt == 0L) return true;
+        if (System.currentTimeMillis() - lastGenericDialogueAt < DIALOGUE_STALL_TIMEOUT_MS)
+            return false; // recovery watchdog, not a normal action delay
+        if (lastGenericDialogueAttempts >= MAX_UNCONFIRMED_ACTIONS) {
+            stopForReview("Unchanged dialogue after " + lastGenericDialogueAttempts
+                    + " attempts; widget=" + signature);
+            return false;
+        }
+        log.warn("Halloween dialogue did not advance; retrying | stage={} attempt={}"
+                        + " signature={}",
+                stage, lastGenericDialogueAttempts + 1, signature);
+        return true;
     }
 
     private void dialogueActed(String message, String signature) {
-        lastDialogueActionAt = System.currentTimeMillis();
-        lastGenericDialogueAt = lastDialogueActionAt;
+        lastGenericDialogueAt = System.currentTimeMillis();
         lastGenericDialogueSignature = signature;
+        lastGenericDialogueAttempts++;
         status = message;
         log.info("Halloween dialogue action | stage={} | {}", stage, message);
     }
@@ -1635,6 +1656,8 @@ public final class KspHalloween2026Script extends Script {
             clearChemistTextPrompt();
             lastGenericDialogueSignature = "";
             lastGenericDialogueAt = 0L;
+            lastGenericDialogueAttempts = 0;
+            clearStagePendingActions();
             chemistConversationAt = 0L;
             chemistAnswerSubmissions = 0;
             Rs2Walker.clearWalkingRoute("ksp_seasonal_stage_changed");
