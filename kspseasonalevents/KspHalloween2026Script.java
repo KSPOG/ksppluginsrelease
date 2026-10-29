@@ -201,6 +201,7 @@ public final class KspHalloween2026Script extends Script {
     private long chemistConversationAt;
     private long chemistAnswerSubmittedAt;
     private boolean chemistAnswerPromptObserved;
+    private int chemistAnswerSubmissions;
 
     public synchronized boolean start(KspSeasonalEventsConfig configuration) {
         if (active) return true;
@@ -224,6 +225,7 @@ public final class KspHalloween2026Script extends Script {
         clearChemistOptionPending();
         clearChemistTextPrompt();
         chemistConversationAt = 0L;
+        chemistAnswerSubmissions = 0;
         pendingHolidayItem = null;
         pendingHolidayItemAt = 0L;
         holidayRetrievalTimeouts = 0;
@@ -620,6 +622,11 @@ public final class KspHalloween2026Script extends Script {
             }
             return true;
         }
+        if (chemistAnswerSubmissions >= 1) {
+            stopForReview("Chemist text prompt reopened after submitting 92;"
+                    + " inspect game dialogue before another submission");
+            return true;
+        }
         if (!ready()) {
             status = "Waiting to enter Chemist riddle answer 92";
             return true;
@@ -628,6 +635,7 @@ public final class KspHalloween2026Script extends Script {
         // One submission per observed prompt. Do not type additional digits
         // while the same input is visible; prevent accidental 9292 responses.
         chemistAnswerSubmittedAt = now;
+        chemistAnswerSubmissions++;
         Rs2Keyboard.typeString("92");
         Rs2Keyboard.enter();
         acted("Typed Chemist COFFIN riddle answer 92 into chatbox and pressed Enter");
@@ -1427,6 +1435,7 @@ public final class KspHalloween2026Script extends Script {
             lastTalkAt = System.currentTimeMillis();
             chemistConversationAt = lastTalkAt;
             clearChemistTextPrompt();
+            chemistAnswerSubmissions = 0;
             acted("Talking to Chemist; COFFIN riddle answer is 92");
         } else {
             status = "Chemist puzzle: select answer 92";
@@ -1589,6 +1598,7 @@ public final class KspHalloween2026Script extends Script {
             clearChemistOptionPending();
             clearChemistTextPrompt();
             chemistConversationAt = 0L;
+            chemistAnswerSubmissions = 0;
             Rs2Walker.clearWalkingRoute("ksp_seasonal_stage_changed");
             log.info("KSP Seasonal Events Halloween | {} -> {} | {}", previous, next, message);
             if (next != Stage.STOPPED && next != Stage.PAUSED && next != Stage.NEEDS_REVIEW)
