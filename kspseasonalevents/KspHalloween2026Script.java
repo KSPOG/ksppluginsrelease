@@ -4,6 +4,7 @@ import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.coords.WorldArea;
 import net.runelite.api.widgets.Widget;
 import net.runelite.api.widgets.WidgetInfo;
+import net.runelite.api.widgets.WidgetInfo;
 import net.runelite.api.coords.WorldPoint;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.plugins.microbot.Microbot;
@@ -196,6 +197,11 @@ public final class KspHalloween2026Script extends Script {
     private boolean pendingStarterDialogueSeen;
     private boolean starterConversationActive;
     private String lastStarterDialogue = "";
+    private int starterTalkAttempts;
+    private int starterNoDialogueTicks;
+    private boolean starterInterfaceSeen;
+    private String lastStarterObservedWidgetText = "";
+    private static final int MAX_STARTER_TALK_ATTEMPTS = 3;
     // Track the visible Chemist option menu until it actually changes.
     // Alternating widget clicks and option keybindings avoids silent keybind failures.
     private String pendingChemistOptions = "";
@@ -246,6 +252,10 @@ public final class KspHalloween2026Script extends Script {
         pendingStarterDialogueSeen = false;
         starterConversationActive = false;
         lastStarterDialogue = "";
+        starterTalkAttempts = 0;
+        starterNoDialogueTicks = 0;
+        starterInterfaceSeen = false;
+        lastStarterObservedWidgetText = "";
         clearChemistOptionPending();
         clearChemistTextPrompt();
         chemistConversationAt = 0L;
@@ -363,10 +373,10 @@ public final class KspHalloween2026Script extends Script {
         // handling. A riddle answer field is not a selectable "92" option.
         if (stage == Stage.CHEMIST_RIDDLE && handleChemistAnswerPrompt()) return;
 
-        if (starterConversationActive
-                && (Rs2Dialogue.hasContinue() || Rs2Dialogue.hasSelectAnOption())) {
-            pendingStarterDialogueSeen = true;
-            pendingStarterLastDialogueAt = System.currentTimeMillis();
+        boolean dialogueVisible = Rs2Dialogue.hasContinue() || Rs2Dialogue.hasSelectAnOption();
+        if (starterConversationActive && dialogueVisible) {
+            starterInterfaceSeen = true;
+            starterNoDialogueTicks = 0;
             inspectStarterDialogue();
             if (stage == Stage.NEEDS_REVIEW || stage == Stage.COMPLETED) return;
         }
@@ -393,28 +403,35 @@ public final class KspHalloween2026Script extends Script {
         // Angel/Henja are authoritative for the event objective. Never
         // resume a preselected stage just because their dialogue closed.
         if (starterConversationActive) {
-            if (pendingStarterDialogueSeen) {
-                // Dialogue is no longer visible, so resolve the last
-                // observed authoritative objective without a sleep.
-                if (pendingStarterNext == null) {
-                    starterConversationActive = false;
-                    stopForReview("Angel/Henja dialogue did not identify a known Halloween objective;"
-                            + " lastDialogue=" + lastStarterDialogue);
-                    return;
+            // Consecutive absent widget snapshots distinguish a conversation
+            // close from the short frame where one dialogue page replaces another.
+            if (starterInterfaceSeen && ++starterNoDialogueTicks >= 2) {
+                starterConversationActive = false;
+                starterInterfaceSeen = false;
+                if (pendingStarterNext != null) {
+                    Stage next = pendingStarterNext;
+                    pendingStarterNext = null;
+                    pendingStarterDialogueSeen = false;
+                    starterTalkAttempts = 0;
+                    change(next, "Angel / Henja dialogue resolved event state");
+                } else {
+                    log.warn("Halloween Angel/Henja conversation closed without a classified"
+                                    + " objective | attempt={}/{} text={} lastWidgetText={}"
+                                    + " textCaptured={}",
+                            starterTalkAttempts, MAX_STARTER_TALK_ATTEMPTS,
+                            lastStarterDialogue, lastStarterObservedWidgetText,
+                            pendingStarterDialogueSeen);
+                    status = "Rechecking Angel / Henja; dialogue objective not yet confirmed";
                 }
-                Stage next = pendingStarterNext;
-                pendingStarterNext = null;
-                pendingStarterDialogueSeen = false;
+            } else if (!starterInterfaceSeen
+                    && System.currentTimeMillis() - pendingStarterAt > 8_000L) {
+                log.warn("Halloween starter Talk-to had no dialogue widgets | stage={}"
+                                + " attempt={}/{}",
+                        stage, starterTalkAttempts, MAX_STARTER_TALK_ATTEMPTS);
                 starterConversationActive = false;
-                change(next, "Angel / Henja dialogue resolved event state");
-            } else if (System.currentTimeMillis() - pendingStarterAt > 8_000L) {
-                log.warn("Halloween starter click produced no visible dialogue | stage={}", stage);
-                starterConversationActive = false;
-                pendingStarterNext = null;
-                pendingStarterDialogueSeen = false;
-                lastActionAt = 0L; // permit a clean Talk-to retry
+                status = "Retrying Angel / Henja: no dialogue widgets appeared";
             } else {
-                status = "Waiting for Angel / Henja dialogue";
+                status = "Reading Angel / Henja dialogue widgets";
             }
             return;
         }
@@ -718,6 +735,13 @@ public final class KspHalloween2026Script extends Script {
     private void talkToStarter(WorldPoint player) {
         if (!nearOrWalk(player, STARTER, 8, "Angel / Henja's house"))
             return;
+        if (starterTalkAttempts >= MAX_STARTER_TALK_ATTEMPTS) {
+            stopForReview("Angel/Henja dialogue did not identify a known Halloween objective"
+                    + " after " + starterTalkAttempts + " conversations;"
+                    + " lastDialogue=" + lastStarterDialogue
+                    + " widgetText=" + lastStarterObservedWidgetText);
+            return;
+        }
         boolean clicked = Rs2Npc.getNpc("Henja") != null
                 && Rs2Npc.interact("Henja", "Talk-to");
         if (!clicked) clicked = Rs2Npc.getNpc("Angel") != null
@@ -726,14 +750,18 @@ public final class KspHalloween2026Script extends Script {
             status = "Locating Angel / Henja in their Rimmington home";
             return;
         }
-        acted("Speaking to Angel / Henja to resolve current event state");
+        starterTalkAttempts++;
+        acted("Speaking to Angel / Henja to resolve current event state"
+                + " (attempt " + starterTalkAttempts + "/" + MAX_STARTER_TALK_ATTEMPTS + ")");
         lastTalkAt = System.currentTimeMillis();
         pendingStarterNext = null;
         pendingStarterAt = lastTalkAt;
         pendingStarterLastDialogueAt = 0L;
         pendingStarterDialogueSeen = false;
         starterConversationActive = true;
-        lastStarterDialogue = "";
+        starterInterfaceSeen = false;
+        starterNoDialogueTicks = 0;
+        // Keep last non-empty text across retries for accurate failure diagnostics.
     }
 
     private Rs2TileObjectModel lantern() {
