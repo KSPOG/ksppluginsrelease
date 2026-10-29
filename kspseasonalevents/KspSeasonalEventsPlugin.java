@@ -26,7 +26,7 @@ import net.runelite.client.ui.overlay.OverlayManager;
         enabledByDefault = PluginConstants.DEFAULT_ENABLED,
         isExternal = PluginConstants.IS_EXTERNAL)
 public final class KspSeasonalEventsPlugin extends Plugin {
-    public static final String VERSION = "0.2.9";
+    public static final String VERSION = "0.2.10";
     @Inject private ClientToolbar toolbar;
     @Inject private OverlayManager overlays;
     @Inject private KspSeasonalEventsOverlay overlay;

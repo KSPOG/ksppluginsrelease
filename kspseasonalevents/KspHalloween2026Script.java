@@ -3,6 +3,7 @@ package net.runelite.client.plugins.microbot.kspseasonalevents;
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.coords.WorldArea;
 import net.runelite.api.widgets.Widget;
+import net.runelite.api.widgets.WidgetInfo;
 import net.runelite.api.coords.WorldPoint;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.plugins.microbot.Microbot;
@@ -64,7 +65,7 @@ public final class KspHalloween2026Script extends Script {
     // Five verified child attempts trigger a report checkpoint, not success.
     private static final int CHILD_REPORT_CHECKPOINT = 5;
     private static final int MAX_CHILD_NPC_SCOUT_STOPS = 4;
-    private static final long CHILD_SCENE_SETTLE_MS = 2_000L;
+    // Scene readiness and NPC movement are observed directly; no settle timer.
     private static final String TREATER_CHILD_GROUP_KEY = "halloweenConfirmedChildNpcGroup";
     // 2026 client logs show two groups of five NPC definition IDs. The
     // groups are NOT assigned to children or adults without live evidence.
@@ -87,7 +88,10 @@ public final class KspHalloween2026Script extends Script {
         new WorldPoint(2970, 3193, 0), new WorldPoint(2948, 3198, 0),
         new WorldPoint(2941, 3230, 0), new WorldPoint(2970, 3250, 0)
     };
-    private static final long ACTION_GAP = 1_400L;
+    // Timeouts are only failure recovery, never pacing between valid state changes.
+    private static final long DIALOGUE_STALL_TIMEOUT_MS = 4_000L;
+    private static final long WORLD_ACTION_STALL_TIMEOUT_MS = 6_000L;
+    private static final int MAX_UNCONFIRMED_ACTIONS = 3;
     private static final long WALK_RETRY = 10_000L;
     // Prefer a complete outfit using distinct equipment slots.
     // Match each item against live RuneLite item composition names.
@@ -168,7 +172,9 @@ public final class KspHalloween2026Script extends Script {
     private int sweepsWithoutTarget;
     private int actionsAtStage;
     private long lastActionAt;
-    private long lastWalkAt;
+    private String lastGenericDialogueSignature = "";
+    private long lastGenericDialogueAt;
+    private int lastGenericDialogueAttempts;    private long lastWalkAt;
     private long lastTalkAt;
     private long lastDiagnosticAt;
     private volatile WorldPoint pendingLantern;
@@ -195,6 +201,27 @@ public final class KspHalloween2026Script extends Script {
     private String pendingChemistOptions = "";
     private long pendingChemistOptionAt;
     private int pendingChemistOptionAttempts;
+    // The 2026 COFFIN answer is entered into a chatbox text prompt, NOT
+    // necessarily selected from a list of dialogue options.
+    private long chemistConversationAt;
+    private long chemistAnswerSubmittedAt;
+    private boolean pendingCook;
+    private long pendingCookAt;
+    private int pendingCookFailures;
+    private int pendingOldOnionCount = -1;
+    private long pendingOldOnionAt;
+    private int pendingOldOnionFailures;
+    private int pendingCoatCandyCount = -1;
+    private long pendingCoatAt;
+    private int pendingCoatFailures;
+    private String pendingEquipItem;
+    private long pendingEquipAt;
+    private boolean pendingHolidayClose;
+    private long pendingHolidayCloseAt;
+    private int pendingHolidayScrollY = -1;
+    private long pendingHolidayScrollAt;
+    private boolean chemistAnswerPromptObserved;
+    private int chemistAnswerSubmissions;
 
     public synchronized boolean start(KspSeasonalEventsConfig configuration) {
         if (active) return true;
@@ -203,6 +230,10 @@ public final class KspHalloween2026Script extends Script {
         this.paused = false;
         this.startedAt = System.currentTimeMillis();
         lastActionAt = lastWalkAt = lastTalkAt = lastDiagnosticAt = 0L;
+        lastGenericDialogueSignature = "";
+        lastGenericDialogueAt = 0L;
+        lastGenericDialogueAttempts = 0;
+        clearStagePendingActions();
         pendingLantern = null;
         pendingLanternAt = 0L;
         lastVerificationTalkAt = 0L;
@@ -216,6 +247,9 @@ public final class KspHalloween2026Script extends Script {
         starterConversationActive = false;
         lastStarterDialogue = "";
         clearChemistOptionPending();
+        clearChemistTextPrompt();
+        chemistConversationAt = 0L;
+        chemistAnswerSubmissions = 0;
         pendingHolidayItem = null;
         pendingHolidayItemAt = 0L;
         holidayRetrievalTimeouts = 0;
@@ -277,7 +311,7 @@ public final class KspHalloween2026Script extends Script {
             log.info("Halloween saved stage {} deferred to starter dialogue", saved);
         }
         mainScheduledFuture = scheduledExecutorService.scheduleWithFixedDelay(
-                this::safeTick, 0L, 600L, TimeUnit.MILLISECONDS);
+                this::safeTick, 0L, 150L, TimeUnit.MILLISECONDS);
         log.info("Halloween 2026 started | stage={} lanterns={}/8 adultsGiven={}",
                 stage, getLanternCount(), adultsGiven);
         return true;
@@ -325,6 +359,10 @@ public final class KspHalloween2026Script extends Script {
         if (player == null) { status = "Waiting for player location"; return; }
         if (stage == Stage.COMPLETED || stage == Stage.NEEDS_REVIEW) return;
 
+        // Check the Chemist's free-text input BEFORE generic Continue/option
+        // handling. A riddle answer field is not a selectable "92" option.
+        if (stage == Stage.CHEMIST_RIDDLE && handleChemistAnswerPrompt()) return;
+
         if (starterConversationActive
                 && (Rs2Dialogue.hasContinue() || Rs2Dialogue.hasSelectAnOption())) {
             pendingStarterDialogueSeen = true;
@@ -335,10 +373,10 @@ public final class KspHalloween2026Script extends Script {
 
         if (Rs2Dialogue.hasContinue()) {
             if (stage == Stage.CHEMIST_RIDDLE) clearChemistOptionPending();
-            if (ready()) {
+            String signature = stage + "|continue|" + Rs2Dialogue.getDialogueText();
+            if (canDispatchDialogue(signature)) {
                 Rs2Dialogue.clickContinue();
-                lastActionAt = System.currentTimeMillis();
-                status = "Advancing " + stage + " dialogue";
+                dialogueActed("Advancing " + stage + " dialogue", signature);
             }
             return;
         }
@@ -347,15 +385,17 @@ public final class KspHalloween2026Script extends Script {
             handleDialogueOption();
             return;
         }
+        // No menu/continue is visible: the next NPC/object state may be
+        // processed immediately. A fresh menu signature is unlocked on sight.
+        lastGenericDialogueSignature = "";
+        lastGenericDialogueAttempts = 0;
 
         // Angel/Henja are authoritative for the event objective. Never
         // resume a preselected stage just because their dialogue closed.
         if (starterConversationActive) {
             if (pendingStarterDialogueSeen) {
-                if (System.currentTimeMillis() - pendingStarterLastDialogueAt < 1_500L) {
-                    status = "Finishing Angel / Henja conversation";
-                    return;
-                }
+                // Dialogue is no longer visible, so resolve the last
+                // observed authoritative objective without a sleep.
                 if (pendingStarterNext == null) {
                     starterConversationActive = false;
                     stopForReview("Angel/Henja dialogue did not identify a known Halloween objective;"
@@ -437,28 +477,14 @@ public final class KspHalloween2026Script extends Script {
     }
 
     private void handleDialogueOption() {
-        if (!ready()) return;
         // Enumerate unknown choices for accurate follow-up debugging.
         List<String> options = Rs2Dialogue.getDialogueOptions().stream()
                 .map(w -> w == null ? "" : w.getText())
                 .collect(Collectors.toList());
-        if (stage == Stage.GET_COSTUME
-                && Rs2Dialogue.keyPressForDialogueOption(
-                        "I'd like to check holiday items please!", true)) {
-            acted("Selected Diango's holiday-item retrieval dialogue");
-            return;
-        }
-
-        if ((stage == Stage.REPORT_LANTERNS || stage == Stage.GET_COSTUME
-                || stage == Stage.VERIFY_LANTERNS)
-                && Rs2Dialogue.keyPressForDialogueOption("Sure, I'll take the hat.", true)) {
-            acted("Accepted Halloween hat from Angel / Henja");
-            return;
-        }
-
+        String signature = stage + "|" + Rs2Dialogue.getQuestion() + "|" + options;
+        // Never replay an unchanged option menu while the client is
+        // processing it. A changed widget/question is immediately actionable.
         if (stage == Stage.CHEMIST_RIDDLE) {
-            // Wiki-confirmed conversation: select Halloween, then solve COFFIN = 92.
-            // Never choose unrelated Chemist topics or a random numeric option.
             if (handleChemistDialogueOption(options)) return;
             if (System.currentTimeMillis() - lastDiagnosticAt > 5_000L) {
                 lastDiagnosticAt = System.currentTimeMillis();
@@ -468,13 +494,28 @@ public final class KspHalloween2026Script extends Script {
             status = "Waiting for Chemist Halloween / 92 option; see dialogue logs";
             return;
         }
+        if (!canDispatchDialogue(signature)) return;
+        if (stage == Stage.GET_COSTUME
+                && Rs2Dialogue.keyPressForDialogueOption(
+                        "I'd like to check holiday items please!", true)) {
+            dialogueActed("Selected Diango's holiday-item retrieval dialogue", signature);
+            return;
+        }
+
+        if ((stage == Stage.REPORT_LANTERNS || stage == Stage.GET_COSTUME
+                || stage == Stage.VERIFY_LANTERNS)
+                && Rs2Dialogue.keyPressForDialogueOption("Sure, I'll take the hat.", true)) {
+            dialogueActed("Accepted Halloween hat from Angel / Henja", signature);
+            return;
+        }
+
         String[] choices = {
             "Yes", "Sure", "I'd like to help", "Of course", "Let's do it",
             "I'll help", "I can help", "Okay", "Halloween", "Trick or treat"
         };
         for (String choice : choices) {
             if (Rs2Dialogue.clickOption(choice, true)) {
-                acted("Selected confirmed event dialogue: " + choice);
+                dialogueActed("Selected confirmed event dialogue: " + choice, signature);
                 return;
             }
         }
@@ -507,7 +548,7 @@ public final class KspHalloween2026Script extends Script {
         }
 
         long now = System.currentTimeMillis();
-        if (pendingChemistOptionAt != 0L && now - pendingChemistOptionAt < 2_000L) {
+        if (pendingChemistOptionAt != 0L && now - pendingChemistOptionAt < DIALOGUE_STALL_TIMEOUT_MS) {
             status = "Waiting for Chemist menu to change after "
                     + options.get(optionIndex) + " (" + pendingChemistOptionAttempts + " attempts)";
             return true;
@@ -517,8 +558,6 @@ public final class KspHalloween2026Script extends Script {
                     + options.get(optionIndex) + "; options=" + options);
             return true;
         }
-        if (!ready()) return true;
-
         List<Widget> liveOptions = Rs2Dialogue.getDialogueOptions();
         if (optionIndex >= liveOptions.size()) {
             status = "Chemist options changed while reading widgets; retrying";
@@ -535,9 +574,11 @@ public final class KspHalloween2026Script extends Script {
         pendingChemistOptionAttempts++;
         pendingChemistOptionAt = now;
         if (selected) {
-            acted("Selecting Chemist " + options.get(optionIndex)
+            chemistConversationAt = now;
+            status = "Selected Chemist " + options.get(optionIndex)
                     + " via " + (viaWidget ? "option widget" : "option keybinding")
-                    + "; awaiting dialogue change");
+                    + "; awaiting dialogue change";
+            log.info("Halloween dialogue action | stage={} | {}", stage, status);
         } else {
             log.warn("Halloween Chemist option input failed | option={} method={} attempt={}",
                     options.get(optionIndex), viaWidget ? "widget" : "key", pendingChemistOptionAttempts);
@@ -550,6 +591,112 @@ public final class KspHalloween2026Script extends Script {
         pendingChemistOptions = "";
         pendingChemistOptionAt = 0L;
         pendingChemistOptionAttempts = 0;
+    }
+
+    /**
+     * RuneLite chatbox input widgets can display a text prompt without
+     * {@link Rs2Dialogue#hasSelectAnOption()}. Read one client-thread
+     * snapshot and only type during this plugin's recent Chemist conversation.
+     */
+    private boolean handleChemistAnswerPrompt() {
+        long now = System.currentTimeMillis();
+        if (chemistConversationAt == 0L || now - chemistConversationAt > 120_000L)
+            return false;
+
+        ChemistInputView view = Microbot.getClientThread().runOnClientThreadOptional(() -> {
+            Widget title = Microbot.getClient().getWidget(WidgetInfo.CHATBOX_TITLE);
+            Widget fullInput = Microbot.getClient().getWidget(WidgetInfo.CHATBOX_FULL_INPUT);
+            Widget input = Microbot.getClient().getWidget(WidgetInfo.CHATBOX_INPUT);
+            return new ChemistInputView(isVisible(title), isVisible(fullInput),
+                    isVisible(input), widgetText(title), widgetText(fullInput));
+        }).orElse(null);
+        if (view == null) return false;
+
+        // Never mistake an NPC Continue or selectable choice for a
+        // free-text answer field, even when a chatbox text widget is visible.
+        if (Rs2Dialogue.hasContinue() || Rs2Dialogue.hasSelectAnOption())
+            return false;
+
+        boolean prompt = KspHalloweenChemistInput.isAnswerPrompt(
+                view.titleVisible, view.fullInputVisible, view.inputVisible,
+                view.titleText, view.fullInputText);
+
+        if (!prompt) {
+            if (chemistAnswerSubmittedAt != 0L) {
+                log.info("Halloween Chemist answer input closed | submittedAgoMs={} sugar={}"
+                        + " moltenSugar={}",
+                        now - chemistAnswerSubmittedAt,
+                        Rs2Inventory.count("Sugar"), Rs2Inventory.count("Molten sugar"));
+                clearChemistTextPrompt();
+                // Give the Chemist response time to arrive before retrying.
+                lastActionAt = now;
+                status = "Chemist answer submitted; checking for sugar or further dialogue";
+                return true;
+            }
+            return false;
+        }
+
+        if (!chemistAnswerPromptObserved) {
+            chemistAnswerPromptObserved = true;
+            log.info("Halloween Chemist riddle text input detected | title={} body={}"
+                            + " fullInputVisible={} inputVisible={}",
+                    view.titleText, view.fullInputText,
+                    view.fullInputVisible, view.inputVisible);
+        }
+
+        if (chemistAnswerSubmittedAt != 0L) {
+            if (now - chemistAnswerSubmittedAt >= 12_000L) {
+                stopForReview("Chemist riddle input still visible after submitting 92;"
+                        + " inspect chatbox and logs before retrying");
+            } else {
+                status = "Waiting for Chemist to accept submitted answer 92";
+            }
+            return true;
+        }
+        if (chemistAnswerSubmissions >= 1) {
+            stopForReview("Chemist text prompt reopened after submitting 92;"
+                    + " inspect game dialogue before another submission");
+            return true;
+        }
+        // One submission per observed prompt. Do not type additional digits
+        // while the same input is visible; prevent accidental 9292 responses.
+        chemistAnswerSubmittedAt = now;
+        chemistAnswerSubmissions++;
+        Rs2Keyboard.typeString("92");
+        Rs2Keyboard.enter();
+        status = "Submitted Chemist COFFIN riddle answer 92; awaiting game response";
+        log.info("Halloween dialogue action | stage={} | {}", stage, status);
+        return true;
+    }
+
+    private static boolean isVisible(Widget widget) {
+        return widget != null && !widget.isHidden();
+    }
+
+    private static String widgetText(Widget widget) {
+        return widget == null || widget.getText() == null ? "" : widget.getText();
+    }
+
+    private void clearChemistTextPrompt() {
+        chemistAnswerSubmittedAt = 0L;
+        chemistAnswerPromptObserved = false;
+    }
+
+    private static final class ChemistInputView {
+        final boolean titleVisible;
+        final boolean fullInputVisible;
+        final boolean inputVisible;
+        final String titleText;
+        final String fullInputText;
+
+        ChemistInputView(boolean titleVisible, boolean fullInputVisible,
+                         boolean inputVisible, String titleText, String fullInputText) {
+            this.titleVisible = titleVisible;
+            this.fullInputVisible = fullInputVisible;
+            this.inputVisible = inputVisible;
+            this.titleText = titleText;
+            this.fullInputText = fullInputText;
+        }
     }
 
     private boolean nearOrWalk(WorldPoint player, WorldPoint destination,
@@ -571,7 +718,6 @@ public final class KspHalloween2026Script extends Script {
     private void talkToStarter(WorldPoint player) {
         if (!nearOrWalk(player, STARTER, 8, "Angel / Henja's house"))
             return;
-        if (!ready()) return;
         boolean clicked = Rs2Npc.getNpc("Henja") != null
                 && Rs2Npc.interact("Henja", "Talk-to");
         if (!clicked) clicked = Rs2Npc.getNpc("Angel") != null
@@ -651,8 +797,6 @@ public final class KspHalloween2026Script extends Script {
             nearOrWalk(player, pendingLantern, 6, "confirm clicked jack-o'-lantern");
             return true;
         }
-        if (pendingLanternAt != 0L
-                && System.currentTimeMillis() - pendingLanternAt < 1_100L) return true;
         final WorldPoint clickedTile = pendingLantern;
         boolean stillPresent = Microbot.getRs2TileObjectCache().query().fromWorldView()
                 .where(o -> o != null && clickedTile.equals(o.getWorldLocation())
@@ -686,7 +830,7 @@ public final class KspHalloween2026Script extends Script {
         if (target != null) {
             WorldPoint location = target.getWorldLocation();
             status = "Smashing jack-o'-lantern " + (smashedLanternTiles.size() + 1) + "/8";
-            if (ready() && target.click(target.findAction("Smash"))) {
+            if (target.click(target.findAction("Smash"))) {
                 pendingLantern = location;
                 pendingLanternAt = System.currentTimeMillis();
                 configManager.setConfiguration(GROUP, PENDING_LANTERN_KEY, tileKey(location));
@@ -914,10 +1058,51 @@ public final class KspHalloween2026Script extends Script {
     }
 
     private void collectCostume(WorldPoint player) {
-        if (!ready()) return;
         int equipped = costumeCount();
         KspDiangoHolidayRetrieval.Snapshot window =
                 KspDiangoHolidayRetrieval.inspect(missingCostumeRetrievalNames());
+
+        if (pendingEquipItem != null) {
+            if (Rs2Equipment.isWearing(pendingEquipItem, true)) {
+                log.info("Halloween costume equipped | item={}", pendingEquipItem);
+                pendingEquipItem = null;
+            } else if (System.currentTimeMillis() - pendingEquipAt
+                    < WORLD_ACTION_STALL_TIMEOUT_MS) {
+                status = "Waiting for equipped costume to update: " + pendingEquipItem;
+                return;
+            } else {
+                stopForReview("Costume equip action did not update equipment: "
+                        + pendingEquipItem);
+                return;
+            }
+        }
+
+        if (!window.open) {
+            pendingHolidayClose = false;
+            pendingHolidayScrollY = -1;
+        } else if (pendingHolidayClose) {
+            if (System.currentTimeMillis() - pendingHolidayCloseAt
+                    < WORLD_ACTION_STALL_TIMEOUT_MS) {
+                status = "Waiting for Diango retrieval modal to close";
+                return;
+            }
+            pendingHolidayClose = false; // Recovery: another close attempt may be needed.
+        }
+
+        if (window.open && pendingHolidayScrollY >= 0) {
+            if (window.scrollY != pendingHolidayScrollY) {
+                log.info("Diango scroll acknowledged | oldY={} newY={}",
+                        pendingHolidayScrollY, window.scrollY);
+                pendingHolidayScrollY = -1;
+            } else if (System.currentTimeMillis() - pendingHolidayScrollAt
+                    < WORLD_ACTION_STALL_TIMEOUT_MS) {
+                status = "Waiting for Diango item-list scroll update";
+                return;
+            } else {
+                stopForReview("Diango scroll did not move; inspect visible retrieval items");
+                return;
+            }
+        }
 
         if (equipped >= 4) {
             if (window.open) {
@@ -975,6 +1160,8 @@ public final class KspHalloween2026Script extends Script {
                 if (slot == null || wornSlots.contains(slot)
                         || !Rs2Inventory.hasItem(piece, true)) continue;
                 if (Rs2Inventory.wear(piece)) {
+                    pendingEquipItem = piece;
+                    pendingEquipAt = System.currentTimeMillis();
                     acted("Equipping collected costume: " + piece
                             + " (" + wornSlots.size() + "/4 slots worn)");
                 } else {
@@ -1009,6 +1196,8 @@ public final class KspHalloween2026Script extends Script {
             if (holidayScrollAttempts < 24 && window.canScrollDown()) {
                 if (KspDiangoHolidayRetrieval.scrollDown(window)) {
                     holidayScrollAttempts++;
+                    pendingHolidayScrollY = window.scrollY;
+                    pendingHolidayScrollAt = System.currentTimeMillis();
                     acted("Searching additional missing costume slots; scroll "
                             + holidayScrollAttempts);
                 }
@@ -1027,7 +1216,9 @@ public final class KspHalloween2026Script extends Script {
         holidayCloseAttempts = 0;
         if (!nearOrWalk(player, DIANGO, 8, "Diango in Draynor Village")) return;
         if (Rs2Npc.getNpc("Diango") != null
-                && System.currentTimeMillis() - lastTalkAt > 6_000L) {
+                && (lastTalkAt == 0L
+                    || System.currentTimeMillis() - lastTalkAt
+                        >= WORLD_ACTION_STALL_TIMEOUT_MS)) {
             if (Rs2Npc.interact("Diango", "Holiday-items")) {
                 lastTalkAt = System.currentTimeMillis();
                 acted("Opening Diango to collect missing costume pieces");
@@ -1064,6 +1255,8 @@ public final class KspHalloween2026Script extends Script {
             Rs2Keyboard.keyPress(KeyEvent.VK_ESCAPE);
         }
         holidayCloseAttempts++;
+        pendingHolidayClose = true;
+        pendingHolidayCloseAt = System.currentTimeMillis();
         acted("Closing Diango after full four-slot costume batch");
     }
 
@@ -1254,7 +1447,7 @@ public final class KspHalloween2026Script extends Script {
 
         if (child != null) {
             childNoTargetSince = 0L;
-            if (ready() && Rs2Npc.interact(child, "Spook")) {
+            if (Rs2Npc.interact(child, "Spook")) {
                 spookedChildren.add(child.getId());
                 persistNpcIds(SPOOKED_CHILD_IDS_KEY, spookedChildren);
                 // If new children become available after moving, previous
@@ -1272,18 +1465,11 @@ public final class KspHalloween2026Script extends Script {
         // NPC scene updates may lag behind a movement or Spook action.
         // Give the scene time to settle before initiating any new route.
         long now = System.currentTimeMillis();
-        if (childNoTargetSince == 0L) {
-            childNoTargetSince = now;
-            status = "Checking nearby child trick-or-treaters ("
-                    + spookedChildren.size() + "/" + CHILD_REPORT_CHECKPOINT
-                    + " Spook attempts)";
+        if (Rs2Player.isMoving()) {
+            status = "Waiting for movement to finish before checking child NPCs";
             return;
         }
-        if (Rs2Player.isMoving() || now - childNoTargetSince < CHILD_SCENE_SETTLE_MS) {
-            status = "Waiting for visible child NPCs ("
-                    + spookedChildren.size() + "/" + CHILD_REPORT_CHECKPOINT + ")";
-            return;
-        }
+        if (childNoTargetSince == 0L) childNoTargetSince = now;
 
         if (scoutVisibleTreaters(player, visibleTreaters)) return;
 
@@ -1309,10 +1495,20 @@ public final class KspHalloween2026Script extends Script {
             return;
         }
         if (!nearOrWalk(player, CHEMIST, 8, "the Chemist west of Rimmington")) return;
-        if (ready() && Rs2Npc.getNpc("Chemist") != null
-                && System.currentTimeMillis() - lastTalkAt > 6_000L
+        // One Talk-to per observed conversation. The watchdog allows a
+        // retry only when no dialogue/input or sugar appeared.
+        long now = System.currentTimeMillis();
+        if (chemistConversationAt != 0L
+                && now - chemistConversationAt < WORLD_ACTION_STALL_TIMEOUT_MS) {
+            status = "Waiting for Chemist dialogue or sugar";
+            return;
+        }
+        if (Rs2Npc.getNpc("Chemist") != null
                 && Rs2Npc.interact("Chemist", "Talk-to")) {
             lastTalkAt = System.currentTimeMillis();
+            chemistConversationAt = lastTalkAt;
+            clearChemistTextPrompt();
+            chemistAnswerSubmissions = 0;
             acted("Talking to Chemist; COFFIN riddle answer is 92");
         } else {
             status = "Chemist puzzle: select answer 92";
@@ -1334,6 +1530,11 @@ public final class KspHalloween2026Script extends Script {
             change(Stage.COLLECT_ONIONS, "Molten sugar ready");
             return;
         }
+        if (pendingCook && System.currentTimeMillis() - pendingCookAt
+                < WORLD_ACTION_STALL_TIMEOUT_MS) {
+            status = "Waiting for sugar-to-molten-sugar inventory transition";
+            return;
+        }
         if (!Rs2Inventory.hasItem("Sugar", true)) {
             change(Stage.CHEMIST_RIDDLE, "Need sugar from Chemist");
             return;
@@ -1349,11 +1550,24 @@ public final class KspHalloween2026Script extends Script {
             status = "Locating range in Angel/Henja's house or Chemist fireplace";
             return;
         }
+        if (pendingCook) {
+            if (System.currentTimeMillis() - pendingCookAt < WORLD_ACTION_STALL_TIMEOUT_MS) {
+                status = "Waiting for sugar to become molten sugar";
+                return;
+            }
+            pendingCook = false;
+            if (++pendingCookFailures >= MAX_UNCONFIRMED_ACTIONS) {
+                stopForReview("Cooking sugar failed without inventory change after "
+                        + pendingCookFailures + " attempts");
+                return;
+            }
+        }
         net.runelite.client.plugins.microbot.util.inventory.Rs2ItemModel sugar =
                 Rs2Inventory.get("Sugar", true);
-        if (sugar != null && ready()
-                && Rs2Inventory.useItemOnObject(sugar.getId(), surface.getId())) {
-            acted("Cooking sugar at " + surface.getName());
+        if (sugar != null && Rs2Inventory.useItemOnObject(sugar.getId(), surface.getId())) {
+            pendingCook = true;
+            pendingCookAt = System.currentTimeMillis();
+            acted("Cooking sugar at " + surface.getName() + "; awaiting molten sugar");
         }
     }
 
@@ -1372,11 +1586,34 @@ public final class KspHalloween2026Script extends Script {
                         && (o.hasActionContaining("Take") || o.hasActionContaining("Search")
                             || o.hasActionContaining("Collect")))
                 .nearestOnClientThread();
-        if (crate != null && ready()) {
+        int count = Rs2Inventory.count("Old onion");
+        if (pendingOldOnionCount >= 0) {
+            if (count > pendingOldOnionCount) {
+                log.info("Halloween old-onion receipt confirmed | before={} after={}",
+                        pendingOldOnionCount, count);
+                pendingOldOnionCount = -1;
+                pendingOldOnionFailures = 0;
+            } else if (System.currentTimeMillis() - pendingOldOnionAt
+                    < WORLD_ACTION_STALL_TIMEOUT_MS) {
+                status = "Waiting for old onion to appear in inventory";
+                return;
+            } else {
+                pendingOldOnionCount = -1;
+                if (++pendingOldOnionFailures >= MAX_UNCONFIRMED_ACTIONS) {
+                    stopForReview("Old onion crate clicked without inventory receipt");
+                    return;
+                }
+            }
+        }
+        if (crate != null) {
             String action = crate.findAction("Take");
             if (action == null) action = crate.findAction("Search");
             if (action == null) action = crate.findAction("Collect");
-            if (action != null && crate.click(action)) acted("Collecting OLD onion (not regular onion)");
+            if (action != null && crate.click(action)) {
+                pendingOldOnionCount = count;
+                pendingOldOnionAt = System.currentTimeMillis();
+                acted("Collecting OLD onion (not regular onion)");
+            }
         } else {
             status = "Locating the OLD onion crate behind Angel/Henja's house";
         }
@@ -1389,6 +1626,26 @@ public final class KspHalloween2026Script extends Script {
             change(Stage.GIVE_CANDY, "Five candy onions ready for adults");
             return;
         }
+        // A combine may consume its inputs before the output inventory cache
+        // updates; treat that as pending until the candy-onion receipt appears.
+        if (pendingCoatCandyCount >= 0) {
+            if (candy > pendingCoatCandyCount) {
+                log.info("Halloween candy onion created | before={} after={}",
+                        pendingCoatCandyCount, candy);
+                pendingCoatCandyCount = -1;
+                pendingCoatFailures = 0;
+            } else if (System.currentTimeMillis() - pendingCoatAt
+                    < WORLD_ACTION_STALL_TIMEOUT_MS) {
+                status = "Waiting for candy onion inventory receipt";
+                return;
+            } else {
+                pendingCoatCandyCount = -1;
+                if (++pendingCoatFailures >= MAX_UNCONFIRMED_ACTIONS) {
+                    stopForReview("Coating onions did not create candy onions");
+                    return;
+                }
+            }
+        }
         if (old <= 0) {
             change(Stage.COLLECT_ONIONS, "Need remaining old onions");
             return;
@@ -1397,27 +1654,36 @@ public final class KspHalloween2026Script extends Script {
             change(Stage.COOK_SUGAR, "Need more molten sugar");
             return;
         }
-        if (ready() && Rs2Inventory.combine("Molten sugar", "Old onion"))
+        if (Rs2Inventory.combine("Molten sugar", "Old onion")) {
+            pendingCoatCandyCount = candy;
+            pendingCoatAt = System.currentTimeMillis();
             acted("Coating old onion with molten sugar (" + candy + "/5 prepared)");
+        }
     }
 
     private void giveCandy(WorldPoint player) {
         int candyCount = Rs2Inventory.count("Candy onion");
         if (pendingCandyCount >= 0) {
-            if (System.currentTimeMillis() - lastActionAt >= 1_200L) {
-                if (candyCount < pendingCandyCount) {
-                    int used = pendingCandyCount - candyCount;
-                    if (pendingAdultId > 0 && givenAdultIds.add(pendingAdultId)) {
-                        adultsGiven = Math.min(5, adultsGiven + 1);
-                        configManager.setConfiguration(GROUP, ADULTS_KEY, adultsGiven);
-                        persistNpcIds(DELIVERED_ADULT_IDS_KEY, givenAdultIds);
-                        log.info("Halloween candy delivery verified | adultId={} used={} total={}/5",
-                                pendingAdultId, used, adultsGiven);
-                    }
+            if (candyCount < pendingCandyCount) {
+                int used = pendingCandyCount - candyCount;
+                if (pendingAdultId > 0 && givenAdultIds.add(pendingAdultId)) {
+                    adultsGiven = Math.min(5, adultsGiven + 1);
+                    configManager.setConfiguration(GROUP, ADULTS_KEY, adultsGiven);
+                    persistNpcIds(DELIVERED_ADULT_IDS_KEY, givenAdultIds);
+                    log.info("Halloween candy delivery verified | adultId={} used={} total={}/5",
+                            pendingAdultId, used, adultsGiven);
                 }
                 pendingCandyCount = -1;
                 pendingAdultId = -1;
-            } else return;
+                // Inventory receipt is authoritative; proceed immediately.
+            } else if (System.currentTimeMillis() - lastActionAt < WORLD_ACTION_STALL_TIMEOUT_MS) {
+                status = "Waiting for candy-onion inventory receipt";
+                return;
+            } else {
+                stopForReview("Adult candy-onion use did not consume an item;"
+                        + " check NPC/dialogue before retrying");
+                return;
+            }
         }
         if (adultsGiven >= 5) {
             change(Stage.FINAL_TALK, "Five adult trick-or-treaters served");
@@ -1441,7 +1707,7 @@ public final class KspHalloween2026Script extends Script {
         net.runelite.client.plugins.microbot.util.inventory.Rs2ItemModel item =
                 Rs2Inventory.get("Candy onion");
         if (adult != null && item != null) {
-            if (ready() && Rs2Inventory.useItemOnNpc(item.getId(), adult)) {
+            if (Rs2Inventory.useItemOnNpc(item.getId(), adult)) {
                 pendingCandyCount = candyCount;
                 pendingAdultId = adult.getId();
                 acted("Offering candy onion to adult npcId=" + adult.getId());
@@ -1463,8 +1729,50 @@ public final class KspHalloween2026Script extends Script {
         log.info("Halloween action | stage={} | {}", stage, message);
     }
 
-    private boolean ready() {
-        return System.currentTimeMillis() - lastActionAt >= ACTION_GAP;
+    private void clearStagePendingActions() {
+        pendingCook = false;
+        pendingCookAt = 0L;
+        pendingCookFailures = 0;
+        pendingOldOnionCount = -1;
+        pendingOldOnionAt = 0L;
+        pendingOldOnionFailures = 0;
+        pendingCoatCandyCount = -1;
+        pendingCoatAt = 0L;
+        pendingCoatFailures = 0;
+        pendingEquipItem = null;
+        pendingEquipAt = 0L;
+        pendingHolidayClose = false;
+        pendingHolidayCloseAt = 0L;
+        pendingHolidayScrollY = -1;
+        pendingHolidayScrollAt = 0L;
+    }
+
+    private boolean canDispatchDialogue(String signature) {
+        if (!signature.equals(lastGenericDialogueSignature)) {
+            lastGenericDialogueSignature = signature;
+            lastGenericDialogueAt = 0L;
+            lastGenericDialogueAttempts = 0;
+        }
+        if (lastGenericDialogueAt == 0L) return true;
+        if (System.currentTimeMillis() - lastGenericDialogueAt < DIALOGUE_STALL_TIMEOUT_MS)
+            return false; // recovery watchdog, not a normal action delay
+        if (lastGenericDialogueAttempts >= MAX_UNCONFIRMED_ACTIONS) {
+            stopForReview("Unchanged dialogue after " + lastGenericDialogueAttempts
+                    + " attempts; widget=" + signature);
+            return false;
+        }
+        log.warn("Halloween dialogue did not advance; retrying | stage={} attempt={}"
+                        + " signature={}",
+                stage, lastGenericDialogueAttempts + 1, signature);
+        return true;
+    }
+
+    private void dialogueActed(String message, String signature) {
+        lastGenericDialogueAt = System.currentTimeMillis();
+        lastGenericDialogueSignature = signature;
+        lastGenericDialogueAttempts++;
+        status = message;
+        log.info("Halloween dialogue action | stage={} | {}", stage, message);
     }
 
     private void change(Stage next, String message) {
@@ -1473,6 +1781,13 @@ public final class KspHalloween2026Script extends Script {
         status = message;
         if (previous != next) {
             clearChemistOptionPending();
+            clearChemistTextPrompt();
+            lastGenericDialogueSignature = "";
+            lastGenericDialogueAt = 0L;
+            lastGenericDialogueAttempts = 0;
+            clearStagePendingActions();
+            chemistConversationAt = 0L;
+            chemistAnswerSubmissions = 0;
             Rs2Walker.clearWalkingRoute("ksp_seasonal_stage_changed");
             log.info("KSP Seasonal Events Halloween | {} -> {} | {}", previous, next, message);
             if (next != Stage.STOPPED && next != Stage.PAUSED && next != Stage.NEEDS_REVIEW)
