@@ -1,4 +1,4 @@
-# KSP Seasonal Events v0.2.12
+# KSP Seasonal Events v0.2.13
 
 A **standalone Microbot plugin**, independent of Chopper, with its own
 config, navigation panel, Start / Pause / Resume / Stop / Reset progress,
@@ -33,6 +33,31 @@ may require manual review rather than repeated speculative clicks. The
 plugin logs stage transitions, visible dialogue options when unknown, NPC
 IDs and world tiles of successfully targeted event objects. No guessed
 NPC/object IDs are treated as authoritative.
+
+## Adult delivery: NPC action evidence before navigation (0.2.13)
+
+Logs from 29 October 2026 show that all five candy onions were created,
+but `GIVE_CANDY` had only NPC IDs 16794–16798 in the scene. The
+previous classifier required **both** trick-or-treater ID ranges to be
+seen for model-height comparison, and wandered across generic Rimmington
+waypoints when it couldn't classify the visible NPCs.
+
+The delivery stage now reads live **transformed NPC menu actions and
+model heights in one client-thread snapshot**. A known event NPC with
+`Spook` is a child candidate; a known event NPC with `Talk-to` or
+`Trick-or-treat` but no `Spook` may be used as an adult when four
+Halloween outfit items are equipped. Existing verified child group
+evidence takes precedence. Conflicting menu evidence remains unknown.
+
+The script tries the **nearest eligible adult already loaded** before
+asking WebWalker to search elsewhere. A visible but unclassified event
+NPC causes a bounded 12-second diagnostic wait, not another speculative
+waypoint route. It logs the NPC ID, world tile, live actions, costume
+state and classification, then pauses for review if unresolved.
+Successful delivery is counted only when candy is actually consumed.
+
+This behavior is compile/static-test verified only until a live adult
+delivery is observed in a new session.
 
 ## Onion collection and inventory-state recovery (0.2.12)
 
