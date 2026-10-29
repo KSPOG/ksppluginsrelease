@@ -1,4 +1,4 @@
-# KSP Seasonal Events v0.2.14
+# KSP Seasonal Events v0.2.15
 
 A **standalone Microbot plugin**, independent of Chopper, with its own
 config, navigation panel, Start / Pause / Resume / Stop / Reset progress,
@@ -28,13 +28,45 @@ guarantee event completion.
 | Collect onions | Collect five event onions from **Crate of onions** behind the house; inventory displays **Old inion** | Prioritize visible crate without WebWalker; require inventory receipt; count remaining Old inion + prepared Candy onions + verified deliveries toward five |
 | Make candy | Combine molten sugar with Old inion | Use the observed inventory item name, accept `Old onion` as client-name fallback, and verify each Candy onion receipt |
 | Serve adults | Give candy onions to five adult trick-or-treaters | Target only NPC IDs **16794–16798**; use Candy onion on a loaded undelivered adult and confirm inventory consumption before counting |
-| Finale | Cutscene then speak to Angel or Henja | Return for dialogue; only report completion when in-game message or Vampyre reward confirms it |
+| Finale | Complete final dialogue and watch cutscene | While RuneLite CUTSCENE_STATUS is active, do nothing except explicitly requested dialogue; stop the event script and remove its overlay only when the visible Eventscroll.CONGRATULATIONS (807:5) reads **Event complete!** |
 
 The wiki doesn't provide every precise live interaction, so certain steps
 may require manual review rather than repeated speculative clicks. The
 plugin logs stage transitions, visible dialogue options when unknown, NPC
 IDs and world tiles of successfully targeted event objects. No guessed
 NPC/object IDs are treated as authoritative.
+
+## Cutscene handling and completion scroll (0.2.15)
+
+- **During any Halloween cutscene**, the Microbot
+  `Rs2Dialogue.isInCutScene()` guard (RuneLite
+  `CUTSCENE_STATUS` varbit 542) prevents inventory reconciliation,
+  walking, NPC interactions, and ordinary stage actions.
+- Only an **actual on-screen dialogue Continue** is advanced; choices
+  are processed when prompted, but a skip-cutscene prompt is refused
+  using **No** rather than choosing a generic affirmative option.
+- After final dialogue, `WAIT_FOR_REWARD` never returns to Angel/Henja
+  just because a reward appears. It waits for the exact visible RuneLite
+  widget `Eventscroll.CONGRATULATIONS`, **group 807, child 5**,
+  widget ID **52887557**, and exact text **Event complete!**.
+- This completion widget is checked on the script loop **and** on game
+  ticks, including while the user has paused the script. Upon
+  confirmation the script saves `COMPLETED`, stops, and the owning
+  plugin removes its overlay; the plugin is not forcibly disabled in
+  RuneLite, leaving the side panel available.
+- Chat messages and NPC dialogue that say the event is finished do
+  not stop gameplay prematurely before the actual completion scroll.
+
+The event selector is now the reusable **`HALLOWEEN` / “Halloween”**,
+not an annual `HALLOWEEN_2026` enum. The old event selection is
+migrated automatically while preserving saved objective progress.
+The **2026-specific handler** remains separate and can be replaced or
+extended for later Halloween event mechanics without renaming the
+user-facing event.
+
+Automated compilation and regression tests validate source behavior;
+the full final cutscene and widget appearance must still be validated
+in-game.
 
 ## Verified 2026 child/adult NPC IDs for both tasks (0.2.14)
 

@@ -37,6 +37,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
 
 /**
@@ -54,6 +55,14 @@ import java.util.stream.Collectors;
 @Singleton
 public final class KspHalloween2026Script extends Script {
     private static final String GROUP = "KspSeasonalEvents";
+    // RuneLite Widget Inspector: Eventscroll.CONGRATULATIONS,
+    // interface 807 child 5, full widget ID 52887557, text "Event complete!".
+    private static final int EVENT_COMPLETE_GROUP = 807;
+    private static final int EVENT_COMPLETE_CHILD = 5;
+    private static final int EVENT_COMPLETE_WIDGET_ID =
+            (EVENT_COMPLETE_GROUP << 16) | EVENT_COMPLETE_CHILD;
+    private final AtomicBoolean completionSignaled = new AtomicBoolean();
+    private volatile Runnable completionCallback;
     private static final String STAGE_KEY = "halloweenStage";
     private static final String LANTERNS_KEY = "halloweenSmashTiles";
     private static final String PENDING_LANTERN_KEY = "halloweenPendingSmashTile";
@@ -229,11 +238,16 @@ public final class KspHalloween2026Script extends Script {
     private boolean chemistAnswerPromptObserved;
     private int chemistAnswerSubmissions;
 
+    public void setCompletionCallback(Runnable callback) {
+        completionCallback = callback;
+    }
+
     public synchronized boolean start(KspSeasonalEventsConfig configuration) {
         if (active) return true;
         this.config = configuration;
         this.active = true;
         this.paused = false;
+        completionSignaled.set(false);
         this.startedAt = System.currentTimeMillis();
         lastActionAt = lastWalkAt = lastTalkAt = lastDiagnosticAt = 0L;
         lastGenericDialogueSignature = "";
@@ -319,6 +333,11 @@ public final class KspHalloween2026Script extends Script {
         Stage saved = savedStage();
         if (saved == Stage.COMPLETED) {
             change(Stage.COMPLETED, "Previously confirmed Halloween completion");
+            // A completed event must not restart on a later client launch.
+            // Leave the side panel available for an explicit progress reset.
+            active = false;
+            status = "Event already complete; reset progress to start another run";
+            return false;
         } else if (hasUniqueCandyObjectiveInventory()) {
             // Event-exclusive items are direct evidence that this character
             // has reached the adult-candy subtask. Do not force a pointless
@@ -370,16 +389,86 @@ public final class KspHalloween2026Script extends Script {
     }
 
     private void safeTick() {
-        if (!active || paused) return;
-        try { tick(); }
+        if (!active) return;
+        try {
+            // Complete even if the user paused just before the final scroll.
+            if (checkForEventComplete()) return;
+            if (paused) return;
+            tick();
+        }
         catch (Exception e) {
             log.warn("Halloween stage={} player={} failed", stage, Rs2Player.getWorldLocation(), e);
             stopForReview("Event API or interface changed; inspect client logs");
         }
     }
 
+    /**
+     * The event scroll is the final authority. The reward inventory and a
+     * completion chat message are NOT sufficient to stop the script early.
+     * Exact widget and text prevent unrelated quest scrolls from triggering.
+     * Called both from the normal loop and GameTick (including while paused).
+     */
+    public boolean checkForEventComplete() {
+        if (!active || completionSignaled.get()) return completionSignaled.get();
+        boolean complete = Microbot.getClientThread().runOnClientThreadOptional(() -> {
+            if (Microbot.getClient() == null) return false;
+            Widget congratulations = Microbot.getClient().getWidget(
+                    EVENT_COMPLETE_GROUP, EVENT_COMPLETE_CHILD);
+            if (congratulations == null || congratulations.isHidden()) return false;
+            String text = congratulations.getText();
+            return text != null && text.replaceAll("<[^>]*>", "").trim()
+                    .equalsIgnoreCase("Event complete!");
+        }).orElse(false);
+        if (!complete || !completionSignaled.compareAndSet(false, true)) return false;
+
+        log.info("Halloween completion widget confirmed | widgetId={} text=Event complete!",
+                EVENT_COMPLETE_WIDGET_ID);
+        change(Stage.COMPLETED, "Event complete! screen confirmed; stopping event");
+        // The owning plugin schedules shutdown on Swing's EDT to remove its
+        // overlay and cancel the script without stopping on the client thread.
+        Runnable callback = completionCallback;
+        if (callback != null) callback.run();
+        return true;
+    }
+
+    private boolean handleCutscene() {
+        // RuneLite's CUTSCENE_STATUS varbit 542, exposed by Microbot.
+        if (!Rs2Dialogue.isInCutScene()) return false;
+        // Cutscenes must not be interrupted by walking, inventory use, NPC
+        // interactions, or generic stage reconciliation.
+        if (Rs2Dialogue.hasContinue()) {
+            String signature = "cutscene|continue|" + Rs2Dialogue.getDialogueText();
+            if (canDispatchDialogue(signature)) {
+                Rs2Dialogue.clickContinue();
+                dialogueActed("Advancing dialogue during Halloween cutscene", signature);
+            }
+        } else if (Rs2Dialogue.hasSelectAnOption()) {
+            String question = Rs2Dialogue.getQuestion();
+            String normalized = question == null ? "" : question.toLowerCase(Locale.ROOT);
+            // Never choose Yes to a 'skip cutscene' question.
+            if (normalized.contains("skip")) {
+                String signature = "cutscene|do-not-skip|" + normalized;
+                if (canDispatchDialogue(signature)
+                        && Rs2Dialogue.clickOption("No", true)) {
+                    dialogueActed("Declining to skip Halloween cutscene", signature);
+                } else {
+                    status = "Cutscene skip prompt: waiting to decline skip safely";
+                }
+            } else {
+                handleDialogueOption();
+            }
+        } else {
+            status = "Watching Halloween cutscene; no gameplay actions";
+        }
+        return true;
+    }
+
     private void tick() {
+        if (checkForEventComplete()) return;
         if (!Microbot.isLoggedIn()) { status = "Waiting for login"; return; }
+        // This gate must precede inventory reconciliation, NPC navigation,
+        // and player-location reads. Only explicit cutscene dialogue is acted on.
+        if (handleCutscene()) return;
         WorldPoint player = Rs2Player.getWorldLocation();
         if (player == null) { status = "Waiting for player location"; return; }
         if (stage == Stage.COMPLETED || stage == Stage.NEEDS_REVIEW) return;
@@ -530,16 +619,10 @@ public final class KspHalloween2026Script extends Script {
                 talkToStarter(player);
                 break;
             case WAIT_FOR_REWARD:
-                // A reward item can prove something was granted, but it must
-                // not become the event-state oracle. If completion chat was
-                // missed, ask Angel/Henja again and resolve their dialogue.
-                if (Rs2Inventory.hasItem("Vampyre costume top")
-                        || Rs2Equipment.isWearing("Vampyre costume top", true)) {
-                    change(Stage.FINAL_TALK,
-                            "Vampyre reward observed; rechecking final event state with Angel/Henja");
-                } else {
-                    status = "Waiting for final reward/completion message from Angel / Henja";
-                }
+                // No more NPC clicks or walking after the final dialogue.
+                // A reward may arrive before the cutscene finishes; only
+                // Eventscroll.CONGRATULATIONS ends the plugin.
+                status = "Waiting for Event complete! scroll (807:5)";
                 break;
             default:
                 break;
@@ -1086,7 +1169,9 @@ public final class KspHalloween2026Script extends Script {
                 break;
 
             case COMPLETE:
-                resolved = Stage.COMPLETED;
+                // A dialogue statement can appear while the cutscene or
+                // reward screen is still pending: keep waiting for widget 807:5.
+                resolved = Stage.WAIT_FOR_REWARD;
                 break;
 
             default:
@@ -2071,7 +2156,8 @@ public final class KspHalloween2026Script extends Script {
         }
         if (text.contains("you have completed the halloween event")
                 || text.contains("you have completed the 2026 halloween event")) {
-            change(Stage.COMPLETED, "Halloween completion confirmed by game");
+            log.info("Halloween completion chat observed; waiting for Event complete! widget");
+            status = "Completion dialogue received; waiting for Event complete! scroll";
             return;
         }
         if (text.contains("jack") || text.contains("onion")
@@ -2150,7 +2236,12 @@ public final class KspHalloween2026Script extends Script {
         paused = false;
         Rs2Walker.clearWalkingRoute("ksp_seasonal_stopped");
         super.shutdown();
-        stage = Stage.STOPPED;
-        status = "Stopped - press Start";
+        if (completionSignaled.get() || stage == Stage.COMPLETED) {
+            stage = Stage.COMPLETED;
+            status = "Event complete! Plugin stopped.";
+        } else {
+            stage = Stage.STOPPED;
+            status = "Stopped - press Start";
+        }
     }
 }

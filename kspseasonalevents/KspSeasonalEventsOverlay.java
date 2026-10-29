@@ -30,7 +30,7 @@ public final class KspSeasonalEventsOverlay extends OverlayPanel {
         panelComponent.getChildren().add(TitleComponent.builder()
                 .text("KSP Seasonal Events").color(Color.WHITE).build());
         panelComponent.getChildren().add(LineComponent.builder()
-                .left("Event").right("Halloween 2026").build());
+                .left("Event").right("Halloween").build());
         panelComponent.getChildren().add(LineComponent.builder()
                 .left("Stage").right(script.getStage().toString()).build());
         panelComponent.getChildren().add(LineComponent.builder()
