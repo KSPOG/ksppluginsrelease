@@ -400,7 +400,7 @@ jobs:
           javac -d /tmp/ksp-halloween-chemist-test \
             release/kspseasonalevents/KspHalloweenChemistDialogue.java \
             release/.github/tests/seasonal/KspHalloweenChemistDialogueTest.java
-          java -cp /tmp/ksp-halloween-chemist-test \\
+          java -cp /tmp/ksp-halloween-chemist-test \
             net.runelite.client.plugins.microbot.kspseasonalevents.KspHalloweenChemistDialogueTest
 
       - name: Install Seasonal Events sources into Microbot Hub
