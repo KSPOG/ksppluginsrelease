@@ -3,6 +3,7 @@ package net.runelite.client.plugins.microbot.kspseasonalevents;
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.coords.WorldArea;
 import net.runelite.api.widgets.Widget;
+import net.runelite.api.widgets.WidgetInfo;
 import net.runelite.api.coords.WorldPoint;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.plugins.microbot.Microbot;
@@ -195,6 +196,11 @@ public final class KspHalloween2026Script extends Script {
     private String pendingChemistOptions = "";
     private long pendingChemistOptionAt;
     private int pendingChemistOptionAttempts;
+    // The 2026 COFFIN answer is entered into a chatbox text prompt, NOT
+    // necessarily selected from a list of dialogue options.
+    private long chemistConversationAt;
+    private long chemistAnswerSubmittedAt;
+    private boolean chemistAnswerPromptObserved;
 
     public synchronized boolean start(KspSeasonalEventsConfig configuration) {
         if (active) return true;
@@ -216,6 +222,8 @@ public final class KspHalloween2026Script extends Script {
         starterConversationActive = false;
         lastStarterDialogue = "";
         clearChemistOptionPending();
+        clearChemistTextPrompt();
+        chemistConversationAt = 0L;
         pendingHolidayItem = null;
         pendingHolidayItemAt = 0L;
         holidayRetrievalTimeouts = 0;
@@ -324,6 +332,10 @@ public final class KspHalloween2026Script extends Script {
         WorldPoint player = Rs2Player.getWorldLocation();
         if (player == null) { status = "Waiting for player location"; return; }
         if (stage == Stage.COMPLETED || stage == Stage.NEEDS_REVIEW) return;
+
+        // Check the Chemist's free-text input BEFORE generic Continue/option
+        // handling. A riddle answer field is not a selectable "92" option.
+        if (stage == Stage.CHEMIST_RIDDLE && handleChemistAnswerPrompt()) return;
 
         if (starterConversationActive
                 && (Rs2Dialogue.hasContinue() || Rs2Dialogue.hasSelectAnOption())) {
@@ -535,6 +547,7 @@ public final class KspHalloween2026Script extends Script {
         pendingChemistOptionAttempts++;
         pendingChemistOptionAt = now;
         if (selected) {
+            chemistConversationAt = now;
             acted("Selecting Chemist " + options.get(optionIndex)
                     + " via " + (viaWidget ? "option widget" : "option keybinding")
                     + "; awaiting dialogue change");
@@ -550,6 +563,105 @@ public final class KspHalloween2026Script extends Script {
         pendingChemistOptions = "";
         pendingChemistOptionAt = 0L;
         pendingChemistOptionAttempts = 0;
+    }
+
+    /**
+     * RuneLite chatbox input widgets can display a text prompt without
+     * {@link Rs2Dialogue#hasSelectAnOption()}. Read one client-thread
+     * snapshot and only type during this plugin's recent Chemist conversation.
+     */
+    private boolean handleChemistAnswerPrompt() {
+        long now = System.currentTimeMillis();
+        if (chemistConversationAt == 0L || now - chemistConversationAt > 120_000L)
+            return false;
+
+        ChemistInputView view = Microbot.getClientThread().runOnClientThreadOptional(() -> {
+            Widget title = Microbot.getClient().getWidget(WidgetInfo.CHATBOX_TITLE);
+            Widget fullInput = Microbot.getClient().getWidget(WidgetInfo.CHATBOX_FULL_INPUT);
+            Widget input = Microbot.getClient().getWidget(WidgetInfo.CHATBOX_INPUT);
+            return new ChemistInputView(isVisible(title), isVisible(fullInput),
+                    isVisible(input), widgetText(title), widgetText(fullInput));
+        }).orElse(null);
+        if (view == null) return false;
+
+        boolean prompt = KspHalloweenChemistInput.isAnswerPrompt(
+                view.titleVisible, view.fullInputVisible, view.inputVisible,
+                view.titleText, view.fullInputText);
+
+        if (!prompt) {
+            if (chemistAnswerSubmittedAt != 0L) {
+                log.info("Halloween Chemist answer input closed | submittedAgoMs={} sugar={}"
+                        + " moltenSugar={}",
+                        now - chemistAnswerSubmittedAt,
+                        Rs2Inventory.count("Sugar"), Rs2Inventory.count("Molten sugar"));
+                clearChemistTextPrompt();
+                // Give the Chemist response time to arrive before retrying.
+                lastActionAt = now;
+                status = "Chemist answer submitted; checking for sugar or further dialogue";
+                return true;
+            }
+            return false;
+        }
+
+        if (!chemistAnswerPromptObserved) {
+            chemistAnswerPromptObserved = true;
+            log.info("Halloween Chemist riddle text input detected | title={} body={}"
+                            + " fullInputVisible={} inputVisible={}",
+                    view.titleText, view.fullInputText,
+                    view.fullInputVisible, view.inputVisible);
+        }
+
+        if (chemistAnswerSubmittedAt != 0L) {
+            if (now - chemistAnswerSubmittedAt >= 12_000L) {
+                stopForReview("Chemist riddle input still visible after submitting 92;"
+                        + " inspect chatbox and logs before retrying");
+            } else {
+                status = "Waiting for Chemist to accept submitted answer 92";
+            }
+            return true;
+        }
+        if (!ready()) {
+            status = "Waiting to enter Chemist riddle answer 92";
+            return true;
+        }
+
+        // One submission per observed prompt. Do not type additional digits
+        // while the same input is visible; prevent accidental 9292 responses.
+        chemistAnswerSubmittedAt = now;
+        Rs2Keyboard.typeString("92");
+        Rs2Keyboard.enter();
+        acted("Typed Chemist COFFIN riddle answer 92 into chatbox and pressed Enter");
+        return true;
+    }
+
+    private static boolean isVisible(Widget widget) {
+        return widget != null && !widget.isHidden();
+    }
+
+    private static String widgetText(Widget widget) {
+        return widget == null || widget.getText() == null ? "" : widget.getText();
+    }
+
+    private void clearChemistTextPrompt() {
+        chemistAnswerSubmittedAt = 0L;
+        chemistAnswerPromptObserved = false;
+    }
+
+    private static final class ChemistInputView {
+        final boolean titleVisible;
+        final boolean fullInputVisible;
+        final boolean inputVisible;
+        final String titleText;
+        final String fullInputText;
+
+        ChemistInputView(boolean titleVisible, boolean fullInputVisible,
+                         boolean inputVisible, String titleText, String fullInputText) {
+            this.titleVisible = titleVisible;
+            this.fullInputVisible = fullInputVisible;
+            this.inputVisible = inputVisible;
+            this.titleText = titleText;
+            this.fullInputText = fullInputText;
+        }
     }
 
     private boolean nearOrWalk(WorldPoint player, WorldPoint destination,
@@ -1313,6 +1425,8 @@ public final class KspHalloween2026Script extends Script {
                 && System.currentTimeMillis() - lastTalkAt > 6_000L
                 && Rs2Npc.interact("Chemist", "Talk-to")) {
             lastTalkAt = System.currentTimeMillis();
+            chemistConversationAt = lastTalkAt;
+            clearChemistTextPrompt();
             acted("Talking to Chemist; COFFIN riddle answer is 92");
         } else {
             status = "Chemist puzzle: select answer 92";
@@ -1473,6 +1587,8 @@ public final class KspHalloween2026Script extends Script {
         status = message;
         if (previous != next) {
             clearChemistOptionPending();
+            clearChemistTextPrompt();
+            chemistConversationAt = 0L;
             Rs2Walker.clearWalkingRoute("ksp_seasonal_stage_changed");
             log.info("KSP Seasonal Events Halloween | {} -> {} | {}", previous, next, message);
             if (next != Stage.STOPPED && next != Stage.PAUSED && next != Stage.NEEDS_REVIEW)
