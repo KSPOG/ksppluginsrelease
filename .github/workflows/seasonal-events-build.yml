@@ -55,7 +55,7 @@ jobs:
           panel=(root/'KspSeasonalEventsPanel.java').read_text()
           overlay=(root/'KspSeasonalEventsOverlay.java').read_text()
           event=(root/'KspSeasonalEvent.java').read_text()
-          assert 'VERSION = "0.2.8"' in plugin
+          assert 'VERSION = "0.2.9"' in plugin
           assert 'KSP + "Seasonal Events"' in plugin
           assert 'kspwillowchopper' not in plugin and 'kspwillowchopper' not in script
           assert 'HALLOWEEN_2026' in event
@@ -73,7 +73,8 @@ jobs:
           assert 'spookedChildren' in script and 'npcHasAction(n, "Spook")' in script
           assert 'costumeCount() < 4' in script
           assert 'Rs2Npc.getNpc("Diango")' in script
-          assert 'Rs2Dialogue.clickOption("92")' in script
+          assert 'KspHalloweenChemistDialogue.findOptionIndex(options)' in script
+          assert 'Rs2Widget.clickWidget(liveOptions.get(optionIndex))' in script
           assert 'Rs2Inventory.useItemOnObject' in script
           assert 'Rs2Inventory.count("Old onion") >= 5' in script
           assert 'Rs2Inventory.combine("Molten sugar", "Old onion")' in script
@@ -390,6 +391,17 @@ jobs:
           assert 'if (next == Stage.SPOOK_CHILDREN)' in change
           assert 'childScoutedNpcTiles.clear();' in change
           print('PASS: no fixed children waypoints, no adult Spook, bounded NPC-guided scout, one-batch age reads')
+
+      - name: Test wiki-confirmed Chemist dialogue routing
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/ksp-halloween-chemist-test
+          javac -d /tmp/ksp-halloween-chemist-test \
+            release/kspseasonalevents/KspHalloweenChemistDialogue.java \
+            release/.github/tests/seasonal/KspHalloweenChemistDialogueTest.java
+          java -cp /tmp/ksp-halloween-chemist-test \
+            net.runelite.client.plugins.microbot.kspseasonalevents.KspHalloweenChemistDialogueTest
 
       - name: Install Seasonal Events sources into Microbot Hub
         shell: bash

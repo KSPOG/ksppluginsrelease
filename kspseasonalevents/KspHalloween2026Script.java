@@ -2,6 +2,7 @@ package net.runelite.client.plugins.microbot.kspseasonalevents;
 
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.coords.WorldArea;
+import net.runelite.api.widgets.Widget;
 import net.runelite.api.coords.WorldPoint;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.plugins.microbot.Microbot;
@@ -9,6 +10,7 @@ import net.runelite.client.plugins.microbot.Script;
 import net.runelite.client.plugins.microbot.util.npc.Rs2NpcModel;
 import net.runelite.client.plugins.microbot.api.tileobject.models.Rs2TileObjectModel;
 import net.runelite.client.plugins.microbot.util.dialogues.Rs2Dialogue;
+import net.runelite.client.plugins.microbot.util.widget.Rs2Widget;
 import net.runelite.client.plugins.microbot.util.equipment.Rs2Equipment;
 import net.runelite.client.plugins.microbot.util.inventory.Rs2Inventory;
 import net.runelite.client.plugins.microbot.util.keyboard.Rs2Keyboard;
@@ -188,6 +190,11 @@ public final class KspHalloween2026Script extends Script {
     private boolean pendingStarterDialogueSeen;
     private boolean starterConversationActive;
     private String lastStarterDialogue = "";
+    // Track the visible Chemist option menu until it actually changes.
+    // Alternating widget clicks and option keybindings avoids silent keybind failures.
+    private String pendingChemistOptions = "";
+    private long pendingChemistOptionAt;
+    private int pendingChemistOptionAttempts;
 
     public synchronized boolean start(KspSeasonalEventsConfig configuration) {
         if (active) return true;
@@ -208,6 +215,7 @@ public final class KspHalloween2026Script extends Script {
         pendingStarterDialogueSeen = false;
         starterConversationActive = false;
         lastStarterDialogue = "";
+        clearChemistOptionPending();
         pendingHolidayItem = null;
         pendingHolidayItemAt = 0L;
         holidayRetrievalTimeouts = 0;
@@ -326,6 +334,7 @@ public final class KspHalloween2026Script extends Script {
         }
 
         if (Rs2Dialogue.hasContinue()) {
+            if (stage == Stage.CHEMIST_RIDDLE) clearChemistOptionPending();
             if (ready()) {
                 Rs2Dialogue.clickContinue();
                 lastActionAt = System.currentTimeMillis();
@@ -447,8 +456,16 @@ public final class KspHalloween2026Script extends Script {
             return;
         }
 
-        if (stage == Stage.CHEMIST_RIDDLE && Rs2Dialogue.clickOption("92")) {
-            acted("Answered Chemist's COFFIN riddle: 92");
+        if (stage == Stage.CHEMIST_RIDDLE) {
+            // Wiki-confirmed conversation: select Halloween, then solve COFFIN = 92.
+            // Never choose unrelated Chemist topics or a random numeric option.
+            if (handleChemistDialogueOption(options)) return;
+            if (System.currentTimeMillis() - lastDiagnosticAt > 5_000L) {
+                lastDiagnosticAt = System.currentTimeMillis();
+                log.warn("Halloween Chemist dialogue requires review | question={} options={}",
+                        Rs2Dialogue.getQuestion(), options);
+            }
+            status = "Waiting for Chemist Halloween / 92 option; see dialogue logs";
             return;
         }
         String[] choices = {
@@ -466,6 +483,73 @@ public final class KspHalloween2026Script extends Script {
             log.warn("Halloween dialogue needs review | stage={} options={}", stage, options);
         }
         status = "Unknown " + stage + " dialogue options; see logs (no random selection)";
+    }
+
+    /**
+     * The Chemist's visible dialogue must provide the exact wiki event option.
+     * An attempted click is NOT treated as success until the menu changes or closes.
+     */
+    private boolean handleChemistDialogueOption(List<String> options) {
+        int optionIndex = KspHalloweenChemistDialogue.findOptionIndex(options);
+        if (optionIndex < 0) {
+            clearChemistOptionPending();
+            return false;
+        }
+
+        String question = Rs2Dialogue.getQuestion();
+        String signature = (question == null ? "" : question) + "|" + options;
+        if (!signature.equals(pendingChemistOptions)) {
+            pendingChemistOptions = signature;
+            pendingChemistOptionAt = 0L;
+            pendingChemistOptionAttempts = 0;
+            log.info("Halloween Chemist options observed | question={} options={} chosen={}",
+                    question, options, options.get(optionIndex));
+        }
+
+        long now = System.currentTimeMillis();
+        if (pendingChemistOptionAt != 0L && now - pendingChemistOptionAt < 2_000L) {
+            status = "Waiting for Chemist menu to change after "
+                    + options.get(optionIndex) + " (" + pendingChemistOptionAttempts + " attempts)";
+            return true;
+        }
+        if (pendingChemistOptionAttempts >= 6) {
+            stopForReview("Chemist option was selected six times without a dialogue change: "
+                    + options.get(optionIndex) + "; options=" + options);
+            return true;
+        }
+        if (!ready()) return true;
+
+        List<Widget> liveOptions = Rs2Dialogue.getDialogueOptions();
+        if (optionIndex >= liveOptions.size()) {
+            status = "Chemist options changed while reading widgets; retrying";
+            clearChemistOptionPending();
+            return true;
+        }
+
+        // First try client-local widget bounds, then RuneLite/Microbot's option
+        // keybinding on the unchanged menu. No fixed canvas coordinates.
+        boolean viaWidget = pendingChemistOptionAttempts % 2 == 0;
+        boolean selected = viaWidget
+                ? Rs2Widget.clickWidget(liveOptions.get(optionIndex))
+                : Rs2Dialogue.keyPressForDialogueOption(optionIndex + 1);
+        pendingChemistOptionAttempts++;
+        pendingChemistOptionAt = now;
+        if (selected) {
+            acted("Selecting Chemist " + options.get(optionIndex)
+                    + " via " + (viaWidget ? "option widget" : "option keybinding")
+                    + "; awaiting dialogue change");
+        } else {
+            log.warn("Halloween Chemist option input failed | option={} method={} attempt={}",
+                    options.get(optionIndex), viaWidget ? "widget" : "key", pendingChemistOptionAttempts);
+            status = "Retrying Chemist " + options.get(optionIndex) + " option";
+        }
+        return true;
+    }
+
+    private void clearChemistOptionPending() {
+        pendingChemistOptions = "";
+        pendingChemistOptionAt = 0L;
+        pendingChemistOptionAttempts = 0;
     }
 
     private boolean nearOrWalk(WorldPoint player, WorldPoint destination,
@@ -1236,11 +1320,12 @@ public final class KspHalloween2026Script extends Script {
     }
 
     private Rs2TileObjectModel cookingSurface() {
+        // Sugar is USED ON the range/fireplace; the object itself need not
+        // advertise a Cook or Use context-menu action.
         return Microbot.getRs2TileObjectCache().query().fromWorldView()
                 .where(o -> o != null && o.getName() != null
                         && (o.getName().equalsIgnoreCase("Range")
-                            || o.getName().equalsIgnoreCase("Fireplace"))
-                        && (o.hasActionContaining("Cook") || o.hasActionContaining("Use")))
+                            || o.getName().equalsIgnoreCase("Fireplace")))
                 .nearestOnClientThread();
     }
 
@@ -1257,7 +1342,11 @@ public final class KspHalloween2026Script extends Script {
                 && !nearOrWalk(player, CHEMIST, 8, "Rimmington range / fireplace")) return;
         Rs2TileObjectModel surface = cookingSurface();
         if (surface == null) {
-            status = "Locating range in children's house or Chemist fireplace";
+            // The Chemist and Angel/Henja are far enough apart that the
+            // cooking surface may not be loaded into the scene yet.
+            if (!nearOrWalk(player, STARTER, 8, "Angel / Henja range to cook sugar"))
+                return;
+            status = "Locating range in Angel/Henja's house or Chemist fireplace";
             return;
         }
         net.runelite.client.plugins.microbot.util.inventory.Rs2ItemModel sugar =
@@ -1273,8 +1362,9 @@ public final class KspHalloween2026Script extends Script {
             change(Stage.COAT_ONIONS, "Five event-only old onions collected");
             return;
         }
-        if (!RIMMINGTON.contains(player)
-                && !nearOrWalk(player, STARTER, 8, "old onion crate behind children's house"))
+        // The Chemist is already inside Rimmington, but the crate behind
+        // Angel/Henja's home may still be outside the loaded scene.
+        if (!nearOrWalk(player, STARTER, 8, "old onion crate behind Angel / Henja's house"))
             return;
         Rs2TileObjectModel crate = Microbot.getRs2TileObjectCache().query().fromWorldView()
                 .where(o -> o != null && o.getName() != null
@@ -1382,6 +1472,7 @@ public final class KspHalloween2026Script extends Script {
         stage = next;
         status = message;
         if (previous != next) {
+            clearChemistOptionPending();
             Rs2Walker.clearWalkingRoute("ksp_seasonal_stage_changed");
             log.info("KSP Seasonal Events Halloween | {} -> {} | {}", previous, next, message);
             if (next != Stage.STOPPED && next != Stage.PAUSED && next != Stage.NEEDS_REVIEW)
