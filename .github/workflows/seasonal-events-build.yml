@@ -149,10 +149,11 @@ jobs:
           starter = src.split('private void talkToStarter(', 1)[1].split('private Rs2TileObjectModel lantern()', 1)[0]
           costume = src.split('private void collectCostume(', 1)[1].split('private boolean npcHasAction(', 1)[0]
 
-          assert 'pendingStarterNext != null' in tick
+          assert 'starterConversationActive' in tick
+          assert 'inspectStarterDialogue();' in tick
           assert 'pendingStarterDialogueSeen = true;' in tick
-          assert 'if (pendingStarterDialogueSeen)' in tick
-          assert 'change(next, "Starter dialogue completed")' in tick
+          assert 'if (pendingStarterNext == null)' in tick
+          assert 'change(next, "Angel / Henja dialogue resolved event state")' in tick
           assert 'Waiting for Angel / Henja dialogue' in tick
           assert 'pendingStarterLastDialogueAt' in tick
           assert 'pendingStarterLastDialogueAt < 1_500L' in tick
@@ -163,8 +164,9 @@ jobs:
           assert 'stage == Stage.GET_COSTUME' in opts
           assert 'Accepted Halloween hat from Angel / Henja' in opts
           assert 'No thanks, I don' not in opts
-          assert 'pendingStarterNext = next;' in starter
-          assert 'change(next,' not in starter
+          assert 'pendingStarterNext = null;' in starter
+          assert 'starterConversationActive = true;' in starter
+          assert 'change(' not in starter
 
           assert costume.index('for (String piece : COSTUME_PIECES)') < costume.index('nearOrWalk(player, DIANGO')
           assert 'Rs2Npc.interact("Diango", "Holiday-items")' in costume
