@@ -186,6 +186,8 @@ public final class KspHalloween2026Script extends Script {
     private long pendingStarterAt;
     private long pendingStarterLastDialogueAt;
     private boolean pendingStarterDialogueSeen;
+    private boolean starterConversationActive;
+    private String lastStarterDialogue = "";
 
     public synchronized boolean start(KspSeasonalEventsConfig configuration) {
         if (active) return true;
@@ -204,6 +206,8 @@ public final class KspHalloween2026Script extends Script {
         pendingStarterAt = 0L;
         pendingStarterLastDialogueAt = 0L;
         pendingStarterDialogueSeen = false;
+        starterConversationActive = false;
+        lastStarterDialogue = "";
         pendingHolidayItem = null;
         pendingHolidayItemAt = 0L;
         holidayRetrievalTimeouts = 0;
@@ -254,19 +258,16 @@ public final class KspHalloween2026Script extends Script {
                 spookedChildren.size(), givenAdultIds.size(), adultsGiven);
 
         Stage saved = savedStage();
-        if (saved == Stage.SPOOK_CHILDREN && spookedChildren.isEmpty()
-                && configManager.getConfiguration(GROUP, SPOOKED_CHILD_IDS_KEY) == null) {
-            // Upgrade from v0.2.4, where spooked children were never saved.
-            // Ask Angel/Henja for the authoritative next step before doing
-            // another full Rimmington loop.
-            saved = Stage.REPORT_CHILDREN;
-            log.info("Halloween legacy child-stage resume | verifying with starter");
+        if (saved == Stage.COMPLETED) {
+            change(Stage.COMPLETED, "Previously confirmed Halloween completion");
+        } else {
+            // Saved stages and local counters are recovery hints only.
+            // Every non-completed start synchronizes with Angel/Henja so the
+            // server's dialogue decides the current event objective.
+            change(Stage.INTRODUCTION,
+                    "Synchronizing Halloween event state with Angel / Henja");
+            log.info("Halloween saved stage {} deferred to starter dialogue", saved);
         }
-        if (lanternsVerified && (saved == Stage.SMASH_LANTERNS
-                || saved == Stage.VERIFY_LANTERNS))
-            saved = Stage.REPORT_LANTERNS;
-        change(saved == Stage.STOPPED || saved == Stage.PAUSED || saved == Stage.NEEDS_REVIEW
-                ? Stage.INTRODUCTION : saved, "Resuming Halloween 2026 walkthrough");
         mainScheduledFuture = scheduledExecutorService.scheduleWithFixedDelay(
                 this::safeTick, 0L, 600L, TimeUnit.MILLISECONDS);
         log.info("Halloween 2026 started | stage={} lanterns={}/8 adultsGiven={}",
@@ -316,20 +317,12 @@ public final class KspHalloween2026Script extends Script {
         if (player == null) { status = "Waiting for player location"; return; }
         if (stage == Stage.COMPLETED || stage == Stage.NEEDS_REVIEW) return;
 
-        if (stage == Stage.VERIFY_LANTERNS
-                && (Rs2Dialogue.hasContinue() || Rs2Dialogue.hasSelectAnOption()))
-            inspectLanternVerificationDialogue();
-
-        if (stage == Stage.REPORT_CHILDREN
-                && (Rs2Dialogue.hasContinue() || Rs2Dialogue.hasSelectAnOption())) {
-            inspectChildReportDialogue();
-            if (stage != Stage.REPORT_CHILDREN) return;
-        }
-
-        if (pendingStarterNext != null
+        if (starterConversationActive
                 && (Rs2Dialogue.hasContinue() || Rs2Dialogue.hasSelectAnOption())) {
             pendingStarterDialogueSeen = true;
             pendingStarterLastDialogueAt = System.currentTimeMillis();
+            inspectStarterDialogue();
+            if (stage == Stage.NEEDS_REVIEW || stage == Stage.COMPLETED) return;
         }
 
         if (Rs2Dialogue.hasContinue()) {
@@ -346,32 +339,31 @@ public final class KspHalloween2026Script extends Script {
             return;
         }
 
-        // Prevent the next activity (e.g. walking to Diango) from starting
-        // while the NPC is still offering a hat or explaining the next step.
-        if (pendingStarterNext != null) {
+        // Angel/Henja are authoritative for the event objective. Never
+        // resume a preselected stage just because their dialogue closed.
+        if (starterConversationActive) {
             if (pendingStarterDialogueSeen) {
-                // Dialogue frames can disappear momentarily between NPC
-                // lines. Require a short quiet period before changing stages.
                 if (System.currentTimeMillis() - pendingStarterLastDialogueAt < 1_500L) {
                     status = "Finishing Angel / Henja conversation";
+                    return;
+                }
+                if (pendingStarterNext == null) {
+                    starterConversationActive = false;
+                    stopForReview("Angel/Henja dialogue did not identify a known Halloween objective;"
+                            + " lastDialogue=" + lastStarterDialogue);
                     return;
                 }
                 Stage next = pendingStarterNext;
                 pendingStarterNext = null;
                 pendingStarterDialogueSeen = false;
-                if (stage == Stage.REPORT_CHILDREN
-                        && next == Stage.CHEMIST_RIDDLE
-                        && !childrenReportConfirmed) {
-                    stopForReview("Angel/Henja dialogue did not confirm the Chemist/adult objective;"
-                            + " cannot advance without quest evidence");
-                    return;
-                }
-                change(next, "Starter dialogue completed");
+                starterConversationActive = false;
+                change(next, "Angel / Henja dialogue resolved event state");
             } else if (System.currentTimeMillis() - pendingStarterAt > 8_000L) {
-                log.warn("Halloween starter click produced no visible dialogue | stage={} next={}",
-                        stage, pendingStarterNext);
+                log.warn("Halloween starter click produced no visible dialogue | stage={}", stage);
+                starterConversationActive = false;
                 pendingStarterNext = null;
                 pendingStarterDialogueSeen = false;
+                lastActionAt = 0L; // permit a clean Talk-to retry
             } else {
                 status = "Waiting for Angel / Henja dialogue";
             }
@@ -380,16 +372,16 @@ public final class KspHalloween2026Script extends Script {
 
         switch (stage) {
             case INTRODUCTION:
-                talkToStarter(player, Stage.SMASH_LANTERNS);
+                talkToStarter(player);
                 break;
             case SMASH_LANTERNS:
                 smashLanterns(player);
                 break;
             case VERIFY_LANTERNS:
-                verifyLanternsWithStarter(player);
+                talkToStarter(player);
                 break;
             case REPORT_LANTERNS:
-                talkToStarter(player, Stage.GET_COSTUME);
+                talkToStarter(player);
                 break;
             case GET_COSTUME:
                 collectCostume(player);
@@ -398,7 +390,7 @@ public final class KspHalloween2026Script extends Script {
                 spookChildren(player);
                 break;
             case REPORT_CHILDREN:
-                talkToStarter(player, Stage.CHEMIST_RIDDLE);
+                talkToStarter(player);
                 break;
             case CHEMIST_RIDDLE:
                 solveChemist(player);
@@ -416,14 +408,18 @@ public final class KspHalloween2026Script extends Script {
                 giveCandy(player);
                 break;
             case FINAL_TALK:
-                talkToStarter(player, Stage.WAIT_FOR_REWARD);
+                talkToStarter(player);
                 break;
             case WAIT_FOR_REWARD:
+                // A reward item can prove something was granted, but it must
+                // not become the event-state oracle. If completion chat was
+                // missed, ask Angel/Henja again and resolve their dialogue.
                 if (Rs2Inventory.hasItem("Vampyre costume top")
                         || Rs2Equipment.isWearing("Vampyre costume top", true)) {
-                    change(Stage.COMPLETED, "Vampyre event reward confirmed in inventory/equipment");
+                    change(Stage.FINAL_TALK,
+                            "Vampyre reward observed; rechecking final event state with Angel/Henja");
                 } else {
-                    status = "Waiting for Halloween final cutscene and reward confirmation";
+                    status = "Waiting for final reward/completion message from Angel / Henja";
                 }
                 break;
             default:
@@ -488,9 +484,7 @@ public final class KspHalloween2026Script extends Script {
         return false;
     }
 
-    private void talkToStarter(WorldPoint player, Stage next) {
-        // Being somewhere within Rimmington does not mean Angel/Henja
-        // are loaded. Return to the actual starter house before talking.
+    private void talkToStarter(WorldPoint player) {
         if (!nearOrWalk(player, STARTER, 8, "Angel / Henja's house"))
             return;
         if (!ready()) return;
@@ -502,12 +496,14 @@ public final class KspHalloween2026Script extends Script {
             status = "Locating Angel / Henja in their Rimmington home";
             return;
         }
-        acted("Speaking to Angel / Henja; waiting for dialogue");
+        acted("Speaking to Angel / Henja to resolve current event state");
         lastTalkAt = System.currentTimeMillis();
-        pendingStarterNext = next;
+        pendingStarterNext = null;
         pendingStarterAt = lastTalkAt;
         pendingStarterLastDialogueAt = 0L;
         pendingStarterDialogueSeen = false;
+        starterConversationActive = true;
+        lastStarterDialogue = "";
     }
 
     private Rs2TileObjectModel lantern() {
@@ -597,9 +593,9 @@ public final class KspHalloween2026Script extends Script {
         if (!RIMMINGTON.contains(player)
                 && !nearOrWalk(player, STARTER, 12, "Rimmington lanterns")) return;
         if (pendingLanternConfirmed(player)) return;
-        if (lanternsVerified || smashedLanternTiles.size() >= 8) {
-            confirmAllLanterns("eight unique smashed locations");
-            change(Stage.REPORT_LANTERNS, "All eight lanterns confirmed; return to children");
+        if (lanternsVerified) {
+            change(Stage.REPORT_LANTERNS,
+                    "Lantern objective already confirmed by Angel/Henja");
             return;
         }
         Rs2TileObjectModel target = lantern();
@@ -657,91 +653,146 @@ public final class KspHalloween2026Script extends Script {
         nearOrWalk(player, next, 6, purpose);
     }
 
-    private void inspectLanternVerificationDialogue() {
-        String text = Rs2Dialogue.hasSelectAnOption()
+    private void inspectStarterDialogue() {
+        String raw = Rs2Dialogue.hasSelectAnOption()
                 ? Rs2Dialogue.getQuestion() : Rs2Dialogue.getDialogueText();
-        if (text == null || text.isBlank()) return;
-        String lower = text.toLowerCase(Locale.ROOT).replaceAll("<[^>]*>", "");
-        boolean remaining = (lower.contains("lantern") || lower.contains("pumpkin"))
-                && (lower.contains("still") || lower.contains("more")
-                    || lower.contains("haven't") || lower.contains("not all")
-                    || lower.contains("remaining"));
-        if (remaining) {
-            starterReportedRemainingCount++;
-            log.info("Halloween starter reports unfinished lanterns | text={}", text);
-            if (starterReportedRemainingCount >= 2) {
-                stopForReview("Starter still reports remaining lanterns after another search");
-            } else {
+        if (raw == null || raw.isBlank()) return;
+
+        lastStarterDialogue = raw.replaceAll("<[^>]*>", " ").replaceAll("\\s+", " ").trim();
+        KspHalloweenStarterState.Objective objective =
+                KspHalloweenStarterState.classify(raw);
+        if (objective == KspHalloweenStarterState.Objective.UNKNOWN) {
+            if (System.currentTimeMillis() - lastDiagnosticAt > 5_000L) {
+                lastDiagnosticAt = System.currentTimeMillis();
+                log.info("Halloween Angel/Henja state dialogue not yet classified"
+                        + " | stage={} text={}", stage, raw);
+            }
+            return;
+        }
+
+        Stage resolved;
+        switch (objective) {
+            case SMASH_LANTERNS:
+                // Dialogue outranks any stale local 8/8 count. Keep observed
+                // tiles as discovery history, but never auto-advance from it.
+                lanternsVerified = false;
+                configManager.unsetConfiguration(GROUP, LANTERNS_VERIFIED_KEY);
                 sweepRequiredByStarter = true;
-                change(Stage.SMASH_LANTERNS, "Starter requests remaining lanterns; rescan");
-            }
-            return;
+                resolved = Stage.SMASH_LANTERNS;
+                break;
+
+            case SCARE_CHILDREN:
+                confirmAllLanterns("Angel/Henja dialogue advanced beyond lanterns");
+                childrenReportConfirmed = false;
+                configManager.unsetConfiguration(GROUP, CHILD_CONFIRMED_KEY);
+                resolved = costumeCount() >= 4 ? Stage.SPOOK_CHILDREN : Stage.GET_COSTUME;
+
+                if (stage == Stage.REPORT_CHILDREN && resolved == Stage.SPOOK_CHILDREN
+                        && pendingStarterNext != resolved) {
+                    childSpookRetries++;
+                    configManager.setConfiguration(
+                            GROUP, CHILD_RETRY_COUNT_KEY, childSpookRetries);
+                    int allowedRetries =
+                            spookedChildren.size() >= CHILD_REPORT_CHECKPOINT ? 1 : 2;
+                    if (childSpookRetries > allowedRetries) {
+                        pendingStarterNext = null;
+                        stopForReview("Angel/Henja still requires child scares after "
+                                + childSpookRetries + " verified reports. Inspect the"
+                                + " Spook responses and child NPC availability");
+                        return;
+                    }
+                    if (spookedChildren.size() >= CHILD_REPORT_CHECKPOINT) {
+                        spookedChildren.clear();
+                        persistNpcIds(SPOOKED_CHILD_IDS_KEY, spookedChildren);
+                    }
+                }
+                break;
+
+            case ADULT_CANDY:
+                confirmAllLanterns("Angel/Henja dialogue confirms post-lantern objective");
+                childrenReportConfirmed = true;
+                configManager.setConfiguration(GROUP, CHILD_CONFIRMED_KEY, true);
+                configManager.unsetConfiguration(GROUP, CHILD_RETRY_COUNT_KEY);
+                childSpookRetries = 0;
+
+                // If local delivery bookkeeping says 5/5 but the starter still
+                // describes the adult-candy objective, the local counter lost
+                // the authority contest. Re-open all adult identities safely.
+                if (adultsGiven >= 5) {
+                    log.warn("Angel/Henja contradict local adults 5/5; resetting local"
+                            + " delivery acknowledgements to follow server dialogue");
+                    adultsGiven = 0;
+                    givenAdultIds.clear();
+                    configManager.setConfiguration(GROUP, ADULTS_KEY, 0);
+                    persistNpcIds(DELIVERED_ADULT_IDS_KEY, givenAdultIds);
+                }
+                resolved = stageForAdultCandyObjective();
+                break;
+
+            case CLAIM_REWARD:
+                confirmAllLanterns("Angel/Henja final dialogue confirms late event state");
+                childrenReportConfirmed = true;
+                configManager.setConfiguration(GROUP, CHILD_CONFIRMED_KEY, true);
+                resolved = Stage.WAIT_FOR_REWARD;
+                break;
+
+            case COMPLETE:
+                resolved = Stage.COMPLETED;
+                break;
+
+            default:
+                return;
         }
-        boolean nextTask = lower.contains("diango") || lower.contains("costume")
-                || lower.contains("dressing up") || lower.contains("dress up")
-                || lower.contains("spook the")
-                || (lower.contains("wear") && lower.contains("halloween"));
-        boolean allDone = (lower.contains("you've smashed")
-                || lower.contains("you have smashed")
-                || lower.contains("you've destroyed")
-                || lower.contains("you have destroyed"))
-                && (lower.contains("all eight") || lower.contains("all 8"))
-                && (lower.contains("lantern") || lower.contains("pumpkin"))
-                && !lower.contains("?");
-        if (nextTask || allDone) {
-            confirmAllLanterns("starter dialogue confirms progress: " + text);
-            change(Stage.GET_COSTUME, "Starter confirmed lantern completion");
-            return;
+
+        if (pendingStarterNext != resolved) {
+            log.info("Halloween Angel/Henja resolved event objective"
+                            + " | dialogueObjective={} previousStage={} resolvedStage={}"
+                            + " local(lanterns={}/8 childAttempts={}/{} adults={}/5)"
+                            + " text={}",
+                    objective, stage, resolved, getLanternCount(),
+                    getChildSpookAttempts(), CHILD_REPORT_CHECKPOINT,
+                    adultsGiven, raw);
         }
-        if (System.currentTimeMillis() - lastDiagnosticAt > 5_000L) {
-            lastDiagnosticAt = System.currentTimeMillis();
-            log.info("Halloween lantern verification dialogue | text={}", text);
-        }
+        pendingStarterNext = resolved;
+        pendingStarterDialogueSeen = true;
+        pendingStarterLastDialogueAt = System.currentTimeMillis();
     }
 
-    private void verifyLanternsWithStarter(WorldPoint player) {
-        if (!nearOrWalk(player, STARTER, 8, "check lanterns with Angel/Henja")) return;
-        if (lastVerificationTalkAt != 0L) {
-            if (System.currentTimeMillis() - lastVerificationTalkAt > 15_000L) {
-                stopForReview("Lantern completion uncertain after visiting Angel/Henja ("
-                        + getLanternCount() + "/8 recorded). Check in-game progress.");
-            } else {
-                status = "Reading event-starter dialogue for lantern completion";
-            }
-            return;
-        }
-        if (!ready()) return;
-        boolean clicked = Rs2Npc.getNpc("Henja") != null
-                && Rs2Npc.interact("Henja", "Talk-to");
-        if (!clicked) clicked = Rs2Npc.getNpc("Angel") != null
-                && Rs2Npc.interact("Angel", "Talk-to");
-        if (clicked) {
-            lastVerificationTalkAt = System.currentTimeMillis();
-            acted("Asking Angel/Henja to verify the lantern objective");
-        } else {
-            status = "Finding Angel/Henja for completion verification";
-        }
+    private Stage stageForAdultCandyObjective() {
+        int candy = Rs2Inventory.count("Candy onion");
+        int oldOnions = Rs2Inventory.count("Old onion");
+        boolean molten = Rs2Inventory.hasItem("Molten sugar");
+        boolean sugar = Rs2Inventory.hasItem("Sugar", true);
+
+        if (candy > 0) return Stage.GIVE_CANDY;
+        if (molten && oldOnions > 0) return Stage.COAT_ONIONS;
+        if (molten) return Stage.COLLECT_ONIONS;
+        if (sugar) return Stage.COOK_SUGAR;
+        return Stage.CHEMIST_RIDDLE;
     }
 
-    public synchronized boolean confirmLanternsManually() {
-        if (!canConfirmLanternsManually()) return false;
-        confirmAllLanterns("explicit player confirmation");
+    /**
+     * Recovery control: request a fresh server-side event-state read from
+     * Angel/Henja. It never fabricates lantern completion or changes counters.
+     */
+    public synchronized boolean requestStarterStateCheck() {
+        if (!active || stage == Stage.COMPLETED) return false;
         if (stage == Stage.PAUSED) {
-            beforePause = Stage.REPORT_LANTERNS;
-            configManager.setConfiguration(GROUP, STAGE_KEY, Stage.REPORT_LANTERNS.name());
-            status = "Lantern completion confirmed; resume to report";
-        } else {
-            change(Stage.REPORT_LANTERNS, "Lantern completion confirmed by player");
+            beforePause = Stage.INTRODUCTION;
+            configManager.setConfiguration(GROUP, STAGE_KEY, Stage.INTRODUCTION.name());
+            status = "Event state will be rechecked with Angel / Henja on resume";
+            return true;
         }
+        starterConversationActive = false;
+        pendingStarterNext = null;
+        pendingStarterDialogueSeen = false;
+        change(Stage.INTRODUCTION,
+                "Manual event-state recheck requested; consult Angel / Henja");
         return true;
     }
 
-    public boolean canConfirmLanternsManually() {
-        Stage effective = stage == Stage.PAUSED || stage == Stage.NEEDS_REVIEW
-                ? beforePause : stage;
-        return active && !lanternsVerified && getLanternCount() >= 7
-                && (effective == Stage.SMASH_LANTERNS
-                    || effective == Stage.VERIFY_LANTERNS);
+    public boolean canRequestStarterStateCheck() {
+        return active && stage != Stage.COMPLETED;
     }
 
     // An outfit requires four *different equipment slots*. Retrieving four
@@ -942,78 +993,6 @@ public final class KspHalloween2026Script extends Script {
             return Arrays.stream(def.getActions()).anyMatch(a ->
                     a != null && a.equalsIgnoreCase(action));
         }).orElse(false);
-    }
-
-    private void inspectChildReportDialogue() {
-        String raw = Rs2Dialogue.hasSelectAnOption()
-                ? Rs2Dialogue.getQuestion() : Rs2Dialogue.getDialogueText();
-        KspHalloweenChildReport.Instruction instruction =
-                KspHalloweenChildReport.classify(raw);
-        if (instruction == KspHalloweenChildReport.Instruction.UNKNOWN) {
-            if (raw != null && System.currentTimeMillis() - lastDiagnosticAt > 5_000L) {
-                lastDiagnosticAt = System.currentTimeMillis();
-                log.info("Halloween starter child-report dialogue pending evidence | text={}", raw);
-            }
-            return;
-        }
-
-        if (instruction == KspHalloweenChildReport.Instruction.VISIT_CHEMIST) {
-            if (!childrenReportConfirmed) {
-                log.info("Halloween child objective confirmed; next objective is Chemist"
-                        + " | starter={}", raw);
-            }
-            childrenReportConfirmed = true;
-            configManager.setConfiguration(GROUP, CHILD_CONFIRMED_KEY, true);
-            pendingStarterNext = Stage.CHEMIST_RIDDLE;
-            pendingStarterDialogueSeen = true;
-            pendingStarterLastDialogueAt = System.currentTimeMillis();
-            configManager.unsetConfiguration(GROUP, CHILD_RETRY_COUNT_KEY);
-            childSpookRetries = 0;
-            return;
-        }
-
-        // The starter explicitly says to scare trick-or-treaters (including
-        // "Get yourself a Halloween costume and scare off ..."). This is a
-        // real instruction to CONTINUE the child objective, not an unknown
-        // dialogue and certainly not permission to visit the Chemist.
-        Stage required = costumeCount() >= 4
-                ? Stage.SPOOK_CHILDREN : Stage.GET_COSTUME;
-        if (pendingStarterNext == required) {
-            // The same dialogue widget remains visible for multiple ticks.
-            // Never count a single line as multiple failed quest reports.
-            return;
-        }
-
-        if (required == Stage.SPOOK_CHILDREN) {
-            // A negative report with zero or partial (e.g. 2/5) child
-            // attempts must also be bounded. Otherwise a scene with no
-            // available children loops between scouting and the starter.
-            childSpookRetries++;
-            configManager.setConfiguration(GROUP, CHILD_RETRY_COUNT_KEY, childSpookRetries);
-            int allowedRetries = spookedChildren.size() >= CHILD_REPORT_CHECKPOINT ? 1 : 2;
-            if (childSpookRetries > allowedRetries) {
-                pendingStarterNext = null;
-                stopForReview("Angel/Henja still requests child scares after "
-                        + childSpookRetries + " searches with no additional successful targets."
-                        + " Inspect the Spook responses and loaded NPC IDs");
-                return;
-            }
-            if (spookedChildren.size() >= CHILD_REPORT_CHECKPOINT) {
-                // Only discard fully attempted IDs following an explicit
-                // rejection by the server. Partial attempts are preserved.
-                spookedChildren.clear();
-                persistNpcIds(SPOOKED_CHILD_IDS_KEY, spookedChildren);
-            }
-        }
-
-        childrenReportConfirmed = false;
-        configManager.unsetConfiguration(GROUP, CHILD_CONFIRMED_KEY);
-        pendingStarterNext = required;
-        pendingStarterDialogueSeen = true;
-        pendingStarterLastDialogueAt = System.currentTimeMillis();
-        log.info("Halloween starter requests more child scares | next={} costumeSlots={}"
-                        + " retries={} recordedChildAttempts={} dialogue={}",
-                required, costumeCount(), childSpookRetries, spookedChildren.size(), raw);
     }
 
     private TreaterGroup treaterGroup(int npcId) {
@@ -1433,9 +1412,11 @@ public final class KspHalloween2026Script extends Script {
                 && text.startsWith("you smash")
                 && (text.contains("lantern") || text.contains("pumpkin"))) {
             confirmSmashedLantern(pendingLantern, "game smash message");
+            // Local smash acknowledgements update the overlay only. Angel/Henja
+            // dialogue remains authoritative for leaving the lantern objective.
             if (smashedLanternTiles.size() >= 8) {
-                confirmAllLanterns("eight confirmed smashes");
-                change(Stage.REPORT_LANTERNS, "Eight lanterns smashed; report to children");
+                change(Stage.VERIFY_LANTERNS,
+                        "Eight local smash acknowledgements; verifying with Angel/Henja");
             }
             return;
         }
