@@ -375,11 +375,17 @@ public final class KspHalloween2026Script extends Script {
         if (stage == Stage.CHEMIST_RIDDLE && handleChemistAnswerPrompt()) return;
 
         boolean dialogueVisible = Rs2Dialogue.hasContinue() || Rs2Dialogue.hasSelectAnOption();
-        if (starterConversationActive && dialogueVisible) {
-            starterInterfaceSeen = true;
-            starterNoDialogueTicks = 0;
-            inspectStarterDialogue();
-            if (stage == Stage.NEEDS_REVIEW || stage == Stage.COMPLETED) return;
+        if (starterConversationActive) {
+            // The RuneLite dialogue helpers sometimes report no Continue,
+            // even while NPC text is visibly rendered in the chatbox.
+            List<String> samples = starterDialogueSamples();
+            dialogueVisible = dialogueVisible || !samples.isEmpty();
+            if (dialogueVisible) {
+                starterInterfaceSeen = true;
+                starterNoDialogueTicks = 0;
+                inspectStarterDialogue(samples);
+                if (stage == Stage.NEEDS_REVIEW || stage == Stage.COMPLETED) return;
+            }
         }
 
         if (Rs2Dialogue.hasContinue()) {
@@ -910,8 +916,7 @@ public final class KspHalloween2026Script extends Script {
         nearOrWalk(player, next, 6, purpose);
     }
 
-    private void inspectStarterDialogue() {
-        List<String> dialogueTexts = starterDialogueSamples();
+    private void inspectStarterDialogue(List<String> dialogueTexts) {
         if (dialogueTexts.isEmpty()) {
             if (System.currentTimeMillis() - lastDiagnosticAt > 5_000L) {
                 lastDiagnosticAt = System.currentTimeMillis();
