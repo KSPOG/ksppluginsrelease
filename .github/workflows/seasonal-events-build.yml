@@ -384,9 +384,9 @@ jobs:
           assert 'change(Stage.REPORT_CHILDREN' in child
           assert 'visibleTreaters=[' in child
 
-          assert 'if (required == Stage.SPOOK_CHILDREN)' in report
+          assert 'stage == Stage.REPORT_CHILDREN && resolved == Stage.SPOOK_CHILDREN' in report
           assert 'childSpookRetries > allowedRetries' in report
-          assert 'if (spookedChildren.size() >= CHILD_REPORT_CHECKPOINT)' in report
+          assert 'spookedChildren.size() >= CHILD_REPORT_CHECKPOINT' in report
           assert 'if (next == Stage.SPOOK_CHILDREN)' in change
           assert 'childScoutedNpcTiles.clear();' in change
           print('PASS: no fixed children waypoints, no adult Spook, bounded NPC-guided scout, one-batch age reads')
