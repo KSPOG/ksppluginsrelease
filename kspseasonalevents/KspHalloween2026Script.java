@@ -218,6 +218,7 @@ public final class KspHalloween2026Script extends Script {
     private int pendingOldOnionCount = -1;
     private long pendingOldOnionAt;
     private int pendingOldOnionFailures;
+    private long oldOnionCrateMissingSince;
     private int pendingCoatCandyCount = -1;
     private long pendingCoatAt;
     private int pendingCoatFailures;
@@ -1147,15 +1148,19 @@ public final class KspHalloween2026Script extends Script {
     }
 
     private Stage stageForAdultCandyObjective() {
-        int candy = Rs2Inventory.count("Candy onion");
-        int oldOnions = Rs2Inventory.count("Old onion");
+        int candy = Rs2Inventory.count("Candy onion", true);
+        int oldOnions = oldInionCount();
         boolean molten = Rs2Inventory.hasItem("Molten sugar");
         boolean sugar = Rs2Inventory.hasItem("Sugar", true);
 
-        if (candy > 0) return Stage.GIVE_CANDY;
+        if (adultsGiven >= ONIONS_REQUIRED) return Stage.FINAL_TALK;
+        if (candy >= ONIONS_REQUIRED - adultsGiven) return Stage.GIVE_CANDY;
+        if (molten && totalOnionsAccountedFor() < ONIONS_REQUIRED)
+            return Stage.COLLECT_ONIONS;
         if (molten && oldOnions > 0) return Stage.COAT_ONIONS;
-        if (molten) return Stage.COLLECT_ONIONS;
+        if (candy > 0) return Stage.GIVE_CANDY;
         if (sugar) return Stage.COOK_SUGAR;
+        // No more cooked inputs. First get sugar, then use the exact crate.
         return Stage.CHEMIST_RIDDLE;
     }
 
@@ -1731,57 +1736,131 @@ public final class KspHalloween2026Script extends Script {
         }
     }
 
+    // Exact names observed in the live 2026 event. The alternate item
+    // spelling is included for clients whose item definitions use the wiki name.
+    private static final String OLD_ONION_CRATE_NAME = "Crate of onions";
+    private static final String[] OLD_ONION_ITEM_NAMES = {"Old inion", "Old onion"};
+    private static final int ONIONS_REQUIRED = 5;
+    private static final int OLD_ONION_CRATE_SEARCH_RADIUS = 20;
+    private static final long OLD_ONION_CRATE_MISSING_REVIEW_MS = 12_000L;
+
+    private int oldInionCount() {
+        int total = 0;
+        for (String itemName : OLD_ONION_ITEM_NAMES)
+            total += Rs2Inventory.count(itemName, true);
+        return total;
+    }
+
+    private String carriedOldInionName() {
+        for (String itemName : OLD_ONION_ITEM_NAMES) {
+            if (Rs2Inventory.count(itemName, true) > 0) return itemName;
+        }
+        return null;
+    }
+
+    /** Consumed old onions still count: candy in inventory and verified deliveries. */
+    private int totalOnionsAccountedFor() {
+        return oldInionCount() + Rs2Inventory.count("Candy onion", true) + adultsGiven;
+    }
+
+    private Rs2TileObjectModel oldOnionCrate() {
+        return Microbot.getRs2TileObjectCache().query().fromWorldView()
+                .where(o -> o != null && o.getWorldLocation() != null
+                        && o.getName() != null
+                        && OLD_ONION_CRATE_NAME.equalsIgnoreCase(o.getName())
+                        && STARTER.distanceTo(o.getWorldLocation()) <= OLD_ONION_CRATE_SEARCH_RADIUS)
+                .nearestOnClientThread();
+    }
+
+    private String oldOnionCrateAction(Rs2TileObjectModel crate) {
+        if (crate == null) return null;
+        for (String option : new String[] {"Take", "Collect", "Search", "Pick", "Grab", "Gather"}) {
+            String action = crate.findAction(option);
+            if (action != null) return action;
+        }
+        return null;
+    }
+
     private void collectOnions(WorldPoint player) {
-        if (Rs2Inventory.count("Old onion") >= 5) {
-            change(Stage.COAT_ONIONS, "Five event-only old onions collected");
+        int count = oldInionCount();
+        int candy = Rs2Inventory.count("Candy onion", true);
+        int total = count + candy + adultsGiven;
+
+        // Inventory is authoritative for the local collection subtask; the
+        // overall adult-candy objective was established by Angel/Henja.
+        if (total >= ONIONS_REQUIRED) {
+            change(count > 0 ? Stage.COAT_ONIONS : Stage.GIVE_CANDY,
+                    "Five onions accounted for: raw=" + count + " candy=" + candy
+                            + " delivered=" + adultsGiven);
             return;
         }
-        // The Chemist is already inside Rimmington, but the crate behind
-        // Angel/Henja's home may still be outside the loaded scene.
-        if (!nearOrWalk(player, STARTER, 8, "old onion crate behind Angel / Henja's house"))
-            return;
-        Rs2TileObjectModel crate = Microbot.getRs2TileObjectCache().query().fromWorldView()
-                .where(o -> o != null && o.getName() != null
-                        && o.getName().toLowerCase(Locale.ROOT).contains("onion")
-                        && (o.hasActionContaining("Take") || o.hasActionContaining("Search")
-                            || o.hasActionContaining("Collect")))
-                .nearestOnClientThread();
-        int count = Rs2Inventory.count("Old onion");
+
+        // An interaction has not succeeded merely because the crate was clicked.
+        // Wait for the inventory receipt, and re-evaluate immediately on change.
         if (pendingOldOnionCount >= 0) {
             if (count > pendingOldOnionCount) {
-                log.info("Halloween old-onion receipt confirmed | before={} after={}",
-                        pendingOldOnionCount, count);
+                log.info("Halloween old inion receipt | before={} after={} total={}/{}",
+                        pendingOldOnionCount, count, total, ONIONS_REQUIRED);
                 pendingOldOnionCount = -1;
                 pendingOldOnionFailures = 0;
             } else if (System.currentTimeMillis() - pendingOldOnionAt
                     < WORLD_ACTION_STALL_TIMEOUT_MS) {
-                status = "Waiting for old onion to appear in inventory";
+                status = "Waiting for Old inion inventory receipt (" + total + "/5)";
                 return;
             } else {
                 pendingOldOnionCount = -1;
                 if (++pendingOldOnionFailures >= MAX_UNCONFIRMED_ACTIONS) {
-                    stopForReview("Old onion crate clicked without inventory receipt");
+                    stopForReview("Crate of onions interaction did not produce an Old inion;"
+                            + " inventory names or crate action may have changed");
                     return;
                 }
             }
         }
+
+        // PRIORITY: query and interact with the actual, loaded scene object.
+        // Never walk toward STARTER first when its crate is in the canvas.
+        Rs2TileObjectModel crate = oldOnionCrate();
         if (crate != null) {
-            String action = crate.findAction("Take");
-            if (action == null) action = crate.findAction("Search");
-            if (action == null) action = crate.findAction("Collect");
-            if (action != null && crate.click(action)) {
+            oldOnionCrateMissingSince = 0L;
+            String action = oldOnionCrateAction(crate);
+            if (action == null) {
+                stopForReview("Crate of onions visible at " + crate.getWorldLocation()
+                        + " but does not expose a known collection action");
+                return;
+            }
+            if (crate.click(action)) {
                 pendingOldOnionCount = count;
                 pendingOldOnionAt = System.currentTimeMillis();
-                acted("Collecting OLD onion (not regular onion)");
+                acted("Collecting Old inion " + (total + 1) + "/5 from "
+                        + OLD_ONION_CRATE_NAME + " at " + crate.getWorldLocation());
             }
-        } else {
-            status = "Locating the OLD onion crate behind Angel/Henja's house";
+            return;
+        }
+
+        // Fall back to walking only when the real crate has not loaded and
+        // the player is outside the house area. No repeated webwalk to STARTER
+        // while standing at/near the event house.
+        if (player.distanceTo(STARTER) > OLD_ONION_CRATE_SEARCH_RADIUS) {
+            oldOnionCrateMissingSince = 0L;
+            nearOrWalk(player, STARTER, OLD_ONION_CRATE_SEARCH_RADIUS,
+                    "the Crate of onions behind Angel/Henja's house");
+            return;
+        }
+
+        if (oldOnionCrateMissingSince == 0L)
+            oldOnionCrateMissingSince = System.currentTimeMillis();
+        status = "Searching loaded scene for Crate of onions (no walk-to-start)";
+        if (System.currentTimeMillis() - oldOnionCrateMissingSince
+                >= OLD_ONION_CRATE_MISSING_REVIEW_MS) {
+            stopForReview("Crate of onions not found in loaded scene near Angel/Henja;"
+                    + " player=" + player + " raw=" + count
+                    + " candy=" + candy + " delivered=" + adultsGiven);
         }
     }
 
     private void coatOnions() {
         int candy = Rs2Inventory.count("Candy onion");
-        int old = Rs2Inventory.count("Old onion");
+        int old = oldInionCount();
         if (candy >= 5) {
             change(Stage.GIVE_CANDY, "Five candy onions ready for adults");
             return;
@@ -1814,7 +1893,8 @@ public final class KspHalloween2026Script extends Script {
             change(Stage.COOK_SUGAR, "Need more molten sugar");
             return;
         }
-        if (Rs2Inventory.combine("Molten sugar", "Old onion")) {
+        String oldItemName = carriedOldInionName();
+        if (oldItemName != null && Rs2Inventory.combine("Molten sugar", oldItemName)) {
             pendingCoatCandyCount = candy;
             pendingCoatAt = System.currentTimeMillis();
             acted("Coating old onion with molten sugar (" + candy + "/5 prepared)");
@@ -1896,6 +1976,7 @@ public final class KspHalloween2026Script extends Script {
         pendingOldOnionCount = -1;
         pendingOldOnionAt = 0L;
         pendingOldOnionFailures = 0;
+        oldOnionCrateMissingSince = 0L;
         pendingCoatCandyCount = -1;
         pendingCoatAt = 0L;
         pendingCoatFailures = 0;
@@ -1965,7 +2046,7 @@ public final class KspHalloween2026Script extends Script {
     private void stopForReview(String message) {
         log.warn("Halloween review required | stage={} status={} player={} inventory(sugar/old/candy)={}/{}/{}",
                 stage, message, Rs2Player.getWorldLocation(), Rs2Inventory.count("Sugar"),
-                Rs2Inventory.count("Old onion"), Rs2Inventory.count("Candy onion"));
+                oldInionCount(), Rs2Inventory.count("Candy onion"));
         beforePause = stage;
         stage = Stage.NEEDS_REVIEW;
         status = message;
