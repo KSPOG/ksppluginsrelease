@@ -1064,6 +1064,48 @@ public final class KspHalloween2026Script extends Script {
         KspDiangoHolidayRetrieval.Snapshot window =
                 KspDiangoHolidayRetrieval.inspect(missingCostumeRetrievalNames());
 
+        if (pendingEquipItem != null) {
+            if (Rs2Equipment.isWearing(pendingEquipItem, true)) {
+                log.info("Halloween costume equipped | item={}", pendingEquipItem);
+                pendingEquipItem = null;
+            } else if (System.currentTimeMillis() - pendingEquipAt
+                    < WORLD_ACTION_STALL_TIMEOUT_MS) {
+                status = "Waiting for equipped costume to update: " + pendingEquipItem;
+                return;
+            } else {
+                stopForReview("Costume equip action did not update equipment: "
+                        + pendingEquipItem);
+                return;
+            }
+        }
+
+        if (!window.open) {
+            pendingHolidayClose = false;
+            pendingHolidayScrollY = -1;
+        } else if (pendingHolidayClose) {
+            if (System.currentTimeMillis() - pendingHolidayCloseAt
+                    < WORLD_ACTION_STALL_TIMEOUT_MS) {
+                status = "Waiting for Diango retrieval modal to close";
+                return;
+            }
+            pendingHolidayClose = false; // Recovery: another close attempt may be needed.
+        }
+
+        if (window.open && pendingHolidayScrollY >= 0) {
+            if (window.scrollY != pendingHolidayScrollY) {
+                log.info("Diango scroll acknowledged | oldY={} newY={}",
+                        pendingHolidayScrollY, window.scrollY);
+                pendingHolidayScrollY = -1;
+            } else if (System.currentTimeMillis() - pendingHolidayScrollAt
+                    < WORLD_ACTION_STALL_TIMEOUT_MS) {
+                status = "Waiting for Diango item-list scroll update";
+                return;
+            } else {
+                stopForReview("Diango scroll did not move; inspect visible retrieval items");
+                return;
+            }
+        }
+
         if (equipped >= 4) {
             if (window.open) {
                 closeHolidayRetrieval(window);
@@ -1120,6 +1162,8 @@ public final class KspHalloween2026Script extends Script {
                 if (slot == null || wornSlots.contains(slot)
                         || !Rs2Inventory.hasItem(piece, true)) continue;
                 if (Rs2Inventory.wear(piece)) {
+                    pendingEquipItem = piece;
+                    pendingEquipAt = System.currentTimeMillis();
                     acted("Equipping collected costume: " + piece
                             + " (" + wornSlots.size() + "/4 slots worn)");
                 } else {
@@ -1154,6 +1198,8 @@ public final class KspHalloween2026Script extends Script {
             if (holidayScrollAttempts < 24 && window.canScrollDown()) {
                 if (KspDiangoHolidayRetrieval.scrollDown(window)) {
                     holidayScrollAttempts++;
+                    pendingHolidayScrollY = window.scrollY;
+                    pendingHolidayScrollAt = System.currentTimeMillis();
                     acted("Searching additional missing costume slots; scroll "
                             + holidayScrollAttempts);
                 }
@@ -1172,7 +1218,9 @@ public final class KspHalloween2026Script extends Script {
         holidayCloseAttempts = 0;
         if (!nearOrWalk(player, DIANGO, 8, "Diango in Draynor Village")) return;
         if (Rs2Npc.getNpc("Diango") != null
-                && System.currentTimeMillis() - lastTalkAt > 6_000L) {
+                && (lastTalkAt == 0L
+                    || System.currentTimeMillis() - lastTalkAt
+                        >= WORLD_ACTION_STALL_TIMEOUT_MS)) {
             if (Rs2Npc.interact("Diango", "Holiday-items")) {
                 lastTalkAt = System.currentTimeMillis();
                 acted("Opening Diango to collect missing costume pieces");
@@ -1209,6 +1257,8 @@ public final class KspHalloween2026Script extends Script {
             Rs2Keyboard.keyPress(KeyEvent.VK_ESCAPE);
         }
         holidayCloseAttempts++;
+        pendingHolidayClose = true;
+        pendingHolidayCloseAt = System.currentTimeMillis();
         acted("Closing Diango after full four-slot costume batch");
     }
 
@@ -1679,6 +1729,24 @@ public final class KspHalloween2026Script extends Script {
         lastActionAt = System.currentTimeMillis();
         status = message;
         log.info("Halloween action | stage={} | {}", stage, message);
+    }
+
+    private void clearStagePendingActions() {
+        pendingCook = false;
+        pendingCookAt = 0L;
+        pendingCookFailures = 0;
+        pendingOldOnionCount = -1;
+        pendingOldOnionAt = 0L;
+        pendingOldOnionFailures = 0;
+        pendingCoatCandyCount = -1;
+        pendingCoatAt = 0L;
+        pendingCoatFailures = 0;
+        pendingEquipItem = null;
+        pendingEquipAt = 0L;
+        pendingHolidayClose = false;
+        pendingHolidayCloseAt = 0L;
+        pendingHolidayScrollY = -1;
+        pendingHolidayScrollAt = 0L;
     }
 
     private boolean canDispatchDialogue(String signature) {
