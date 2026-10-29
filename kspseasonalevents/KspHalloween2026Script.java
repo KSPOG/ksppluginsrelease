@@ -411,11 +411,15 @@ public final class KspHalloween2026Script extends Script {
                 talkToStarter(player);
                 break;
             case WAIT_FOR_REWARD:
+                // A reward item can prove something was granted, but it must
+                // not become the event-state oracle. If completion chat was
+                // missed, ask Angel/Henja again and resolve their dialogue.
                 if (Rs2Inventory.hasItem("Vampyre costume top")
                         || Rs2Equipment.isWearing("Vampyre costume top", true)) {
-                    change(Stage.COMPLETED, "Vampyre event reward confirmed in inventory/equipment");
+                    change(Stage.FINAL_TALK,
+                            "Vampyre reward observed; rechecking final event state with Angel/Henja");
                 } else {
-                    status = "Waiting for Halloween final cutscene and reward confirmation";
+                    status = "Waiting for final reward/completion message from Angel / Henja";
                 }
                 break;
             default:
@@ -767,25 +771,28 @@ public final class KspHalloween2026Script extends Script {
         return Stage.CHEMIST_RIDDLE;
     }
 
-    public synchronized boolean confirmLanternsManually() {
-        if (!canConfirmLanternsManually()) return false;
-        confirmAllLanterns("explicit player confirmation");
+    /**
+     * Recovery control: request a fresh server-side event-state read from
+     * Angel/Henja. It never fabricates lantern completion or changes counters.
+     */
+    public synchronized boolean requestStarterStateCheck() {
+        if (!active || stage == Stage.COMPLETED) return false;
         if (stage == Stage.PAUSED) {
-            beforePause = Stage.REPORT_LANTERNS;
-            configManager.setConfiguration(GROUP, STAGE_KEY, Stage.REPORT_LANTERNS.name());
-            status = "Lantern completion confirmed; resume to report";
-        } else {
-            change(Stage.REPORT_LANTERNS, "Lantern completion confirmed by player");
+            beforePause = Stage.INTRODUCTION;
+            configManager.setConfiguration(GROUP, STAGE_KEY, Stage.INTRODUCTION.name());
+            status = "Event state will be rechecked with Angel / Henja on resume";
+            return true;
         }
+        starterConversationActive = false;
+        pendingStarterNext = null;
+        pendingStarterDialogueSeen = false;
+        change(Stage.INTRODUCTION,
+                "Manual event-state recheck requested; consult Angel / Henja");
         return true;
     }
 
-    public boolean canConfirmLanternsManually() {
-        Stage effective = stage == Stage.PAUSED || stage == Stage.NEEDS_REVIEW
-                ? beforePause : stage;
-        return active && !lanternsVerified && getLanternCount() >= 7
-                && (effective == Stage.SMASH_LANTERNS
-                    || effective == Stage.VERIFY_LANTERNS);
+    public boolean canRequestStarterStateCheck() {
+        return active && stage != Stage.COMPLETED;
     }
 
     // An outfit requires four *different equipment slots*. Retrieving four
