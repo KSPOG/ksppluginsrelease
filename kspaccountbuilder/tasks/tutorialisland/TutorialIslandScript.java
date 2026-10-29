@@ -866,29 +866,6 @@ public class TutorialIslandScript extends KspManagedScript
         return true;
     }
 
-    // Give WebWalker the first opportunity to traverse tutorial obstacles.
-    // Preserve live scene interactions only after a stalled navigation attempt.
-    private String passageAttemptKey;
-    private long passageAttemptAtMs;
-    private static final long PASSAGE_FALLBACK_DELAY_MS = 4_500L;
-
-    private boolean walkerFirstPassage(String key, WorldPoint destination, int reach)
-    {
-        if (destination == null) return true;
-        WorldPoint player = Rs2Player.getWorldLocation();
-        if (player == null) return false;
-        if (!key.equals(passageAttemptKey))
-        {
-            passageAttemptKey = key;
-            passageAttemptAtMs = System.currentTimeMillis();
-        }
-        walkTutorialLocal(destination, reach);
-        // Reaching a closed barrier's near-side tile is not evidence that
-        // the passage was traversed: let the state/area predicate decide.
-        return !Rs2Player.isMoving()
-                && System.currentTimeMillis() - passageAttemptAtMs >= PASSAGE_FALLBACK_DELAY_MS;
-    }
-
     private boolean openCookingGate()
     {
         if (Microbot.getVarbitPlayerValue(281) != 120 || isInArea(COOKING_AREA))
@@ -896,8 +873,9 @@ public class TutorialIslandScript extends KspManagedScript
             return true;
         }
 
-        if (walkerFirstPassage("cooking-gate", COOKING_AREA_WALK_TILE, 3))
+        if (!Rs2Player.isMoving() && !Rs2Player.isInteracting())
             clickNearestTutorialObject(ObjectID.GATE_9470, "Open");
+        walkTutorialLocal(COOKING_AREA_WALK_TILE, 3);
 
         return false;
     }
@@ -913,9 +891,9 @@ public class TutorialIslandScript extends KspManagedScript
         // The Account Guide may only load after entering the room.
         if (playerLocation.getX() < ACCOUNT_GUIDE_ROOM_MIN_X)
         {
-            if (npc != null && npc.getWorldLocation() != null
-                    && walkerFirstPassage("account-guide-door", npc.getWorldLocation(), 2))
-                clickNearestTutorialObject(ACCOUNT_GUIDE_DOOR_ID, "Open");
+            clickNearestTutorialObject(ACCOUNT_GUIDE_DOOR_ID, "Open");
+            if (npc != null && npc.getWorldLocation() != null)
+                walkTutorialLocal(npc.getWorldLocation(), 2);
             return false;
         }
 
@@ -997,18 +975,28 @@ public class TutorialIslandScript extends KspManagedScript
         if (Rs2Inventory.contains("Bread dough"))
         {
             doughMixDispatched = false;
-            if (breadCookingDispatched && Rs2Player.isAnimating()) return;
+            if (breadCookingDispatched && (Rs2Player.isAnimating()
+                    || isTutorialInteractionPending("cooking:range-use"))) return;
             breadCookingDispatched = false;
 
             Rs2TileObjectModel range = tutorialObject(9736);
             if (range == null) range = tutorialObject("Range");
-            if (prepareTutorialObjectInteraction(range, 4) && readyForAction()
-                    && useTutorialItemOnLiveObject(ItemID.BREAD_DOUGH, range,
-                            "cooking:bread-dough-on-range"))
+            if (range == null)
             {
-                breadCookingDispatched = true;
+                logMissingTutorialObject("Range", 9736);
+                return;
             }
-            else if (range == null) logMissingTutorialObject("Range", 9736);
+            if (!prepareTutorialObjectInteraction(range, 4) || !readyForAction()) return;
+
+            // Bread dough is already produced. Interact with the stove/range
+            // directly rather than selecting dough from the inventory.
+            if (range.click("Cook") || range.click("Use"))
+            {
+                markTutorialInteraction("cooking:range-use");
+                breadCookingDispatched = true;
+                Microbot.log("[TutIsland] Cooking range action dispatched | objectId="
+                        + range.getId() + " progress=" + progress);
+            }
             return;
         }
 
@@ -1087,7 +1075,6 @@ public class TutorialIslandScript extends KspManagedScript
             return;
         }
 
-        if (!walkerFirstPassage("mining-ladder-down", new WorldPoint(3088, 9520, 0), 4)) return;
         Rs2TileObjectModel ladder = tutorialObject(9726);
 
         if (prepareTutorialObjectInteraction(ladder, 4))
@@ -1382,8 +1369,7 @@ public class TutorialIslandScript extends KspManagedScript
                 attackRatWithRange();
                 return;
             case 500:
-                if (walkerFirstPassage("mining-ladder-up", new WorldPoint(COMBAT_INSTRUCTOR_AREA.getX() + 2, COMBAT_INSTRUCTOR_AREA.getY() + 2, COMBAT_INSTRUCTOR_AREA.getPlane()), 4))
-                    clickTutorialObject("Ladder", "Climb-up", 4);
+                clickTutorialObject("Ladder", "Climb-up", 4);
                 return;
             default:
         }
@@ -1417,9 +1403,7 @@ public class TutorialIslandScript extends KspManagedScript
     {
         if (isInsideRatPen(Rs2Player.getWorldLocation()))
         {
-            if (instructor != null && instructor.getWorldLocation() != null
-                    && walkerFirstPassage("rat-gate-exit", instructor.getWorldLocation(), 3))
-                clickNearestTutorialObject(RAT_PEN_GATE_ID, "Open");
+            clickNearestTutorialObject(RAT_PEN_GATE_ID, "Open");
         }
         else walkAndTalk(instructor);
     }
@@ -1621,7 +1605,6 @@ public class TutorialIslandScript extends KspManagedScript
 
     private void advanceThroughTutorialDoor(int doorId, WorldPoint destination, int progress)
     {
-        if (!walkerFirstPassage("progress-door-" + doorId, destination, 3)) return;
         Rs2TileObjectModel door = tutorialObject(doorId);
         if (door != null && door.hasAction("Open"))
         {
@@ -1650,8 +1633,6 @@ public class TutorialIslandScript extends KspManagedScript
             walkTutorialLocal(CHAPEL_INSTRUCTOR_TILE, 5);
             return false;
         }
-
-        if (!walkerFirstPassage("chapel-inner-door", CHAPEL_INSTRUCTOR_TILE, 2)) return false;
 
         // The inner chapel entrance is distinct from door 9722 and can
         // remain closed after the tutorial advances from 540 to 550.
@@ -2217,10 +2198,7 @@ public class TutorialIslandScript extends KspManagedScript
             return true;
         }
 
-        WorldPoint penDestination = new WorldPoint(RAT_PEN_INNER_BOUNDARY_X - 1,
-                RAT_PIT_AREA.getY() + RAT_PIT_AREA.getHeight() / 2, RAT_PIT_AREA.getPlane());
-        if (walkerFirstPassage("rat-gate-entry", penDestination, 2)
-                && !isTutorialInteractionPending("rat-gate")
+        if (!isTutorialInteractionPending("rat-gate")
                 && clickNearestTutorialObject(RAT_PEN_GATE_ID, "Open"))
         {
             markTutorialInteraction("rat-gate");
@@ -2876,11 +2854,6 @@ public class TutorialIslandScript extends KspManagedScript
             return false;
         }
 
-        Rs2TileObjectModel passageObject = tutorialObject(objectId);
-        WorldPoint destination = target != null ? target
-                : passageObject == null ? null : passageObject.getWorldLocation();
-        if (!walkerFirstPassage("passage-" + objectId, destination, Math.max(1, reach)))
-            return completed.getAsBoolean();
         WorldPoint player = Rs2Player.getWorldLocation();
         if (player != null && KspLiveScene.interact(objectId, player, 45, "Open"))
         {
