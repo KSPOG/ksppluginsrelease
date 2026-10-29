@@ -792,10 +792,10 @@ final class KspCinematicHudRenderer
         int crestX = p + 8, crestY = header - 9;
         for (int i = 0; i < 4; i++)
             g.fillRect(crestX + i * 4, crestY - (i + 1) * 4, 3, (i + 1) * 4);
-        g.setFont(new Font("Serif", Font.BOLD, Math.max(17, h / 11)));
+        g.setFont(new Font("Serif", Font.BOLD, Math.max(20, h / 10)));
         ellipsis(g, "KSP Account Builder", p + 30, header - 7,
                 Math.max(80, w - 252), BRIGHT);
-        g.setFont(new Font("SansSerif", Font.PLAIN, Math.max(10, h / 21)));
+        g.setFont(new Font("SansSerif", Font.PLAIN, Math.max(13, h / 17)));
         alignRight(g, "Runtime " + time(script.getRuntimeSeconds()),
                 w - 100, header - 8, IVORY);
         uiButton(g, "collapse", w - 92, 4, 26, header - 8, "−", RAISED);
@@ -850,17 +850,17 @@ final class KspCinematicHudRenderer
             // The original reference uses a skill medallion and a two-line
             // title, never a plain text label over the scene.
             medal(g, sceneX + 24, top + 24, kind, 17);
-            g.setFont(new Font("Serif", Font.BOLD, Math.max(15, bodyH / 8)));
+            g.setFont(new Font("Serif", Font.BOLD, Math.max(18, bodyH / 7)));
             ellipsis(g, displayKind(kind), sceneX + 48, top + 21,
                     sceneW - 54, BRIGHT);
-            g.setFont(new Font("SansSerif", Font.PLAIN, Math.max(10, bodyH / 13)));
+            g.setFont(new Font("SansSerif", Font.PLAIN, Math.max(13, bodyH / 11)));
             ellipsis(g, safe(script.getOverlayTaskDetail(), task), sceneX + 48, top + 34,
                     sceneW - 54, IVORY);
             g.setColor(new Color(4, 9, 13, 225));
             g.fillRoundRect(sceneX + 5, bottom - 34, sceneW - 10, 29, 5, 5);
             g.setColor(GOLD);
             g.drawRoundRect(sceneX + 5, bottom - 34, sceneW - 10, 29, 5, 5);
-            g.setFont(new Font("SansSerif", Font.PLAIN, Math.max(10, bodyH / 12)));
+            g.setFont(new Font("SansSerif", Font.PLAIN, Math.max(13, bodyH / 10)));
             ellipsis(g, (script.isManualPaused() ? "PAUSED · " : "")
                     + safe(script.getOverlayTaskDetail(), "Idle"),
                     sceneX + 10, bottom - 18, sceneW - 20, IVORY);
@@ -881,9 +881,9 @@ final class KspCinematicHudRenderer
         else
         {
             ornamentalFrame(g, sceneX, top, w - sceneX - p, bodyH);
-            g.setFont(new Font("Serif", Font.BOLD, Math.max(14, bodyH / 7)));
+            g.setFont(new Font("Serif", Font.BOLD, Math.max(17, bodyH / 6)));
             label(g, currentPage, sceneX + 10, top + 19, BRIGHT);
-            g.setFont(new Font("SansSerif", Font.PLAIN, Math.max(10, bodyH / 11)));
+            g.setFont(new Font("SansSerif", Font.PLAIN, Math.max(13, bodyH / 9)));
             if ("Settings".equals(currentPage) || settingsOpen)
             {
                 toggle(g, "setting:tooltips", sceneX + 10, top + 28,
@@ -974,12 +974,12 @@ final class KspCinematicHudRenderer
         int left = x + 9, right = x + w - 9;
         int headingHeight = Math.max(19, h / 6);
         int barY = y + headingHeight + 22;
-        g.setFont(new Font("Serif", Font.BOLD, Math.max(12, h / 9)));
+        g.setFont(new Font("Serif", Font.BOLD, Math.max(14, h / 8)));
         medal(g, x + 22, y + 19, kind, 13);
         ellipsis(g, displayKind(kind), x + 43, y + 20, w - 51, BRIGHT);
-        g.setFont(new Font("SansSerif", Font.BOLD, 11));
+        g.setFont(new Font("SansSerif", Font.BOLD, 13));
         label(g, valid ? "Level " + level : "XP unavailable", left, y + headingHeight + 14, IVORY);
-        g.setFont(new Font("SansSerif", Font.PLAIN, 10));
+        g.setFont(new Font("SansSerif", Font.PLAIN, 12));
         alignRight(g, valid ? briefXp(xp) + "/" + briefXp(next) : "—",
                 right, y + headingHeight + 14, MUTED);
         drawBar(g, left, barY, w - 18, 7, progress, XP_BLUE);
@@ -987,7 +987,7 @@ final class KspCinematicHudRenderer
         // Compact labels when the live chatbox height is constrained.
         int rowStart = barY + 16;
         int step = Math.max(11, (h - (rowStart - y) - 8) / 6);
-        g.setFont(new Font("SansSerif", Font.PLAIN, Math.max(9, Math.min(11, h / 14))));
+        g.setFont(new Font("SansSerif", Font.PLAIN, Math.max(11, Math.min(13, h / 12))));
         int valueWidth = Math.max(59, w / 2);
         int captionWidth = w - valueWidth - 18;
         String[] captions = {"⚔ XP Gained", "⚔ XP / Hour", "◷ To Level",

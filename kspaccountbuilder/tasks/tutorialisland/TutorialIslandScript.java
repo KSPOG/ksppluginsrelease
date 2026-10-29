@@ -866,6 +866,29 @@ public class TutorialIslandScript extends KspManagedScript
         return true;
     }
 
+    // Give WebWalker the first opportunity to traverse tutorial obstacles.
+    // Preserve live scene interactions only after a stalled navigation attempt.
+    private String passageAttemptKey;
+    private long passageAttemptAtMs;
+    private static final long PASSAGE_FALLBACK_DELAY_MS = 4_500L;
+
+    private boolean walkerFirstPassage(String key, WorldPoint destination, int reach)
+    {
+        if (destination == null) return true;
+        WorldPoint player = Rs2Player.getWorldLocation();
+        if (player == null) return false;
+        if (!key.equals(passageAttemptKey))
+        {
+            passageAttemptKey = key;
+            passageAttemptAtMs = System.currentTimeMillis();
+        }
+        walkTutorialLocal(destination, reach);
+        // Reaching a closed barrier's near-side tile is not evidence that
+        // the passage was traversed: let the state/area predicate decide.
+        return !Rs2Player.isMoving()
+                && System.currentTimeMillis() - passageAttemptAtMs >= PASSAGE_FALLBACK_DELAY_MS;
+    }
+
     private boolean openCookingGate()
     {
         if (Microbot.getVarbitPlayerValue(281) != 120 || isInArea(COOKING_AREA))
@@ -873,15 +896,8 @@ public class TutorialIslandScript extends KspManagedScript
             return true;
         }
 
-        if (!Rs2Player.isMoving() && !Rs2Player.isInteracting())
-        {
+        if (walkerFirstPassage("cooking-gate", COOKING_AREA_WALK_TILE, 3))
             clickNearestTutorialObject(ObjectID.GATE_9470, "Open");
-        }
-
-        if (!isInArea(COOKING_AREA))
-        {
-            walkTutorialLocal(COOKING_AREA_WALK_TILE, 3);
-        }
 
         return false;
     }
@@ -897,7 +913,9 @@ public class TutorialIslandScript extends KspManagedScript
         // The Account Guide may only load after entering the room.
         if (playerLocation.getX() < ACCOUNT_GUIDE_ROOM_MIN_X)
         {
-            clickNearestTutorialObject(ACCOUNT_GUIDE_DOOR_ID, "Open");
+            if (npc != null && npc.getWorldLocation() != null
+                    && walkerFirstPassage("account-guide-door", npc.getWorldLocation(), 2))
+                clickNearestTutorialObject(ACCOUNT_GUIDE_DOOR_ID, "Open");
             return false;
         }
 
@@ -1069,6 +1087,7 @@ public class TutorialIslandScript extends KspManagedScript
             return;
         }
 
+        if (!walkerFirstPassage("mining-ladder-down", new WorldPoint(3088, 9520, 0), 4)) return;
         Rs2TileObjectModel ladder = tutorialObject(9726);
 
         if (prepareTutorialObjectInteraction(ladder, 4))
@@ -1263,15 +1282,27 @@ public class TutorialIslandScript extends KspManagedScript
         if (furnace == null) logMissingTutorialObject("Furnace", ObjectID.FURNACE_10082);
         if (!prepareTutorialObjectInteraction(furnace, 4) || !readyForAction()) return;
 
-        // Avoid repeatedly using ore on the furnace while the previous
-        // interaction is being processed or the smelting animation begins.
-        if (!Rs2Inventory.hasItem(ItemID.TIN_ORE)
-                && !Rs2Inventory.hasItem(ItemID.COPPER_ORE))
+        // The tutorial furnace exposes a direct live "Use" interaction.
+        // Prefer it over selecting ore: selecting inventory items can race
+        // with the asynchronous game client and leave this step stalled.
+        if (furnace.hasAction("Use"))
         {
-            return;
+            if (isTutorialInteractionPending("object:furnace:Use")) return;
+            if (furnace.click("Use"))
+            {
+                markTutorialInteraction("object:furnace:Use");
+                Microbot.log("[TutIsland] Furnace Use dispatched | tile="
+                        + furnace.getWorldLocation() + " progress="
+                        + Microbot.getVarbitPlayerValue(281));
+                return;
+            }
         }
 
-        int ore = Rs2Inventory.hasItem(ItemID.TIN_ORE) ? ItemID.TIN_ORE : ItemID.COPPER_ORE;
+        // Fallback for furnace variants without a usable "Use" action.
+        if (!Rs2Inventory.hasItem(ItemID.TIN_ORE)
+                || !Rs2Inventory.hasItem(ItemID.COPPER_ORE)) return;
+
+        int ore = ItemID.TIN_ORE;
         if (!useTutorialItemOnLiveObject(ore, furnace, "object:furnace:smelt-bronze"))
             logTutorialInteractionPending("furnace", furnace, ore);
     }
@@ -1351,7 +1382,8 @@ public class TutorialIslandScript extends KspManagedScript
                 attackRatWithRange();
                 return;
             case 500:
-                clickTutorialObject("Ladder", "Climb-up", 4);
+                if (walkerFirstPassage("mining-ladder-up", new WorldPoint(COMBAT_INSTRUCTOR_AREA.getX() + 2, COMBAT_INSTRUCTOR_AREA.getY() + 2, COMBAT_INSTRUCTOR_AREA.getPlane()), 4))
+                    clickTutorialObject("Ladder", "Climb-up", 4);
                 return;
             default:
         }
@@ -1385,7 +1417,9 @@ public class TutorialIslandScript extends KspManagedScript
     {
         if (isInsideRatPen(Rs2Player.getWorldLocation()))
         {
-            clickNearestTutorialObject(RAT_PEN_GATE_ID, "Open");
+            if (instructor != null && instructor.getWorldLocation() != null
+                    && walkerFirstPassage("rat-gate-exit", instructor.getWorldLocation(), 3))
+                clickNearestTutorialObject(RAT_PEN_GATE_ID, "Open");
         }
         else walkAndTalk(instructor);
     }
@@ -1587,6 +1621,7 @@ public class TutorialIslandScript extends KspManagedScript
 
     private void advanceThroughTutorialDoor(int doorId, WorldPoint destination, int progress)
     {
+        if (!walkerFirstPassage("progress-door-" + doorId, destination, 3)) return;
         Rs2TileObjectModel door = tutorialObject(doorId);
         if (door != null && door.hasAction("Open"))
         {
@@ -1615,6 +1650,8 @@ public class TutorialIslandScript extends KspManagedScript
             walkTutorialLocal(CHAPEL_INSTRUCTOR_TILE, 5);
             return false;
         }
+
+        if (!walkerFirstPassage("chapel-inner-door", CHAPEL_INSTRUCTOR_TILE, 2)) return false;
 
         // The inner chapel entrance is distinct from door 9722 and can
         // remain closed after the tutorial advances from 540 to 550.
@@ -2180,7 +2217,10 @@ public class TutorialIslandScript extends KspManagedScript
             return true;
         }
 
-        if (!isTutorialInteractionPending("rat-gate")
+        WorldPoint penDestination = new WorldPoint(RAT_PEN_INNER_BOUNDARY_X - 1,
+                RAT_PIT_AREA.getY() + RAT_PIT_AREA.getHeight() / 2, RAT_PIT_AREA.getPlane());
+        if (walkerFirstPassage("rat-gate-entry", penDestination, 2)
+                && !isTutorialInteractionPending("rat-gate")
                 && clickNearestTutorialObject(RAT_PEN_GATE_ID, "Open"))
         {
             markTutorialInteraction("rat-gate");
@@ -2640,22 +2680,12 @@ public class TutorialIslandScript extends KspManagedScript
             return;
         }
 
-        // The normal blocking walkTo() can invoke bank detour comparison
-        // even for a 5-tile walk in the Tutorial Island instance, planning
-        // an impossible trip to Lumbridge and being canceled every tick.
-        // walkStep() uses Microbot's route planner but does not run its
-        // bank/cache/transport optimization or block the tutorial loop.
-        // Explicit tutorial gates and doors are handled by the stage logic.
-        if (TutAreas.contains(playerLocation) && TutAreas.contains(target))
+        // Delegate navigation to Microbot WebWalker. Stage-specific
+        // interactions remain responsible for instructional doors and gates;
+        // the walker owns routing and obstacle traversal.
+        if (TutAreas.contains(playerLocation) && !TutAreas.contains(target))
         {
-            Rs2Walker.walkStep(target, reach);
-            return;
-        }
-
-        // Never allow a mainland route while the tutorial is active.
-        if (TutAreas.contains(playerLocation))
-        {
-            debug("Tutorial Island refused nonlocal route | player={} target={}",
+            debug("Tutorial Island refused mainland destination | player={} target={}",
                     playerLocation, target);
             return;
         }
@@ -2846,6 +2876,11 @@ public class TutorialIslandScript extends KspManagedScript
             return false;
         }
 
+        Rs2TileObjectModel passageObject = tutorialObject(objectId);
+        WorldPoint destination = target != null ? target
+                : passageObject == null ? null : passageObject.getWorldLocation();
+        if (!walkerFirstPassage("passage-" + objectId, destination, Math.max(1, reach)))
+            return completed.getAsBoolean();
         WorldPoint player = Rs2Player.getWorldLocation();
         if (player != null && KspLiveScene.interact(objectId, player, 45, "Open"))
         {
