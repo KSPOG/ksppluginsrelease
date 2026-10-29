@@ -720,7 +720,6 @@ public final class KspHalloween2026Script extends Script {
     private void talkToStarter(WorldPoint player) {
         if (!nearOrWalk(player, STARTER, 8, "Angel / Henja's house"))
             return;
-        if (!ready()) return;
         boolean clicked = Rs2Npc.getNpc("Henja") != null
                 && Rs2Npc.interact("Henja", "Talk-to");
         if (!clicked) clicked = Rs2Npc.getNpc("Angel") != null
@@ -800,8 +799,6 @@ public final class KspHalloween2026Script extends Script {
             nearOrWalk(player, pendingLantern, 6, "confirm clicked jack-o'-lantern");
             return true;
         }
-        if (pendingLanternAt != 0L
-                && System.currentTimeMillis() - pendingLanternAt < 1_100L) return true;
         final WorldPoint clickedTile = pendingLantern;
         boolean stillPresent = Microbot.getRs2TileObjectCache().query().fromWorldView()
                 .where(o -> o != null && clickedTile.equals(o.getWorldLocation())
@@ -835,7 +832,7 @@ public final class KspHalloween2026Script extends Script {
         if (target != null) {
             WorldPoint location = target.getWorldLocation();
             status = "Smashing jack-o'-lantern " + (smashedLanternTiles.size() + 1) + "/8";
-            if (ready() && target.click(target.findAction("Smash"))) {
+            if (target.click(target.findAction("Smash"))) {
                 pendingLantern = location;
                 pendingLanternAt = System.currentTimeMillis();
                 configManager.setConfiguration(GROUP, PENDING_LANTERN_KEY, tileKey(location));
@@ -1063,7 +1060,6 @@ public final class KspHalloween2026Script extends Script {
     }
 
     private void collectCostume(WorldPoint player) {
-        if (!ready()) return;
         int equipped = costumeCount();
         KspDiangoHolidayRetrieval.Snapshot window =
                 KspDiangoHolidayRetrieval.inspect(missingCostumeRetrievalNames());
@@ -1403,7 +1399,7 @@ public final class KspHalloween2026Script extends Script {
 
         if (child != null) {
             childNoTargetSince = 0L;
-            if (ready() && Rs2Npc.interact(child, "Spook")) {
+            if (Rs2Npc.interact(child, "Spook")) {
                 spookedChildren.add(child.getId());
                 persistNpcIds(SPOOKED_CHILD_IDS_KEY, spookedChildren);
                 // If new children become available after moving, previous
@@ -1458,8 +1454,15 @@ public final class KspHalloween2026Script extends Script {
             return;
         }
         if (!nearOrWalk(player, CHEMIST, 8, "the Chemist west of Rimmington")) return;
-        if (ready() && Rs2Npc.getNpc("Chemist") != null
-                && System.currentTimeMillis() - lastTalkAt > 6_000L
+        // One Talk-to per observed conversation. The watchdog allows a
+        // retry only when no dialogue/input or sugar appeared.
+        long now = System.currentTimeMillis();
+        if (chemistConversationAt != 0L
+                && now - chemistConversationAt < WORLD_ACTION_STALL_TIMEOUT_MS) {
+            status = "Waiting for Chemist dialogue or sugar";
+            return;
+        }
+        if (Rs2Npc.getNpc("Chemist") != null
                 && Rs2Npc.interact("Chemist", "Talk-to")) {
             lastTalkAt = System.currentTimeMillis();
             chemistConversationAt = lastTalkAt;
@@ -1556,20 +1559,26 @@ public final class KspHalloween2026Script extends Script {
     private void giveCandy(WorldPoint player) {
         int candyCount = Rs2Inventory.count("Candy onion");
         if (pendingCandyCount >= 0) {
-            if (System.currentTimeMillis() - lastActionAt >= 1_200L) {
-                if (candyCount < pendingCandyCount) {
-                    int used = pendingCandyCount - candyCount;
-                    if (pendingAdultId > 0 && givenAdultIds.add(pendingAdultId)) {
-                        adultsGiven = Math.min(5, adultsGiven + 1);
-                        configManager.setConfiguration(GROUP, ADULTS_KEY, adultsGiven);
-                        persistNpcIds(DELIVERED_ADULT_IDS_KEY, givenAdultIds);
-                        log.info("Halloween candy delivery verified | adultId={} used={} total={}/5",
-                                pendingAdultId, used, adultsGiven);
-                    }
+            if (candyCount < pendingCandyCount) {
+                int used = pendingCandyCount - candyCount;
+                if (pendingAdultId > 0 && givenAdultIds.add(pendingAdultId)) {
+                    adultsGiven = Math.min(5, adultsGiven + 1);
+                    configManager.setConfiguration(GROUP, ADULTS_KEY, adultsGiven);
+                    persistNpcIds(DELIVERED_ADULT_IDS_KEY, givenAdultIds);
+                    log.info("Halloween candy delivery verified | adultId={} used={} total={}/5",
+                            pendingAdultId, used, adultsGiven);
                 }
                 pendingCandyCount = -1;
                 pendingAdultId = -1;
-            } else return;
+                // Inventory receipt is authoritative; proceed immediately.
+            } else if (System.currentTimeMillis() - lastActionAt < WORLD_ACTION_STALL_TIMEOUT_MS) {
+                status = "Waiting for candy-onion inventory receipt";
+                return;
+            } else {
+                stopForReview("Adult candy-onion use did not consume an item;"
+                        + " check NPC/dialogue before retrying");
+                return;
+            }
         }
         if (adultsGiven >= 5) {
             change(Stage.FINAL_TALK, "Five adult trick-or-treaters served");
@@ -1593,7 +1602,7 @@ public final class KspHalloween2026Script extends Script {
         net.runelite.client.plugins.microbot.util.inventory.Rs2ItemModel item =
                 Rs2Inventory.get("Candy onion");
         if (adult != null && item != null) {
-            if (ready() && Rs2Inventory.useItemOnNpc(item.getId(), adult)) {
+            if (Rs2Inventory.useItemOnNpc(item.getId(), adult)) {
                 pendingCandyCount = candyCount;
                 pendingAdultId = adult.getId();
                 acted("Offering candy onion to adult npcId=" + adult.getId());
