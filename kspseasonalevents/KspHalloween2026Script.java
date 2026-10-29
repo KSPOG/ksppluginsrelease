@@ -171,7 +171,9 @@ public final class KspHalloween2026Script extends Script {
     private int sweepsWithoutTarget;
     private int actionsAtStage;
     private long lastActionAt;
-    private long lastDialogueActionAt;    private long lastWalkAt;
+    private long lastDialogueActionAt;
+    private String lastGenericDialogueSignature = "";
+    private long lastGenericDialogueAt;    private long lastWalkAt;
     private long lastTalkAt;
     private long lastDiagnosticAt;
     private volatile WorldPoint pendingLantern;
@@ -213,6 +215,8 @@ public final class KspHalloween2026Script extends Script {
         this.startedAt = System.currentTimeMillis();
         lastActionAt = lastWalkAt = lastTalkAt = lastDiagnosticAt = 0L;
         lastDialogueActionAt = 0L;
+        lastGenericDialogueSignature = "";
+        lastGenericDialogueAt = 0L;
         pendingLantern = null;
         pendingLanternAt = 0L;
         lastVerificationTalkAt = 0L;
@@ -459,17 +463,23 @@ public final class KspHalloween2026Script extends Script {
         List<String> options = Rs2Dialogue.getDialogueOptions().stream()
                 .map(w -> w == null ? "" : w.getText())
                 .collect(Collectors.toList());
+        String signature = stage + "|" + Rs2Dialogue.getQuestion() + "|" + options;
+        // An unchanged option menu may still be processing the previous
+        // input. Repeating it every scheduler tick can skip NPC branches.
+        if (signature.equals(lastGenericDialogueSignature)
+                && System.currentTimeMillis() - lastGenericDialogueAt < 900L)
+            return;
         if (stage == Stage.GET_COSTUME
                 && Rs2Dialogue.keyPressForDialogueOption(
                         "I'd like to check holiday items please!", true)) {
-            acted("Selected Diango's holiday-item retrieval dialogue");
+            dialogueActed("Selected Diango's holiday-item retrieval dialogue", signature);
             return;
         }
 
         if ((stage == Stage.REPORT_LANTERNS || stage == Stage.GET_COSTUME
                 || stage == Stage.VERIFY_LANTERNS)
                 && Rs2Dialogue.keyPressForDialogueOption("Sure, I'll take the hat.", true)) {
-            acted("Accepted Halloween hat from Angel / Henja");
+            dialogueActed("Accepted Halloween hat from Angel / Henja", signature);
             return;
         }
 
@@ -491,7 +501,7 @@ public final class KspHalloween2026Script extends Script {
         };
         for (String choice : choices) {
             if (Rs2Dialogue.clickOption(choice, true)) {
-                acted("Selected confirmed event dialogue: " + choice);
+                dialogueActed("Selected confirmed event dialogue: " + choice, signature);
                 return;
             }
         }
@@ -590,6 +600,11 @@ public final class KspHalloween2026Script extends Script {
                     isVisible(input), widgetText(title), widgetText(fullInput));
         }).orElse(null);
         if (view == null) return false;
+
+        // Never mistake an NPC Continue or selectable choice for a
+        // free-text answer field, even when a chatbox text widget is visible.
+        if (Rs2Dialogue.hasContinue() || Rs2Dialogue.hasSelectAnOption())
+            return false;
 
         boolean prompt = KspHalloweenChemistInput.isAnswerPrompt(
                 view.titleVisible, view.fullInputVisible, view.inputVisible,
@@ -1603,6 +1618,14 @@ public final class KspHalloween2026Script extends Script {
         return System.currentTimeMillis() - lastDialogueActionAt >= DIALOGUE_GAP_MS;
     }
 
+    private void dialogueActed(String message, String signature) {
+        lastDialogueActionAt = System.currentTimeMillis();
+        lastGenericDialogueAt = lastDialogueActionAt;
+        lastGenericDialogueSignature = signature;
+        status = message;
+        log.info("Halloween dialogue action | stage={} | {}", stage, message);
+    }
+
     private void change(Stage next, String message) {
         Stage previous = stage;
         stage = next;
@@ -1610,6 +1633,8 @@ public final class KspHalloween2026Script extends Script {
         if (previous != next) {
             clearChemistOptionPending();
             clearChemistTextPrompt();
+            lastGenericDialogueSignature = "";
+            lastGenericDialogueAt = 0L;
             chemistConversationAt = 0L;
             chemistAnswerSubmissions = 0;
             Rs2Walker.clearWalkingRoute("ksp_seasonal_stage_changed");
