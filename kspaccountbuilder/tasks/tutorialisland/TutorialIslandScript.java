@@ -983,11 +983,14 @@ public class TutorialIslandScript extends KspManagedScript
             breadCookingDispatched = false;
 
             Rs2TileObjectModel range = tutorialObject(9736);
-            if (prepareTutorialObjectInteraction(range, 4)
-                    && Rs2Inventory.useItemOnObject(ItemID.BREAD_DOUGH, range.getId()))
+            if (range == null) range = tutorialObject("Range");
+            if (prepareTutorialObjectInteraction(range, 4) && readyForAction()
+                    && useTutorialItemOnLiveObject(ItemID.BREAD_DOUGH, range,
+                            "cooking:bread-dough-on-range"))
             {
                 breadCookingDispatched = true;
             }
+            else if (range == null) logMissingTutorialObject("Range", 9736);
             return;
         }
 
@@ -1256,6 +1259,8 @@ public class TutorialIslandScript extends KspManagedScript
     {
         if (Rs2Inventory.contains("Bronze bar") || Rs2Player.isAnimating()) return;
         Rs2TileObjectModel furnace = tutorialObject(ObjectID.FURNACE_10082);
+        if (furnace == null) furnace = tutorialObject("Furnace");
+        if (furnace == null) logMissingTutorialObject("Furnace", ObjectID.FURNACE_10082);
         if (!prepareTutorialObjectInteraction(furnace, 4) || !readyForAction()) return;
 
         // Avoid repeatedly using ore on the furnace while the previous
@@ -1267,22 +1272,24 @@ public class TutorialIslandScript extends KspManagedScript
         }
 
         int ore = Rs2Inventory.hasItem(ItemID.TIN_ORE) ? ItemID.TIN_ORE : ItemID.COPPER_ORE;
-        Rs2Inventory.useItemOnObject(ore, furnace.getId());
-        markTutorialInteraction("object:furnace:smelt-bronze");
+        if (!useTutorialItemOnLiveObject(ore, furnace, "object:furnace:smelt-bronze"))
+            logTutorialInteractionPending("furnace", furnace, ore);
     }
 
     private void openTutorialAnvil()
     {
         if (Rs2Widget.isSmithingWidgetOpen() || Rs2Player.isAnimating()) return;
         Rs2TileObjectModel anvil = tutorialObject("Anvil");
+        if (anvil == null) logMissingTutorialObject("Anvil", -1);
         if (!prepareTutorialObjectInteraction(anvil, 4) || !readyForAction()) return;
 
         // Wait for the previous interaction to be acknowledged before
         // attempting another item-on-object or Smith interaction.
         if (Rs2Inventory.hasItem(ItemID.BRONZE_BAR))
         {
-            Rs2Inventory.useItemOnObject(ItemID.BRONZE_BAR, anvil.getId());
-            markTutorialInteraction("object:anvil:bronze-bar");
+            if (!useTutorialItemOnLiveObject(ItemID.BRONZE_BAR, anvil,
+                    "object:anvil:bronze-bar"))
+                logTutorialInteractionPending("anvil", anvil, ItemID.BRONZE_BAR);
         }
         else if (anvil.click("Smith"))
         {
@@ -1335,7 +1342,10 @@ public class TutorialIslandScript extends KspManagedScript
                 leaveRatPenOrTalk(instructor);
                 return;
             case 480:
-                equipTutorialRangeGear();
+                // Some client builds remain on 480 after equipping both
+                // ranged items. Do not idle waiting for a 490 varbit edge:
+                // attempt the tutorial rat once the required gear is worn.
+                attackRatWithRange();
                 return;
             case 490:
                 attackRatWithRange();
@@ -1514,7 +1524,9 @@ public class TutorialIslandScript extends KspManagedScript
                     && TUT_ISLAND_BANK_AREA.contains(object.getWorldLocation())
                     && (object.getId() == ObjectID.BANK_BOOTH_10083
                         || "Bank booth".equalsIgnoreCase(object.getName()))
-                    && object.hasAction("Bank"));
+                    // Tutorial Island is special: these booths advertise
+                    // "Use", not the mainland "Bank" action.
+                    && (object.hasAction("Use") || object.hasAction("Bank")));
             if (tutorialBooth == null)
             {
                 if (System.currentTimeMillis() - lastTutorialWalkerWarningAtMs >= 5_000L)
@@ -1522,17 +1534,24 @@ public class TutorialIslandScript extends KspManagedScript
                     lastTutorialWalkerWarningAtMs = System.currentTimeMillis();
                     Microbot.log("[TutIsland] Waiting for LOCAL bank booth"
                             + " | progress=" + progress + " player=" + playerLocation
+                            + " expectedActions=[Use,Bank] expectedId="
+                            + ObjectID.BANK_BOOTH_10083
                             + " allowedRoom=" + TUT_ISLAND_BANK_AREA);
                 }
                 return;
             }
             if (prepareTutorialObjectInteraction(tutorialBooth, 4)
-                    && tutorialBooth.click("Bank"))
+                    && readyForAction())
             {
-                markTutorialInteraction("tutorial:bank-booth");
-                Microbot.log("[TutIsland] Opened Tutorial Island bank booth"
-                        + " | id=" + tutorialBooth.getId()
-                        + " tile=" + tutorialBooth.getWorldLocation());
+                String boothAction = tutorialBooth.hasAction("Use") ? "Use" : "Bank";
+                if (tutorialBooth.click(boothAction))
+                {
+                    markTutorialInteraction("tutorial:bank-booth");
+                    Microbot.log("[TutIsland] Dispatched Tutorial Island bank booth"
+                            + " | action=" + boothAction + " id=" + tutorialBooth.getId()
+                            + " tile=" + tutorialBooth.getWorldLocation()
+                            + " progress=" + progress);
+                }
             }
             return;
         }
@@ -2621,6 +2640,25 @@ public class TutorialIslandScript extends KspManagedScript
             return;
         }
 
+        // The normal blocking walkTo() can invoke bank detour comparison
+        // even for a 5-tile walk in the Tutorial Island instance, planning
+        // an impossible trip to Lumbridge and being canceled every tick.
+        // walkStep() uses Microbot's route planner but does not run its
+        // bank/cache/transport optimization or block the tutorial loop.
+        // Explicit tutorial gates and doors are handled by the stage logic.
+        if (TutAreas.contains(playerLocation) && TutAreas.contains(target))
+        {
+            Rs2Walker.walkStep(target, reach);
+            return;
+        }
+
+        // Never allow a mainland route while the tutorial is active.
+        if (TutAreas.contains(playerLocation))
+        {
+            debug("Tutorial Island refused nonlocal route | player={} target={}",
+                    playerLocation, target);
+            return;
+        }
         Rs2Walker.walkTo(target, reach);
     }
 
@@ -2655,6 +2693,60 @@ public class TutorialIslandScript extends KspManagedScript
     {
         pendingInteractionKey = key;
         pendingInteractionAtMs = System.currentTimeMillis();
+    }
+
+    /**
+     * Use an inventory item on the exact object obtained from the live
+     * Tutorial Island scene. Microbot's Rs2Inventory.useItemOnObject(...)
+     * goes through the tile-object CACHE after selecting the item: that
+     * cache can miss an otherwise visible tutorial furnace/range/anvil.
+     * The model click instead binds to the actual TileObject/WorldView.
+     * The selection is async: if it has not appeared yet, retry next tick.
+     */
+    private boolean useTutorialItemOnLiveObject(int itemId,
+            Rs2TileObjectModel object, String interactionKey)
+    {
+        if (object == null || !Rs2Inventory.hasItem(itemId)
+                || isTutorialInteractionPending(interactionKey))
+            return false;
+
+        if (!Rs2Inventory.isItemSelected())
+        {
+            if (!Rs2Inventory.use(itemId)) return false;
+            if (!Rs2Inventory.isItemSelected()) return false;
+        }
+
+        if (!object.click("")) return false;
+        markTutorialInteraction(interactionKey);
+        Microbot.log("[TutIsland] Live item-on-object dispatched | itemId="
+                + itemId + " objectId=" + object.getId()
+                + " tile=" + object.getWorldLocation()
+                + " progress=" + Microbot.getVarbitPlayerValue(281));
+        return true;
+    }
+
+    private void logTutorialInteractionPending(String purpose,
+            Rs2TileObjectModel object, int itemId)
+    {
+        long now = System.currentTimeMillis();
+        if (now - lastTutorialTransitionDiagnosticAtMs < 5_000L) return;
+        lastTutorialTransitionDiagnosticAtMs = now;
+        Microbot.log("[TutIsland] Waiting for live item-on-object action"
+                + " | purpose=" + purpose + " itemId=" + itemId
+                + " objectId=" + (object == null ? -1 : object.getId())
+                + " player=" + Rs2Player.getWorldLocation()
+                + " itemSelected=" + Rs2Inventory.isItemSelected()
+                + " progress=" + Microbot.getVarbitPlayerValue(281));
+    }
+
+    private void logMissingTutorialObject(String name, int expectedId)
+    {
+        long now = System.currentTimeMillis();
+        if (now - lastTutorialTransitionDiagnosticAtMs < 5_000L) return;
+        lastTutorialTransitionDiagnosticAtMs = now;
+        Microbot.log("[TutIsland] Live object missing | name=" + name
+                + " id=" + expectedId + " player=" + Rs2Player.getWorldLocation()
+                + " progress=" + Microbot.getVarbitPlayerValue(281));
     }
 
     private Rs2TileObjectModel tutorialObject(int id)

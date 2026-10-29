@@ -116,7 +116,7 @@ jobs:
           root = Path('release/kspaccountbuilder')
           tutorial = (root / 'tasks/tutorialisland/TutorialIslandScript.java').read_text()
           plugin = (root / 'KspAccountBuilderPlugin.java').read_text()
-          assert 'VERSION = "1.9.61"' in plugin
+          assert 'VERSION = "1.9.62"' in plugin
 
           mining = tutorial.split('private void miningGuide()', 1)[1].split('private void smeltTutorialBronze()', 1)[0]
           for state in (260, 270, 280, 290, 300, 310, 320, 330, 340, 350):
@@ -141,13 +141,50 @@ jobs:
 
           banker = tutorial.split('private void bankerGuide()', 1)[1].split('private void prayerGuide()', 1)[0]
           assert 'TUT_ISLAND_BANK_AREA.contains(object.getWorldLocation())' in banker
-          assert 'object.hasAction("Bank")' in banker
+          assert 'object.hasAction("Use") || object.hasAction("Bank")' in banker
+          assert 'String boothAction = tutorialBooth.hasAction("Use") ? "Use" : "Bank";' in banker
           assert 'ObjectID.BANK_BOOTH_10083' in banker
           assert 'Rs2Bank.openBank()' not in banker and 'Rs2Bank.walkToBank' not in banker
           assert 'ksp_tutorial_reject_mainland_bank_route' in tutorial
           assert 'ksp_tutorial_game_tick_mainland_route_rejected' in plugin
           assert 'TutAreas.contains(destination)' in plugin
           print('PASS: mining progress/live ore targeting, ranged rat attack and Tutorial Island banker-only routing')
+
+      - name: Verify Tutorial Island live item targets, bank Use and bounded local walker
+        shell: python
+        run: |
+          from pathlib import Path
+          src = Path('release/kspaccountbuilder/tasks/tutorialisland/TutorialIslandScript.java').read_text()
+          cook = src.split('private void cookingGuide()', 1)[1].split('private void questGuide()', 1)[0]
+          mining = src.split('private void smeltTutorialBronze()', 1)[1].split('private void combatGuide()', 1)[0]
+          combat = src.split('private void combatGuide()', 1)[1].split('private void equipTutorialDagger()', 1)[0]
+          ranged = src.split('private void attackRatWithRange()', 1)[1].split('private void bankerGuide()', 1)[0]
+          banker = src.split('private void bankerGuide()', 1)[1].split('private void prayerGuide()', 1)[0]
+          local = src.split('private void walkTutorialLocal(WorldPoint target, int reach)', 1)[1].split('private boolean openTutorialPassage(', 1)[0]
+          item_use = src.split('private boolean useTutorialItemOnLiveObject(', 1)[1].split('private void logTutorialInteractionPending(', 1)[0]
+          assert 'useTutorialItemOnLiveObject(ItemID.BREAD_DOUGH, range,' in cook
+          assert 'range = tutorialObject("Range")' in cook
+          assert 'useTutorialItemOnLiveObject(ore, furnace,' in mining
+          assert 'useTutorialItemOnLiveObject(ItemID.BRONZE_BAR, anvil,' in mining
+          assert 'furnace = tutorialObject("Furnace")' in mining
+          assert 'Rs2Inventory.useItemOnObject(' not in cook + mining
+          assert 'Rs2Inventory.use(itemId)' in item_use
+          assert 'Rs2Inventory.isItemSelected()' in item_use
+          assert 'object.click("")' in item_use
+          assert 'markTutorialInteraction(interactionKey)' in item_use
+          assert 'case 480:' in combat
+          assert 'attackRatWithRange();' in combat.split('case 480:', 1)[1].split('case 490:', 1)[0]
+          assert 'if (attackNearestRat())' in ranged
+          assert 'object.hasAction("Use") || object.hasAction("Bank")' in banker
+          assert 'tutorialBooth.hasAction("Use") ? "Use" : "Bank"' in banker
+          assert 'ObjectID.BANK_BOOTH_10083' in banker
+          assert 'TUT_ISLAND_BANK_AREA.contains(object.getWorldLocation())' in banker
+          assert 'Rs2Bank.openBank()' not in banker and 'Rs2Bank.walkToBank' not in banker
+          assert 'Rs2Walker.walkStep(target, reach);' in local
+          assert 'if (TutAreas.contains(playerLocation) && TutAreas.contains(target))' in local
+          assert 'if (TutAreas.contains(playerLocation))' in local
+          assert local.index('Rs2Walker.walkStep(target, reach);') < local.index('Rs2Walker.walkTo(target, reach);')
+          print('PASS: local Microbot step-walking, selected live objects, 480 ranged attack, Tutorial booth Use')
 
       - name: Verify Tutorial Island prayer/magic exits and regular-account dialogue
         shell: python
