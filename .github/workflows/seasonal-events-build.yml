@@ -118,7 +118,7 @@ jobs:
           assert 'pendingLanternConfirmed(player)' in search
           assert 'configManager.setConfiguration(GROUP, PENDING_LANTERN_KEY' in search
 
-          assert 'inspectStarterDialogue()' in code
+          assert 'inspectStarterDialogue(samples);' in code
           assert 'KspHalloweenStarterState.classify(raw)' in code
           assert 'confirmAllLanterns(' in code
           assert 'LANTERNS_VERIFIED_KEY' in code
@@ -362,7 +362,7 @@ jobs:
           age = code.split('private void observeTreaterAges()', 1)[1].split('private TreaterAge classifyTreater(', 1)[0]
           scout = code.split('private boolean scoutVisibleTreaters(', 1)[1].split('private void spookChildren(', 1)[0]
           child = code.split('private void spookChildren(', 1)[1].split('private void solveChemist(', 1)[0]
-          report = code.split('private void inspectStarterDialogue()', 1)[1].split('private Stage stageForAdultCandyObjective()', 1)[0]
+          report = code.split('private void inspectStarterDialogue(List<String> dialogueTexts)', 1)[1].split('private Stage stageForAdultCandyObjective()', 1)[0]
           change = code.split('private void change(Stage next, String message)', 1)[1].split('private void stopForReview(', 1)[0]
 
           assert 'if (confirmedChildGroup != TreaterGroup.UNKNOWN) return;' in age
