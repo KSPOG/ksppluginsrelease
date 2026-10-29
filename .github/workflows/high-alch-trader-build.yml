@@ -52,7 +52,7 @@ jobs:
           mule = (root / 'KspHighAlchMuleService.java').read_text()
           access = (root / 'KspHighAlchGeAccess.java').read_text()
           plugin = (root / 'KspF2PHighAlchTraderPlugin.java').read_text()
-          assert 'VERSION = "0.3.8"' in plugin
+          assert 'VERSION = "0.3.9"' in plugin
           for label, code in [('trader', trader), ('reserve', reserve), ('mule', mule)]:
               assert 'KspVerifiedBank' not in code, label + ' still accesses generic bank booth'
               assert 'Rs2Bank.openBank()' not in code, label + ' still uses generic bank scan'
@@ -68,6 +68,35 @@ jobs:
           assert 'new NewMenuEntry()' in access and 'Microbot.doInvoke(entry' in access
           assert 'MIN_X = 3153' in access and 'MAX_Y = 3502' in access
           print('PASS: High Alch GE-only bankers, clerks, routes, reserve guard and mule')
+
+      - name: Verify GE clerk readiness, invalid item filtering and bounded quantity failures
+        shell: python
+        run: |
+          from pathlib import Path
+          root = Path('release/kspf2phighalchtrader')
+          access = (root / 'KspHighAlchGeAccess.java').read_text()
+          script = (root / 'KspF2PHighAlchTraderScript.java').read_text()
+          catalog = (root / 'F2PAlchCatalog.java').read_text()
+          assert 'Rs2Inventory.isItemSelected()' in access
+          assert 'Microbot.getMouse().click();' in access
+          assert 'lastDiagnostic = inspection[0]' in access
+          assert 'npc.getTransformedComposition()' in access
+          assert 'NPC_ACTIONS[selectedOption].getId()' in access
+          assert '.setWorldViewId(view.getId()).actor(selected)' in access
+          assert 'Rs2Camera.turnTo(npc)' in access
+          assert 'return isInGrandExchange(player) && isInGrandExchange(actor)' in access
+          assert 'lastDiagnostic()' in script
+          assert 'GE Clerk interaction not confirmed' in script
+          assert 'Rs2Bank.isBankPinWidgetVisible()' in script
+          assert 'GE quantity/offer setup failed 3 times' in script
+          assert 'offerSetupFailures >= 3' in script
+          assert 'nextOfferSetupAttemptAt' in script
+          assert 'pendingQuantity + " x "' in script
+          assert 'UNOBTAINABLE_IDS = Set.of(31454)' in catalog
+          assert 'result.removeAll(UNOBTAINABLE_IDS)' in catalog
+          assert 'availableF2p.removeAll(UNOBTAINABLE_IDS)' in catalog
+          assert 'availableMembers.removeAll(UNOBTAINABLE_IDS)' in catalog
+          print('PASS: live GE clerk action, item deselection, bounded offer setup and item 31454 exclusion')
 
       - name: Install plugin and shared KSP sources
         shell: bash
