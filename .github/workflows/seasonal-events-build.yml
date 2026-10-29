@@ -55,7 +55,7 @@ jobs:
           panel=(root/'KspSeasonalEventsPanel.java').read_text()
           overlay=(root/'KspSeasonalEventsOverlay.java').read_text()
           event=(root/'KspSeasonalEvent.java').read_text()
-          assert 'VERSION = "0.2.16"' in plugin
+          assert 'VERSION = "0.2.17"' in plugin
           assert 'KSP + "Seasonal Events"' in plugin
           assert 'kspwillowchopper' not in plugin and 'kspwillowchopper' not in script
           assert 'HALLOWEEN("Halloween")' in event
@@ -387,12 +387,12 @@ jobs:
               assert 'getChildSpookAttempts()' in source
               assert 'getChildSpookCheckpoint()' in source
               assert 'isChildObjectiveConfirmed()' in source
-          assert 'Child Spook attempts' in overlay
+          assert 'Child scares verified' in overlay
           assert 'Child objective' in overlay
-          assert 'Child Spook attempts' in panel
+          assert 'Child scares verified' in panel
           assert 'Not verified' in overlay and 'Confirmed' in overlay
           assert 'Not verified' in panel and 'Confirmed' in panel
-          print('PASS: child Spook attempts and separate confirmed quest objective in both UIs')
+          print('PASS: scene-verified child scares and separate server quest objective in both UIs')
 
       - name: Verify 2026 child NPC IDs and safe scene-guided Spook
         shell: python
@@ -450,6 +450,49 @@ jobs:
           assert 'givenAdultIds.removeIf(id -> !isAdultTreaterId(id))' in start
           assert 'configManager.unsetConfiguration(GROUP, LEGACY_TREATER_CHILD_GROUP_KEY)' in start
           print('PASS: known child and adult ID groups, action-guarded Spook, saved-state migration, bounded NPC-guided search')
+
+      - name: Verify exact live scene child Spook receipt and no premature reports
+        shell: python
+        run: |
+          from pathlib import Path
+          script = Path('release/kspseasonalevents/KspHalloween2026Script.java').read_text()
+          overlay = Path('release/kspseasonalevents/KspSeasonalEventsOverlay.java').read_text()
+          panel = Path('release/kspseasonalevents/KspSeasonalEventsPanel.java').read_text()
+          start = script.split('public synchronized boolean start(',1)[1].split('private void restoreNpcIds(',1)[0]
+          observer = script.split('private ChildSceneStatus pendingChildLiveSceneStatus(',1)[1].split('private boolean verifyPendingChildSpook(',1)[0]
+          verify = script.split('private boolean verifyPendingChildSpook(',1)[1].split('private void spookChildren(',1)[0]
+          spook = script.split('private void spookChildren(',1)[1].split('private void solveChemist(',1)[0]
+          assert 'halloweenChildNpcIdsConfirmed' in script
+          assert 'LEGACY_SPOOKED_CHILD_ATTEMPTS_KEY = "halloweenChildNpcIdsAttempted"' in script
+          assert 'configManager.unsetConfiguration(GROUP, LEGACY_SPOOKED_CHILD_ATTEMPTS_KEY)' in start
+          assert start.index('configManager.unsetConfiguration(GROUP, LEGACY_SPOOKED_CHILD_ATTEMPTS_KEY)') < start.index('restoreNpcIds(SPOOKED_CHILD_IDS_KEY, spookedChildren)')
+          assert 'pendingChildId = id;' in spook
+          assert 'pendingChildIndex = index;' in spook
+          assert 'pendingChildTile = tile;' in spook
+          assert 'pendingChildSpookAt = now;' in spook
+          assert 'Rs2Npc.interact(child, "Spook")' in spook
+          assert 'spookedChildren.add(' not in spook
+          assert 'persistNpcIds(SPOOKED_CHILD_IDS_KEY, spookedChildren)' not in spook
+          assert spook.index('if (verifyPendingChildSpook(player)) return;') < spook.index('if (spookedChildren.size() >= CHILD_REPORT_CHECKPOINT)')
+          assert 'Five child NPC disappearances confirmed by RuneLite live scene' in spook
+          assert 'change(Stage.REPORT_CHILDREN,' in spook
+          assert 'No additional child Spook targets' not in spook
+          assert 'getTopLevelWorldView().npcs()' in observer
+          assert 'npc.getIndex() == pendingChildIndex' in observer
+          assert 'player.distanceTo(pendingChildTile) > 10' in observer
+          assert 'ChildSceneStatus.UNKNOWN' in observer
+          assert 'return ChildSceneStatus.ABSENT;' in observer
+          assert 'CHILD_SPOOK_ABSENCE_STABLE_MS' in verify
+          assert 'ChildSceneStatus.ABSENT' in verify
+          assert 'spookedChildren.add(confirmedId);' in verify
+          assert 'persistNpcIds(SPOOKED_CHILD_IDS_KEY, spookedChildren);' in verify
+          assert 'CHILD_SPOOK_CONFIRM_TIMEOUT_MS' in verify
+          assert 'childSpookCooldownUntil.put(failedId,' in verify
+          assert 'LIVE SCENE CONFIRMED' in verify
+          assert 'return false;' in verify
+          assert 'Child scares verified' in overlay
+          assert 'Child scares verified' in panel
+          print('PASS: each child is counted only after exact live NPC disappearance, stable in-scene observation, no report at partial attempts')
 
       - name: Test wiki-confirmed Chemist dialogue routing
         shell: bash
