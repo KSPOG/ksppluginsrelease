@@ -901,7 +901,12 @@ public class KspF2PHighAlchTraderScript extends KspBreakAwareScript {
         GrandExchangeSlots placedSlot = geInteraction.placeBuyOffer(
                 pendingItemName, pendingItemId, pendingPrice, pendingQuantity);
         if (placedSlot == null) {
-            status = "GE offer did not reach a live slot: " + pendingItemName;
+            status = "GE offer not submitted: " + pendingQuantity + " x "
+                    + pendingItemName + " (id=" + pendingItemId
+                    + ", price=" + pendingPrice + ", overview="
+                    + Rs2GrandExchange.isOpen() + ", offerScreen="
+                    + Rs2GrandExchange.isOfferScreenOpen() + ")";
+            log.warn("High Alch Trader offer setup failed | {}", status);
             return;
         }
 
@@ -1622,11 +1627,29 @@ public class KspF2PHighAlchTraderScript extends KspBreakAwareScript {
         nextGeTravelAttemptAt = now + GE_TRAVEL_RETRY_MS;
         status = "Opening nearby Grand Exchange Clerk";
         if (!KspHighAlchGeAccess.openLocalExchange()) {
-            status = "Waiting for GE Clerk in range (no offsite walk)";
+            status = "GE Clerk: " + KspHighAlchGeAccess.lastDiagnostic();
+            log.warn("High Alch Trader could not open GE | {}", status);
             return false;
         }
-        return sleepUntil(Rs2GrandExchange::isOpen, 3_000)
-                && !Rs2GrandExchange.isOfferScreenOpen();
+        if (Rs2Bank.isBankPinWidgetVisible()) {
+            status = "GE is requesting bank PIN; unlock before continuing";
+            log.warn("High Alch Trader GE bank PIN prompt detected");
+            return false;
+        }
+        boolean opened = sleepUntil(Rs2GrandExchange::isOpen, 4_000);
+        if (!opened) {
+            status = "GE Clerk interaction not confirmed: "
+                    + KspHighAlchGeAccess.lastDiagnostic();
+            log.warn("High Alch Trader GE overview did not appear | {}", status);
+            return false;
+        }
+        if (Rs2GrandExchange.isOfferScreenOpen()) {
+            Rs2GrandExchange.backToOverview();
+            status = "Returning to GE overview";
+            return false;
+        }
+        status = "Grand Exchange opened";
+        return true;
     }
 
     private boolean isExpectedInterruption(Throwable throwable) {
