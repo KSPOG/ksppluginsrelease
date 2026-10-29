@@ -1297,7 +1297,10 @@ public class TutorialIslandScript extends KspManagedScript
     private void interactWithTutorialMiningRock(Rs2TileObjectModel rock, String action)
     {
         if (rock == null || !rock.hasAction(action)) return;
-        if (!prepareTutorialObjectInteraction(rock, 4) || !readyForAction()) return;
+        // Direct scene-object interaction lets the client approach a nearby
+        // rock itself; do not invoke WebWalker, which may bootstrap a
+        // mainland bank route inside the tutorial mining instance.
+        if (!readyForAction()) return;
         if (rock.click(action))
         {
             markTutorialInteraction("mining:" + rock.getId() + ":" + action);
@@ -1339,8 +1342,15 @@ public class TutorialIslandScript extends KspManagedScript
         if (Rs2Inventory.contains("Bronze bar") || Rs2Player.isAnimating()) return;
         Rs2TileObjectModel furnace = tutorialObject(ObjectID.FURNACE_10082);
         if (furnace == null) furnace = tutorialObject("Furnace");
-        if (furnace == null) logMissingTutorialObject("Furnace", ObjectID.FURNACE_10082);
-        if (!prepareTutorialObjectInteraction(furnace, 4) || !readyForAction()) return;
+        if (furnace == null)
+        {
+            logMissingTutorialObject("Furnace", ObjectID.FURNACE_10082);
+            return;
+        }
+        // Use the live object from the underground scene directly. Calling
+        // prepareTutorialObjectInteraction() here invokes walkTo(), whose
+        // short-distance bank comparison attempts to route to Lumbridge.
+        if (!readyForAction()) return;
 
         // The tutorial furnace exposes a direct live "Use" interaction.
         // Prefer it over selecting ore: selecting inventory items can race
