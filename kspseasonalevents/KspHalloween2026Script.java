@@ -1504,11 +1504,24 @@ public final class KspHalloween2026Script extends Script {
             status = "Locating range in Angel/Henja's house or Chemist fireplace";
             return;
         }
+        if (pendingCook) {
+            if (System.currentTimeMillis() - pendingCookAt < WORLD_ACTION_STALL_TIMEOUT_MS) {
+                status = "Waiting for sugar to become molten sugar";
+                return;
+            }
+            pendingCook = false;
+            if (++pendingCookFailures >= MAX_UNCONFIRMED_ACTIONS) {
+                stopForReview("Cooking sugar failed without inventory change after "
+                        + pendingCookFailures + " attempts");
+                return;
+            }
+        }
         net.runelite.client.plugins.microbot.util.inventory.Rs2ItemModel sugar =
                 Rs2Inventory.get("Sugar", true);
-        if (sugar != null && ready()
-                && Rs2Inventory.useItemOnObject(sugar.getId(), surface.getId())) {
-            acted("Cooking sugar at " + surface.getName());
+        if (sugar != null && Rs2Inventory.useItemOnObject(sugar.getId(), surface.getId())) {
+            pendingCook = true;
+            pendingCookAt = System.currentTimeMillis();
+            acted("Cooking sugar at " + surface.getName() + "; awaiting molten sugar");
         }
     }
 
@@ -1527,11 +1540,34 @@ public final class KspHalloween2026Script extends Script {
                         && (o.hasActionContaining("Take") || o.hasActionContaining("Search")
                             || o.hasActionContaining("Collect")))
                 .nearestOnClientThread();
-        if (crate != null && ready()) {
+        int count = Rs2Inventory.count("Old onion");
+        if (pendingOldOnionCount >= 0) {
+            if (count > pendingOldOnionCount) {
+                log.info("Halloween old-onion receipt confirmed | before={} after={}",
+                        pendingOldOnionCount, count);
+                pendingOldOnionCount = -1;
+                pendingOldOnionFailures = 0;
+            } else if (System.currentTimeMillis() - pendingOldOnionAt
+                    < WORLD_ACTION_STALL_TIMEOUT_MS) {
+                status = "Waiting for old onion to appear in inventory";
+                return;
+            } else {
+                pendingOldOnionCount = -1;
+                if (++pendingOldOnionFailures >= MAX_UNCONFIRMED_ACTIONS) {
+                    stopForReview("Old onion crate clicked without inventory receipt");
+                    return;
+                }
+            }
+        }
+        if (crate != null) {
             String action = crate.findAction("Take");
             if (action == null) action = crate.findAction("Search");
             if (action == null) action = crate.findAction("Collect");
-            if (action != null && crate.click(action)) acted("Collecting OLD onion (not regular onion)");
+            if (action != null && crate.click(action)) {
+                pendingOldOnionCount = count;
+                pendingOldOnionAt = System.currentTimeMillis();
+                acted("Collecting OLD onion (not regular onion)");
+            }
         } else {
             status = "Locating the OLD onion crate behind Angel/Henja's house";
         }
@@ -1552,8 +1588,29 @@ public final class KspHalloween2026Script extends Script {
             change(Stage.COOK_SUGAR, "Need more molten sugar");
             return;
         }
-        if (ready() && Rs2Inventory.combine("Molten sugar", "Old onion"))
+        if (pendingCoatCandyCount >= 0) {
+            if (candy > pendingCoatCandyCount) {
+                log.info("Halloween candy onion created | before={} after={}",
+                        pendingCoatCandyCount, candy);
+                pendingCoatCandyCount = -1;
+                pendingCoatFailures = 0;
+            } else if (System.currentTimeMillis() - pendingCoatAt
+                    < WORLD_ACTION_STALL_TIMEOUT_MS) {
+                status = "Waiting for candy onion inventory receipt";
+                return;
+            } else {
+                pendingCoatCandyCount = -1;
+                if (++pendingCoatFailures >= MAX_UNCONFIRMED_ACTIONS) {
+                    stopForReview("Coating onions did not create candy onions");
+                    return;
+                }
+            }
+        }
+        if (Rs2Inventory.combine("Molten sugar", "Old onion")) {
+            pendingCoatCandyCount = candy;
+            pendingCoatAt = System.currentTimeMillis();
             acted("Coating old onion with molten sugar (" + candy + "/5 prepared)");
+        }
     }
 
     private void giveCandy(WorldPoint player) {
@@ -1622,10 +1679,6 @@ public final class KspHalloween2026Script extends Script {
         lastActionAt = System.currentTimeMillis();
         status = message;
         log.info("Halloween action | stage={} | {}", stage, message);
-    }
-
-    private boolean ready() {
-        return System.currentTimeMillis() - lastActionAt >= ACTION_GAP;
     }
 
     private boolean canDispatchDialogue(String signature) {
