@@ -1385,7 +1385,7 @@ public class TutorialIslandScript extends KspManagedScript
                 attackRatWithRange();
                 return;
             case 500:
-                if (walkerFirstPassage("mining-ladder-up", COMBAT_INSTRUCTOR_TILE, 4))
+                if (walkerFirstPassage("mining-ladder-up", new WorldPoint(COMBAT_INSTRUCTOR_AREA.getX() + 2, COMBAT_INSTRUCTOR_AREA.getY() + 2, COMBAT_INSTRUCTOR_AREA.getPlane()), 4))
                     clickTutorialObject("Ladder", "Climb-up", 4);
                 return;
             default:
