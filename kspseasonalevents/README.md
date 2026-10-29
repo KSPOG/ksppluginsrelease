@@ -1,4 +1,4 @@
-# KSP Seasonal Events v0.2.7
+# KSP Seasonal Events v0.2.8
 
 A **standalone Microbot plugin**, independent of Chopper, with its own
 config, navigation panel, Start / Pause / Resume / Stop / Reset progress,
@@ -33,6 +33,43 @@ may require manual review rather than repeated speculative clicks. The
 plugin logs stage transitions, visible dialogue options when unknown, NPC
 IDs and world tiles of successfully targeted event objects. No guessed
 NPC/object IDs are treated as authoritative.
+
+## Angel/Henja dialogue is authoritative (0.2.8)
+
+Global 2026 event state is now resolved from the dialogue produced after
+talking to **Angel or Henja**. Saved stages, overlay counters, inventory
+items and successful click dispatches remain useful recovery/operation data,
+but they no longer decide which event objective is active.
+
+On every non-completed plugin start the script first returns to Angel/Henja
+and reads their dialogue. The shared starter-state classifier currently
+recognises these objective families:
+
+- smash remaining jack-o'-lanterns;
+- obtain/equip a Halloween costume and scare child trick-or-treaters;
+- solve the Chemist / molten sugar / old onion / candy onion objective;
+- final reward dialogue;
+- explicit event completion.
+
+Once an objective is known, inventory state may select the appropriate
+**subtask** (for example cook sugar versus collect old onions), but it does
+not override the objective supplied by Angel/Henja.
+
+Local 8/8 lantern acknowledgements now trigger a return to the starter for
+verification instead of completing the lantern objective by themselves.
+Likewise, five local adult-delivery acknowledgements lead to a final starter
+conversation; if Angel/Henja still describes the adult-candy objective,
+the local 5/5 bookkeeping is treated as stale and safely reopened.
+
+The old **Confirm all 8 lanterns smashed** override has been removed.
+The side panel now provides **Recheck state with Angel / Henja**, which
+changes no counters and simply requests a fresh authoritative dialogue
+sync. Unknown dialogue stops for review rather than falling back to a saved
+stage.
+
+The final Vampyre reward item is supporting evidence only. If a completion
+game message was missed, the script talks to Angel/Henja again instead of
+marking the event complete from inventory alone.
 
 ## NPC-guided child searching and client-thread load (0.2.7)
 
