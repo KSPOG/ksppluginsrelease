@@ -4,6 +4,7 @@ import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.coords.WorldArea;
 import net.runelite.api.widgets.Widget;
 import net.runelite.api.widgets.WidgetInfo;
+import net.runelite.api.gameval.InterfaceID;
 import net.runelite.api.widgets.WidgetInfo;
 import net.runelite.api.coords.WorldPoint;
 import net.runelite.client.config.ConfigManager;
@@ -910,22 +911,54 @@ public final class KspHalloween2026Script extends Script {
     }
 
     private void inspectStarterDialogue() {
-        String raw = Rs2Dialogue.hasSelectAnOption()
-                ? Rs2Dialogue.getQuestion() : Rs2Dialogue.getDialogueText();
-        if (raw == null || raw.isBlank()) return;
+        List<String> dialogueTexts = starterDialogueSamples();
+        if (dialogueTexts.isEmpty()) {
+            if (System.currentTimeMillis() - lastDiagnosticAt > 5_000L) {
+                lastDiagnosticAt = System.currentTimeMillis();
+                log.warn("Halloween Angel/Henja dialogue widget is visible but no text"
+                        + " could be read | stage={} continue={} choices={}",
+                        stage, Rs2Dialogue.hasContinue(), Rs2Dialogue.hasSelectAnOption());
+            }
+            return; // A visible menu is not itself proof of dialogue content.
+        }
 
-        lastStarterDialogue = raw.replaceAll("<[^>]*>", " ").replaceAll("\\s+", " ").trim();
+        pendingStarterDialogueSeen = true;
+        pendingStarterLastDialogueAt = System.currentTimeMillis();
+        String observed = String.join(" | ", dialogueTexts);
+        if (!observed.equals(lastStarterObservedWidgetText)) {
+            lastStarterObservedWidgetText = observed;
+            log.info("Halloween Angel/Henja dialogue evidence | stage={} text={}",
+                    stage, observed);
+        }
+
+        String raw = null;
         KspHalloweenStarterState.Objective objective =
-                KspHalloweenStarterState.classify(raw);
+                KspHalloweenStarterState.Objective.UNKNOWN;
+        for (String text : dialogueTexts) {
+            // Prefer explicit statements on individual dialogue widgets.
+            KspHalloweenStarterState.Objective classified =
+                    KspHalloweenStarterState.classify(text);
+            if (classified != KspHalloweenStarterState.Objective.UNKNOWN) {
+                raw = text;
+                objective = classified;
+                break;
+            }
+        }
         if (objective == KspHalloweenStarterState.Objective.UNKNOWN) {
+            // An event sentence can wrap across several chatbox widget fields.
+            raw = String.join(" ", dialogueTexts);
+            objective = KspHalloweenStarterState.classify(raw);
+        }
+        if (objective == KspHalloweenStarterState.Objective.UNKNOWN) {
+            lastStarterDialogue = observed;
             if (System.currentTimeMillis() - lastDiagnosticAt > 5_000L) {
                 lastDiagnosticAt = System.currentTimeMillis();
                 log.info("Halloween Angel/Henja state dialogue not yet classified"
-                        + " | stage={} text={}", stage, raw);
+                        + " | stage={} text={}", stage, observed);
             }
             return;
         }
-
+        lastStarterDialogue = raw;
         Stage resolved;
         switch (objective) {
             case SMASH_LANTERNS:
@@ -1012,6 +1045,84 @@ public final class KspHalloween2026Script extends Script {
         pendingStarterNext = resolved;
         pendingStarterDialogueSeen = true;
         pendingStarterLastDialogueAt = System.currentTimeMillis();
+    }
+
+    /**
+     * Read the actual RuneLite dialogue widgets, rather than relying on
+     * Rs2Dialogue.getDialogueText(): that helper checks only three legacy
+     * child IDs and can return empty for a visible NPC dialogue.
+     *
+     * Only examine currently visible dialogue groups while a starter
+     * conversation initiated by this script is active.
+     */
+    private List<String> starterDialogueSamples() {
+        List<String> captured = Microbot.getClientThread().runOnClientThreadOptional(() -> {
+            List<String> result = new ArrayList<>();
+            int[] groups = {
+                InterfaceID.DIALOG_NPC,
+                InterfaceID.DIALOG_PLAYER,
+                InterfaceID.DIALOG_SPRITE,
+                InterfaceID.DIALOG_DOUBLE_SPRITE,
+                InterfaceID.DIALOG_OPTION
+            };
+            for (int group : groups) {
+                collectVisibleDialogueText(Microbot.getClient().getWidget(group, 0),
+                        result, 0);
+            }
+
+            // Some dialogue layouts have no useful group-0 root.
+            collectVisibleDialogueText(Microbot.getClient().getWidget(
+                    WidgetInfo.DIALOG_NPC_TEXT), result, 0);
+            collectVisibleDialogueText(Microbot.getClient().getWidget(
+                    WidgetInfo.DIALOG_PLAYER_TEXT), result, 0);
+            collectVisibleDialogueText(Microbot.getClient().getWidget(
+                    WidgetInfo.DIALOG_SPRITE_TEXT), result, 0);
+            collectVisibleDialogueText(Microbot.getClient().getWidget(
+                    WidgetInfo.DIALOG_DOUBLE_SPRITE_TEXT), result, 0);
+            collectVisibleDialogueText(Microbot.getClient().getWidget(
+                    WidgetInfo.DIALOG_OPTION_OPTIONS), result, 0);
+            return result;
+        }).orElse(Collections.emptyList());
+
+        // Keep Microbot helpers as additional sources, never the only source.
+        List<String> all = new ArrayList<>(captured);
+        addStarterDialogueText(all, Rs2Dialogue.getDialogueText());
+        if (Rs2Dialogue.hasSelectAnOption())
+            addStarterDialogueText(all, Rs2Dialogue.getQuestion());
+        return all;
+    }
+
+    private static void collectVisibleDialogueText(Widget widget,
+                                                    List<String> output, int depth) {
+        if (widget == null || widget.isHidden() || depth > 3
+                || output.size() >= 40) return;
+        addStarterDialogueText(output, widget.getText());
+        collectDialogueChildren(widget.getStaticChildren(), output, depth + 1);
+        collectDialogueChildren(widget.getDynamicChildren(), output, depth + 1);
+        collectDialogueChildren(widget.getNestedChildren(), output, depth + 1);
+    }
+
+    private static void collectDialogueChildren(Widget[] children,
+                                                List<String> output, int depth) {
+        if (children == null) return;
+        for (Widget child : children) {
+            if (output.size() >= 40) break;
+            collectVisibleDialogueText(child, output, depth);
+        }
+    }
+
+    private static void addStarterDialogueText(List<String> output, String raw) {
+        if (raw == null) return;
+        String text = raw.replaceAll("(?i)<br\\s*/?>", " ")
+                .replaceAll("<[^>]*>", " ")
+                .replace("&nbsp;", " ")
+                .replaceAll("\\s+", " ")
+                .trim();
+        if (text.isEmpty() || text.equalsIgnoreCase("Click here to continue")
+                || text.equalsIgnoreCase("Please wait...")
+                || text.equalsIgnoreCase("Select an Option")
+                || output.contains(text)) return;
+        output.add(text);
     }
 
     private Stage stageForAdultCandyObjective() {
