@@ -1320,13 +1320,12 @@ public final class KspHalloween2026Script extends Script {
     }
 
     private Rs2TileObjectModel cookingSurface() {
+        // Sugar is USED ON the range/fireplace; the object itself need not
+        // advertise a Cook or Use context-menu action.
         return Microbot.getRs2TileObjectCache().query().fromWorldView()
                 .where(o -> o != null && o.getName() != null
                         && (o.getName().equalsIgnoreCase("Range")
-                            || o.getName().equalsIgnoreCase("Fireplace"))
-                        // Sugar is USED ON the range/fireplace; the object
-                        // itself does not have to advertise Cook/Use actions.
-                        )
+                            || o.getName().equalsIgnoreCase("Fireplace")))
                 .nearestOnClientThread();
     }
 
