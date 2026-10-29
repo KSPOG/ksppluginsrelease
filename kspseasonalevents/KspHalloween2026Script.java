@@ -88,7 +88,7 @@ public final class KspHalloween2026Script extends Script {
         new WorldPoint(2970, 3193, 0), new WorldPoint(2948, 3198, 0),
         new WorldPoint(2941, 3230, 0), new WorldPoint(2970, 3250, 0)
     };
-    private static final long ACTION_GAP = 1_400L; // NPC/world actions
+    private static final long ACTION_GAP = 900L; // NPC/world actions; live-state confirmation gates retries
     private static final long DIALOGUE_GAP_MS = 320L;
     private static final long CHEMIST_OPTION_RETRY_MS = 900L;
     private static final long WALK_RETRY = 10_000L;
