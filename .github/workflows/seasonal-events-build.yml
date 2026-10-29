@@ -397,8 +397,8 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p /tmp/ksp-halloween-chemist-test
-          javac -d /tmp/ksp-halloween-chemist-test \\
-            release/kspseasonalevents/KspHalloweenChemistDialogue.java \\
+          javac -d /tmp/ksp-halloween-chemist-test \
+            release/kspseasonalevents/KspHalloweenChemistDialogue.java \
             release/.github/tests/seasonal/KspHalloweenChemistDialogueTest.java
           java -cp /tmp/ksp-halloween-chemist-test \\
             net.runelite.client.plugins.microbot.kspseasonalevents.KspHalloweenChemistDialogueTest
