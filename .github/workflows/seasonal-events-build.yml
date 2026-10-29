@@ -85,7 +85,8 @@ jobs:
           assert 'Rs2Inventory.combine("Molten sugar", oldItemName)' in script
           assert 'Rs2Inventory.useItemOnNpc' in script
           assert 'adultsGiven >= 5' in script
-          assert 'Vampyre costume top' in script
+          assert 'EVENT_COMPLETE_WIDGET_ID' in script
+          assert 'equalsIgnoreCase("Event complete!")' in script
           assert 'configManager.setConfiguration(GROUP, STAGE_KEY' in script
           assert 'configManager.setConfiguration(GROUP, LANTERNS_KEY' in script
           assert 'configManager.setConfiguration(GROUP, ADULTS_KEY' in script
