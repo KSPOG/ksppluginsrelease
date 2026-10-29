@@ -65,7 +65,7 @@ public final class KspHalloween2026Script extends Script {
     // Five verified child attempts trigger a report checkpoint, not success.
     private static final int CHILD_REPORT_CHECKPOINT = 5;
     private static final int MAX_CHILD_NPC_SCOUT_STOPS = 4;
-    private static final long CHILD_SCENE_SETTLE_MS = 2_000L;
+    // Scene readiness and NPC movement are observed directly; no settle timer.
     private static final String TREATER_CHILD_GROUP_KEY = "halloweenConfirmedChildNpcGroup";
     // 2026 client logs show two groups of five NPC definition IDs. The
     // groups are NOT assigned to children or adults without live evidence.
@@ -394,10 +394,8 @@ public final class KspHalloween2026Script extends Script {
         // resume a preselected stage just because their dialogue closed.
         if (starterConversationActive) {
             if (pendingStarterDialogueSeen) {
-                if (System.currentTimeMillis() - pendingStarterLastDialogueAt < 1_500L) {
-                    status = "Finishing Angel / Henja conversation";
-                    return;
-                }
+                // Dialogue is no longer visible, so resolve the last
+                // observed authoritative objective without a sleep.
                 if (pendingStarterNext == null) {
                     starterConversationActive = false;
                     stopForReview("Angel/Henja dialogue did not identify a known Halloween objective;"
@@ -1467,18 +1465,11 @@ public final class KspHalloween2026Script extends Script {
         // NPC scene updates may lag behind a movement or Spook action.
         // Give the scene time to settle before initiating any new route.
         long now = System.currentTimeMillis();
-        if (childNoTargetSince == 0L) {
-            childNoTargetSince = now;
-            status = "Checking nearby child trick-or-treaters ("
-                    + spookedChildren.size() + "/" + CHILD_REPORT_CHECKPOINT
-                    + " Spook attempts)";
+        if (Rs2Player.isMoving()) {
+            status = "Waiting for movement to finish before checking child NPCs";
             return;
         }
-        if (Rs2Player.isMoving() || now - childNoTargetSince < CHILD_SCENE_SETTLE_MS) {
-            status = "Waiting for visible child NPCs ("
-                    + spookedChildren.size() + "/" + CHILD_REPORT_CHECKPOINT + ")";
-            return;
-        }
+        if (childNoTargetSince == 0L) childNoTargetSince = now;
 
         if (scoutVisibleTreaters(player, visibleTreaters)) return;
 
@@ -1537,6 +1528,11 @@ public final class KspHalloween2026Script extends Script {
     private void cookSugar(WorldPoint player) {
         if (Rs2Inventory.hasItem("Molten sugar")) {
             change(Stage.COLLECT_ONIONS, "Molten sugar ready");
+            return;
+        }
+        if (pendingCook && System.currentTimeMillis() - pendingCookAt
+                < WORLD_ACTION_STALL_TIMEOUT_MS) {
+            status = "Waiting for sugar-to-molten-sugar inventory transition";
             return;
         }
         if (!Rs2Inventory.hasItem("Sugar", true)) {
@@ -1630,14 +1626,8 @@ public final class KspHalloween2026Script extends Script {
             change(Stage.GIVE_CANDY, "Five candy onions ready for adults");
             return;
         }
-        if (old <= 0) {
-            change(Stage.COLLECT_ONIONS, "Need remaining old onions");
-            return;
-        }
-        if (!Rs2Inventory.hasItem("Molten sugar")) {
-            change(Stage.COOK_SUGAR, "Need more molten sugar");
-            return;
-        }
+        // A combine may consume its inputs before the output inventory cache
+        // updates; treat that as pending until the candy-onion receipt appears.
         if (pendingCoatCandyCount >= 0) {
             if (candy > pendingCoatCandyCount) {
                 log.info("Halloween candy onion created | before={} after={}",
@@ -1655,6 +1645,14 @@ public final class KspHalloween2026Script extends Script {
                     return;
                 }
             }
+        }
+        if (old <= 0) {
+            change(Stage.COLLECT_ONIONS, "Need remaining old onions");
+            return;
+        }
+        if (!Rs2Inventory.hasItem("Molten sugar")) {
+            change(Stage.COOK_SUGAR, "Need more molten sugar");
+            return;
         }
         if (Rs2Inventory.combine("Molten sugar", "Old onion")) {
             pendingCoatCandyCount = candy;
