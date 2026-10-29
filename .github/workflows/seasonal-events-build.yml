@@ -55,7 +55,7 @@ jobs:
           panel=(root/'KspSeasonalEventsPanel.java').read_text()
           overlay=(root/'KspSeasonalEventsOverlay.java').read_text()
           event=(root/'KspSeasonalEvent.java').read_text()
-          assert 'VERSION = "0.2.7"' in plugin
+          assert 'VERSION = "0.2.8"' in plugin
           assert 'KSP + "Seasonal Events"' in plugin
           assert 'kspwillowchopper' not in plugin and 'kspwillowchopper' not in script
           assert 'HALLOWEEN_2026' in event
@@ -117,24 +117,23 @@ jobs:
           assert 'pendingLanternConfirmed(player)' in search
           assert 'configManager.setConfiguration(GROUP, PENDING_LANTERN_KEY' in search
 
-          assert 'inspectLanternVerificationDialogue()' in code
-          assert 'verifyLanternsWithStarter(WorldPoint player)' in code
-          assert 'stopForReview("Lantern completion uncertain' in code
+          assert 'inspectStarterDialogue()' in code
+          assert 'KspHalloweenStarterState.classify(raw)' in code
           assert 'confirmAllLanterns(' in code
           assert 'LANTERNS_VERIFIED_KEY' in code
           assert 'parseLanternTile' in code
-          assert 'confirmLanternsManually()' in code
-          assert 'canConfirmLanternsManually()' in code
+          assert 'requestStarterStateCheck()' in code
+          assert 'canRequestStarterStateCheck()' in code
           assert 'getLanternCount() { return lanternsVerified ? 8' in code
           assert 'configManager.unsetConfiguration(GROUP, PENDING_LANTERN_KEY)' in code
           assert 'configManager.unsetConfiguration(GROUP, LANTERNS_VERIFIED_KEY)' in code
           assert 'ksp_seasonal_stage_changed' in code
           assert 'ksp_seasonal_paused' in code
 
-          assert 'new JButton("Confirm all 8 lanterns smashed")' in panel
-          assert 'JOptionPane.YES_NO_OPTION' in panel
-          assert 'script.canConfirmLanternsManually()' in panel
-          assert 'script.confirmLanternsManually()' in panel
+          assert 'new JButton("Recheck state with Angel / Henja")' in panel
+          assert 'script.requestStarterStateCheck()' in panel
+          assert 'script.canRequestStarterStateCheck()' in panel
+          assert 'JOptionPane' not in panel
           assert 'ChatMessageType.PUBLICCHAT' not in plugin
           assert 'type == ChatMessageType.GAMEMESSAGE' in plugin
           assert 'type == ChatMessageType.SPAM' in plugin
@@ -249,108 +248,71 @@ jobs:
           assert 'closeHolidayRetrieval(window)' not in batch[partial_batch:reopen]
           print('PASS: four distinct slots must be owned before any automatic window closing/equipping')
 
-      - name: Verify child reporting and unique adult candy delivery transitions
-        shell: python
-        run: |
-          from pathlib import Path
-          code = Path('release/kspseasonalevents/KspHalloween2026Script.java').read_text()
-          child = code.split('private void spookChildren(WorldPoint player)', 1)[1].split('private void solveChemist(', 1)[0]
-          report = code.split('private void inspectChildReportDialogue()', 1)[1].split('private void spookChildren(', 1)[0]
-          adults = code.split('private void giveCandy(WorldPoint player)', 1)[1].split('private void acted(', 1)[0]
-          start = code.split('public synchronized boolean start(', 1)[1].split('private Stage savedStage()', 1)[0]
-          starter = code.split('private void talkToStarter(', 1)[1].split('private Rs2TileObjectModel lantern()', 1)[0]
-          tick = code.split('private void tick()', 1)[1].split('private void handleDialogueOption()', 1)[0]
-
-          assert 'CHILD_REPORT_CHECKPOINT = 5' in code
-          assert child.index('spookedChildren.size() >= CHILD_REPORT_CHECKPOINT') < child.index('Rs2Npc.getNpcs()')
-          assert 'observeTreaterAges();' in child
-          assert 'classifyTreater(n) == TreaterAge.CHILD' in child
-          assert 'classifyTreater(n) == TreaterAge.ADULT' in adults
-          assert '&& !npcHasAction(n, "Spook")' not in adults
-          age = code.split('private void observeTreaterAges()',1)[1].split('private void spookChildren(',1)[0]
-          assert 'treaterGroup(n.getId())' in age
-          assert 'candidate.getLogicalHeight()' in age
-          assert 'n::getLogicalHeight' not in age
-          assert 'a.size() >= 2 && b.size() >= 2' in age
-          assert 'confirmedChildGroup = TreaterGroup.A' in age
-          assert 'confirmedChildGroup = TreaterGroup.B' in age
-          assert 'TreaterAge.UNKNOWN' in age
-          assert 'TREATER_CHILD_GROUP_KEY' in age
-          assert 'confirmedChildGroup == TreaterGroup.UNKNOWN' in age
-          assert 'Child/adult NPC models cannot be differentiated safely' in age
-          assert 'if (stage == Stage.NEEDS_REVIEW) return;' in child
-          assert 'if (stage == Stage.NEEDS_REVIEW) return;' in adults
-          assert 'TREATER_GROUP_A_START = 16778' in code
-          assert 'TREATER_GROUP_B_START = 16794' in code
-          assert 'configManager.unsetConfiguration(GROUP, TREATER_CHILD_GROUP_KEY)' in code
-          assert 'spookedChildren.add(child.getId())' in child
-          assert 'spookedChildren.add(child.getIndex())' not in child
-          assert 'persistNpcIds(SPOOKED_CHILD_IDS_KEY, spookedChildren)' in child
-          assert 'change(Stage.REPORT_CHILDREN' in child
-          assert 'scanRimmington(player, "Looking for child trick-or-treaters")' not in child
-          assert 'scoutVisibleTreaters(player, visibleTreaters)' in child
-          assert 'childrenReportConfirmed = true;' in report
-          assert 'KspHalloweenChildReport.classify(raw)' in report
-          assert 'Instruction.VISIT_CHEMIST' in report
-          assert 'Instruction.UNKNOWN' in report
-          assert 'pendingStarterNext = required;' in report
-          assert 'Stage.SPOOK_CHILDREN : Stage.GET_COSTUME' in report
-          assert 'childrenReportConfirmed' in tick and 'next == Stage.CHEMIST_RIDDLE' in tick
-          assert 'stopForReview("Angel/Henja dialogue did not confirm' in tick
-          assert 'nearOrWalk(player, STARTER, 8, "Angel / Henja' in starter
-          assert 'saved == Stage.SPOOK_CHILDREN && spookedChildren.isEmpty()' in start
-          assert 'restoreNpcIds(SPOOKED_CHILD_IDS_KEY, spookedChildren)' in start
-          assert 'restoreNpcIds(DELIVERED_ADULT_IDS_KEY, givenAdultIds)' in start
-          assert '!spookedChildren.contains(n.getId())' in adults
-          assert '!givenAdultIds.contains(n.getId())' in adults
-          assert 'pendingAdultId = adult.getId()' in adults
-          assert 'candyCount < pendingCandyCount' in adults
-          assert 'givenAdultIds.add(pendingAdultId)' in adults
-          assert 'persistNpcIds(DELIVERED_ADULT_IDS_KEY, givenAdultIds)' in adults
-          assert 'sweepsWithoutTarget >= RIMMINGTON_SWEEP.length' in adults
-          assert 'stopForReview("Adult search exhausted' in adults
-          assert 'givenAdultIndexes' not in code
-          assert 'configManager.unsetConfiguration(GROUP, SPOOKED_CHILD_IDS_KEY)' in code
-          assert 'configManager.unsetConfiguration(GROUP, DELIVERED_ADULT_IDS_KEY)' in code
-          print('PASS: five-child report checkpoint, NPC-only scouting, single-batch classification and adult receipts')
-
-      - name: Test child-report dialogue classification with actual 2026 text
+      - name: Test Angel/Henja event-state classification with actual 2026 dialogue
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p /tmp/ksp-halloween-dialogue-test
-          javac -d /tmp/ksp-halloween-dialogue-test \
-            release/kspseasonalevents/KspHalloweenChildReport.java \
-            release/.github/tests/seasonal/KspHalloweenChildReportTest.java
-          java -cp /tmp/ksp-halloween-dialogue-test \
-            net.runelite.client.plugins.microbot.kspseasonalevents.KspHalloweenChildReportTest
+          mkdir -p /tmp/ksp-halloween-starter-test
+          javac -d /tmp/ksp-halloween-starter-test \
+            release/kspseasonalevents/KspHalloweenStarterState.java \
+            release/.github/tests/seasonal/KspHalloweenStarterStateTest.java
+          java -cp /tmp/ksp-halloween-starter-test \
+            net.runelite.client.plugins.microbot.kspseasonalevents.KspHalloweenStarterStateTest
 
-      - name: Verify child-report stage recovery and persistent retries
+      - name: Verify Angel/Henja dialogue is authoritative for global event state
         shell: python
         run: |
           from pathlib import Path
-          code = Path('release/kspseasonalevents/KspHalloween2026Script.java').read_text()
-          parser = Path('release/kspseasonalevents/KspHalloweenChildReport.java').read_text()
+          root = Path('release/kspseasonalevents')
+          code = (root/'KspHalloween2026Script.java').read_text()
+          parser = (root/'KspHalloweenStarterState.java').read_text()
+          panel = (root/'KspSeasonalEventsPanel.java').read_text()
+
+          start = code.split('public synchronized boolean start(',1)[1].split('private void restoreNpcIds(',1)[0]
           tick = code.split('private void tick()',1)[1].split('private void handleDialogueOption()',1)[0]
-          report = code.split('private void inspectChildReportDialogue()',1)[1].split('private TreaterGroup treaterGroup(',1)[0]
-          assert 'KspHalloweenChildReport.classify(raw)' in report
-          assert 'SCARE_CHILDREN' in parser and 'VISIT_CHEMIST' in parser
-          assert 'Stage.SPOOK_CHILDREN : Stage.GET_COSTUME' in report
-          assert 'pendingStarterNext = required;' in report
-          assert 'pendingStarterDialogueSeen = true;' in report
-          assert 'pendingStarterLastDialogueAt = System.currentTimeMillis();' in report
-          assert 'if (pendingStarterNext == required)' in report
-          assert 'pendingStarterNext = Stage.CHEMIST_RIDDLE;' in report
-          assert 'configManager.setConfiguration(GROUP, CHILD_RETRY_COUNT_KEY, childSpookRetries)' in report
-          assert 'childSpookRetries > allowedRetries' in report
-          assert 'spookedChildren.size() >= CHILD_REPORT_CHECKPOINT ? 1 : 2' in report
-          assert 'spookedChildren.clear();' in report
-          assert 'persistNpcIds(SPOOKED_CHILD_IDS_KEY, spookedChildren);' in report
-          assert 'savedRetries' in code
-          assert 'configManager.unsetConfiguration(GROUP, CHILD_RETRY_COUNT_KEY)' in code
-          assert 'next == Stage.CHEMIST_RIDDLE' in tick and '!childrenReportConfirmed' in tick
-          assert 'change(next, "Starter dialogue completed")' in tick
-          print('PASS: explicit spook directive, deferred stage, bounded persistent retries and confirmed Chemist gate')
+          inspect = code.split('private void inspectStarterDialogue()',1)[1].split('private Stage stageForAdultCandyObjective()',1)[0]
+          talk = code.split('private void talkToStarter(WorldPoint player)',1)[1].split('private Rs2TileObjectModel lantern()',1)[0]
+          search = code.split('private void smashLanterns(WorldPoint player)',1)[1].split('private void scanRimmington',1)[0]
+          chat = code.split('public void onChatMessage(String raw)',1)[1].split('public void setPaused(',1)[0]
+
+          assert 'change(Stage.INTRODUCTION' in start
+          assert 'saved stage {} deferred to starter dialogue' in start
+          assert 'starterConversationActive' in tick
+          assert 'inspectStarterDialogue();' in tick
+          assert 'if (pendingStarterNext == null)' in tick
+          assert 'Angel/Henja dialogue did not identify a known Halloween objective' in tick
+          assert 'talkToStarter(player);' in tick
+          assert 'talkToStarter(player,' not in code
+
+          assert 'KspHalloweenStarterState.classify(raw)' in inspect
+          for objective in ('SMASH_LANTERNS','SCARE_CHILDREN','ADULT_CANDY','CLAIM_REWARD','COMPLETE'):
+              assert 'case ' + objective + ':' in inspect
+              assert objective in parser
+          assert 'resolved = costumeCount() >= 4 ? Stage.SPOOK_CHILDREN : Stage.GET_COSTUME' in inspect
+          assert 'resolved = stageForAdultCandyObjective();' in inspect
+          assert 'childrenReportConfirmed = true;' in inspect
+          assert 'configManager.setConfiguration(GROUP, CHILD_CONFIRMED_KEY, true)' in inspect
+          assert 'lanternsVerified = false;' in inspect
+          assert 'configManager.unsetConfiguration(GROUP, LANTERNS_VERIFIED_KEY)' in inspect
+          assert 'adultsGiven >= 5' in inspect
+          assert 'givenAdultIds.clear();' in inspect
+          assert 'resolved = Stage.WAIT_FOR_REWARD;' in inspect
+          assert 'resolved = Stage.COMPLETED;' in inspect
+
+          assert 'pendingStarterNext = null;' in talk
+          assert 'starterConversationActive = true;' in talk
+          assert 'Speaking to Angel / Henja to resolve current event state' in talk
+
+          assert 'lanternsVerified || smashedLanternTiles.size() >= 8' not in search
+          assert 'Eight local smash acknowledgements; verifying with Angel/Henja' in chat
+          assert 'confirmAllLanterns("eight confirmed smashes")' not in chat
+
+          assert 'confirmLanternsManually' not in code
+          assert 'canConfirmLanternsManually' not in code
+          assert 'requestStarterStateCheck()' in code
+          assert 'Recheck state with Angel / Henja' in panel
+          assert 'KspHalloweenChildReport' not in code
+          print('PASS: Angel/Henja dialogue owns global state; local counters only drive subtask execution')
 
       - name: Verify child scare counters appear in overlay and side panel
         shell: python
