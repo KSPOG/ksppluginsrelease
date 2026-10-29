@@ -333,6 +333,11 @@ public final class KspHalloween2026Script extends Script {
         Stage saved = savedStage();
         if (saved == Stage.COMPLETED) {
             change(Stage.COMPLETED, "Previously confirmed Halloween completion");
+            // A completed event must not restart on a later client launch.
+            // Leave the side panel available for an explicit progress reset.
+            active = false;
+            status = "Event already complete; reset progress to start another run";
+            return false;
         } else if (hasUniqueCandyObjectiveInventory()) {
             // Event-exclusive items are direct evidence that this character
             // has reached the adult-candy subtask. Do not force a pointless
