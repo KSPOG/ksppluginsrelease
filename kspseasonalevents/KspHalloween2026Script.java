@@ -1763,8 +1763,10 @@ public final class KspHalloween2026Script extends Script {
             pendingChildAbsentSince = 0L;
         }
 
-        if (now - pendingChildSpookAt >= CHILD_SPOOK_CONFIRM_TIMEOUT_MS
-                || observed == ChildSceneStatus.UNKNOWN) {
+        // UNKNOWN can be transient while walking toward an NPC or while
+        // RuneLite swaps scene snapshots. Wait for the bounded timeout rather
+        // than retrying the same interaction immediately.
+        if (now - pendingChildSpookAt >= CHILD_SPOOK_CONFIRM_TIMEOUT_MS) {
             final int failedId = pendingChildId;
             log.warn("Halloween child scare NOT confirmed | childNpcId={}"
                     + " index={} tile={} liveScene={} elapsedMs={}"
@@ -1818,6 +1820,13 @@ public final class KspHalloween2026Script extends Script {
 
         if (child != null) {
             childNoTargetSince = 0L;
+            // Keep the NPC's last position in the active scene until the
+            // disappearance is verified. Do not begin from an unloaded tile.
+            if (player.distanceTo(child.getWorldLocation()) > 9) {
+                nearOrWalk(player, child.getWorldLocation(), 6,
+                        "unspooked child trick-or-treater");
+                return;
+            }
             // Take a stable identity and position BEFORE invoking the action.
             // Action dispatch alone is never evidence of a successful scare.
             int id = child.getId();
