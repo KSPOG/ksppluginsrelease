@@ -1,4 +1,4 @@
-# KSP Seasonal Events v0.2.16
+# KSP Seasonal Events v0.2.17
 
 A **standalone Microbot plugin**, independent of Chopper, with its own
 config, navigation panel, Start / Pause / Resume / Stop / Reset progress,
@@ -21,7 +21,7 @@ guarantee event completion.
 | Smash lanterns | Smash all eight Jack-O-Lanterns | Live scene objects with Smash action; track disappearance and persist each confirmed world tile; search Rimmington when objects not loaded |
 | Report lanterns | Speak to Angel or Henja | Return to their house |
 | Halloween costume | Obtain previous Halloween rewards from Diango in Draynor and wear at least four items | Travel to Diango, request rewards via dialogue, equip known carried costume pieces, wait for four equipped pieces; does not blindly click reward widgets |
-| Scare children | Spook *child* trick-or-treaters, not adults | Target only NPC IDs **16778–16782** with a live Spook action; preserve distinct child attempts |
+| Scare children | Spook *child* trick-or-treaters, not adults | Target only NPC IDs **16778–16782** with a live Spook action; confirm each exact NPC's disappearance in RuneLite's loaded scene before counting it |
 | Report children | Speak to Angel or Henja | Return and progress to Chemist |
 | Chemist | Obtain sugar by solving COFFIN periodic-table riddle: C(6)+O(8)+F(9)+F(9)+I(53)+N(7) = **92** | Talk to Chemist, select explicit 92 dialogue option when offered; otherwise log unknown widget for review |
 | Cook sugar | Cook sugar on the house range or Chemist fireplace | Resolve a live Range/Fireplace and use sugar on it; wait for Molten sugar inventory |
@@ -35,6 +35,41 @@ may require manual review rather than repeated speculative clicks. The
 plugin logs stage transitions, visible dialogue options when unknown, NPC
 IDs and world tiles of successfully targeted event objects. No guessed
 NPC/object IDs are treated as authoritative.
+
+## Verified child scares from RuneLite live scene (0.2.17)
+
+A live October 29 log revealed that five `Spook` menu actions were
+sent in eight seconds, but Angel/Henja still required the child-scare
+objective. Later the plugin got stuck at 2/5: it had counted clicks
+as successful scares, permanently excluded those NPC IDs, searched
+near adults (which also have `Spook` actions), and repeatedly returned
+to Angel/Henja after only partial attempts.
+
+- On every valid child `Spook`, remember the exact **NPC ID + RuneLite
+  scene index + world tile** as pending. Do **not** count the click.
+- Examine the **live `getTopLevelWorldView().npcs()`** collection on
+  RuneLite's client thread, with the player's proximity to the clicked
+  tile checked. The exact scene index must remain **absent for at least
+  450 ms** before the scare counts toward 5/5.
+- A temporarily unavailable scene, still-visible NPC or elapsed seven
+  seconds cannot count as success. Unconfirmed interactions are logged,
+  returned to the candidate pool after a short cooldown and retried.
+- No new `Spook` is sent until the previous interaction is confirmed or
+  timed out. The plugin reports to Angel/Henja only after **five
+  confirmed disappearances**, not after five attempted clicks.
+- The UI now labels progress **Child scares verified**; Angel/Henja's
+  separate **Child objective** remains unverified until a confirming
+  dialogue state.
+- Old `halloweenChildNpcIdsAttempted` saved values are discarded as
+  unverified; confirmed IDs use a new key,
+  `halloweenChildNpcIdsConfirmed`. **Other progress, including all
+  previously confirmed lantern tiles, is preserved.**
+
+**Limitation:** An NPC can leave the loaded scene for reasons other
+than a successful scare. The near-tile and repeated-absence checks
+reduce false positives, but Angel/Henja's objective dialogue is still
+the authority on quest progression. Compilation does not replace a
+live client acceptance test.
 
 ## Eighth-lantern handoff and progress persistence (0.2.16)
 

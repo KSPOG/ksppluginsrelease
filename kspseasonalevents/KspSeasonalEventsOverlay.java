@@ -36,7 +36,7 @@ public final class KspSeasonalEventsOverlay extends OverlayPanel {
         panelComponent.getChildren().add(LineComponent.builder()
                 .left("Lanterns").right(script.getLanternCount() + "/8").build());
         panelComponent.getChildren().add(LineComponent.builder()
-                .left("Child Spook attempts")
+                .left("Child scares verified")
                 .right(script.getChildSpookAttempts() + "/"
                         + script.getChildSpookCheckpoint()).build());
         panelComponent.getChildren().add(LineComponent.builder()
