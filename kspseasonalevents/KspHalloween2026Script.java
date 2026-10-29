@@ -4,7 +4,7 @@ import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.coords.WorldArea;
 import net.runelite.api.widgets.Widget;
 import net.runelite.api.widgets.WidgetInfo;
-import net.runelite.api.gameval.InterfaceID;
+import net.runelite.api.widgets.InterfaceID;
 import net.runelite.api.widgets.WidgetInfo;
 import net.runelite.api.coords.WorldPoint;
 import net.runelite.client.config.ConfigManager;
