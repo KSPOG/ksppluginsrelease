@@ -171,6 +171,16 @@ public class TutorialIslandScript extends KspManagedScript
     private long lastRangedAttackAtMs;
     private int lastRangedTargetIndex = -1;
 
+    // Tutorial progress (varbit 281) is the authoritative state boundary.
+    private TutState monitoredState;
+    private int monitoredProgress = -1;
+    private long stateEnteredAtMs;
+    private long lastStateDiagnosticAtMs;
+    private long lastStateRetryAtMs;
+    private int currentStateRetries;
+    private static final long STATE_DIAGNOSTIC_INTERVAL_MS = 5_000L;
+    private static final long STATE_RETRY_INTERVAL_MS = 8_000L;
+
     public boolean run()
     {
         shutdown();
@@ -197,6 +207,7 @@ public class TutorialIslandScript extends KspManagedScript
             // every tutorial tick without cancelling valid island-local paths.
             rejectMainlandWalkerRoute();
             calculateStatus();
+            monitorCurrentState();
 
             if (closeBlockingTutorialWidget()
                     || handleSetupWidget()
@@ -257,6 +268,68 @@ public class TutorialIslandScript extends KspManagedScript
             return true;
         }
         return false;
+    }
+
+    /**
+     * A retry re-dispatches only the CURRENT stage. It never advances the
+     * tutorial or chooses an alternative state without varbit/widget evidence.
+     * Progress changes reset its counters and release stale action guards.
+     */
+    private void monitorCurrentState()
+    {
+        final long now = System.currentTimeMillis();
+        final int progress = Microbot.getVarbitPlayerValue(281);
+        if (status != monitoredState || progress != monitoredProgress)
+        {
+            Microbot.log("[TutIsland] STATE_ENTER | from=" + monitoredState
+                    + "/" + monitoredProgress + " to=" + status + "/" + progress
+                    + " player=" + Rs2Player.getWorldLocation());
+            monitoredState = status;
+            monitoredProgress = progress;
+            stateEnteredAtMs = now;
+            lastStateDiagnosticAtMs = 0L;
+            lastStateRetryAtMs = now;
+            currentStateRetries = 0;
+            pendingInteractionAtMs = 0L;
+            pendingInteractionKey = null;
+        }
+        if (now - lastStateDiagnosticAtMs >= STATE_DIAGNOSTIC_INTERVAL_MS)
+        {
+            lastStateDiagnosticAtMs = now;
+            Microbot.log("[TutIsland] STATE_HEARTBEAT | state=" + status
+                    + " progress=" + progress + " elapsedMs=" + (now - stateEnteredAtMs)
+                    + " retry=" + currentStateRetries
+                    + " player=" + Rs2Player.getWorldLocation()
+                    + " moving=" + Rs2Player.isMoving()
+                    + " animating=" + Rs2Player.isAnimating()
+                    + " interacting=" + Rs2Player.isInteracting()
+                    + " walkerTarget=" + Rs2Walker.getCurrentTarget()
+                    + " pending=" + pendingInteractionKey
+                    + " tin=" + Rs2Inventory.count("Tin ore")
+                    + " copper=" + Rs2Inventory.count("Copper ore")
+                    + " dough=" + Rs2Inventory.count("Bread dough")
+                    + " bread=" + Rs2Inventory.count("Bread"));
+        }
+        if (status == TutState.FINISHED || Rs2Player.isMoving()
+                || Rs2Player.isAnimating() || Rs2Player.isInteracting()
+                || isInDialogue() || hasContinue())
+        {
+            lastStateRetryAtMs = now;
+            return;
+        }
+        if (now - lastStateRetryAtMs >= STATE_RETRY_INTERVAL_MS)
+        {
+            lastStateRetryAtMs = now;
+            currentStateRetries++;
+            Microbot.log("[TutIsland] STATE_RETRY | state=" + status
+                    + " progress=" + progress + " attempt=" + currentStateRetries
+                    + " stalledMs=" + (now - stateEnteredAtMs)
+                    + " action=" + pendingInteractionKey);
+            pendingInteractionAtMs = 0L;
+            pendingInteractionKey = null;
+            // The next loop iteration re-evaluates and dispatches the same
+            // stage's normal action, including live object/NPC discovery.
+        }
     }
 
     private void runStage()
@@ -2111,6 +2184,12 @@ public class TutorialIslandScript extends KspManagedScript
         lastRangedDiagnosticAtMs = 0L;
         lastRangedAttackAtMs = 0L;
         lastRangedTargetIndex = -1;
+        monitoredState = null;
+        monitoredProgress = -1;
+        stateEnteredAtMs = 0L;
+        lastStateDiagnosticAtMs = 0L;
+        lastStateRetryAtMs = 0L;
+        currentStateRetries = 0;
     }
 
     // -------------------------------------------------------------------------
@@ -2701,6 +2780,9 @@ public class TutorialIslandScript extends KspManagedScript
     {
         pendingInteractionKey = key;
         pendingInteractionAtMs = System.currentTimeMillis();
+        Microbot.log("[TutIsland] ACTION_DISPATCH | state=" + status
+                + " progress=" + Microbot.getVarbitPlayerValue(281)
+                + " action=" + key + " attempt=" + currentStateRetries);
     }
 
     /**
