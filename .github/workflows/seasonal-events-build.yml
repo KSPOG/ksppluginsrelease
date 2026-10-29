@@ -157,7 +157,8 @@ jobs:
           assert 'change(next, "Angel / Henja dialogue resolved event state")' in tick
           assert 'Waiting for Angel / Henja dialogue' in tick
           assert 'pendingStarterLastDialogueAt' in tick
-          assert 'pendingStarterLastDialogueAt < 1_500L' in tick
+          assert 'pendingStarterLastDialogueAt < 1_500L' not in tick
+          assert 'Dialogue is no longer visible' in tick
 
           assert "Sure, I'll take the hat." in opts
           assert 'Rs2Dialogue.keyPressForDialogueOption("Sure, I' in opts
@@ -364,7 +365,7 @@ jobs:
           assert 'observedTreaterHeights.putAll(heights)' in age
 
           assert 'MAX_CHILD_NPC_SCOUT_STOPS = 4' in code
-          assert 'CHILD_SCENE_SETTLE_MS = 2_000L' in code
+          assert 'CHILD_SCENE_SETTLE_MS = 2_000L' not in code
           assert 'childScoutedNpcTiles' in scout
           assert 'classifyTreater(anchor)' in scout
           assert 'age == TreaterAge.ADULT' in scout
@@ -379,7 +380,7 @@ jobs:
           assert '!spookedChildren.contains(n.getId())' in child
           assert 'npcHasAction(n, "Spook")' in child
           assert 'Rs2Npc.interact(child, "Spook")' in child
-          assert 'CHILD_SCENE_SETTLE_MS' in child
+          assert 'Rs2Player.isMoving()' in child
           assert 'scoutVisibleTreaters(player, visibleTreaters)' in child
           assert 'scanRimmington(' not in child
           assert 'change(Stage.REPORT_CHILDREN' in child
@@ -426,10 +427,21 @@ jobs:
           assert 'Rs2Keyboard.enter()' in input_handler
           assert 'chemistAnswerSubmissions >= 1' in input_handler
           assert 'Rs2Dialogue.hasContinue() || Rs2Dialogue.hasSelectAnOption()' in input_handler
-          assert 'this::safeTick, 0L, 300L' in code
-          assert 'DIALOGUE_GAP_MS = 320L' in code
-          assert 'ACTION_GAP = 900L' in code
-          print('PASS: Chemist free-text handling prioritized and dialogue paced safely')
+          assert 'this::safeTick, 0L, 150L' in code
+          assert 'DIALOGUE_GAP_MS' not in code
+          assert 'ACTION_GAP' not in code
+          assert 'private boolean ready()' not in code
+          assert 'private boolean canDispatchDialogue(String signature)' in code
+          assert 'signature.equals(lastGenericDialogueSignature)' in code
+          assert 'WORLD_ACTION_STALL_TIMEOUT_MS' in code
+          assert 'pendingOldOnionCount >= 0' in code
+          assert 'pendingCoatCandyCount >= 0' in code
+          assert 'if (pendingCook)' in code
+          assert 'pendingHolidayScrollY >= 0' in code
+          assert 'pendingEquipItem != null' in code
+          assert 'candyCount < pendingCandyCount' in code
+          assert 'pendingStarterLastDialogueAt < 1_500L' not in code
+          print('PASS: event advances on widget/NPC/inventory changes without global delays')
           PY
 
       - name: Install Seasonal Events sources into Microbot Hub
