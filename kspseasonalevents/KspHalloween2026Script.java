@@ -67,16 +67,17 @@ public final class KspHalloween2026Script extends Script {
     // Five verified child attempts trigger a report checkpoint, not success.
     private static final int CHILD_REPORT_CHECKPOINT = 5;
     private static final int MAX_CHILD_NPC_SCOUT_STOPS = 4;
-    // Scene readiness and NPC movement are observed directly; no settle timer.
-    private static final String TREATER_CHILD_GROUP_KEY = "halloweenConfirmedChildNpcGroup";
-    // 2026 client logs show two groups of five NPC definition IDs. The
-    // groups are NOT assigned to children or adults without live evidence.
-    private static final int TREATER_GROUP_A_START = 16778;
-    private static final int TREATER_GROUP_A_END = 16782;
-    private static final int TREATER_GROUP_B_START = 16794;
-    private static final int TREATER_GROUP_B_END = 16798;
+    // Retired heuristic classification persisted under this key in older
+    // revisions. Unset it on startup; these verified IDs supersede it.
+    private static final String LEGACY_TREATER_CHILD_GROUP_KEY = "halloweenConfirmedChildNpcGroup";
+    // Verified 2026 Halloween NPC definition IDs from live game inspection.
+    // Both tasks select by NPC.getId(), never by model height, name heuristics
+    // or assumed context-menu differences between these two NPC ranges.
+    private static final int CHILD_TREATER_FIRST_ID = 16778;
+    private static final int CHILD_TREATER_LAST_ID = 16782;
+    private static final int ADULT_TREATER_FIRST_ID = 16794;
+    private static final int ADULT_TREATER_LAST_ID = 16798;
     private enum TreaterAge { CHILD, ADULT, UNKNOWN }
-    private enum TreaterGroup { A, B, UNKNOWN }
     private static final WorldArea RIMMINGTON = new WorldArea(2925, 3180, 85, 95, 0);
     private static final WorldPoint STARTER = new WorldPoint(2958, 3211, 0);
     private static final WorldPoint DIANGO = new WorldPoint(3081, 3248, 0);
@@ -162,14 +163,6 @@ public final class KspHalloween2026Script extends Script {
     private volatile boolean childrenReportConfirmed;
     private int childrenReportAttempts;
     private int childSpookRetries;
-    private final Map<Integer, Integer> observedTreaterHeights = new HashMap<>();
-    // Live NPC menu actions are stronger evidence than comparing model sizes
-    // of two groups which may not both be loaded into the scene.
-    private final Map<Integer, Set<String>> observedTreaterActions = new HashMap<>();
-    private boolean treaterCostumeReady;
-    private long adultUnknownSince;
-    private TreaterGroup confirmedChildGroup = TreaterGroup.UNKNOWN;
-    private long lastTreaterClassificationLogAt;
     // Track only live-event-NPC-derived scout tiles. The generic Rimmington
     // lantern search waypoints are never used to locate child NPCs.
     private final Set<String> childScoutedNpcTiles = new HashSet<>();
@@ -277,12 +270,6 @@ public final class KspHalloween2026Script extends Script {
         childrenReportConfirmed = false;
         childrenReportAttempts = 0;
         childSpookRetries = 0;
-        observedTreaterHeights.clear();
-        observedTreaterActions.clear();
-        treaterCostumeReady = false;
-        adultUnknownSince = 0L;
-        confirmedChildGroup = TreaterGroup.UNKNOWN;
-        lastTreaterClassificationLogAt = 0L;
         childScoutedNpcTiles.clear();
         childNoTargetSince = 0L;
         sweepIndex = 0;
@@ -304,6 +291,19 @@ public final class KspHalloween2026Script extends Script {
         catch (NumberFormatException e) { adultsGiven = 0; }
         restoreNpcIds(SPOOKED_CHILD_IDS_KEY, spookedChildren);
         restoreNpcIds(DELIVERED_ADULT_IDS_KEY, givenAdultIds);
+        // Earlier heuristic releases could persist reversed group assignments.
+        // Keep only NPC IDs that match the now-known task they completed.
+        if (spookedChildren.removeIf(id -> !isChildTreaterId(id))) {
+            persistNpcIds(SPOOKED_CHILD_IDS_KEY, spookedChildren);
+            log.warn("Halloween discarded invalid child-spook NPC IDs from saved progress");
+        }
+        if (givenAdultIds.removeIf(id -> !isAdultTreaterId(id))) {
+            persistNpcIds(DELIVERED_ADULT_IDS_KEY, givenAdultIds);
+            log.warn("Halloween discarded invalid adult-delivery NPC IDs from saved progress");
+            adultsGiven = Math.min(adultsGiven, givenAdultIds.size());
+            configManager.setConfiguration(GROUP, ADULTS_KEY, adultsGiven);
+        }
+        configManager.unsetConfiguration(GROUP, LEGACY_TREATER_CHILD_GROUP_KEY);
         childrenReportConfirmed = Boolean.parseBoolean(
                 configManager.getConfiguration(GROUP, CHILD_CONFIRMED_KEY));
         String savedRetries = configManager.getConfiguration(GROUP, CHILD_RETRY_COUNT_KEY);
@@ -313,9 +313,6 @@ public final class KspHalloween2026Script extends Script {
         } catch (NumberFormatException ignored) {
             childSpookRetries = 0;
         }
-        String childGroupConfig = configManager.getConfiguration(GROUP, TREATER_CHILD_GROUP_KEY);
-        if ("A".equals(childGroupConfig)) confirmedChildGroup = TreaterGroup.A;
-        else if ("B".equals(childGroupConfig)) confirmedChildGroup = TreaterGroup.B;
         log.info("Halloween saved NPC progress | attemptedChildren={} adultIds={} delivered={}",
                 spookedChildren.size(), givenAdultIds.size(), adultsGiven);
 
@@ -1493,137 +1490,22 @@ public final class KspHalloween2026Script extends Script {
         }).orElse(false);
     }
 
-    private TreaterGroup treaterGroup(int npcId) {
-        if (npcId >= TREATER_GROUP_A_START && npcId <= TREATER_GROUP_A_END)
-            return TreaterGroup.A;
-        if (npcId >= TREATER_GROUP_B_START && npcId <= TREATER_GROUP_B_END)
-            return TreaterGroup.B;
-        return TreaterGroup.UNKNOWN;
+    private static boolean isChildTreaterId(int npcId) {
+        return npcId >= CHILD_TREATER_FIRST_ID && npcId <= CHILD_TREATER_LAST_ID;
     }
 
-    private void observeTreaterAges() {
-        // Once confirmed, group identity remains available from persisted
-        // game-menu evidence; avoid repeated expensive client-thread reads.
-        if (confirmedChildGroup != TreaterGroup.UNKNOWN) return;
+    private static boolean isAdultTreaterId(int npcId) {
+        return npcId >= ADULT_TREATER_FIRST_ID && npcId <= ADULT_TREATER_LAST_ID;
+    }
 
-        List<Rs2NpcModel> candidates = Rs2Npc.getNpcs()
-                .filter(n -> n.getName() != null
-                        && n.getName().toLowerCase(Locale.ROOT).contains("trick")
-                        && treaterGroup(n.getId()) != TreaterGroup.UNKNOWN)
-                .collect(Collectors.toList());
-
-        // One client-thread snapshot obtains both the NPC heights and *live
-        // transformed menu actions*. Avoid one invoke for each NPC/tick.
-        Map<Integer, Set<String>> actions = new HashMap<>();
-        Map<Integer, Integer> heights = Microbot.getClientThread()
-                .runOnClientThreadOptional(() -> {
-                    Map<Integer, Integer> snapshot = new HashMap<>();
-                    for (Rs2NpcModel candidate : candidates) {
-                        int height = candidate.getLogicalHeight();
-                        if (height > 0) snapshot.put(candidate.getId(), height);
-                        net.runelite.api.NPCComposition definition =
-                                candidate.getTransformedComposition();
-                        if (definition == null && Microbot.getClient() != null)
-                            definition = Microbot.getClient().getNpcDefinition(candidate.getId());
-                        Set<String> options = new HashSet<>();
-                        if (definition != null && definition.getActions() != null) {
-                            for (String option : definition.getActions()) {
-                                if (option != null && !option.isBlank())
-                                    options.add(option.trim().toLowerCase(Locale.ROOT));
-                            }
-                        }
-                        actions.put(candidate.getId(), options);
-                    }
-                    return snapshot;
-                }).orElse(Collections.emptyMap());
-        observedTreaterHeights.putAll(heights);
-        observedTreaterActions.clear();
-        observedTreaterActions.putAll(actions);
-        treaterCostumeReady = costumeCount() >= 4;
-
-        // A *Spook* menu entry identifies a child directly, even if only one
-        // group is in scene. This avoids waiting for both ID ranges/height
-        // distributions to overlap in the loaded RuneLite scene.
-        Set<TreaterGroup> spookGroups = candidates.stream()
-                .filter(n -> observedTreaterActions.getOrDefault(
-                        n.getId(), Collections.emptySet()).contains("spook"))
-                .map(n -> treaterGroup(n.getId()))
-                .collect(Collectors.toSet());
-        if (spookGroups.size() == 1) {
-            confirmedChildGroup = spookGroups.iterator().next();
-            configManager.setConfiguration(GROUP, TREATER_CHILD_GROUP_KEY,
-                    confirmedChildGroup.name());
-            log.info("Halloween child/adult groups verified by visible Spook menu action"
-                    + " | childGroup={} actions={}",
-                    confirmedChildGroup, observedTreaterActions);
-            return;
-        }
-
-        List<Integer> a = new ArrayList<>();
-        List<Integer> b = new ArrayList<>();
-        for (Map.Entry<Integer, Integer> entry : observedTreaterHeights.entrySet()) {
-            TreaterGroup group = treaterGroup(entry.getKey());
-            if (group == TreaterGroup.A) a.add(entry.getValue());
-            if (group == TreaterGroup.B) b.add(entry.getValue());
-        }
-
-        // Height is only a fallback when BOTH groups are observed and have
-        // nonoverlapping size distributions. Unlike action evidence, height
-        // can vary by NPC outfit and must not be used for a single group.
-        if (a.size() >= 2 && b.size() >= 2) {
-            int aMin = a.stream().mapToInt(Integer::intValue).min().orElse(0);
-            int aMax = a.stream().mapToInt(Integer::intValue).max().orElse(0);
-            int bMin = b.stream().mapToInt(Integer::intValue).min().orElse(0);
-            int bMax = b.stream().mapToInt(Integer::intValue).max().orElse(0);
-            if (aMax > 0 && aMax * 100L <= bMin * 80L)
-                confirmedChildGroup = TreaterGroup.A;
-            else if (bMax > 0 && bMax * 100L <= aMin * 80L)
-                confirmedChildGroup = TreaterGroup.B;
-            if (confirmedChildGroup != TreaterGroup.UNKNOWN) {
-                configManager.setConfiguration(GROUP, TREATER_CHILD_GROUP_KEY,
-                        confirmedChildGroup.name());
-                log.info("Halloween NPC age classification by model heights"
-                        + " | childGroup={} groupAHeights={} groupBHeights={}",
-                        confirmedChildGroup, a, b);
-                return;
-            }
-            // Overlapping models are not automatically a fatal stage failure:
-            // the individual menu actions may still identify eligible adults.
-        }
-
-        if (System.currentTimeMillis() - lastTreaterClassificationLogAt > 10_000L) {
-            lastTreaterClassificationLogAt = System.currentTimeMillis();
-            log.info("Halloween NPC classification by live action"
-                    + " | heights={} actions={} costumeReady={}",
-                    observedTreaterHeights, observedTreaterActions, treaterCostumeReady);
-        }
+    private static boolean isKnownTreaterId(int npcId) {
+        return isChildTreaterId(npcId) || isAdultTreaterId(npcId);
     }
 
     private TreaterAge classifyTreater(Rs2NpcModel npc) {
-        if (npc == null || npc.getName() == null) return TreaterAge.UNKNOWN;
-        String name = npc.getName().toLowerCase(Locale.ROOT);
-        if (!name.contains("trick")) return TreaterAge.UNKNOWN;
-        if (name.contains("adult") || name.contains("grown-up")) return TreaterAge.ADULT;
-        if (name.contains("child") || name.contains("kid")) return TreaterAge.CHILD;
-        TreaterGroup group = treaterGroup(npc.getId());
-        if (group == TreaterGroup.UNKNOWN) return TreaterAge.UNKNOWN;
-        if (confirmedChildGroup != TreaterGroup.UNKNOWN)
-            return group == confirmedChildGroup ? TreaterAge.CHILD : TreaterAge.ADULT;
-
-        Set<String> actions = observedTreaterActions.get(npc.getId());
-        if (actions == null || actions.isEmpty()) return TreaterAge.UNKNOWN;
-        // A Spook option with another conversational action is ambiguous
-        // during delivery: do not treat that as proof this is a child or adult.
-        if (stage == Stage.GIVE_CANDY && actions.contains("spook")
-                && (actions.contains("talk-to") || actions.contains("trick-or-treat")))
-            return TreaterAge.UNKNOWN;
-        if (actions.contains("spook")) return TreaterAge.CHILD;
-        // Without a verified child group, absence of Spook is evidence only
-        // when a full costume is equipped (so a child could expose Spook) AND
-        // the NPC has a live conversational menu action. Do not classify an
-        // unknown NPC solely from its height or proximity.
-        if (treaterCostumeReady && (actions.contains("talk-to")
-                || actions.contains("trick-or-treat"))) return TreaterAge.ADULT;
+        if (npc == null) return TreaterAge.UNKNOWN;
+        if (isChildTreaterId(npc.getId())) return TreaterAge.CHILD;
+        if (isAdultTreaterId(npc.getId())) return TreaterAge.ADULT;
         return TreaterAge.UNKNOWN;
     }
 
@@ -1685,9 +1567,6 @@ public final class KspHalloween2026Script extends Script {
         if (!RIMMINGTON.contains(player)
                 && !nearOrWalk(player, STARTER, 12, "child trick-or-treaters")) return;
 
-        observeTreaterAges();
-        if (stage == Stage.NEEDS_REVIEW) return;
-
         if (spookedChildren.size() >= CHILD_REPORT_CHECKPOINT) {
             childrenReportConfirmed = false;
             change(Stage.REPORT_CHILDREN,
@@ -1695,16 +1574,15 @@ public final class KspHalloween2026Script extends Script {
             return;
         }
 
-        // One live scene snapshot per tick. Child selection is based on the
-        // verified age group AND the actual Spook action. Adult NPCs are never
-        // eligible targets, even when travelling past them for discovery.
+        // Exact 2026 event NPC IDs are authoritative for both tasks.
+        // Spook is dispatched ONLY to child IDs (16778–16782), and only
+        // when the NPC advertises that action. No height inference.
         List<Rs2NpcModel> visibleTreaters = Rs2Npc.getNpcs()
-                .filter(n -> n.getName() != null
-                        && n.getName().toLowerCase(Locale.ROOT).contains("trick"))
+                .filter(n -> isKnownTreaterId(n.getId()))
                 .collect(Collectors.toList());
 
         Rs2NpcModel child = visibleTreaters.stream()
-                .filter(n -> classifyTreater(n) == TreaterAge.CHILD
+                .filter(n -> isChildTreaterId(n.getId())
                         && !spookedChildren.contains(n.getId())
                         && npcHasAction(n, "Spook"))
                 .min(Comparator.comparingInt(n -> n.getWorldLocation() == null
@@ -2037,29 +1915,22 @@ public final class KspHalloween2026Script extends Script {
             change(Stage.COAT_ONIONS, "Prepare more candy onions for adults");
             return;
         }
-        // Use the live NPC scene first. Do not webwalk to a generic waypoint
-        // when an eligible adult is already accessible/in the canvas.
-        observeTreaterAges();
-        if (stage == Stage.NEEDS_REVIEW) return;
+        // Select ONLY verified adult IDs (16794–16798). Never depend on
+        // child-group inference, model height or an unrelated Talk-to action.
+        // Prefer an adult already in the live scene before any webwalking.
         List<Rs2NpcModel> visibleTreaters = Rs2Npc.getNpcs()
-                .filter(n -> n.getName() != null
-                        && n.getName().toLowerCase(Locale.ROOT).contains("trick")
-                        && treaterGroup(n.getId()) != TreaterGroup.UNKNOWN
+                .filter(n -> isKnownTreaterId(n.getId())
                         && n.getWorldLocation() != null
                         && RIMMINGTON.contains(n.getWorldLocation()))
                 .collect(Collectors.toList());
         Rs2NpcModel adult = visibleTreaters.stream()
-                // A verified adult can receive a selected inventory item
-                // even if the NPC has no ordinary Talk-to menu entry.
-                .filter(n -> classifyTreater(n) == TreaterAge.ADULT
-                        && !spookedChildren.contains(n.getId())
+                .filter(n -> isAdultTreaterId(n.getId())
                         && !givenAdultIds.contains(n.getId()))
                 .min(Comparator.comparingInt(n -> player.distanceTo(n.getWorldLocation())))
                 .orElse(null);
         net.runelite.client.plugins.microbot.util.inventory.Rs2ItemModel item =
                 Rs2Inventory.get("Candy onion", true);
         if (adult != null && item != null) {
-            adultUnknownSince = 0L;
             // Supersede any route to an earlier search waypoint.
             Rs2Walker.clearWalkingRoute("ksp_halloween_adult_visible");
             if (Rs2Inventory.useItemOnNpc(item.getId(), adult)) {
@@ -2073,30 +1944,10 @@ public final class KspHalloween2026Script extends Script {
             return;
         }
 
-        // If an event NPC is visible but classification failed, never keep
-        // wandering away from the loaded scene. Record the precise evidence
-        // for debugging instead of guessing at a child/adult identity.
-        List<Rs2NpcModel> unknown = visibleTreaters.stream()
-                .filter(n -> classifyTreater(n) == TreaterAge.UNKNOWN
-                        && !givenAdultIds.contains(n.getId()))
-                .collect(Collectors.toList());
-        if (!unknown.isEmpty()) {
-            if (adultUnknownSince == 0L) adultUnknownSince = System.currentTimeMillis();
-            status = "Checking adult NPC actions in current scene";
-            if (System.currentTimeMillis() - adultUnknownSince >= 12_000L) {
-                String evidence = unknown.stream()
-                        .map(n -> n.getId() + "@" + n.getWorldLocation()
-                                + ":actions=" + observedTreaterActions.get(n.getId()))
-                        .collect(Collectors.joining("; "));
-                stopForReview("Visible trick-or-treater NPCs could not be verified"
-                        + " as adults; costumeReady=" + treaterCostumeReady
-                        + " evidence=" + evidence);
-            }
-            return;
-        }
-
-        adultUnknownSince = 0L;
-        // Only scout when no eligible *or unresolved* adult is in view.
+        // Child NPCs in the scene are not candidates for candy. If no adult
+        // ID is loaded, navigate to discover another adult; never reclassify
+        // the children as adults or treat them as an ambiguous blocker.
+        // Only scout when no undelivered adult is in the loaded scene.
         if (Rs2Player.isMoving()) {
             status = "Waiting for movement to finish before searching for adult NPCs";
             return;
@@ -2191,7 +2042,6 @@ public final class KspHalloween2026Script extends Script {
                 childNoTargetSince = 0L;
                 childScoutedNpcTiles.clear();
             }
-            if (next == Stage.GIVE_CANDY) adultUnknownSince = 0L;
         }
     }
 
@@ -2258,7 +2108,7 @@ public final class KspHalloween2026Script extends Script {
         configManager.unsetConfiguration(GROUP, DELIVERED_ADULT_IDS_KEY);
         configManager.unsetConfiguration(GROUP, CHILD_RETRY_COUNT_KEY);
         configManager.unsetConfiguration(GROUP, CHILD_CONFIRMED_KEY);
-        configManager.unsetConfiguration(GROUP, TREATER_CHILD_GROUP_KEY);
+        configManager.unsetConfiguration(GROUP, LEGACY_TREATER_CHILD_GROUP_KEY);
         smashedLanternTiles.clear();
         pendingLantern = null;
         lanternsVerified = false;

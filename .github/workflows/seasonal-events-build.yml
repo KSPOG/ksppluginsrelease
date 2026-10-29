@@ -55,7 +55,7 @@ jobs:
           panel=(root/'KspSeasonalEventsPanel.java').read_text()
           overlay=(root/'KspSeasonalEventsOverlay.java').read_text()
           event=(root/'KspSeasonalEvent.java').read_text()
-          assert 'VERSION = "0.2.13"' in plugin
+          assert 'VERSION = "0.2.14"' in plugin
           assert 'KSP + "Seasonal Events"' in plugin
           assert 'kspwillowchopper' not in plugin and 'kspwillowchopper' not in script
           assert 'HALLOWEEN_2026' in event
@@ -356,26 +356,31 @@ jobs:
           assert 'Not verified' in panel and 'Confirmed' in panel
           print('PASS: child Spook attempts and separate confirmed quest objective in both UIs')
 
-      - name: Verify scene-guided child search and one-batch client thread classification
+      - name: Verify 2026 child NPC IDs and safe scene-guided Spook
         shell: python
         run: |
           from pathlib import Path
           code = Path('release/kspseasonalevents/KspHalloween2026Script.java').read_text()
-          age = code.split('private void observeTreaterAges()', 1)[1].split('private TreaterAge classifyTreater(', 1)[0]
           scout = code.split('private boolean scoutVisibleTreaters(', 1)[1].split('private void spookChildren(', 1)[0]
           child = code.split('private void spookChildren(', 1)[1].split('private void solveChemist(', 1)[0]
           report = code.split('private void inspectStarterDialogue(List<String> dialogueTexts)', 1)[1].split('private Stage stageForAdultCandyObjective()', 1)[0]
           change = code.split('private void change(Stage next, String message)', 1)[1].split('private void stopForReview(', 1)[0]
 
-          assert 'if (confirmedChildGroup != TreaterGroup.UNKNOWN) return;' in age
-          assert age.index('if (confirmedChildGroup != TreaterGroup.UNKNOWN) return;') < age.index('Rs2Npc.getNpcs()')
-          assert age.count('runOnClientThreadOptional(') == 1
-          assert 'n::getLogicalHeight' not in age
-          assert 'candidate.getLogicalHeight()' in age
-          assert 'observedTreaterHeights.putAll(heights)' in age
+          assert 'CHILD_TREATER_FIRST_ID = 16778' in code
+          assert 'CHILD_TREATER_LAST_ID = 16782' in code
+          assert 'ADULT_TREATER_FIRST_ID = 16794' in code
+          assert 'ADULT_TREATER_LAST_ID = 16798' in code
+          assert 'private static boolean isChildTreaterId(int npcId)' in code
+          assert 'private static boolean isAdultTreaterId(int npcId)' in code
+          assert 'private static boolean isKnownTreaterId(int npcId)' in code
+          assert 'if (isChildTreaterId(npc.getId())) return TreaterAge.CHILD;' in code
+          assert 'if (isAdultTreaterId(npc.getId())) return TreaterAge.ADULT;' in code
+          assert 'private void observeTreaterAges()' not in code
+          assert 'observedTreaterHeights' not in code
+          assert 'confirmedChildGroup' not in code
+          assert 'getLogicalHeight()' not in code
 
           assert 'MAX_CHILD_NPC_SCOUT_STOPS = 4' in code
-          assert 'CHILD_SCENE_SETTLE_MS = 2_000L' not in code
           assert 'childScoutedNpcTiles' in scout
           assert 'classifyTreater(anchor)' in scout
           assert 'age == TreaterAge.ADULT' in scout
@@ -386,7 +391,8 @@ jobs:
           assert 'Rs2Npc.interact(' not in scout
 
           assert 'Rs2Npc.getNpcs()' in child
-          assert 'classifyTreater(n) == TreaterAge.CHILD' in child
+          assert '.filter(n -> isKnownTreaterId(n.getId()))' in child
+          assert 'isChildTreaterId(n.getId())' in child
           assert '!spookedChildren.contains(n.getId())' in child
           assert 'npcHasAction(n, "Spook")' in child
           assert 'Rs2Npc.interact(child, "Spook")' in child
@@ -395,13 +401,17 @@ jobs:
           assert 'scanRimmington(' not in child
           assert 'change(Stage.REPORT_CHILDREN' in child
           assert 'visibleTreaters=[' in child
-
           assert 'stage == Stage.REPORT_CHILDREN && resolved == Stage.SPOOK_CHILDREN' in report
           assert 'childSpookRetries > allowedRetries' in report
           assert 'spookedChildren.size() >= CHILD_REPORT_CHECKPOINT' in report
           assert 'if (next == Stage.SPOOK_CHILDREN)' in change
           assert 'childScoutedNpcTiles.clear();' in change
-          print('PASS: no fixed children waypoints, no adult Spook, bounded NPC-guided scout, one-batch age reads')
+
+          start = code.split('public synchronized boolean start(', 1)[1].split('private void restoreNpcIds(', 1)[0]
+          assert 'spookedChildren.removeIf(id -> !isChildTreaterId(id))' in start
+          assert 'givenAdultIds.removeIf(id -> !isAdultTreaterId(id))' in start
+          assert 'configManager.unsetConfiguration(GROUP, LEGACY_TREATER_CHILD_GROUP_KEY)' in start
+          print('PASS: known child and adult ID groups, action-guarded Spook, saved-state migration, bounded NPC-guided search')
 
       - name: Test wiki-confirmed Chemist dialogue routing
         shell: bash
@@ -490,38 +500,35 @@ jobs:
           assert adult.index('Rs2Npc.getNpcs()') < adult.index('nearOrWalk(player, STARTER')
           print('PASS: exact event item/crate, verified five-total receipts, inventory reconciliation and NPC-first interaction')
 
-      - name: Verify adult candy delivery without blind scene sweeps
+      - name: Verify exact 2026 adult IDs and inventory-confirmed candy delivery
         shell: python
         run: |
           from pathlib import Path
           code = Path('release/kspseasonalevents/KspHalloween2026Script.java').read_text()
-          capture = code.split('private void observeTreaterAges()', 1)[1].split('private TreaterAge classifyTreater(', 1)[0]
-          classify = code.split('private TreaterAge classifyTreater(', 1)[1].split('private boolean scoutVisibleTreaters(', 1)[0]
           delivery = code.split('private void giveCandy(WorldPoint player)', 1)[1].split('private void acted(', 1)[0]
-          assert 'private final Map<Integer, Set<String>> observedTreaterActions' in code
-          assert 'candidate.getTransformedComposition()' in capture
-          assert 'observedTreaterActions.putAll(actions);' in capture
-          assert 'treaterCostumeReady = costumeCount() >= 4;' in capture
-          assert capture.count('runOnClientThreadOptional(') == 1
-          assert 'spookGroups.size() == 1' in capture
-          assert 'observedTreaterHeights.putAll(heights)' in capture
-          assert 'observedTreaterActions.get(npc.getId())' in classify
-          assert 'if (actions.contains("spook")) return TreaterAge.CHILD;' in classify
-          assert 'actions.contains("talk-to")' in classify
-          assert 'actions.contains("trick-or-treat")' in classify
-          assert 'treaterCostumeReady' in classify
-          assert 'stage == Stage.GIVE_CANDY' in classify
+          age = code.split('private TreaterAge classifyTreater(', 1)[1].split('private boolean scoutVisibleTreaters(', 1)[0]
+          assert 'ADULT_TREATER_FIRST_ID = 16794' in code
+          assert 'ADULT_TREATER_LAST_ID = 16798' in code
+          assert 'CHILD_TREATER_FIRST_ID = 16778' in code
+          assert 'CHILD_TREATER_LAST_ID = 16782' in code
+          assert 'isChildTreaterId(npc.getId())' in age
+          assert 'isAdultTreaterId(npc.getId())' in age
+          assert 'observedTreaterActions' not in code
+          assert 'observedTreaterHeights' not in code
+          assert 'TREATER_CHILD_GROUP_KEY' not in code.replace('LEGACY_TREATER_CHILD_GROUP_KEY', '')
           assert delivery.index('Rs2Npc.getNpcs()') < delivery.index('scanRimmington(')
-          assert delivery.index('if (adult != null && item != null)') < delivery.index('if (!unknown.isEmpty())') < delivery.index('scanRimmington(')
+          assert 'isAdultTreaterId(n.getId())' in delivery
+          assert '!givenAdultIds.contains(n.getId())' in delivery
           assert 'Rs2Walker.clearWalkingRoute("ksp_halloween_adult_visible")' in delivery
           assert 'Rs2Inventory.useItemOnNpc(item.getId(), adult)' in delivery
           assert 'pendingCandyCount = candyCount;' in delivery
           assert 'pendingAdultId = adult.getId();' in delivery
-          assert 'adultUnknownSince >= 12_000L' in delivery or '>= 12_000L' in delivery
-          assert 'stopForReview("Visible trick-or-treater NPCs could not be verified"' in delivery
-          assert 'classifyTreater(n) == TreaterAge.ADULT' in delivery
-          assert 'verified adult can receive' not in delivery.lower() or 'Talk-to menu entry' in delivery
-          print('PASS: action-based adult selection, visible-first interaction, confirmed receipt, no blind sweep')
+          assert 'candyCount < pendingCandyCount' in delivery
+          assert 'givenAdultIds.add(pendingAdultId)' in delivery
+          assert 'adultsGiven = Math.min(5, adultsGiven + 1)' in delivery
+          assert 'if (sweepsWithoutTarget >= RIMMINGTON_SWEEP.length)' in delivery
+          assert 'Visible trick-or-treater NPCs could not be verified' not in delivery
+          print('PASS: exact adult target IDs only, no mistaken child targeting, inventory-confirmed unique deliveries')
 
       - name: Install Seasonal Events sources into Microbot Hub
         shell: bash
