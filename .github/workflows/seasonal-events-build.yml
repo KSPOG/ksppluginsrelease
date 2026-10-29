@@ -210,7 +210,7 @@ jobs:
           assert 'holidayScrollAttempts < 24' in costume
           assert 'Rs2Inventory.getEmptySlots() <= 0' in costume
           assert costume.index('if (window.open) {') < costume.index('if (diango == null)')
-          assert 'Rs2Npc.interact("Diango", "Holiday-items")' in costume
+          assert 'Rs2Npc.interact(diango, "Holiday-items")' in costume
           assert 'change(Stage.SPOOK_CHILDREN' in costume
           assert 'skeleton boots' in script and 'skeleton shirt' in script
           assert 'Diango has no additional suitable wearable costume pieces' in costume
