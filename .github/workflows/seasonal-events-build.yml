@@ -55,7 +55,7 @@ jobs:
           panel=(root/'KspSeasonalEventsPanel.java').read_text()
           overlay=(root/'KspSeasonalEventsOverlay.java').read_text()
           event=(root/'KspSeasonalEvent.java').read_text()
-          assert 'VERSION = "0.2.9"' in plugin
+          assert 'VERSION = "0.2.10"' in plugin
           assert 'KSP + "Seasonal Events"' in plugin
           assert 'kspwillowchopper' not in plugin and 'kspwillowchopper' not in script
           assert 'HALLOWEEN_2026' in event
@@ -402,6 +402,35 @@ jobs:
             release/.github/tests/seasonal/KspHalloweenChemistDialogueTest.java
           java -cp /tmp/ksp-halloween-chemist-test \
             net.runelite.client.plugins.microbot.kspseasonalevents.KspHalloweenChemistDialogueTest
+
+      - name: Test Chemist free-text riddle prompt and fast dialogue safeguards
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/ksp-halloween-chemist-input-test
+          javac -d /tmp/ksp-halloween-chemist-input-test \
+            release/kspseasonalevents/KspHalloweenChemistInput.java \
+            release/.github/tests/seasonal/KspHalloweenChemistInputTest.java
+          java -cp /tmp/ksp-halloween-chemist-input-test \
+            net.runelite.client.plugins.microbot.kspseasonalevents.KspHalloweenChemistInputTest
+          python - <<'PY'
+          from pathlib import Path
+          code=Path('release/kspseasonalevents/KspHalloween2026Script.java').read_text()
+          tick=code.split('private void tick()',1)[1].split('private void handleDialogueOption()',1)[0]
+          input_handler=code.split('private boolean handleChemistAnswerPrompt()',1)[1].split('private static boolean isVisible(',1)[0]
+          assert 'stage == Stage.CHEMIST_RIDDLE && handleChemistAnswerPrompt()' in tick
+          assert tick.index('handleChemistAnswerPrompt()') < tick.index('Rs2Dialogue.hasContinue()')
+          assert 'WidgetInfo.CHATBOX_FULL_INPUT' in code
+          assert 'WidgetInfo.CHATBOX_INPUT' in code
+          assert 'Rs2Keyboard.typeString("92")' in input_handler
+          assert 'Rs2Keyboard.enter()' in input_handler
+          assert 'chemistAnswerSubmissions >= 1' in input_handler
+          assert 'Rs2Dialogue.hasContinue() || Rs2Dialogue.hasSelectAnOption()' in input_handler
+          assert 'this::safeTick, 0L, 300L' in code
+          assert 'DIALOGUE_GAP_MS = 320L' in code
+          assert 'ACTION_GAP = 900L' in code
+          print('PASS: Chemist free-text handling prioritized and dialogue paced safely')
+          PY
 
       - name: Install Seasonal Events sources into Microbot Hub
         shell: bash
