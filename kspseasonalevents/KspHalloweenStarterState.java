@@ -54,12 +54,19 @@ final class KspHalloweenStarterState {
         boolean trickOrTreater = text.contains("trick-or-treater")
                 || text.contains("trick or treater")
                 || text.contains("children") || text.contains("kids");
+        boolean adultsOnly = (text.contains("adult") || text.contains("grown-up")
+                || text.contains("grown up")) && !trickOrTreater;
         boolean scare = text.contains("scare") || text.contains("spook")
                 || text.contains("frighten");
         boolean costume = text.contains("costume") || text.contains("diango")
                 || text.contains("dress up") || text.contains("dressing up")
                 || (text.contains("wear") && text.contains("halloween"));
-        if ((trickOrTreater && scare) || (costume && (trickOrTreater || scare)))
+
+        // "Adults won't be frightened by your costume" is explanatory text,
+        // not an instruction to repeat the child objective.
+        if (adultsOnly)
+            return Objective.UNKNOWN;
+        if ((trickOrTreater && scare) || (costume && trickOrTreater))
             return Objective.SCARE_CHILDREN;
 
         boolean lantern = text.contains("lantern") || text.contains("jack-o-lantern")
