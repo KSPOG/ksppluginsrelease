@@ -1259,6 +1259,8 @@ public class TutorialIslandScript extends KspManagedScript
     {
         if (Rs2Inventory.contains("Bronze bar") || Rs2Player.isAnimating()) return;
         Rs2TileObjectModel furnace = tutorialObject(ObjectID.FURNACE_10082);
+        if (furnace == null) furnace = tutorialObject("Furnace");
+        if (furnace == null) logMissingTutorialObject("Furnace", ObjectID.FURNACE_10082);
         if (!prepareTutorialObjectInteraction(furnace, 4) || !readyForAction()) return;
 
         // Avoid repeatedly using ore on the furnace while the previous
@@ -1278,6 +1280,7 @@ public class TutorialIslandScript extends KspManagedScript
     {
         if (Rs2Widget.isSmithingWidgetOpen() || Rs2Player.isAnimating()) return;
         Rs2TileObjectModel anvil = tutorialObject("Anvil");
+        if (anvil == null) logMissingTutorialObject("Anvil", -1);
         if (!prepareTutorialObjectInteraction(anvil, 4) || !readyForAction()) return;
 
         // Wait for the previous interaction to be acknowledged before
@@ -1342,8 +1345,7 @@ public class TutorialIslandScript extends KspManagedScript
                 // Some client builds remain on 480 after equipping both
                 // ranged items. Do not idle waiting for a 490 varbit edge:
                 // attempt the tutorial rat once the required gear is worn.
-                if (equipRequiredTutorialRangedGear()) equipTutorialRangeGear();
-                else attackRatWithRange();
+                attackRatWithRange();
                 return;
             case 490:
                 attackRatWithRange();
