@@ -116,7 +116,7 @@ jobs:
           root = Path('release/kspaccountbuilder')
           tutorial = (root / 'tasks/tutorialisland/TutorialIslandScript.java').read_text()
           plugin = (root / 'KspAccountBuilderPlugin.java').read_text()
-          assert 'VERSION = "1.9.62"' in plugin
+          assert 'VERSION = "1.9.63"' in plugin
 
           mining = tutorial.split('private void miningGuide()', 1)[1].split('private void smeltTutorialBronze()', 1)[0]
           for state in (260, 270, 280, 290, 300, 310, 320, 330, 340, 350):
@@ -150,7 +150,7 @@ jobs:
           assert 'TutAreas.contains(destination)' in plugin
           print('PASS: mining progress/live ore targeting, ranged rat attack and Tutorial Island banker-only routing')
 
-      - name: Verify Tutorial Island live item targets, bank Use and bounded local walker
+      - name: Verify Tutorial Island live item targets, bank Use and full WebWalker
         shell: python
         run: |
           from pathlib import Path
@@ -180,11 +180,68 @@ jobs:
           assert 'ObjectID.BANK_BOOTH_10083' in banker
           assert 'TUT_ISLAND_BANK_AREA.contains(object.getWorldLocation())' in banker
           assert 'Rs2Bank.openBank()' not in banker and 'Rs2Bank.walkToBank' not in banker
-          assert 'Rs2Walker.walkStep(target, reach);' in local
-          assert 'if (TutAreas.contains(playerLocation) && TutAreas.contains(target))' in local
-          assert 'if (TutAreas.contains(playerLocation))' in local
-          assert local.index('Rs2Walker.walkStep(target, reach);') < local.index('Rs2Walker.walkTo(target, reach);')
-          print('PASS: local Microbot step-walking, selected live objects, 480 ranged attack, Tutorial booth Use')
+          assert 'Rs2Walker.walkStep(target, reach);' not in local
+          assert 'if (TutAreas.contains(playerLocation) && !TutAreas.contains(target))' in local
+          assert 'ensureTutorialDirectWebWalker();' in local
+          assert local.count('Rs2Walker.walkTo(target, reach);') == 1
+          print('PASS: full Microbot walking, selected live objects, 480 ranged attack, Tutorial booth Use')
+
+      - name: Verify full WebWalker with scoped banked-transports override and furnace Use
+        shell: python
+        run: |
+          from pathlib import Path
+          code = Path('release/kspaccountbuilder/tasks/tutorialisland/TutorialIslandScript.java').read_text()
+          plugin = Path('release/kspaccountbuilder/KspAccountBuilderPlugin.java').read_text()
+          assert 'VERSION = "1.9.63"' in plugin
+          local = code.split('private void walkTutorialLocal(WorldPoint target, int reach)', 1)[1].split('private boolean openTutorialPassage(', 1)[0]
+          config = code.split('private void ensureTutorialDirectWebWalker()', 1)[1].split('private void rejectMainlandWalkerRoute()', 1)[0]
+          furnace = code.split('private void smeltTutorialBronze()', 1)[1].split('private void openTutorialAnvil()', 1)[0]
+          shutdown = code.split('public void shutdown()', 1)[1].split('// Public accessors', 1)[0]
+          run = code.split('public boolean run()', 1)[1].split('private boolean closeBlockingTutorialWidget()', 1)[0]
+          assert 'Rs2Walker.walkStep(' not in local
+          assert 'Rs2Walker.walkTo(target, reach)' in local
+          assert 'ensureTutorialDirectWebWalker();' in local
+          assert 'TutAreas.contains(playerLocation) && !TutAreas.contains(target)' in local
+          assert 'ensureTutorialDirectWebWalker();' in run
+          assert 'WALKER_CONFIG_GROUP = "shortestpath"' in code
+          assert 'WALKER_BANKED_TRANSPORT_KEY = "walkWithBankedTransports"' in code
+          assert 'Boolean.parseBoolean(configured)' in config
+          assert 'configManager.setConfiguration(WALKER_CONFIG_GROUP,' in config
+          assert 'false);' in config
+          assert 'savedBankedTransportSetting' in config
+          assert 'restoreTutorialWebWalkerPreference()' in shutdown
+          assert shutdown.index('super.shutdown()') < shutdown.index('restoreTutorialWebWalkerPreference()')
+          assert 'furnace.hasAction("Use")' in furnace
+          assert 'Rs2Inventory.deselect()' in furnace
+          assert 'furnace.click("Use")' in furnace
+          assert 'markTutorialInteraction("object:furnace:use")' in furnace
+          assert 'useTutorialItemOnLiveObject(ore, furnace,' in furnace
+          assert furnace.index('furnace.click("Use")') < furnace.index('useTutorialItemOnLiveObject(ore, furnace,')
+          assert 'Rs2Inventory.contains("Bronze bar")' in furnace
+          print('PASS: full WebWalker for island routes; no Lumbridge banked detours; direct furnace Use and verified progress')
+
+      - name: Verify explicit Cinematic and Legacy overlay switching
+        shell: python
+        run: |
+          from pathlib import Path
+          root = Path('release/kspaccountbuilder')
+          panel = (root / 'KspAccountBuilderPanel.java').read_text()
+          overlay = (root / 'KSPAccountBuilderOverlay.java').read_text()
+          config = (root / 'KspAccountBuilderConfig.java').read_text()
+          plugin = (root / 'KspAccountBuilderPlugin.java').read_text()
+          assert 'new String[]{"Cinematic overlay", "Legacy overlay"}' in panel
+          assert 'addControl(quick, "Overlay style", overlayStyle);' in panel
+          assert '"cinematicHud", overlayStyle.getSelectedIndex() == 0' in panel
+          assert 'overlayStyle.setSelectedIndex(config.cinematicHud() ? 0 : 1)' in panel
+          assert 'if (!updating)' in panel
+          assert 'keyName = "cinematicHud"' in config
+          assert 'default boolean cinematicHud() { return true; }' in config
+          assert 'if (config.cinematicHud() && config.hudFitChatbox())' in overlay
+          assert 'if (config.cinematicHud()) return cinematic.render(graphics);' in overlay
+          assert 'if (!config.cinematicHud()) return renderOriginalPanel(graphics);' in overlay
+          assert 'private Dimension renderOriginalPanel(Graphics2D graphics)' in overlay
+          assert 'overlayManager.add(overlay);' in plugin
+          print('PASS: sidebar offers Legacy explicitly, preserves saved preference and both renderers remain functional')
 
       - name: Verify Tutorial Island prayer/magic exits and regular-account dialogue
         shell: python

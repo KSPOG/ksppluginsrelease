@@ -64,7 +64,10 @@ final class KspAccountBuilderPanel extends PluginPanel
     private final JComboBox<Enum<?>> target = new JComboBox<>();
     private final JComboBox<Integer> hudScale = new JComboBox<>(new Integer[]{75, 100, 125, 150});
     private final JCheckBox showHud = new JCheckBox("Show in-game HUD");
-    private final JCheckBox cinematicHud = new JCheckBox("Use cinematic interface");
+    // Keep the existing 'cinematicHud' config key for user preference
+    // migration, but expose BOTH renderers as explicit choices.
+    private final JComboBox<String> overlayStyle =
+            new JComboBox<>(new String[]{"Cinematic overlay", "Legacy overlay"});
     private final JCheckBox fitChatbox = new JCheckBox("Fit HUD to chatbox");
     private final JCheckBox hudDetails = new JCheckBox("Expanded HUD details");
     private final JCheckBox compactHud = new JCheckBox("Compact in-game HUD");
@@ -224,15 +227,13 @@ final class KspAccountBuilderPanel extends PluginPanel
             }
         });
         quick.add(showHud);
-        cinematicHud.setOpaque(false);
-        cinematicHud.setForeground(new Color(242, 235, 221));
-        cinematicHud.setToolTipText("Switch between the new cinematic interface and the complete original status panel.");
-        cinematicHud.addActionListener(e -> {
+        overlayStyle.setToolTipText("Choose Cinematic or the original RuneLite Legacy status overlay; changing the style does not stop the script.");
+        overlayStyle.addActionListener(e -> {
             if (!updating)
                 configManager.setConfiguration(KspAccountBuilderConfig.CONFIG_GROUP,
-                        "cinematicHud", cinematicHud.isSelected());
+                        "cinematicHud", overlayStyle.getSelectedIndex() == 0);
         });
-        quick.add(cinematicHud);
+        addControl(quick, "Overlay style", overlayStyle);
         fitChatbox.setOpaque(false);
         fitChatbox.setForeground(new Color(242, 235, 221));
         fitChatbox.setToolTipText("Match the live RuneLite chatbox dimensions and position; uncheck for the full-size HUD.");
@@ -446,7 +447,8 @@ final class KspAccountBuilderPanel extends PluginPanel
         if (hudScale.getSelectedItem() == null || !hudScale.getSelectedItem().equals(currentScale))
             hudScale.setSelectedItem(currentScale == 75 || currentScale == 100 || currentScale == 125 || currentScale == 150 ? currentScale : 100);
         showHud.setSelected(plugin.isHudVisible());
-        cinematicHud.setSelected(config.cinematicHud());
+        if (overlayStyle.getSelectedIndex() != (config.cinematicHud() ? 0 : 1))
+            overlayStyle.setSelectedIndex(config.cinematicHud() ? 0 : 1);
         fitChatbox.setSelected(config.hudFitChatbox());
         compactHud.setSelected(plugin.isCompactOverlay());
         hudDetails.setSelected(config.hudDetailsVisible());
