@@ -150,7 +150,7 @@ jobs:
           assert 'TutAreas.contains(destination)' in plugin
           print('PASS: mining progress/live ore targeting, ranged rat attack and Tutorial Island banker-only routing')
 
-      - name: Verify Tutorial Island live item targets, bank Use and bounded local walker
+      - name: Verify Tutorial Island live item targets, bank Use and full WebWalker
         shell: python
         run: |
           from pathlib import Path
@@ -181,10 +181,10 @@ jobs:
           assert 'TUT_ISLAND_BANK_AREA.contains(object.getWorldLocation())' in banker
           assert 'Rs2Bank.openBank()' not in banker and 'Rs2Bank.walkToBank' not in banker
           assert 'Rs2Walker.walkStep(target, reach);' not in local
-          assert 'if (TutAreas.contains(playerLocation) && TutAreas.contains(target))' in local
-          assert 'if (TutAreas.contains(playerLocation))' in local
+          assert 'if (TutAreas.contains(playerLocation) && !TutAreas.contains(target))' in local
+          assert 'ensureTutorialDirectWebWalker();' in local
           assert local.count('Rs2Walker.walkTo(target, reach);') == 1
-          print('PASS: local Microbot step-walking, selected live objects, 480 ranged attack, Tutorial booth Use')
+          print('PASS: full Microbot walking, selected live objects, 480 ranged attack, Tutorial booth Use')
 
       - name: Verify full WebWalker with scoped banked-transports override and furnace Use
         shell: python
