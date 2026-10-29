@@ -1,4 +1,4 @@
-# KSP Seasonal Events v0.2.8
+# KSP Seasonal Events v0.2.11
 
 A **standalone Microbot plugin**, independent of Chopper, with its own
 config, navigation panel, Start / Pause / Resume / Stop / Reset progress,
@@ -33,6 +33,18 @@ may require manual review rather than repeated speculative clicks. The
 plugin logs stage transitions, visible dialogue options when unknown, NPC
 IDs and world tiles of successfully targeted event objects. No guessed
 NPC/object IDs are treated as authoritative.
+
+## Angel/Henja visible dialogue capture and recovery (0.2.11)
+
+Starter conversations now inspect visible RuneLite NPC/player/sprite/option
+widget text on the client thread, in addition to Microbot's dialogue
+helpers. The older helper can return an empty string for a visibly open
+conversation. An empty or unclassified reading does **not** authorize a
+stage transition or immediate review stop. The plugin captures the visible
+text and retries the starter conversation up to three times before stopping
+with explicit diagnostics. It resolves the event objective only from a
+recognized Angel/Henja conversation, and ignores single-frame gaps
+between dialogue pages.
 
 ## Angel/Henja dialogue is authoritative (0.2.8)
 
