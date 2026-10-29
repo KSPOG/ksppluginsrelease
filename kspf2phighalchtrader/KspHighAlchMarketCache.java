@@ -36,7 +36,7 @@ final class KspHighAlchMarketCache implements AutoCloseable
 {
     private static final String MAPPING_URL = "https://prices.runescape.wiki/api/v1/osrs/mapping";
     private static final long MAPPING_REFRESH_MS = TimeUnit.HOURS.toMillis(6);
-    private static final String USER_AGENT = "KSP-High-Alch-Trader/0.3.7 (github.com/KSPOG/ksppluginsrelease)";
+    private static final String USER_AGENT = "KSP-High-Alch-Trader/0.3.9 (github.com/KSPOG/ksppluginsrelease)";
     private static final String LATEST_URL = "https://prices.runescape.wiki/api/v1/osrs/latest";
     private static final long REFRESH_SECONDS = 45L;
     private static final long MAX_STALE_LIVE_MS = TimeUnit.MINUTES.toMillis(15);
