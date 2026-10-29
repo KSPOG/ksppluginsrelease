@@ -787,7 +787,12 @@ public final class KspHalloween2026Script extends Script {
     }
 
     private void talkToStarter(WorldPoint player) {
-        if (!nearOrWalk(player, STARTER, 8, "Angel / Henja's house"))
+        // Interact with a loaded Angel/Henja NPC immediately; distance to
+        // the STARTER waypoint is irrelevant when the target is in scene.
+        Rs2NpcModel henja = Rs2Npc.getNpc("Henja");
+        Rs2NpcModel angel = Rs2Npc.getNpc("Angel");
+        if (henja == null && angel == null
+                && !nearOrWalk(player, STARTER, 8, "Angel / Henja's house"))
             return;
         if (starterTalkAttempts >= MAX_STARTER_TALK_ATTEMPTS) {
             stopForReview("Angel/Henja dialogue did not identify a known Halloween objective"
@@ -796,10 +801,8 @@ public final class KspHalloween2026Script extends Script {
                     + " widgetText=" + lastStarterObservedWidgetText);
             return;
         }
-        boolean clicked = Rs2Npc.getNpc("Henja") != null
-                && Rs2Npc.interact("Henja", "Talk-to");
-        if (!clicked) clicked = Rs2Npc.getNpc("Angel") != null
-                && Rs2Npc.interact("Angel", "Talk-to");
+        boolean clicked = henja != null && Rs2Npc.interact(henja, "Talk-to");
+        if (!clicked) clicked = angel != null && Rs2Npc.interact(angel, "Talk-to");
         if (!clicked) {
             status = "Locating Angel / Henja in their Rimmington home";
             return;
@@ -1415,17 +1418,20 @@ public final class KspHalloween2026Script extends Script {
         // acquired (e.g. human intervention or a client UI interruption).
         holidayScrollAttempts = 0;
         holidayCloseAttempts = 0;
-        if (!nearOrWalk(player, DIANGO, 8, "Diango in Draynor Village")) return;
-        if (Rs2Npc.getNpc("Diango") != null
-                && (lastTalkAt == 0L
+        Rs2NpcModel diango = Rs2Npc.getNpc("Diango");
+        if (diango == null) {
+            nearOrWalk(player, DIANGO, 8, "Diango in Draynor Village");
+            return;
+        }
+        if (lastTalkAt == 0L
                     || System.currentTimeMillis() - lastTalkAt
-                        >= WORLD_ACTION_STALL_TIMEOUT_MS)) {
-            if (Rs2Npc.interact("Diango", "Holiday-items")) {
+                        >= WORLD_ACTION_STALL_TIMEOUT_MS) {
+            if (Rs2Npc.interact(diango, "Holiday-items")) {
                 lastTalkAt = System.currentTimeMillis();
                 acted("Opening Diango to collect missing costume pieces");
                 return;
             }
-            if (Rs2Npc.interact("Diango", "Talk-to")) {
+            if (Rs2Npc.interact(diango, "Talk-to")) {
                 lastTalkAt = System.currentTimeMillis();
                 acted("Asking Diango for holiday items");
                 return;
@@ -1695,7 +1701,11 @@ public final class KspHalloween2026Script extends Script {
             change(Stage.COOK_SUGAR, "Chemist sugar acquired");
             return;
         }
-        if (!nearOrWalk(player, CHEMIST, 8, "the Chemist west of Rimmington")) return;
+        Rs2NpcModel chemist = Rs2Npc.getNpc("Chemist");
+        if (chemist == null) {
+            nearOrWalk(player, CHEMIST, 8, "the Chemist west of Rimmington");
+            return;
+        }
         // One Talk-to per observed conversation. The watchdog allows a
         // retry only when no dialogue/input or sugar appeared.
         long now = System.currentTimeMillis();
@@ -1704,8 +1714,7 @@ public final class KspHalloween2026Script extends Script {
             status = "Waiting for Chemist dialogue or sugar";
             return;
         }
-        if (Rs2Npc.getNpc("Chemist") != null
-                && Rs2Npc.interact("Chemist", "Talk-to")) {
+        if (Rs2Npc.interact(chemist, "Talk-to")) {
             lastTalkAt = System.currentTimeMillis();
             chemistConversationAt = lastTalkAt;
             clearChemistTextPrompt();
@@ -1969,8 +1978,8 @@ public final class KspHalloween2026Script extends Script {
             change(Stage.COAT_ONIONS, "Prepare more candy onions for adults");
             return;
         }
-        if (!RIMMINGTON.contains(player)
-                && !nearOrWalk(player, STARTER, 10, "adult trick-or-treaters")) return;
+        // Check currently loaded adults before considering travel. The same
+        // principle applies to Angel, Henja, Diango and the Chemist.
         observeTreaterAges();
         if (stage == Stage.NEEDS_REVIEW) return;
         Rs2NpcModel adult = Rs2Npc.getNpcs().filter(n -> n.getName() != null
@@ -1996,6 +2005,9 @@ public final class KspHalloween2026Script extends Script {
                     + "/5 deliveries; inspect available NPC actions");
             return;
         }
+        if (!RIMMINGTON.contains(player)
+                && !nearOrWalk(player, STARTER, 10, "adult trick-or-treaters"))
+            return;
         scanRimmington(player, "Looking for adult trick-or-treaters");
     }
 
