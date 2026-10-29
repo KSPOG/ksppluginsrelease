@@ -1,4 +1,4 @@
-# KSP Seasonal Events v0.2.13
+# KSP Seasonal Events v0.2.14
 
 A **standalone Microbot plugin**, independent of Chopper, with its own
 config, navigation panel, Start / Pause / Resume / Stop / Reset progress,
@@ -9,9 +9,11 @@ runtime script, and hidden-until-Start overlay.
 Source: https://oldschool.runescape.wiki/w/2026_Halloween_event
 The complete written walkthrough was read on 28 October 2026. This
 plugin implements a **staged workflow based on that walkthrough**; the
-live 2026 object IDs, trick-or-treater NPC IDs, Diango reward interface,
+precise 2026 object IDs, Diango reward interface details,
 dialogue branch strings and completion varbits remain to be verified in
-an actual Microbot client. Passing CI does not guarantee event completion.
+an actual Microbot client. The child and adult trick-or-treater NPC ID
+ranges are now known from live game inspection. Passing CI does not
+guarantee event completion.
 
 | Stage | Wiki requirements | Implementation |
 |---|---|---|
@@ -19,13 +21,13 @@ an actual Microbot client. Passing CI does not guarantee event completion.
 | Smash lanterns | Smash all eight Jack-O-Lanterns | Live scene objects with Smash action; track disappearance and persist each confirmed world tile; search Rimmington when objects not loaded |
 | Report lanterns | Speak to Angel or Henja | Return to their house |
 | Halloween costume | Obtain previous Halloween rewards from Diango in Draynor and wear at least four items | Travel to Diango, request rewards via dialogue, equip known carried costume pieces, wait for four equipped pieces; does not blindly click reward widgets |
-| Scare children | Spook *child* trick-or-treaters, not adults | NPC detection requires a live Spook menu action, ignores recently targeted NPC indexes |
+| Scare children | Spook *child* trick-or-treaters, not adults | Target only NPC IDs **16778–16782** with a live Spook action; preserve distinct child attempts |
 | Report children | Speak to Angel or Henja | Return and progress to Chemist |
 | Chemist | Obtain sugar by solving COFFIN periodic-table riddle: C(6)+O(8)+F(9)+F(9)+I(53)+N(7) = **92** | Talk to Chemist, select explicit 92 dialogue option when offered; otherwise log unknown widget for review |
 | Cook sugar | Cook sugar on the house range or Chemist fireplace | Resolve a live Range/Fireplace and use sugar on it; wait for Molten sugar inventory |
 | Collect onions | Collect five event onions from **Crate of onions** behind the house; inventory displays **Old inion** | Prioritize visible crate without WebWalker; require inventory receipt; count remaining Old inion + prepared Candy onions + verified deliveries toward five |
 | Make candy | Combine molten sugar with Old inion | Use the observed inventory item name, accept `Old onion` as client-name fallback, and verify each Candy onion receipt |
-| Serve adults | Give candy onions to five adult trick-or-treaters | Detect trick-or-treaters **without** child-only Spook action, use candy onion on each NPC, confirm decreased inventory before counting |
+| Serve adults | Give candy onions to five adult trick-or-treaters | Target only NPC IDs **16794–16798**; use Candy onion on a loaded undelivered adult and confirm inventory consumption before counting |
 | Finale | Cutscene then speak to Angel or Henja | Return for dialogue; only report completion when in-game message or Vampyre reward confirms it |
 
 The wiki doesn't provide every precise live interaction, so certain steps
@@ -34,7 +36,27 @@ plugin logs stage transitions, visible dialogue options when unknown, NPC
 IDs and world tiles of successfully targeted event objects. No guessed
 NPC/object IDs are treated as authoritative.
 
-## Adult delivery: NPC action evidence before navigation (0.2.13)
+## Verified 2026 child/adult NPC IDs for both tasks (0.2.14)
+
+The five **adult trick-or-treater NPC IDs** were identified in-game:
+`16794`, `16795`, `16796`, `16797`, `16798`.
+The other 2026 group is the five **children**:
+`16778`, `16779`, `16780`, `16781`, `16782`.
+
+These verified IDs now control **both** the child Spook and adult Candy
+onion stages. No height comparison, guessed action-to-age mapping,
+NPC name substring or persisted group classification can override them.
+Spook additionally requires the live Spook menu action; candy delivery
+uses an eligible, undelivered adult already in the loaded scene first
+and counts completion only after observing the candy inventory decrease.
+Older persisted NPC ID lists are filtered to the correct age groups
+on startup, and the obsolete inferred group configuration is cleared.
+
+When adult NPCs are absent from the scene, the usual bounded search
+continues; loaded child NPCs are ignored as delivery targets.
+Live success of all five interactions still requires in-game validation.
+
+## Historical adult delivery diagnosis (0.2.13; superseded by verified IDs)
 
 Logs from 29 October 2026 show that all five candy onions were created,
 but `GIVE_CANDY` had only NPC IDs 16794–16798 in the scene. The
@@ -42,22 +64,11 @@ previous classifier required **both** trick-or-treater ID ranges to be
 seen for model-height comparison, and wandered across generic Rimmington
 waypoints when it couldn't classify the visible NPCs.
 
-The delivery stage now reads live **transformed NPC menu actions and
-model heights in one client-thread snapshot**. A known event NPC with
-`Spook` is a child candidate; a known event NPC with `Talk-to` or
-`Trick-or-treat` but no `Spook` may be used as an adult when four
-Halloween outfit items are equipped. Existing verified child group
-evidence takes precedence. Conflicting menu evidence remains unknown.
-
-The script tries the **nearest eligible adult already loaded** before
-asking WebWalker to search elsewhere. A visible but unclassified event
-NPC causes a bounded 12-second diagnostic wait, not another speculative
-waypoint route. It logs the NPC ID, world tile, live actions, costume
-state and classification, then pauses for review if unresolved.
-Successful delivery is counted only when candy is actually consumed.
-
-This behavior is compile/static-test verified only until a live adult
-delivery is observed in a new session.
+Version 0.2.13 tried to infer adults from transformed NPC menu actions
+and model heights. This was insufficient because one NPC group could be
+outside the loaded scene. **Version 0.2.14 replaces the inference
+entirely with the verified ID ranges above**, while preserving
+loaded-target-first navigation and inventory-confirmed deliveries.
 
 ## Onion collection and inventory-state recovery (0.2.12)
 
