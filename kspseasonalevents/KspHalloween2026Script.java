@@ -1324,7 +1324,9 @@ public final class KspHalloween2026Script extends Script {
                 .where(o -> o != null && o.getName() != null
                         && (o.getName().equalsIgnoreCase("Range")
                             || o.getName().equalsIgnoreCase("Fireplace"))
-                        && (o.hasActionContaining("Cook") || o.hasActionContaining("Use")))
+                        // Sugar is USED ON the range/fireplace; the object
+                        // itself does not have to advertise Cook/Use actions.
+                        )
                 .nearestOnClientThread();
     }
 
@@ -1341,7 +1343,11 @@ public final class KspHalloween2026Script extends Script {
                 && !nearOrWalk(player, CHEMIST, 8, "Rimmington range / fireplace")) return;
         Rs2TileObjectModel surface = cookingSurface();
         if (surface == null) {
-            status = "Locating range in children's house or Chemist fireplace";
+            // The Chemist and Angel/Henja are far enough apart that the
+            // cooking surface may not be loaded into the scene yet.
+            if (!nearOrWalk(player, STARTER, 8, "Angel / Henja range to cook sugar"))
+                return;
+            status = "Locating range in Angel/Henja's house or Chemist fireplace";
             return;
         }
         net.runelite.client.plugins.microbot.util.inventory.Rs2ItemModel sugar =
@@ -1357,8 +1363,9 @@ public final class KspHalloween2026Script extends Script {
             change(Stage.COAT_ONIONS, "Five event-only old onions collected");
             return;
         }
-        if (!RIMMINGTON.contains(player)
-                && !nearOrWalk(player, STARTER, 8, "old onion crate behind children's house"))
+        // The Chemist is already inside Rimmington, but the crate behind
+        // Angel/Henja's home may still be outside the loaded scene.
+        if (!nearOrWalk(player, STARTER, 8, "old onion crate behind Angel / Henja's house"))
             return;
         Rs2TileObjectModel crate = Microbot.getRs2TileObjectCache().query().fromWorldView()
                 .where(o -> o != null && o.getName() != null
