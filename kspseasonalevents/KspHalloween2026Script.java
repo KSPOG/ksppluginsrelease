@@ -4,6 +4,8 @@ import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.coords.WorldArea;
 import net.runelite.api.widgets.Widget;
 import net.runelite.api.widgets.WidgetInfo;
+import net.runelite.api.widgets.InterfaceID;
+import net.runelite.api.widgets.WidgetInfo;
 import net.runelite.api.coords.WorldPoint;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.plugins.microbot.Microbot;
@@ -196,6 +198,11 @@ public final class KspHalloween2026Script extends Script {
     private boolean pendingStarterDialogueSeen;
     private boolean starterConversationActive;
     private String lastStarterDialogue = "";
+    private int starterTalkAttempts;
+    private int starterNoDialogueTicks;
+    private boolean starterInterfaceSeen;
+    private String lastStarterObservedWidgetText = "";
+    private static final int MAX_STARTER_TALK_ATTEMPTS = 3;
     // Track the visible Chemist option menu until it actually changes.
     // Alternating widget clicks and option keybindings avoids silent keybind failures.
     private String pendingChemistOptions = "";
@@ -246,6 +253,10 @@ public final class KspHalloween2026Script extends Script {
         pendingStarterDialogueSeen = false;
         starterConversationActive = false;
         lastStarterDialogue = "";
+        starterTalkAttempts = 0;
+        starterNoDialogueTicks = 0;
+        starterInterfaceSeen = false;
+        lastStarterObservedWidgetText = "";
         clearChemistOptionPending();
         clearChemistTextPrompt();
         chemistConversationAt = 0L;
@@ -363,17 +374,26 @@ public final class KspHalloween2026Script extends Script {
         // handling. A riddle answer field is not a selectable "92" option.
         if (stage == Stage.CHEMIST_RIDDLE && handleChemistAnswerPrompt()) return;
 
-        if (starterConversationActive
-                && (Rs2Dialogue.hasContinue() || Rs2Dialogue.hasSelectAnOption())) {
-            pendingStarterDialogueSeen = true;
-            pendingStarterLastDialogueAt = System.currentTimeMillis();
-            inspectStarterDialogue();
-            if (stage == Stage.NEEDS_REVIEW || stage == Stage.COMPLETED) return;
+        boolean dialogueVisible = Rs2Dialogue.hasContinue() || Rs2Dialogue.hasSelectAnOption();
+        String currentStarterText = "";
+        if (starterConversationActive) {
+            // The RuneLite dialogue helpers sometimes report no Continue,
+            // even while NPC text is visibly rendered in the chatbox.
+            List<String> samples = starterDialogueSamples();
+            currentStarterText = String.join(" | ", samples);
+            dialogueVisible = dialogueVisible || !samples.isEmpty();
+            if (dialogueVisible) {
+                starterInterfaceSeen = true;
+                starterNoDialogueTicks = 0;
+                inspectStarterDialogue(samples);
+                if (stage == Stage.NEEDS_REVIEW || stage == Stage.COMPLETED) return;
+            }
         }
 
         if (Rs2Dialogue.hasContinue()) {
             if (stage == Stage.CHEMIST_RIDDLE) clearChemistOptionPending();
-            String signature = stage + "|continue|" + Rs2Dialogue.getDialogueText();
+            String signature = stage + "|continue|" + (starterConversationActive
+                    ? currentStarterText : Rs2Dialogue.getDialogueText());
             if (canDispatchDialogue(signature)) {
                 Rs2Dialogue.clickContinue();
                 dialogueActed("Advancing " + stage + " dialogue", signature);
@@ -385,36 +405,56 @@ public final class KspHalloween2026Script extends Script {
             handleDialogueOption();
             return;
         }
-        // No menu/continue is visible: the next NPC/object state may be
-        // processed immediately. A fresh menu signature is unlocked on sight.
+
+        // If the text widget is visible but Microbot misses its Continue
+        // component, advance once per observed text state via canvas keyboard.
+        // This avoids freezing on a valid Angel/Henja dialogue variant.
+        if (starterConversationActive && dialogueVisible) {
+            String signature = stage + "|starter-visible|" + currentStarterText;
+            if (canDispatchDialogue(signature)) {
+                Rs2Keyboard.keyPress(KeyEvent.VK_SPACE);
+                dialogueActed("Advancing visible Angel / Henja dialogue", signature);
+            }
+            return;
+        }
+
+        // The interface really disappeared: do not carry a stale dialogue
+        // signature into the next separate NPC or object interaction.
         lastGenericDialogueSignature = "";
         lastGenericDialogueAttempts = 0;
 
         // Angel/Henja are authoritative for the event objective. Never
         // resume a preselected stage just because their dialogue closed.
         if (starterConversationActive) {
-            if (pendingStarterDialogueSeen) {
-                // Dialogue is no longer visible, so resolve the last
-                // observed authoritative objective without a sleep.
-                if (pendingStarterNext == null) {
-                    starterConversationActive = false;
-                    stopForReview("Angel/Henja dialogue did not identify a known Halloween objective;"
-                            + " lastDialogue=" + lastStarterDialogue);
-                    return;
+            // Consecutive absent widget snapshots distinguish a conversation
+            // close from the short frame where one dialogue page replaces another.
+            if (starterInterfaceSeen && ++starterNoDialogueTicks >= 2) {
+                starterConversationActive = false;
+                starterInterfaceSeen = false;
+                if (pendingStarterNext != null) {
+                    Stage next = pendingStarterNext;
+                    pendingStarterNext = null;
+                    pendingStarterDialogueSeen = false;
+                    starterTalkAttempts = 0;
+                    change(next, "Angel / Henja dialogue resolved event state");
+                } else {
+                    log.warn("Halloween Angel/Henja conversation closed without a classified"
+                                    + " objective | attempt={}/{} text={} lastWidgetText={}"
+                                    + " textCaptured={}",
+                            starterTalkAttempts, MAX_STARTER_TALK_ATTEMPTS,
+                            lastStarterDialogue, lastStarterObservedWidgetText,
+                            pendingStarterDialogueSeen);
+                    status = "Rechecking Angel / Henja; dialogue objective not yet confirmed";
                 }
-                Stage next = pendingStarterNext;
-                pendingStarterNext = null;
-                pendingStarterDialogueSeen = false;
+            } else if (!starterInterfaceSeen
+                    && System.currentTimeMillis() - pendingStarterAt > 8_000L) {
+                log.warn("Halloween starter Talk-to had no dialogue widgets | stage={}"
+                                + " attempt={}/{}",
+                        stage, starterTalkAttempts, MAX_STARTER_TALK_ATTEMPTS);
                 starterConversationActive = false;
-                change(next, "Angel / Henja dialogue resolved event state");
-            } else if (System.currentTimeMillis() - pendingStarterAt > 8_000L) {
-                log.warn("Halloween starter click produced no visible dialogue | stage={}", stage);
-                starterConversationActive = false;
-                pendingStarterNext = null;
-                pendingStarterDialogueSeen = false;
-                lastActionAt = 0L; // permit a clean Talk-to retry
+                status = "Retrying Angel / Henja: no dialogue widgets appeared";
             } else {
-                status = "Waiting for Angel / Henja dialogue";
+                status = "Reading Angel / Henja dialogue widgets";
             }
             return;
         }
@@ -718,6 +758,13 @@ public final class KspHalloween2026Script extends Script {
     private void talkToStarter(WorldPoint player) {
         if (!nearOrWalk(player, STARTER, 8, "Angel / Henja's house"))
             return;
+        if (starterTalkAttempts >= MAX_STARTER_TALK_ATTEMPTS) {
+            stopForReview("Angel/Henja dialogue did not identify a known Halloween objective"
+                    + " after " + starterTalkAttempts + " conversations;"
+                    + " lastDialogue=" + lastStarterDialogue
+                    + " widgetText=" + lastStarterObservedWidgetText);
+            return;
+        }
         boolean clicked = Rs2Npc.getNpc("Henja") != null
                 && Rs2Npc.interact("Henja", "Talk-to");
         if (!clicked) clicked = Rs2Npc.getNpc("Angel") != null
@@ -726,14 +773,18 @@ public final class KspHalloween2026Script extends Script {
             status = "Locating Angel / Henja in their Rimmington home";
             return;
         }
-        acted("Speaking to Angel / Henja to resolve current event state");
+        starterTalkAttempts++;
+        acted("Speaking to Angel / Henja to resolve current event state"
+                + " (attempt " + starterTalkAttempts + "/" + MAX_STARTER_TALK_ATTEMPTS + ")");
         lastTalkAt = System.currentTimeMillis();
         pendingStarterNext = null;
         pendingStarterAt = lastTalkAt;
         pendingStarterLastDialogueAt = 0L;
         pendingStarterDialogueSeen = false;
         starterConversationActive = true;
-        lastStarterDialogue = "";
+        starterInterfaceSeen = false;
+        starterNoDialogueTicks = 0;
+        // Keep last non-empty text across retries for accurate failure diagnostics.
     }
 
     private Rs2TileObjectModel lantern() {
@@ -881,23 +932,54 @@ public final class KspHalloween2026Script extends Script {
         nearOrWalk(player, next, 6, purpose);
     }
 
-    private void inspectStarterDialogue() {
-        String raw = Rs2Dialogue.hasSelectAnOption()
-                ? Rs2Dialogue.getQuestion() : Rs2Dialogue.getDialogueText();
-        if (raw == null || raw.isBlank()) return;
+    private void inspectStarterDialogue(List<String> dialogueTexts) {
+        if (dialogueTexts.isEmpty()) {
+            if (System.currentTimeMillis() - lastDiagnosticAt > 5_000L) {
+                lastDiagnosticAt = System.currentTimeMillis();
+                log.warn("Halloween Angel/Henja dialogue widget is visible but no text"
+                        + " could be read | stage={} continue={} choices={}",
+                        stage, Rs2Dialogue.hasContinue(), Rs2Dialogue.hasSelectAnOption());
+            }
+            return; // A visible menu is not itself proof of dialogue content.
+        }
 
-        lastStarterDialogue = raw.replaceAll("<[^>]*>", " ").replaceAll("\\s+", " ").trim();
+        pendingStarterDialogueSeen = true;
+        pendingStarterLastDialogueAt = System.currentTimeMillis();
+        String observed = String.join(" | ", dialogueTexts);
+        if (!observed.equals(lastStarterObservedWidgetText)) {
+            lastStarterObservedWidgetText = observed;
+            log.info("Halloween Angel/Henja dialogue evidence | stage={} text={}",
+                    stage, observed);
+        }
+
+        String raw = null;
         KspHalloweenStarterState.Objective objective =
-                KspHalloweenStarterState.classify(raw);
+                KspHalloweenStarterState.Objective.UNKNOWN;
+        for (String text : dialogueTexts) {
+            // Prefer explicit statements on individual dialogue widgets.
+            KspHalloweenStarterState.Objective classified =
+                    KspHalloweenStarterState.classify(text);
+            if (classified != KspHalloweenStarterState.Objective.UNKNOWN) {
+                raw = text;
+                objective = classified;
+                break;
+            }
+        }
         if (objective == KspHalloweenStarterState.Objective.UNKNOWN) {
+            // An event sentence can wrap across several chatbox widget fields.
+            raw = String.join(" ", dialogueTexts);
+            objective = KspHalloweenStarterState.classify(raw);
+        }
+        if (objective == KspHalloweenStarterState.Objective.UNKNOWN) {
+            lastStarterDialogue = observed;
             if (System.currentTimeMillis() - lastDiagnosticAt > 5_000L) {
                 lastDiagnosticAt = System.currentTimeMillis();
                 log.info("Halloween Angel/Henja state dialogue not yet classified"
-                        + " | stage={} text={}", stage, raw);
+                        + " | stage={} text={}", stage, observed);
             }
             return;
         }
-
+        lastStarterDialogue = raw;
         Stage resolved;
         switch (objective) {
             case SMASH_LANTERNS:
@@ -984,6 +1066,84 @@ public final class KspHalloween2026Script extends Script {
         pendingStarterNext = resolved;
         pendingStarterDialogueSeen = true;
         pendingStarterLastDialogueAt = System.currentTimeMillis();
+    }
+
+    /**
+     * Read the actual RuneLite dialogue widgets, rather than relying on
+     * Rs2Dialogue.getDialogueText(): that helper checks only three legacy
+     * child IDs and can return empty for a visible NPC dialogue.
+     *
+     * Only examine currently visible dialogue groups while a starter
+     * conversation initiated by this script is active.
+     */
+    private List<String> starterDialogueSamples() {
+        List<String> captured = Microbot.getClientThread().runOnClientThreadOptional(() -> {
+            List<String> result = new ArrayList<>();
+            int[] groups = {
+                InterfaceID.DIALOG_NPC,
+                InterfaceID.DIALOG_PLAYER,
+                InterfaceID.DIALOG_SPRITE,
+                InterfaceID.DIALOG_DOUBLE_SPRITE,
+                InterfaceID.DIALOG_OPTION
+            };
+            for (int group : groups) {
+                collectVisibleDialogueText(Microbot.getClient().getWidget(group, 0),
+                        result, 0);
+            }
+
+            // Some dialogue layouts have no useful group-0 root.
+            collectVisibleDialogueText(Microbot.getClient().getWidget(
+                    WidgetInfo.DIALOG_NPC_TEXT), result, 0);
+            collectVisibleDialogueText(Microbot.getClient().getWidget(
+                    WidgetInfo.DIALOG_PLAYER_TEXT), result, 0);
+            collectVisibleDialogueText(Microbot.getClient().getWidget(
+                    WidgetInfo.DIALOG_SPRITE_TEXT), result, 0);
+            collectVisibleDialogueText(Microbot.getClient().getWidget(
+                    WidgetInfo.DIALOG_DOUBLE_SPRITE_TEXT), result, 0);
+            collectVisibleDialogueText(Microbot.getClient().getWidget(
+                    WidgetInfo.DIALOG_OPTION_OPTIONS), result, 0);
+            return result;
+        }).orElse(Collections.emptyList());
+
+        // Keep Microbot helpers as additional sources, never the only source.
+        List<String> all = new ArrayList<>(captured);
+        addStarterDialogueText(all, Rs2Dialogue.getDialogueText());
+        if (Rs2Dialogue.hasSelectAnOption())
+            addStarterDialogueText(all, Rs2Dialogue.getQuestion());
+        return all;
+    }
+
+    private static void collectVisibleDialogueText(Widget widget,
+                                                    List<String> output, int depth) {
+        if (widget == null || widget.isHidden() || depth > 3
+                || output.size() >= 40) return;
+        addStarterDialogueText(output, widget.getText());
+        collectDialogueChildren(widget.getStaticChildren(), output, depth + 1);
+        collectDialogueChildren(widget.getDynamicChildren(), output, depth + 1);
+        collectDialogueChildren(widget.getNestedChildren(), output, depth + 1);
+    }
+
+    private static void collectDialogueChildren(Widget[] children,
+                                                List<String> output, int depth) {
+        if (children == null) return;
+        for (Widget child : children) {
+            if (output.size() >= 40) break;
+            collectVisibleDialogueText(child, output, depth);
+        }
+    }
+
+    private static void addStarterDialogueText(List<String> output, String raw) {
+        if (raw == null) return;
+        String text = raw.replaceAll("(?i)<br\\s*/?>", " ")
+                .replaceAll("<[^>]*>", " ")
+                .replace("&nbsp;", " ")
+                .replaceAll("\\s+", " ")
+                .trim();
+        if (text.isEmpty() || text.equalsIgnoreCase("Click here to continue")
+                || text.equalsIgnoreCase("Please wait...")
+                || text.equalsIgnoreCase("Select an Option")
+                || output.contains(text)) return;
+        output.add(text);
     }
 
     private Stage stageForAdultCandyObjective() {

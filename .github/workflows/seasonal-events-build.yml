@@ -55,7 +55,7 @@ jobs:
           panel=(root/'KspSeasonalEventsPanel.java').read_text()
           overlay=(root/'KspSeasonalEventsOverlay.java').read_text()
           event=(root/'KspSeasonalEvent.java').read_text()
-          assert 'VERSION = "0.2.10"' in plugin
+          assert 'VERSION = "0.2.11"' in plugin
           assert 'KSP + "Seasonal Events"' in plugin
           assert 'kspwillowchopper' not in plugin and 'kspwillowchopper' not in script
           assert 'HALLOWEEN_2026' in event
@@ -118,7 +118,7 @@ jobs:
           assert 'pendingLanternConfirmed(player)' in search
           assert 'configManager.setConfiguration(GROUP, PENDING_LANTERN_KEY' in search
 
-          assert 'inspectStarterDialogue()' in code
+          assert 'inspectStarterDialogue(samples);' in code
           assert 'KspHalloweenStarterState.classify(raw)' in code
           assert 'confirmAllLanterns(' in code
           assert 'LANTERNS_VERIFIED_KEY' in code
@@ -151,14 +151,13 @@ jobs:
           costume = src.split('private void collectCostume(', 1)[1].split('private boolean npcHasAction(', 1)[0]
 
           assert 'starterConversationActive' in tick
-          assert 'inspectStarterDialogue();' in tick
-          assert 'pendingStarterDialogueSeen = true;' in tick
-          assert 'if (pendingStarterNext == null)' in tick
+          assert 'inspectStarterDialogue(samples);' in tick
+          assert 'starterDialogueSamples()' in tick
+          assert 'if (pendingStarterNext != null)' in tick
           assert 'change(next, "Angel / Henja dialogue resolved event state")' in tick
-          assert 'Waiting for Angel / Henja dialogue' in tick
-          assert 'pendingStarterLastDialogueAt' in tick
+          assert 'Reading Angel / Henja dialogue widgets' in tick
+          assert 'starterNoDialogueTicks >= 2' in tick
           assert 'pendingStarterLastDialogueAt < 1_500L' not in tick
-          assert 'Dialogue is no longer visible' in tick
 
           assert "Sure, I'll take the hat." in opts
           assert 'Rs2Dialogue.keyPressForDialogueOption("Sure, I' in opts
@@ -274,7 +273,7 @@ jobs:
 
           start = code.split('public synchronized boolean start(',1)[1].split('private void restoreNpcIds(',1)[0]
           tick = code.split('private void tick()',1)[1].split('private void handleDialogueOption()',1)[0]
-          inspect = code.split('private void inspectStarterDialogue()',1)[1].split('private Stage stageForAdultCandyObjective()',1)[0]
+          inspect = code.split('private void inspectStarterDialogue(List<String> dialogueTexts)',1)[1].split('private Stage stageForAdultCandyObjective()',1)[0]
           talk = code.split('private void talkToStarter(WorldPoint player)',1)[1].split('private Rs2TileObjectModel lantern()',1)[0]
           search = code.split('private void smashLanterns(WorldPoint player)',1)[1].split('private void scanRimmington',1)[0]
           chat = code.split('public void onChatMessage(String raw)',1)[1].split('public void setPaused(',1)[0]
@@ -282,9 +281,18 @@ jobs:
           assert 'change(Stage.INTRODUCTION' in start
           assert 'saved stage {} deferred to starter dialogue' in start
           assert 'starterConversationActive' in tick
-          assert 'inspectStarterDialogue();' in tick
-          assert 'if (pendingStarterNext == null)' in tick
-          assert 'Angel/Henja dialogue did not identify a known Halloween objective' in tick
+          assert 'inspectStarterDialogue(samples);' in tick
+          assert 'if (pendingStarterNext != null)' in tick
+          assert 'Angel/Henja dialogue did not identify a known Halloween objective' in code
+          assert 'starterTalkAttempts >= MAX_STARTER_TALK_ATTEMPTS' in code
+          assert 'starterNoDialogueTicks >= 2' in tick
+          assert 'WidgetInfo.DIALOG_NPC_TEXT' in inspect
+          assert 'WidgetInfo.DIALOG_PLAYER_TEXT' in inspect
+          assert 'WidgetInfo.DIALOG_SPRITE_TEXT' in inspect
+          assert 'collectVisibleDialogueText(' in inspect
+          assert 'pendingStarterDialogueSeen = true;' in inspect
+          assert 'lastStarterObservedWidgetText' in inspect
+          assert 'return; // A visible menu is not itself proof of dialogue content.' in inspect
           assert 'talkToStarter(player);' in tick
           assert 'talkToStarter(player,' not in code
 
@@ -354,7 +362,7 @@ jobs:
           age = code.split('private void observeTreaterAges()', 1)[1].split('private TreaterAge classifyTreater(', 1)[0]
           scout = code.split('private boolean scoutVisibleTreaters(', 1)[1].split('private void spookChildren(', 1)[0]
           child = code.split('private void spookChildren(', 1)[1].split('private void solveChemist(', 1)[0]
-          report = code.split('private void inspectStarterDialogue()', 1)[1].split('private Stage stageForAdultCandyObjective()', 1)[0]
+          report = code.split('private void inspectStarterDialogue(List<String> dialogueTexts)', 1)[1].split('private Stage stageForAdultCandyObjective()', 1)[0]
           change = code.split('private void change(Stage next, String message)', 1)[1].split('private void stopForReview(', 1)[0]
 
           assert 'if (confirmedChildGroup != TreaterGroup.UNKNOWN) return;' in age
