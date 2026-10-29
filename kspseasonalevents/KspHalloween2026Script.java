@@ -88,7 +88,9 @@ public final class KspHalloween2026Script extends Script {
         new WorldPoint(2970, 3193, 0), new WorldPoint(2948, 3198, 0),
         new WorldPoint(2941, 3230, 0), new WorldPoint(2970, 3250, 0)
     };
-    private static final long ACTION_GAP = 1_400L;
+    private static final long ACTION_GAP = 1_400L; // NPC/world actions
+    private static final long DIALOGUE_GAP_MS = 320L;
+    private static final long CHEMIST_OPTION_RETRY_MS = 900L;
     private static final long WALK_RETRY = 10_000L;
     // Prefer a complete outfit using distinct equipment slots.
     // Match each item against live RuneLite item composition names.
@@ -169,7 +171,7 @@ public final class KspHalloween2026Script extends Script {
     private int sweepsWithoutTarget;
     private int actionsAtStage;
     private long lastActionAt;
-    private long lastWalkAt;
+    private long lastDialogueActionAt;    private long lastWalkAt;
     private long lastTalkAt;
     private long lastDiagnosticAt;
     private volatile WorldPoint pendingLantern;
@@ -210,6 +212,7 @@ public final class KspHalloween2026Script extends Script {
         this.paused = false;
         this.startedAt = System.currentTimeMillis();
         lastActionAt = lastWalkAt = lastTalkAt = lastDiagnosticAt = 0L;
+        lastDialogueActionAt = 0L;
         pendingLantern = null;
         pendingLanternAt = 0L;
         lastVerificationTalkAt = 0L;
@@ -287,7 +290,7 @@ public final class KspHalloween2026Script extends Script {
             log.info("Halloween saved stage {} deferred to starter dialogue", saved);
         }
         mainScheduledFuture = scheduledExecutorService.scheduleWithFixedDelay(
-                this::safeTick, 0L, 600L, TimeUnit.MILLISECONDS);
+                this::safeTick, 0L, 300L, TimeUnit.MILLISECONDS);
         log.info("Halloween 2026 started | stage={} lanterns={}/8 adultsGiven={}",
                 stage, getLanternCount(), adultsGiven);
         return true;
@@ -349,9 +352,9 @@ public final class KspHalloween2026Script extends Script {
 
         if (Rs2Dialogue.hasContinue()) {
             if (stage == Stage.CHEMIST_RIDDLE) clearChemistOptionPending();
-            if (ready()) {
+            if (readyDialogue()) {
                 Rs2Dialogue.clickContinue();
-                lastActionAt = System.currentTimeMillis();
+                lastDialogueActionAt = System.currentTimeMillis();
                 status = "Advancing " + stage + " dialogue";
             }
             return;
@@ -451,7 +454,7 @@ public final class KspHalloween2026Script extends Script {
     }
 
     private void handleDialogueOption() {
-        if (!ready()) return;
+        if (!readyDialogue()) return;
         // Enumerate unknown choices for accurate follow-up debugging.
         List<String> options = Rs2Dialogue.getDialogueOptions().stream()
                 .map(w -> w == null ? "" : w.getText())
@@ -521,7 +524,7 @@ public final class KspHalloween2026Script extends Script {
         }
 
         long now = System.currentTimeMillis();
-        if (pendingChemistOptionAt != 0L && now - pendingChemistOptionAt < 2_000L) {
+        if (pendingChemistOptionAt != 0L && now - pendingChemistOptionAt < CHEMIST_OPTION_RETRY_MS) {
             status = "Waiting for Chemist menu to change after "
                     + options.get(optionIndex) + " (" + pendingChemistOptionAttempts + " attempts)";
             return true;
@@ -531,7 +534,7 @@ public final class KspHalloween2026Script extends Script {
                     + options.get(optionIndex) + "; options=" + options);
             return true;
         }
-        if (!ready()) return true;
+        if (!readyDialogue()) return true;
 
         List<Widget> liveOptions = Rs2Dialogue.getDialogueOptions();
         if (optionIndex >= liveOptions.size()) {
@@ -550,9 +553,11 @@ public final class KspHalloween2026Script extends Script {
         pendingChemistOptionAt = now;
         if (selected) {
             chemistConversationAt = now;
-            acted("Selecting Chemist " + options.get(optionIndex)
+            lastDialogueActionAt = System.currentTimeMillis();
+            status = "Selected Chemist " + options.get(optionIndex)
                     + " via " + (viaWidget ? "option widget" : "option keybinding")
-                    + "; awaiting dialogue change");
+                    + "; awaiting dialogue change";
+            log.info("Halloween dialogue action | stage={} | {}", stage, status);
         } else {
             log.warn("Halloween Chemist option input failed | option={} method={} attempt={}",
                     options.get(optionIndex), viaWidget ? "widget" : "key", pendingChemistOptionAttempts);
@@ -627,7 +632,7 @@ public final class KspHalloween2026Script extends Script {
                     + " inspect game dialogue before another submission");
             return true;
         }
-        if (!ready()) {
+        if (!readyDialogue()) {
             status = "Waiting to enter Chemist riddle answer 92";
             return true;
         }
@@ -638,7 +643,9 @@ public final class KspHalloween2026Script extends Script {
         chemistAnswerSubmissions++;
         Rs2Keyboard.typeString("92");
         Rs2Keyboard.enter();
-        acted("Typed Chemist COFFIN riddle answer 92 into chatbox and pressed Enter");
+        lastDialogueActionAt = System.currentTimeMillis();
+        status = "Submitted Chemist COFFIN riddle answer 92; awaiting game response";
+        log.info("Halloween dialogue action | stage={} | {}", stage, status);
         return true;
     }
 
@@ -1588,6 +1595,12 @@ public final class KspHalloween2026Script extends Script {
 
     private boolean ready() {
         return System.currentTimeMillis() - lastActionAt >= ACTION_GAP;
+    }
+
+    // Dialogue may advance faster than NPC/world interactions, but never
+    // blindly spam the chatbox while waiting for the game to update.
+    private boolean readyDialogue() {
+        return System.currentTimeMillis() - lastDialogueActionAt >= DIALOGUE_GAP_MS;
     }
 
     private void change(Stage next, String message) {
