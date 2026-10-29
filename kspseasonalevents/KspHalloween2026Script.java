@@ -1612,6 +1612,11 @@ public final class KspHalloween2026Script extends Script {
 
         Set<String> actions = observedTreaterActions.get(npc.getId());
         if (actions == null || actions.isEmpty()) return TreaterAge.UNKNOWN;
+        // A Spook option with another conversational action is ambiguous
+        // during delivery: do not treat that as proof this is a child or adult.
+        if (stage == Stage.GIVE_CANDY && actions.contains("spook")
+                && (actions.contains("talk-to") || actions.contains("trick-or-treat")))
+            return TreaterAge.UNKNOWN;
         if (actions.contains("spook")) return TreaterAge.CHILD;
         // Without a verified child group, absence of Spook is evidence only
         // when a full costume is equipped (so a child could expose Spook) AND
