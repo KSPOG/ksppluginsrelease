@@ -945,13 +945,26 @@ public final class KspHalloween2026Script extends Script {
 
     private void confirmSmashedLantern(WorldPoint tile, String evidence) {
         if (tile == null) return;
-        if (smashedLanternTiles.add(tileKey(tile))) {
+        boolean newlyConfirmed = smashedLanternTiles.add(tileKey(tile));
+        if (newlyConfirmed) {
             configManager.setConfiguration(GROUP, LANTERNS_KEY,
                     String.join(",", smashedLanternTiles));
             log.info("Halloween lantern smash confirmed | tile={} evidence={} count={}/8",
                     tile, evidence, getLanternCount());
         }
         clearPendingLantern();
+
+        // A verified disappearing Smash action is sufficient to END THE
+        // LOCAL SMASHING TASK, not to mark the server objective complete.
+        // The original introductory dialogue sets sweepRequiredByStarter=true;
+        // without this transition an actual 8/8 could continue sweeping
+        // forever unless a separate chat message happened to arrive.
+        if (newlyConfirmed && stage == Stage.SMASH_LANTERNS
+                && smashedLanternTiles.size() >= 8) {
+            sweepRequiredByStarter = false;
+            change(Stage.REPORT_LANTERNS,
+                    "Eight lanterns confirmed locally; checking with Angel / Henja");
+        }
     }
 
     private void confirmAllLanterns(String evidence) {
@@ -994,6 +1007,9 @@ public final class KspHalloween2026Script extends Script {
         if (!RIMMINGTON.contains(player)
                 && !nearOrWalk(player, STARTER, 12, "Rimmington lanterns")) return;
         if (pendingLanternConfirmed(player)) return;
+        // The eighth acknowledgement may have changed the stage directly.
+        // Do not overwrite REPORT_LANTERNS with a fallback sweep/recheck.
+        if (stage != Stage.SMASH_LANTERNS) return;
         if (lanternsVerified) {
             change(Stage.REPORT_LANTERNS,
                     "Lantern objective already confirmed by Angel/Henja");
@@ -2145,13 +2161,10 @@ public final class KspHalloween2026Script extends Script {
         if (stage == Stage.SMASH_LANTERNS && pendingLantern != null
                 && text.startsWith("you smash")
                 && (text.contains("lantern") || text.contains("pumpkin"))) {
+            // Both inventory-independent evidence paths (chat and disappearance
+            // of Smash at the exact loaded tile) share the same 8/8 handoff.
+            // Angel/Henja still decides the actual *next* quest objective.
             confirmSmashedLantern(pendingLantern, "game smash message");
-            // Local smash acknowledgements update the overlay only. Angel/Henja
-            // dialogue remains authoritative for leaving the lantern objective.
-            if (smashedLanternTiles.size() >= 8) {
-                change(Stage.VERIFY_LANTERNS,
-                        "Eight local smash acknowledgements; verifying with Angel/Henja");
-            }
             return;
         }
         if (text.contains("you have completed the halloween event")

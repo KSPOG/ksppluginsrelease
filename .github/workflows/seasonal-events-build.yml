@@ -55,7 +55,7 @@ jobs:
           panel=(root/'KspSeasonalEventsPanel.java').read_text()
           overlay=(root/'KspSeasonalEventsOverlay.java').read_text()
           event=(root/'KspSeasonalEvent.java').read_text()
-          assert 'VERSION = "0.2.15"' in plugin
+          assert 'VERSION = "0.2.16"' in plugin
           assert 'KSP + "Seasonal Events"' in plugin
           assert 'kspwillowchopper' not in plugin and 'kspwillowchopper' not in script
           assert 'HALLOWEEN("Halloween")' in event
@@ -100,6 +100,34 @@ jobs:
           assert 'script.start(config)' in plugin and 'overlays.remove(overlay)' in plugin
           assert 'script.setCompletionCallback(' in plugin
           print('PASS: standalone full wiki stages, progress persistence and guarded completion')
+
+      - name: Verify eighth lantern forces report without a game-message dependency
+        shell: python
+        run: |
+          from pathlib import Path
+          src = Path('release/kspseasonalevents/KspHalloween2026Script.java').read_text()
+          confirm = src.split('private void confirmSmashedLantern(WorldPoint tile, String evidence)', 1)[1].split('private void confirmAllLanterns(', 1)[0]
+          pending = src.split('private boolean pendingLanternConfirmed(WorldPoint player)', 1)[1].split('private void smashLanterns(', 1)[0]
+          smash = src.split('private void smashLanterns(WorldPoint player)', 1)[1].split('private void scanRimmington(', 1)[0]
+          chat = src.split('public void onChatMessage(String raw)', 1)[1].split('public void setPaused(', 1)[0]
+          inspection = src.split('private void inspectStarterDialogue(List<String> dialogueTexts)', 1)[1].split('private Stage stageForAdultCandyObjective()', 1)[0]
+          assert 'newlyConfirmed = smashedLanternTiles.add(tileKey(tile))' in confirm
+          assert 'configManager.setConfiguration(GROUP, LANTERNS_KEY,' in confirm
+          assert 'clearPendingLantern();' in confirm
+          assert 'newlyConfirmed && stage == Stage.SMASH_LANTERNS' in confirm
+          assert 'smashedLanternTiles.size() >= 8' in confirm
+          assert 'sweepRequiredByStarter = false;' in confirm
+          assert 'change(Stage.REPORT_LANTERNS,' in confirm
+          assert 'confirmAllLanterns(' not in confirm
+          assert 'confirmSmashedLantern(clickedTile, "smash action disappeared at loaded tile")' in pending
+          assert 'if (stage != Stage.SMASH_LANTERNS) return;' in smash
+          assert smash.index('if (stage != Stage.SMASH_LANTERNS) return;') < smash.index('Rs2TileObjectModel target = lantern();')
+          assert 'confirmSmashedLantern(pendingLantern, "game smash message")' in chat
+          assert 'change(Stage.VERIFY_LANTERNS,' not in chat
+          assert 'case SMASH_LANTERNS:' in inspection
+          assert 'sweepRequiredByStarter = true;' in inspection
+          assert 'lanternsVerified = false;' in inspection
+          print('PASS: 8/8 scene or chat acknowledgement reports to Angel/Henja while server dialogue remains authoritative')
 
       - name: Verify Halloween lantern reconciliation and chat safety
         shell: python
@@ -325,7 +353,10 @@ jobs:
           assert 'Speaking to Angel / Henja to resolve current event state' in talk
 
           assert 'lanternsVerified || smashedLanternTiles.size() >= 8' not in search
-          assert 'Eight local smash acknowledgements; verifying with Angel/Henja' in chat
+          assert 'Eight lanterns confirmed locally; checking with Angel / Henja' in code
+          assert 'change(Stage.REPORT_LANTERNS,' in code
+          assert 'confirmSmashedLantern(pendingLantern, "game smash message")' in chat
+          assert 'change(Stage.VERIFY_LANTERNS,' not in chat
           assert 'confirmAllLanterns("eight confirmed smashes")' not in chat
 
           assert 'confirmLanternsManually' not in code

@@ -1,4 +1,4 @@
-# KSP Seasonal Events v0.2.15
+# KSP Seasonal Events v0.2.16
 
 A **standalone Microbot plugin**, independent of Chopper, with its own
 config, navigation panel, Start / Pause / Resume / Stop / Reset progress,
@@ -35,6 +35,27 @@ may require manual review rather than repeated speculative clicks. The
 plugin logs stage transitions, visible dialogue options when unknown, NPC
 IDs and world tiles of successfully targeted event objects. No guessed
 NPC/object IDs are treated as authoritative.
+
+## Eighth-lantern handoff and progress persistence (0.2.16)
+
+On 29 October 2026, a live log showed eight Jack-O-Lanterns being
+individually confirmed (the final one at 21:24:54), yet the plugin
+remained in `SMASH_LANTERNS`. The prior implementation only advanced
+at 8/8 when a particular game-chat confirmation was received. The
+introductory Angel/Henja dialogue also left `sweepRequiredByStarter`
+enabled, so the general 7/8 fallback did not run.
+
+A newly confirmed eighth lantern, whether evidenced by the Smash
+action disappearing in the loaded scene **or** a game message, now
+moves directly to `REPORT_LANTERNS` to talk to Angel/Henja.
+Local 8/8 does **not** mark the event/server objective complete:
+Angel/Henja's actual dialogue determines whether to proceed to the
+costume/children stage or return to searching for lanterns.
+
+All confirmed tiles remain saved across a stop/reload. Progress is not
+reset to recover from this regression. If Angel/Henja still requests
+lantern smashing, the server dialogue overrides the local count and
+keeps the search open rather than ping-ponging between reporting stages.
 
 ## Cutscene handling and completion scroll (0.2.15)
 
