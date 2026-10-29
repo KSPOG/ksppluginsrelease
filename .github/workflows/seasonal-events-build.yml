@@ -55,7 +55,7 @@ jobs:
           panel=(root/'KspSeasonalEventsPanel.java').read_text()
           overlay=(root/'KspSeasonalEventsOverlay.java').read_text()
           event=(root/'KspSeasonalEvent.java').read_text()
-          assert 'VERSION = "0.2.10"' in plugin
+          assert 'VERSION = "0.2.11"' in plugin
           assert 'KSP + "Seasonal Events"' in plugin
           assert 'kspwillowchopper' not in plugin and 'kspwillowchopper' not in script
           assert 'HALLOWEEN_2026' in event
