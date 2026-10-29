@@ -1263,15 +1263,27 @@ public class TutorialIslandScript extends KspManagedScript
         if (furnace == null) logMissingTutorialObject("Furnace", ObjectID.FURNACE_10082);
         if (!prepareTutorialObjectInteraction(furnace, 4) || !readyForAction()) return;
 
-        // Avoid repeatedly using ore on the furnace while the previous
-        // interaction is being processed or the smelting animation begins.
-        if (!Rs2Inventory.hasItem(ItemID.TIN_ORE)
-                && !Rs2Inventory.hasItem(ItemID.COPPER_ORE))
+        // The tutorial furnace exposes a direct live "Use" interaction.
+        // Prefer it over selecting ore: selecting inventory items can race
+        // with the asynchronous game client and leave this step stalled.
+        if (furnace.hasAction("Use"))
         {
-            return;
+            if (isTutorialInteractionPending("object:furnace:Use")) return;
+            if (furnace.click("Use"))
+            {
+                markTutorialInteraction("object:furnace:Use");
+                Microbot.log("[TutIsland] Furnace Use dispatched | tile="
+                        + furnace.getWorldLocation() + " progress="
+                        + Microbot.getVarbitPlayerValue(281));
+                return;
+            }
         }
 
-        int ore = Rs2Inventory.hasItem(ItemID.TIN_ORE) ? ItemID.TIN_ORE : ItemID.COPPER_ORE;
+        // Fallback for furnace variants without a usable "Use" action.
+        if (!Rs2Inventory.hasItem(ItemID.TIN_ORE)
+                || !Rs2Inventory.hasItem(ItemID.COPPER_ORE)) return;
+
+        int ore = ItemID.TIN_ORE;
         if (!useTutorialItemOnLiveObject(ore, furnace, "object:furnace:smelt-bronze"))
             logTutorialInteractionPending("furnace", furnace, ore);
     }
@@ -2640,22 +2652,12 @@ public class TutorialIslandScript extends KspManagedScript
             return;
         }
 
-        // The normal blocking walkTo() can invoke bank detour comparison
-        // even for a 5-tile walk in the Tutorial Island instance, planning
-        // an impossible trip to Lumbridge and being canceled every tick.
-        // walkStep() uses Microbot's route planner but does not run its
-        // bank/cache/transport optimization or block the tutorial loop.
-        // Explicit tutorial gates and doors are handled by the stage logic.
-        if (TutAreas.contains(playerLocation) && TutAreas.contains(target))
+        // Delegate navigation to Microbot WebWalker. Stage-specific
+        // interactions remain responsible for instructional doors and gates;
+        // the walker owns routing and obstacle traversal.
+        if (TutAreas.contains(playerLocation) && !TutAreas.contains(target))
         {
-            Rs2Walker.walkStep(target, reach);
-            return;
-        }
-
-        // Never allow a mainland route while the tutorial is active.
-        if (TutAreas.contains(playerLocation))
-        {
-            debug("Tutorial Island refused nonlocal route | player={} target={}",
+            debug("Tutorial Island refused mainland destination | player={} target={}",
                     playerLocation, target);
             return;
         }
