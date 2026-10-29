@@ -55,10 +55,13 @@ jobs:
           panel=(root/'KspSeasonalEventsPanel.java').read_text()
           overlay=(root/'KspSeasonalEventsOverlay.java').read_text()
           event=(root/'KspSeasonalEvent.java').read_text()
-          assert 'VERSION = "0.2.14"' in plugin
+          assert 'VERSION = "0.2.15"' in plugin
           assert 'KSP + "Seasonal Events"' in plugin
           assert 'kspwillowchopper' not in plugin and 'kspwillowchopper' not in script
-          assert 'HALLOWEEN_2026' in event
+          assert 'HALLOWEEN("Halloween")' in event
+          assert 'HALLOWEEN_2026(' not in event
+          assert '"HALLOWEEN_2026".equals(configManager.getConfiguration(' in plugin
+          assert 'config.event() != KspSeasonalEvent.HALLOWEEN' in plugin
           stages = ('INTRODUCTION','SMASH_LANTERNS','REPORT_LANTERNS',
                     'GET_COSTUME','SPOOK_CHILDREN','REPORT_CHILDREN',
                     'CHEMIST_RIDDLE','COOK_SUGAR','COLLECT_ONIONS',
@@ -94,6 +97,7 @@ jobs:
           assert 'script.getLanternCount()' in overlay
           assert 'script.isActive()' in overlay
           assert 'script.start(config)' in plugin and 'overlays.remove(overlay)' in plugin
+          assert 'script.setCompletionCallback(' in plugin
           print('PASS: standalone full wiki stages, progress persistence and guarded completion')
 
       - name: Verify Halloween lantern reconciliation and chat safety
@@ -311,7 +315,9 @@ jobs:
           assert 'adultsGiven >= 5' in inspect
           assert 'givenAdultIds.clear();' in inspect
           assert 'resolved = Stage.WAIT_FOR_REWARD;' in inspect
-          assert 'resolved = Stage.COMPLETED;' in inspect
+          assert 'case COMPLETE:' in inspect
+          assert inspect.count('resolved = Stage.WAIT_FOR_REWARD;') >= 2
+          assert 'resolved = Stage.COMPLETED;' not in inspect
 
           assert 'pendingStarterNext = null;' in talk
           assert 'starterConversationActive = true;' in talk
@@ -529,6 +535,57 @@ jobs:
           assert 'if (sweepsWithoutTarget >= RIMMINGTON_SWEEP.length)' in delivery
           assert 'Visible trick-or-treater NPCs could not be verified' not in delivery
           print('PASS: exact adult target IDs only, no mistaken child targeting, inventory-confirmed unique deliveries')
+
+      - name: Verify Halloween cutscene freeze, exact event completion and generic label
+        shell: python
+        run: |
+          from pathlib import Path
+          root = Path('release/kspseasonalevents')
+          code = (root/'KspHalloween2026Script.java').read_text()
+          plugin = (root/'KspSeasonalEventsPlugin.java').read_text()
+          event = (root/'KspSeasonalEvent.java').read_text()
+          overlay = (root/'KspSeasonalEventsOverlay.java').read_text()
+          config = (root/'KspSeasonalEventsConfig.java').read_text()
+          panel = (root/'KspSeasonalEventsPanel.java').read_text()
+          tick = code.split('private void tick()',1)[1].split('private static boolean isCandyStage(',1)[0]
+          guard = code.split('private boolean handleCutscene()',1)[1].split('private void tick()',1)[0]
+          detect = code.split('public boolean checkForEventComplete()',1)[1].split('private boolean handleCutscene()',1)[0]
+          reward = tick.split('case WAIT_FOR_REWARD:',1)[1].split('default:',1)[0]
+          chat = code.split('public void onChatMessage(String raw)',1)[1].split('public void setPaused(',1)[0]
+          assert 'EVENT_COMPLETE_GROUP = 807' in code
+          assert 'EVENT_COMPLETE_CHILD = 5' in code
+          assert '(EVENT_COMPLETE_GROUP << 16) | EVENT_COMPLETE_CHILD' in code
+          assert 'getWidget(' in detect and 'EVENT_COMPLETE_CHILD)' in detect
+          assert 'congratulations.isHidden()' in detect
+          assert 'equalsIgnoreCase("Event complete!")' in detect
+          assert 'completionSignaled.compareAndSet(false, true)' in detect
+          assert 'change(Stage.COMPLETED' in detect
+          assert 'callback.run()' in detect
+          assert 'if (checkForEventComplete()) return;' in tick
+          assert tick.index('if (handleCutscene()) return;') < tick.index('WorldPoint player =')
+          assert tick.index('if (handleCutscene()) return;') < tick.index('stageForAdultCandyObjective()')
+          assert 'Rs2Dialogue.isInCutScene()' in guard
+          assert 'Rs2Dialogue.hasContinue()' in guard
+          assert 'Rs2Dialogue.clickContinue()' in guard
+          assert 'Rs2Dialogue.hasSelectAnOption()' in guard
+          assert 'normalized.contains("skip")' in guard
+          assert 'Rs2Dialogue.clickOption("No", true)' in guard
+          assert 'nearOrWalk(' not in guard
+          assert 'Rs2Inventory.use' not in guard
+          assert 'talkToStarter(' not in guard
+          assert 'status = "Waiting for Event complete! scroll (807:5)";' in reward
+          assert 'change(Stage.FINAL_TALK' not in reward
+          assert 'change(Stage.COMPLETED' not in chat
+          assert 'if (paused) return;' in code.split('private void safeTick()',1)[1].split('public boolean checkForEventComplete()',1)[0]
+          assert 'script.checkForEventComplete()' in plugin
+          assert 'SwingUtilities.invokeLater' in plugin
+          assert 'stopEvent();' in plugin
+          assert 'HALLOWEEN("Halloween")' in event
+          assert 'HALLOWEEN_2026(' not in event
+          assert 'KspSeasonalEvent.HALLOWEEN' in config
+          assert '.right("Halloween")' in overlay
+          assert 'Halloween event walkthrough.' in panel
+          print('PASS: cutscene blocks gameplay, dialogue remains actionable, completion scroll stops plugin, reusable Halloween slot')
 
       - name: Install Seasonal Events sources into Microbot Hub
         shell: bash
