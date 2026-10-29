@@ -68,14 +68,22 @@ public final class KspHalloween2026Script extends Script {
     private static final String PENDING_LANTERN_KEY = "halloweenPendingSmashTile";
     private static final String LANTERNS_VERIFIED_KEY = "halloweenLanternsVerified";
     private static final String ADULTS_KEY = "halloweenAdultsGiven";
-    private static final String SPOOKED_CHILD_IDS_KEY = "halloweenChildNpcIdsAttempted";
+    private static final String SPOOKED_CHILD_IDS_KEY = "halloweenChildNpcIdsConfirmed";
+    // v0.2.16 saved click attempts as if they were successful scares.
+    // They have no scene-disappearance evidence and must not be migrated.
+    private static final String LEGACY_SPOOKED_CHILD_ATTEMPTS_KEY = "halloweenChildNpcIdsAttempted";
     private static final String CHILD_RETRY_COUNT_KEY = "halloweenChildReportRetries";
     private static final String CHILD_CONFIRMED_KEY = "halloweenChildObjectiveConfirmed";
     private static final String DELIVERED_ADULT_IDS_KEY = "halloweenAdultNpcIdsDelivered";
     // Five NPCs per candidate age group were seen in the 2026 log.
-    // Five verified child attempts trigger a report checkpoint, not success.
+    // Five live-scene-confirmed child disappearances trigger the report.
+    // The NPC must vanish while its last tile remains inside the loaded
+    // scene; mere click dispatch, movement or out-of-scene eviction is NOT proof.
     private static final int CHILD_REPORT_CHECKPOINT = 5;
     private static final int MAX_CHILD_NPC_SCOUT_STOPS = 4;
+    private static final long CHILD_SPOOK_CONFIRM_TIMEOUT_MS = 7_000L;
+    private static final long CHILD_SPOOK_ABSENCE_STABLE_MS = 450L;
+    private static final long CHILD_SPOOK_RETRY_COOLDOWN_MS = 2_500L;
     // Retired heuristic classification persisted under this key in older
     // revisions. Unset it on startup; these verified IDs supersede it.
     private static final String LEGACY_TREATER_CHILD_GROUP_KEY = "halloweenConfirmedChildNpcGroup";
@@ -166,8 +174,14 @@ public final class KspHalloween2026Script extends Script {
 
     private final Set<String> smashedLanternTiles = ConcurrentHashMap.newKeySet();
     private volatile boolean lanternsVerified;
-    // Scheduler writes, while Swing panel and overlay read the attempt count.
+    // Scheduler writes; overlay and panel read confirmed disappearances only.
     private final Set<Integer> spookedChildren = ConcurrentHashMap.newKeySet();
+    private final Map<Integer, Long> childSpookCooldownUntil = new HashMap<>();
+    private int pendingChildId = -1;
+    private int pendingChildIndex = -1;
+    private WorldPoint pendingChildTile;
+    private long pendingChildSpookAt;
+    private long pendingChildAbsentSince;
     private final Set<Integer> givenAdultIds = new HashSet<>();
     private volatile boolean childrenReportConfirmed;
     private int childrenReportAttempts;
@@ -280,6 +294,8 @@ public final class KspHalloween2026Script extends Script {
         holidayScrollAttempts = 0;
         holidayCloseAttempts = 0;
         spookedChildren.clear();
+        clearPendingChildSpook();
+        childSpookCooldownUntil.clear();
         givenAdultIds.clear();
         childrenReportConfirmed = false;
         childrenReportAttempts = 0;
@@ -303,6 +319,15 @@ public final class KspHalloween2026Script extends Script {
         String savedAdults = configManager.getConfiguration(GROUP, ADULTS_KEY);
         try { adultsGiven = savedAdults == null ? 0 : Math.max(0, Math.min(5, Integer.parseInt(savedAdults))); }
         catch (NumberFormatException e) { adultsGiven = 0; }
+        // Only restore verified scene disappearances from v0.2.17 onward.
+        // Discard old speculative clicks without resetting lanterns/costume.
+        String legacyChildAttempts = configManager.getConfiguration(
+                GROUP, LEGACY_SPOOKED_CHILD_ATTEMPTS_KEY);
+        if (legacyChildAttempts != null && !legacyChildAttempts.isBlank()) {
+            log.warn("Halloween discarding unverified legacy child Spook clicks: {}."
+                    + " Lantern and event state are preserved", legacyChildAttempts);
+        }
+        configManager.unsetConfiguration(GROUP, LEGACY_SPOOKED_CHILD_ATTEMPTS_KEY);
         restoreNpcIds(SPOOKED_CHILD_IDS_KEY, spookedChildren);
         restoreNpcIds(DELIVERED_ADULT_IDS_KEY, givenAdultIds);
         // Earlier heuristic releases could persist reversed group assignments.
@@ -1145,12 +1170,15 @@ public final class KspHalloween2026Script extends Script {
                     if (childSpookRetries > allowedRetries) {
                         pendingStarterNext = null;
                         stopForReview("Angel/Henja still requires child scares after "
-                                + childSpookRetries + " verified reports. Inspect the"
-                                + " Spook responses and child NPC availability");
+                                + childSpookRetries + " reports. Verified disappearances="
+                                + spookedChildren.size() + "; inspect child availability"
+                                + " and dialogue");
                         return;
                     }
                     if (spookedChildren.size() >= CHILD_REPORT_CHECKPOINT) {
                         spookedChildren.clear();
+                        clearPendingChildSpook();
+                        childSpookCooldownUntil.clear();
                         persistNpcIds(SPOOKED_CHILD_IDS_KEY, spookedChildren);
                     }
                 }
@@ -1660,56 +1688,158 @@ public final class KspHalloween2026Script extends Script {
         return false;
     }
 
+    private enum ChildSceneStatus { PRESENT, ABSENT, UNKNOWN }
+
+    private void clearPendingChildSpook() {
+        pendingChildId = -1;
+        pendingChildIndex = -1;
+        pendingChildTile = null;
+        pendingChildSpookAt = 0L;
+        pendingChildAbsentSince = 0L;
+    }
+
+    /**
+     * Read the actual RuneLite WorldView NPC collection, not a cached list or
+     * a menu action. Index identifies the exact actor clicked; ID identifies
+     * the specific child definition. An index reused or morphed while the
+     * same actor slot remains populated does not count as disappearance.
+     */
+    private ChildSceneStatus pendingChildLiveSceneStatus(WorldPoint player) {
+        if (pendingChildIndex < 0 || pendingChildTile == null || player == null
+                || player.getPlane() != pendingChildTile.getPlane()
+                || player.distanceTo(pendingChildTile) > 10) {
+            return ChildSceneStatus.UNKNOWN;
+        }
+        return Microbot.getClientThread().runOnClientThreadOptional(() -> {
+            if (Microbot.getClient() == null
+                    || Microbot.getClient().getTopLevelWorldView() == null
+                    || Microbot.getClient().getTopLevelWorldView().npcs() == null
+                    || Microbot.getClient().getLocalPlayer() == null) {
+                return ChildSceneStatus.UNKNOWN;
+            }
+            for (net.runelite.api.NPC npc : Microbot.getClient()
+                    .getTopLevelWorldView().npcs()) {
+                if (npc != null && npc.getIndex() == pendingChildIndex) {
+                    return ChildSceneStatus.PRESENT;
+                }
+            }
+            return ChildSceneStatus.ABSENT;
+        }).orElse(ChildSceneStatus.UNKNOWN);
+    }
+
+    /**
+     * Called before attempting any new child. A single missing snapshot is
+     * not reliable: the same actor must remain absent for several polls,
+     * with its last observed tile still near the player.
+     */
+    private boolean verifyPendingChildSpook(WorldPoint player) {
+        if (pendingChildId < 0) return false;
+        final long now = System.currentTimeMillis();
+        ChildSceneStatus observed = pendingChildLiveSceneStatus(player);
+        if (observed == ChildSceneStatus.ABSENT) {
+            if (pendingChildAbsentSince == 0L) pendingChildAbsentSince = now;
+            if (now - pendingChildAbsentSince >= CHILD_SPOOK_ABSENCE_STABLE_MS
+                    && now - pendingChildSpookAt >= CHILD_SPOOK_ABSENCE_STABLE_MS) {
+                final int confirmedId = pendingChildId;
+                final int confirmedIndex = pendingChildIndex;
+                spookedChildren.add(confirmedId);
+                persistNpcIds(SPOOKED_CHILD_IDS_KEY, spookedChildren);
+                clearPendingChildSpook();
+                childSpookCooldownUntil.remove(confirmedId);
+                childNoTargetSince = 0L;
+                // The confirmation represents an objective-level improvement,
+                // not merely a successful click submission.
+                childSpookRetries = 0;
+                configManager.unsetConfiguration(GROUP, CHILD_RETRY_COUNT_KEY);
+                log.info("Halloween child scare LIVE SCENE CONFIRMED | childNpcId={}"
+                        + " index={} confirmed={}/{}",
+                        confirmedId, confirmedIndex, spookedChildren.size(),
+                        CHILD_REPORT_CHECKPOINT);
+                status = "Scare confirmed by child disappearing: "
+                        + spookedChildren.size() + "/" + CHILD_REPORT_CHECKPOINT;
+                return false;
+            }
+        } else {
+            pendingChildAbsentSince = 0L;
+        }
+
+        if (now - pendingChildSpookAt >= CHILD_SPOOK_CONFIRM_TIMEOUT_MS
+                || observed == ChildSceneStatus.UNKNOWN) {
+            final int failedId = pendingChildId;
+            log.warn("Halloween child scare NOT confirmed | childNpcId={}"
+                    + " index={} tile={} liveScene={} elapsedMs={}"
+                    + " (not counting; retry after cooldown)",
+                    pendingChildId, pendingChildIndex, pendingChildTile,
+                    observed, now - pendingChildSpookAt);
+            clearPendingChildSpook();
+            childSpookCooldownUntil.put(failedId,
+                    now + CHILD_SPOOK_RETRY_COOLDOWN_MS);
+            return false;
+        }
+
+        status = "Waiting for child " + pendingChildId
+                + " to disappear from live scene (" + observed + ")";
+        return true;
+    }
+
     private void spookChildren(WorldPoint player) {
         if (costumeCount() < 4) {
+            clearPendingChildSpook();
             change(Stage.GET_COSTUME, "Need four Halloween outfit pieces equipped");
             return;
         }
         if (!RIMMINGTON.contains(player)
                 && !nearOrWalk(player, STARTER, 12, "child trick-or-treaters")) return;
 
+        // Never issue a second Spook while the prior actor is awaiting
+        // confirmation. This prevents five rapid clicks on unresolved actions.
+        if (verifyPendingChildSpook(player)) return;
         if (spookedChildren.size() >= CHILD_REPORT_CHECKPOINT) {
             childrenReportConfirmed = false;
             change(Stage.REPORT_CHILDREN,
-                    "Five distinct child Spook attempts; verifying with Angel/Henja");
+                    "Five child NPC disappearances confirmed by RuneLite live scene");
             return;
         }
 
-        // Exact 2026 event NPC IDs are authoritative for both tasks.
-        // Spook is dispatched ONLY to child IDs (16778–16782), and only
-        // when the NPC advertises that action. No height inference.
         List<Rs2NpcModel> visibleTreaters = Rs2Npc.getNpcs()
                 .filter(n -> isKnownTreaterId(n.getId()))
                 .collect(Collectors.toList());
 
+        long now = System.currentTimeMillis();
         Rs2NpcModel child = visibleTreaters.stream()
                 .filter(n -> isChildTreaterId(n.getId())
                         && !spookedChildren.contains(n.getId())
-                        && npcHasAction(n, "Spook"))
-                .min(Comparator.comparingInt(n -> n.getWorldLocation() == null
-                        ? Integer.MAX_VALUE : player.distanceTo(n.getWorldLocation())))
+                        && npcHasAction(n, "Spook")
+                        && childSpookCooldownUntil.getOrDefault(n.getId(), 0L) <= now
+                        && n.getWorldLocation() != null)
+                .min(Comparator.comparingInt(n ->
+                        player.distanceTo(n.getWorldLocation())))
                 .orElse(null);
 
         if (child != null) {
             childNoTargetSince = 0L;
+            // Take a stable identity and position BEFORE invoking the action.
+            // Action dispatch alone is never evidence of a successful scare.
+            int id = child.getId();
+            int index = child.getIndex();
+            WorldPoint tile = child.getWorldLocation();
             if (Rs2Npc.interact(child, "Spook")) {
-                spookedChildren.add(child.getId());
-                persistNpcIds(SPOOKED_CHILD_IDS_KEY, spookedChildren);
-                // If new children become available after moving, previous
-                // partial-search retries should not count as stalled progress.
-                childSpookRetries = 0;
-                configManager.unsetConfiguration(GROUP, CHILD_RETRY_COUNT_KEY);
-                acted("Spook attempt | childNpcId=" + child.getId()
-                        + " index=" + child.getIndex()
-                        + " distinctAttempts=" + spookedChildren.size()
+                pendingChildId = id;
+                pendingChildIndex = index;
+                pendingChildTile = tile;
+                pendingChildSpookAt = now;
+                pendingChildAbsentSince = 0L;
+                acted("Spook dispatched | childNpcId=" + id
+                        + " index=" + index + " awaiting live-scene disappearance"
+                        + " confirmed=" + spookedChildren.size()
                         + "/" + CHILD_REPORT_CHECKPOINT);
             }
             return;
         }
 
-        // NPC scene updates may lag behind a movement or Spook action.
-        // Give the scene time to settle before initiating any new route.
-        long now = System.currentTimeMillis();
+        // Scene updates may lag behind movement or an NPC's despawn.
+        // Do not report partial *attempts* to Angel/Henja: those dialogs
+        // can only tell us the same child objective is still active.
         if (Rs2Player.isMoving()) {
             status = "Waiting for movement to finish before checking child NPCs";
             return;
@@ -1718,18 +1848,20 @@ public final class KspHalloween2026Script extends Script {
 
         if (scoutVisibleTreaters(player, visibleTreaters)) return;
 
-        String sceneDetails = visibleTreaters.stream()
-                .map(n -> n.getId() + ":" + classifyTreater(n)
-                        + ":spook=" + npcHasAction(n, "Spook")
-                        + ":tile=" + n.getWorldLocation())
-                .collect(Collectors.joining(", "));
-        log.info("Halloween no further unspooked child in loaded scene"
-                        + " | attemptedIds={} visibleTreaters=[{}] scoutedNpcTiles={}"
-                        + " => return to Angel/Henja for authoritative quest check",
-                spookedChildren, sceneDetails, childScoutedNpcTiles);
-        childrenReportConfirmed = false;
-        change(Stage.REPORT_CHILDREN,
-                "No additional child Spook targets in live scene; verifying quest dialogue");
+        if (now - lastDiagnosticAt >= 10_000L) {
+            lastDiagnosticAt = now;
+            String sceneDetails = visibleTreaters.stream()
+                    .map(n -> n.getId() + ":" + classifyTreater(n)
+                            + ":spook=" + npcHasAction(n, "Spook")
+                            + ":tile=" + n.getWorldLocation())
+                    .collect(Collectors.joining(", "));
+            log.info("Halloween waiting for remaining child NPCs in live scene"
+                    + " | confirmedIds={} visibleTreaters=[{}] scoutedNpcTiles={}"
+                    + " (no premature Angel/Henja report)",
+                    spookedChildren, sceneDetails, childScoutedNpcTiles);
+        }
+        status = "Waiting for unspooked child NPCs: "
+                + spookedChildren.size() + "/" + CHILD_REPORT_CHECKPOINT;
     }
 
 
@@ -2139,6 +2271,8 @@ public final class KspHalloween2026Script extends Script {
             actionsAtStage = 0;
             sweepsWithoutTarget = 0;
             sweepIndex = 0;
+            if (previous == Stage.SPOOK_CHILDREN && next != Stage.SPOOK_CHILDREN)
+                clearPendingChildSpook();
             if (next == Stage.SPOOK_CHILDREN) {
                 childNoTargetSince = 0L;
                 childScoutedNpcTiles.clear();
@@ -2204,6 +2338,7 @@ public final class KspHalloween2026Script extends Script {
         configManager.unsetConfiguration(GROUP, LANTERNS_VERIFIED_KEY);
         configManager.unsetConfiguration(GROUP, ADULTS_KEY);
         configManager.unsetConfiguration(GROUP, SPOOKED_CHILD_IDS_KEY);
+        configManager.unsetConfiguration(GROUP, LEGACY_SPOOKED_CHILD_ATTEMPTS_KEY);
         configManager.unsetConfiguration(GROUP, DELIVERED_ADULT_IDS_KEY);
         configManager.unsetConfiguration(GROUP, CHILD_RETRY_COUNT_KEY);
         configManager.unsetConfiguration(GROUP, CHILD_CONFIRMED_KEY);
@@ -2212,6 +2347,8 @@ public final class KspHalloween2026Script extends Script {
         pendingLantern = null;
         lanternsVerified = false;
         spookedChildren.clear();
+        clearPendingChildSpook();
+        childSpookCooldownUntil.clear();
         childScoutedNpcTiles.clear();
         childNoTargetSince = 0L;
         givenAdultIds.clear();
@@ -2229,7 +2366,7 @@ public final class KspHalloween2026Script extends Script {
     public Stage getStage() { return stage; }
     public int getLanternCount() { return lanternsVerified ? 8
             : Math.min(8, smashedLanternTiles.size()); }
-    /** A unique NPC Spook interaction was issued; not proof of a successful scare. */
+    /** Distinct children whose exact NPC indices disappeared from RuneLite's live scene after Spook. */
     public int getChildSpookAttempts() {
         return Math.min(CHILD_REPORT_CHECKPOINT, spookedChildren.size());
     }
@@ -2247,6 +2384,7 @@ public final class KspHalloween2026Script extends Script {
     public synchronized void shutdown() {
         active = false;
         paused = false;
+        clearPendingChildSpook();
         Rs2Walker.clearWalkingRoute("ksp_seasonal_stopped");
         super.shutdown();
         if (completionSignaled.get() || stage == Stage.COMPLETED) {
