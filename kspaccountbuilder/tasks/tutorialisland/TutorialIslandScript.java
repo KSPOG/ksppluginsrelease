@@ -1638,6 +1638,29 @@ public class TutorialIslandScript extends KspManagedScript
         {
             return;
         }
+        // Ranged combat belongs OUTSIDE the rat pen. NPC Attack can cause
+        // automatic pathing into the cage when fired from the instructor side.
+        // Position at the south-east side of the pen before targeting rats.
+        WorldPoint rangedPosition = new WorldPoint(3108, 9512, 0);
+        WorldPoint currentPosition = Rs2Player.getWorldLocation();
+        if (currentPosition == null) return;
+        if (isInsideRatPen(currentPosition)
+                || currentPosition.distanceTo(rangedPosition) > 2)
+        {
+            if (!Rs2Player.isMoving() && !Rs2Player.isAnimating())
+            {
+                Rs2Walker.walkStep(rangedPosition, 1);
+                if (System.currentTimeMillis() - lastRangedDiagnosticAtMs >= 5_000L)
+                {
+                    lastRangedDiagnosticAtMs = System.currentTimeMillis();
+                    Microbot.log("[TutIsland] Ranged outside-pen reposition"
+                            + " | from=" + currentPosition
+                            + " to=" + rangedPosition
+                            + " progress=" + Microbot.getVarbitPlayerValue(281));
+                }
+            }
+            return;
+        }
         if (!readyForAction()) return;
         if (attackNearestRat())
         {
