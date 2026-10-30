@@ -1193,6 +1193,8 @@ public class TutorialIslandScript extends KspManagedScript
         switch (progress)
         {
             case 260:
+                approachMiningInstructorAfterLadder();
+                return;
             case 290:
             case 330:
                 walkAndTalk(tutorialNpc(NpcID.MINING_INSTRUCTOR));
@@ -1234,6 +1236,49 @@ public class TutorialIslandScript extends KspManagedScript
                     openTutorialPassage(ObjectID.GATE_9718,
                             () -> Microbot.getVarbitPlayerValue(281) > 360 || isInArea(COMBAT_INSTRUCTOR_AREA));
                 }
+        }
+    }
+
+    /**
+     * Only the initial mining instructor approach (progress 260).
+     * WebWalker.walkTo can try mainland bank bootstrap underground;
+     * walkStep takes a local step instead. Never alter other stages.
+     */
+    private void approachMiningInstructorAfterLadder()
+    {
+        Rs2NpcModel instructor = tutorialNpc(NpcID.MINING_INSTRUCTOR);
+        WorldPoint player = Rs2Player.getWorldLocation();
+        if (player == null || Rs2Player.isMoving() || Rs2Player.isAnimating())
+            return;
+
+        if (instructor != null && instructor.getWorldLocation() != null)
+        {
+            // The live NPC click can approach the instructor without an
+            // unrelated bank-route computation.
+            if (!readyForAction()) return;
+            if (!isTutorialInteractionPending("mining:instructor:initial")
+                    && instructor.click("Talk-to"))
+            {
+                markTutorialInteraction("mining:instructor:initial");
+                Microbot.log("[TutIsland] Mining instructor initial Talk-to dispatched"
+                        + " | player=" + player + " npc=" + instructor.getWorldLocation());
+            }
+            return;
+        }
+
+        // NPC is not yet in the local scene at the ladder. Take an
+        // underground local step towards the established instructor area.
+        WorldPoint instructorArea = new WorldPoint(3078, 9502, 0);
+        if (player.distanceTo(instructorArea) > 4)
+        {
+            Rs2Walker.walkStep(instructorArea, 4);
+            if (System.currentTimeMillis() - lastMiningDiagnosticAtMs >= 5_000L)
+            {
+                lastMiningDiagnosticAtMs = System.currentTimeMillis();
+                Microbot.log("[TutIsland] Mining instructor approach | player="
+                        + player + " target=" + instructorArea
+                        + " npcVisible=false method=local-walkStep");
+            }
         }
     }
 
