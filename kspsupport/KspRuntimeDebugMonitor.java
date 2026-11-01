@@ -34,6 +34,7 @@ final class KspRuntimeDebugMonitor
     private static final long POLL_MS = 2_000L;
     private static final long HEARTBEAT_MS = 30_000L;
     private static final long STALL_CONFIRM_MS = 120_000L;
+    private static final long STALL_SAMPLE_MS = 5_000L;
     private static final long STALL_GRACE_MS = 15_000L;
     private static final long SLOW_SCAN_WARN_MS = 50L;
     private static final long SLOW_SCAN_WARN_COOLDOWN_MS = 10_000L;
@@ -49,6 +50,7 @@ final class KspRuntimeDebugMonitor
     private final Map<String, String> duplicateSignatures = new HashMap<>();
     private final Map<String, StallObservation> stallObservations = new HashMap<>();
     private String visibleStallKey;
+    private long lastStallSampleAt;
 
     private ScheduledExecutorService executor;
     private String previousGlobalStatus;
@@ -86,6 +88,7 @@ final class KspRuntimeDebugMonitor
         duplicateSignatures.clear();
         stallObservations.clear();
         visibleStallKey = null;
+        lastStallSampleAt = 0L;
         if (panel != null) panel.showStall(null, null, null);
         previousGlobalStatus = null;
         info("runtime monitor stopped");
@@ -128,7 +131,13 @@ final class KspRuntimeDebugMonitor
         List<Heartbeat> heartbeats = new ArrayList<>();
         int activeCount = 0;
         // Take one small shared client snapshot, never one per plugin.
-        GameProgress gameProgress = clientProgressSnapshot();
+        GameProgress gameProgress = null;
+        boolean sampleStalls = now - lastStallSampleAt >= STALL_SAMPLE_MS;
+        if (sampleStalls)
+        {
+            lastStallSampleAt = now;
+            gameProgress = clientProgressSnapshot();
+        }
 
         for (Plugin plugin : loaded)
         {
@@ -144,7 +153,7 @@ final class KspRuntimeDebugMonitor
                     ? snapshotActive(plugin, enabled)
                     : new Snapshot(descriptorName(plugin), enabled, false, Collections.emptyMap());
             previous.put(key, current);
-            updateStallObservation(key, current, gameProgress, now);
+            if (sampleStalls) updateStallObservation(key, current, gameProgress, now);
 
             if (active)
             {
@@ -228,6 +237,7 @@ final class KspRuntimeDebugMonitor
         {
             String token = current.pluginName.toUpperCase(Locale.ROOT)
                     .replaceAll("[^A-Z0-9]+", "-").replaceAll("(^-|-$)", "");
+            if (token.startsWith("KSP-")) token = token.substring(4);
             old.code = "KSP-" + token + "-STALL-E01";
             old.reason = "Running script has no observable movement, XP or state change for 120 seconds";
             warn("suspected stall | plugin=" + current.pluginName + " | code=" + old.code);
