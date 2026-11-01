@@ -1132,14 +1132,34 @@ public class TutorialIslandScript extends KspManagedScript
 
         if (progress == 200 || progress == 210)
         {
-            if (!walkToQuestGuideDoorTile())
+            // The Quest Guide door (9716) is a real blocking object. Do not
+            // path into the room before opening it: a closed door can make
+            // walkStep repeatedly choose an unreachable tile.
+            if (isNpcReachable(npc, 4))
             {
+                walkAndTalk(npc);
                 return;
             }
-
-            openTutorialPassage(
-                    9716,
-                    () -> Microbot.getVarbitPlayerValue(281) >= 220 || isNpcReachable(npc, 4));
+            Rs2TileObjectModel questDoor = tutorialObject(9716);
+            if (questDoor != null && questDoor.getWorldLocation() != null)
+            {
+                if (isTutorialInteractionPending("open:9716")
+                        || Rs2Player.isMoving() || Rs2Player.isInteracting()) return;
+                if (questDoor.click("Open")
+                        || KspLiveScene.interact(9716, Rs2Player.getWorldLocation(), 45, "Open"))
+                {
+                    markTutorialInteraction("open:9716");
+                    Microbot.log("[TutIsland] Quest Guide door Open dispatched | id=9716 tile="
+                            + questDoor.getWorldLocation() + " progress=" + progress);
+                    return;
+                }
+                // Approach the actual loaded door rather than a tile beyond
+                // an obstruction; the stage will re-check the door next tick.
+                walkTutorialLocal(questDoor.getWorldLocation(), 2);
+                return;
+            }
+            logMissingTutorialObject("Quest Guide door", 9716);
+            walkToQuestGuideDoorTile();
             return;
         }
 
