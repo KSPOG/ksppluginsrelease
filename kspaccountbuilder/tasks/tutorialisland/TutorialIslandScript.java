@@ -1135,14 +1135,22 @@ public class TutorialIslandScript extends KspManagedScript
             // The Quest Guide door (9716) is a real blocking object. Do not
             // path into the room before opening it: a closed door can make
             // walkStep repeatedly choose an unreachable tile.
-            if (isNpcReachable(npc, 4))
+            Rs2TileObjectModel questDoor = tutorialObject(9716);
+            // Distance to the NPC is not collision-aware: it can be only
+            // a few tiles away but still separated by this closed door.
+            if (isNpcReachable(npc, 4)
+                    && (questDoor == null || !questDoor.hasAction("Open")))
             {
                 walkAndTalk(npc);
                 return;
             }
-            Rs2TileObjectModel questDoor = tutorialObject(9716);
             if (questDoor != null && questDoor.getWorldLocation() != null)
             {
+                if (!questDoor.hasAction("Open"))
+                {
+                    if (npc != null) walkAndTalk(npc);
+                    return;
+                }
                 if (isTutorialInteractionPending("open:9716")
                         || Rs2Player.isMoving() || Rs2Player.isInteracting()) return;
                 if (questDoor.click("Open")
