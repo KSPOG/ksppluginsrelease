@@ -131,6 +131,14 @@ public class TutorialIslandScript extends KspManagedScript
     private static final WorldArea TUTORIAL_END_AREA     = TutAreas.TUTORIAL_END_AREA;
     private static final WorldPoint CHAPEL_INSTRUCTOR_TILE = new WorldPoint(3128, 3106, 0);
     private static final WorldPoint MAGIC_INSTRUCTOR_TILE = new WorldPoint(3141, 3090, 0);
+    // Safe casting positions supplied from the live Tutorial Island magic stage.
+    // Stand on one of these tiles before selecting Wind Strike on the chicken.
+    private static final WorldPoint[] MAGIC_CHICKEN_CAST_TILES = {
+            new WorldPoint(3141, 3091, 0),
+            new WorldPoint(3140, 3091, 0),
+            new WorldPoint(3139, 3091, 0),
+            new WorldPoint(3138, 3091, 0)
+    };
 
     private String lastGeneratedName = "None";
     private boolean nameLookupPending;
@@ -2652,7 +2660,40 @@ public class TutorialIslandScript extends KspManagedScript
             return true;
         }
 
-        if (Rs2Player.isAnimating() || Rs2Player.isInteracting())
+        // Do not select the spell until the player is standing on one of
+        // the verified casting tiles. Walking with an active spell selection
+        // can cancel the cast or target the wrong object.
+        WorldPoint playerTile = Rs2Player.getWorldLocation();
+        if (playerTile == null) return false;
+        boolean onCastingTile = false;
+        WorldPoint nearestCastingTile = MAGIC_CHICKEN_CAST_TILES[0];
+        int nearestDistance = Integer.MAX_VALUE;
+        for (WorldPoint tile : MAGIC_CHICKEN_CAST_TILES)
+        {
+            if (tile.equals(playerTile))
+            {
+                onCastingTile = true;
+                break;
+            }
+            int distance = playerTile.distanceTo(tile);
+            if (distance >= 0 && distance < nearestDistance)
+            {
+                nearestDistance = distance;
+                nearestCastingTile = tile;
+            }
+        }
+        if (!onCastingTile)
+        {
+            if (!Rs2Player.isMoving() && !Rs2Player.isAnimating())
+            {
+                walkTutorialLocal(nearestCastingTile, 0);
+                debug("Moving to chicken spell tile | from=%s target=%s progress=650",
+                        playerTile, nearestCastingTile);
+            }
+            return false;
+        }
+
+        if (Rs2Player.isMoving() || Rs2Player.isAnimating() || Rs2Player.isInteracting())
         {
             return true;
         }
