@@ -288,8 +288,9 @@ public class MeleeScript extends KspManagedScript {
                 return new TrainingStage(CombatAreas.AL_KHARID_WARRIOR, NPC.AL_KHARID_WARRIOR, null,
                         Arrays.stream(WarriorLoot.values()).map(WarriorLoot::getDisplayName).toArray(String[]::new));
             }
-            if (this.forcedCombatArea == CombatAreas.HILL_GIANTS) {
-                return new TrainingStage(CombatAreas.HILL_GIANTS, NPC.HILL_GIANT, null,
+            if (this.forcedCombatArea == CombatAreas.HILL_GIANTS
+                    || this.forcedCombatArea == CombatAreas.HILL_GIANTS_SOUTH) {
+                return new TrainingStage(this.forcedCombatArea, NPC.HILL_GIANT, null,
                         Arrays.stream(HillGiantLoot.values()).map(HillGiantLoot::getDisplayName).toArray(String[]::new));
             }
             return new TrainingStage(CombatAreas.MOSS_GIANTS, NPC.MOSS_GIANT, null,
