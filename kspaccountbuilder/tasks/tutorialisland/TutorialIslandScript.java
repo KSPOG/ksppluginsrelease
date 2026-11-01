@@ -969,13 +969,18 @@ public class TutorialIslandScript extends KspManagedScript
             return false;
         }
 
-        // The Account Guide may only load after entering the room.
+        // Enter the room by opening its blocking door, but never request
+        // a walk to the Account Guide's occupied tile. Once the NPC
+        // appears in the live scene, the shared interaction clicks it.
         if (playerLocation.getX() < ACCOUNT_GUIDE_ROOM_MIN_X)
         {
-            clickNearestTutorialObject(ACCOUNT_GUIDE_DOOR_ID, "Open");
-            if (npc != null && npc.getWorldLocation() != null)
-                walkTutorialLocal(npc.getWorldLocation(), 2);
-            return false;
+            Rs2TileObjectModel door = tutorialObject(ACCOUNT_GUIDE_DOOR_ID);
+            if (door != null && door.hasAction("Open"))
+            {
+                clickNearestTutorialObject(ACCOUNT_GUIDE_DOOR_ID, "Open");
+                return false;
+            }
+            if (npc == null) return false;
         }
 
         if (npc == null || npc.getWorldLocation() == null)
@@ -1014,17 +1019,8 @@ public class TutorialIslandScript extends KspManagedScript
             return false;
         }
 
-        // The Survival Expert is already a live-scene NPC. A valid
-        // line of sight permits direct Talk-to even beyond four tiles.
-        if (!npc.hasLineOfSight())
-        {
-            if (playerLocation.distanceTo(npcLocation) > 4)
-            {
-                walkTutorialLocal(npcLocation, 4);
-            }
-            return false;
-        }
-
+        // This NPC was resolved from the live scene; do not pre-walk
+        // to its tile even when the line-of-sight check is inconclusive.
         Rs2Walker.clearWalkingRoute("ksp_account_builder_survival_expert");
 
         // This direct NPC interaction previously bypassed the tutorial's
@@ -1038,8 +1034,9 @@ public class TutorialIslandScript extends KspManagedScript
         {
             return false;
         }
-        if (!npc.click("Talk-to"))
+        if (!KspLiveScene.clickLiveNpc(npc, "Talk-to"))
         {
+            debug("Survival Expert live Talk-to unavailable; not walking to NPC tile");
             return false;
         }
         markTutorialInteraction(interactionKey);
@@ -2370,26 +2367,12 @@ public class TutorialIslandScript extends KspManagedScript
             return false;
         }
 
-        // A live-scene NPC with line of sight can be interacted with
-        // directly at any distance supported by the client. The game owns
-        // the short approach after the NPC action; do not ask WebWalker to
-        // path to the NPC first. Line of sight also prevents attempting to
-        // talk through a closed tutorial door.
-        boolean directlyInteractable = npc.hasLineOfSight();
-        if (!directlyInteractable)
-        {
-            if (playerLocation.distanceTo(npcLocation) > reach)
-            {
-                walkTutorialLocal(npcLocation, reach);
-            }
-            else
-            {
-                debug("Live NPC nearby but obstructed | npc=%s npcTile=%s player=%s action=%s",
-                        npc.getName(), npcLocation, playerLocation, action);
-            }
-            return false;
-        }
-
+        // tutorialNpc() returns an NPC from the active live WorldView.
+        // Do not pre-walk to its tile: line-of-sight is not a reliable
+        // indication that a menu action cannot be dispatched, and RuneLite
+        // will approach the NPC naturally when the action is accepted.
+        // The direct scene interaction avoids Rs2NpcModel's separate
+        // cant-reach recovery, which can invoke the global walker.
         Rs2Walker.clearWalkingRoute("ksp_account_builder_tutorial_npc_interaction");
 
         String interactionKey = "npc:" + npc.getIndex() + ":" + action;
@@ -2401,11 +2384,15 @@ public class TutorialIslandScript extends KspManagedScript
             return false;
         }
 
-        if (!npc.click(action))
+        if (!KspLiveScene.clickLiveNpc(npc, action))
         {
+            debug("Live NPC interaction unavailable; no NPC tile walk | npc=%s index=%s action=%s player=%s npcTile=%s",
+                    npc.getName(), npc.getIndex(), action, playerLocation, npcLocation);
             return false;
         }
         markTutorialInteraction(interactionKey);
+        debug("Live NPC action dispatched without walker | npc=%s index=%s action=%s player=%s npcTile=%s",
+                npc.getName(), npc.getIndex(), action, playerLocation, npcLocation);
 
         if (afterClick != null)
         {
@@ -2587,15 +2574,11 @@ public class TutorialIslandScript extends KspManagedScript
             return;
         }
 
-        if (playerLocation.distanceTo(spotLocation) > 4)
-        {
-            walkTutorialLocal(spotLocation, 4);
-            return;
-        }
-
+        // The fishing spot is an NPC in the live scene. Dispatch the
+        // Net action directly and allow the game to approach it.
         Rs2Walker.clearWalkingRoute("ksp_account_builder_tutorial_fishing");
 
-        if (fishingSpot.click("Net"))
+        if (KspLiveScene.clickLiveNpc(fishingSpot, "Net"))
         {
             fishingActionDispatched = true;
         }
