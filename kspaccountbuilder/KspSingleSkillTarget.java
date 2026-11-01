@@ -76,6 +76,7 @@ public enum KspSingleSkillTarget
     MELEE_CHICKENS(KspTrainSingleSkillTask.MELEE, "Chickens", CombatAreas.CHICKENS),
     MELEE_WARRIORS(KspTrainSingleSkillTask.MELEE, "Warriors", CombatAreas.AL_KHARID_WARRIOR),
     MELEE_HILL_GIANTS(KspTrainSingleSkillTask.MELEE, "Hill Giants", CombatAreas.HILL_GIANTS),
+    MELEE_HILL_GIANTS_SOUTH(KspTrainSingleSkillTask.MELEE, "Hill Giants (South)", CombatAreas.HILL_GIANTS_SOUTH),
     MELEE_MOSS_GIANTS(KspTrainSingleSkillTask.MELEE, "Moss Giants", CombatAreas.MOSS_GIANTS),
 
     SMITHING_BRONZE_DAGGER(KspTrainSingleSkillTask.SMITHING, "Bronze Dagger", SmithLevels.BRONZE_DAGGER),
