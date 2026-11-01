@@ -33,6 +33,8 @@ final class KspRuntimeDebugMonitor
     private static final Logger log = LoggerFactory.getLogger("KSP.RuntimeDebug");
     private static final long POLL_MS = 2_000L;
     private static final long HEARTBEAT_MS = 30_000L;
+    private static final long STALL_CONFIRM_MS = 120_000L;
+    private static final long STALL_GRACE_MS = 15_000L;
     private static final long SLOW_SCAN_WARN_MS = 50L;
     private static final long SLOW_SCAN_WARN_COOLDOWN_MS = 10_000L;
     private static final int MAX_VALUE_LENGTH = 120;
@@ -45,6 +47,8 @@ final class KspRuntimeDebugMonitor
     private final Map<String, Snapshot> previous = new HashMap<>();
     private final Map<String, Long> lastHeartbeat = new HashMap<>();
     private final Map<String, String> duplicateSignatures = new HashMap<>();
+    private final Map<String, StallObservation> stallObservations = new HashMap<>();
+    private String visibleStallKey;
 
     private ScheduledExecutorService executor;
     private String previousGlobalStatus;
@@ -80,6 +84,9 @@ final class KspRuntimeDebugMonitor
         previous.clear();
         lastHeartbeat.clear();
         duplicateSignatures.clear();
+        stallObservations.clear();
+        visibleStallKey = null;
+        if (panel != null) panel.showStall(null, null, null);
         previousGlobalStatus = null;
         info("runtime monitor stopped");
         if (panel != null) panel.disposeConsole();
@@ -120,6 +127,8 @@ final class KspRuntimeDebugMonitor
         Map<String, List<String>> activeInstancesByClass = new HashMap<>();
         List<Heartbeat> heartbeats = new ArrayList<>();
         int activeCount = 0;
+        // Take one small shared client snapshot, never one per plugin.
+        String gameProgress = clientProgressSnapshot();
 
         for (Plugin plugin : loaded)
         {
@@ -135,6 +144,7 @@ final class KspRuntimeDebugMonitor
                     ? snapshotActive(plugin, enabled)
                     : new Snapshot(descriptorName(plugin), enabled, false, Collections.emptyMap());
             previous.put(key, current);
+            updateStallObservation(key, current, gameProgress, now);
 
             if (active)
             {
@@ -182,7 +192,102 @@ final class KspRuntimeDebugMonitor
         }
 
         if (panel != null) panel.setActiveCount(activeCount);
+        stallObservations.keySet().removeIf(key -> !seen.contains(key));
+        publishStall();
         checkDuplicateInstances(activeInstancesByClass);
+    }
+
+    /**
+     * Generic stall detection for running KSP script workers.
+     * An enabled but idle plugin is never considered stalled. Normal movement,
+     * animation, XP changes and declared operational state transitions reset
+     * the timer. Waiting for more than two minutes is a suspected stall, not
+     * conclusive evidence that an action failed.
+     */
+    private void updateStallObservation(String key, Snapshot current, String gameProgress, long now)
+    {
+        if (!current.active || gameProgress == null
+                || !current.values.containsKey("activeScripts")
+                || current.pluginName.toLowerCase(Locale.ROOT).contains("account builder"))
+        {
+            stallObservations.remove(key);
+            return;
+        }
+        String signature = gameProgress + "|" + compactState(current.values);
+        StallObservation old = stallObservations.get(key);
+        if (old == null || !old.signature.equals(signature))
+        {
+            stallObservations.put(key, new StallObservation(current.pluginName, signature, now));
+            return;
+        }
+        if (now - old.lastProgressAt < STALL_CONFIRM_MS) return;
+        if (old.code == null)
+        {
+            String token = current.pluginName.toUpperCase(Locale.ROOT)
+                    .replaceAll("[^A-Z0-9]+", "-").replaceAll("(^-|-$)", "");
+            old.code = "KSP-" + token + "-STALL-E01";
+            old.reason = "Running script has no observable movement, XP or state change for 120 seconds";
+            warn("suspected stall | plugin=" + current.pluginName + " | code=" + old.code);
+        }
+    }
+
+    private void publishStall()
+    {
+        StallObservation visible = null;
+        String visibleKey = null;
+        for (Map.Entry<String, StallObservation> entry : stallObservations.entrySet())
+        {
+            if (entry.getValue().code != null)
+            {
+                visible = entry.getValue();
+                visibleKey = entry.getKey();
+                break;
+            }
+        }
+        if (java.util.Objects.equals(visibleStallKey, visibleKey)) return;
+        visibleStallKey = visibleKey;
+        if (panel != null)
+            panel.showStall(visible == null ? null : visible.plugin,
+                    visible == null ? null : visible.code,
+                    visible == null ? null : visible.reason);
+    }
+
+    private static String clientProgressSnapshot()
+    {
+        try
+        {
+            return Microbot.getClientThread().runOnClientThreadOptional(() ->
+            {
+                if (Microbot.getClient() == null || Microbot.getClient().getLocalPlayer() == null
+                        || !Microbot.isLoggedIn()) return null;
+                Player player = Microbot.getClient().getLocalPlayer();
+                long totalXp = 0L;
+                for (net.runelite.api.Skill skill : net.runelite.api.Skill.values())
+                    totalXp += Math.max(0, Microbot.getClient().getSkillExperience(skill));
+                // Do not use global status or system time: neither indicates
+                // actual in-game progress and would mask a genuine stall.
+                return player.getWorldLocation() + "|" + player.getAnimation() + "|" + totalXp;
+            }).orElse(null);
+        }
+        catch (Throwable ignored)
+        {
+            return null;
+        }
+    }
+
+    private static final class StallObservation
+    {
+        final String plugin;
+        final String signature;
+        final long lastProgressAt;
+        String code, reason;
+
+        StallObservation(String plugin, String signature, long lastProgressAt)
+        {
+            this.plugin = plugin;
+            this.signature = signature;
+            this.lastProgressAt = lastProgressAt;
+        }
     }
 
     /** Microbot.status is global, so log it once instead of once per active plugin. */
