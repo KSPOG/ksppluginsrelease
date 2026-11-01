@@ -96,7 +96,9 @@ public class BuyScript extends KspManagedScript {
     private GEArea targetArea = GEArea.GRAND_EXCHANGE;
     private boolean debugLogging;
 
+    private static final long WEBWALK_RETRY_INTERVAL_MS = 10_000L;
     private long lastWebWalkAtMs;
+    private long lastBankWalkAttemptAtMs;
     private long lastActionAtMs;
     private long pendingBankActionAtMs;
     private String pendingBankItem;
@@ -325,11 +327,15 @@ public class BuyScript extends KspManagedScript {
         if (Rs2Player.isMoving()) {
             return false;
         }
+        // An already dispatched WebWalk can briefly report player idle
+        // between route steps. Reusing its route avoids repeated A* queries.
+        long now = System.currentTimeMillis();
+        if (lastWebWalkAtMs > 0L && now - lastWebWalkAtMs < WEBWALK_RETRY_INTERVAL_MS)
+            return false;
 
         Microbot.status = "Walking to GE";
-
+        this.lastWebWalkAtMs = now;
         if (Rs2Walker.walkUntil(this.targetArea.getRandomPoint(), 2, () -> this.targetArea.toWorldArea().contains(Rs2Player.getWorldLocation()))) {
-            this.lastWebWalkAtMs = System.currentTimeMillis();
             this.debug(
                     "Requested GE buy area walk | player={} area={}",
                     Rs2Player.getWorldLocation(),
@@ -616,9 +622,21 @@ public class BuyScript extends KspManagedScript {
             }
 
             Microbot.status = "Opening GE Bank";
-            // Throttle both direct bank clicks and the walking fallback.
-            if (Rs2Player.isMoving() || System.currentTimeMillis() - this.lastActionAtMs < Math.max(ACTION_COOLDOWN_MS, 2_000L)) return;
-            if (!Rs2Bank.openBank()) Rs2Bank.walkToBankAndUseBank();
+            // A bank walk must keep ownership of its route across
+            // intermediate idle ticks; don't reissue it every two seconds.
+            long now = System.currentTimeMillis();
+            if (Rs2Player.isMoving()
+                    || now - this.lastActionAtMs < Math.max(ACTION_COOLDOWN_MS, 2_000L)
+                    || lastBankWalkAttemptAtMs > 0L
+                            && now - lastBankWalkAttemptAtMs < WEBWALK_RETRY_INTERVAL_MS) return;
+            if (!Rs2Bank.openBank())
+            {
+                lastBankWalkAttemptAtMs = System.currentTimeMillis();
+                boolean dispatched = Rs2Bank.walkToBankAndUseBank();
+                debug("GE Buy bank walk dispatch | player={} target={} result={} retryMs={}",
+                        Rs2Player.getWorldLocation(), Rs2Walker.getCurrentTarget(),
+                        dispatched, WEBWALK_RETRY_INTERVAL_MS);
+            }
             this.lastActionAtMs = System.currentTimeMillis();
             return;
         }
@@ -2705,6 +2723,7 @@ public class BuyScript extends KspManagedScript {
 
     public void shutdown() {
         this.lastWebWalkAtMs = 0L;
+        this.lastBankWalkAttemptAtMs = 0L;
         this.lastActionAtMs = 0L;
         clearBankInventoryAction();
 
