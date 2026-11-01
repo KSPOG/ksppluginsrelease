@@ -31,6 +31,8 @@ final class KspReportPrivacy
 
         long hash = Microbot.getClientThread().runOnClientThreadOptional(() ->
                 Microbot.getClient().getAccountHash()).orElse(0L);
+        if (hash == 0L)
+            throw new IllegalStateException("Unable to verify active account hash; report not copied");
         String safe = Pattern.compile(Pattern.quote(name.trim()), Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE)
                 .matcher(input).replaceAll(Matcher.quoteReplacement(MASK));
         if (hash != 0L)
