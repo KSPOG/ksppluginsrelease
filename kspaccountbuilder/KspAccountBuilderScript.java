@@ -300,6 +300,17 @@ public class KspAccountBuilderScript extends KspManagedScript
     private boolean experienceLampPausedActivityTimer;
     private volatile boolean essenceMineRecoveryActive;
     private long lastStatusLogAt;
+    // Only publish a support code after observed lack of real task progress.
+    private static final long STALL_SAMPLE_MS = 5_000L;
+    private static final long STALL_CONFIRM_MS = 120_000L;
+    private volatile String activeStallCode;
+    private volatile String activeStallReason;
+    private BuilderTask monitoredStallTask;
+    private WorldPoint monitoredStallPosition;
+    private long monitoredStallXp;
+    private int monitoredStallInventory;
+    private long monitoredStallProgressAt;
+    private long lastStallSampleAt;
     private KspAccountBuilderConfig config;
     private boolean debugEnabled;
     private boolean debugLoggingApplied;
@@ -394,6 +405,7 @@ public class KspAccountBuilderScript extends KspManagedScript
             updateBreakRuntimeClock();
             if (shuttingDown || !super.run() || shuttingDown) return;
             syncDebugLogging(false);
+            sampleTaskStall();
             if (manualPaused)
             {
                 // Paused time must never count toward a Crafting bank stall.
@@ -571,6 +583,7 @@ public class KspAccountBuilderScript extends KspManagedScript
         essenceMineRecoveryActive = false;
         nextActivitySwitchAtMillis = -1L;
         lastStatusLogAt = 0L;
+        resetStallMonitor();
         debugLoggingApplied = false;
         invalidateTaskSelectionResourceCache();
     }
@@ -2522,6 +2535,82 @@ public class KspAccountBuilderScript extends KspManagedScript
 
     private void debug(String message, Object... args) { if (debugEnabled) KspTaskDebug.info(log, true, "Builder", message, args); }
 
+    /**
+     * A stall means the same active worker has made no observable progress
+     * (position, inventory, or XP) for two minutes and is no longer moving,
+     * animating or interacting. Idle samples alone never trigger a report.
+     * Sampling runs in the scheduler, never the Swing UI thread.
+     */
+    private void sampleTaskStall()
+    {
+        long now = System.currentTimeMillis();
+        if (now - lastStallSampleAt < STALL_SAMPLE_MS) return;
+        lastStallSampleAt = now;
+        BuilderTask active = currentTask;
+        if (shuttingDown || manualPaused || !Microbot.isLoggedIn()
+                || isAnyBreakActive() || !taskStarted || active == null
+                || blockedForcedQuestTask == active || failedRecoveryTask == active
+                || pendingTask != null || pendingRandomTaskSelection
+                || preselectedHandoffTask != null || !isReadyAfterLoginHandoff())
+        {
+            resetStallMonitor();
+            return;
+        }
+
+        WorldPoint position = getSafePlayerLocation();
+        if (position == null || Microbot.getClient() == null)
+        {
+            resetStallMonitor();
+            return;
+        }
+
+        long xp = 0L;
+        for (Skill skill : Skill.values())
+            xp += Math.max(0, Microbot.getClient().getSkillExperience(skill));
+        int inventory = getTaskSelectionInventoryFingerprint();
+        if (active != monitoredStallTask || monitoredStallPosition == null
+                || !position.equals(monitoredStallPosition)
+                || xp != monitoredStallXp || inventory != monitoredStallInventory)
+        {
+            monitoredStallTask = active;
+            monitoredStallPosition = position;
+            monitoredStallXp = xp;
+            monitoredStallInventory = inventory;
+            monitoredStallProgressAt = now;
+            if (activeStallCode != null)
+                log.info("[KSP Builder] Stall cleared after observed progress | code={}", activeStallCode);
+            activeStallCode = null;
+            activeStallReason = null;
+            return;
+        }
+
+        if (Rs2Player.isMoving() || Rs2Player.isAnimating() || Rs2Player.isInteracting())
+        {
+            monitoredStallProgressAt = now;
+            return;
+        }
+        if (now - monitoredStallProgressAt < STALL_CONFIRM_MS) return;
+        if (activeStallCode == null)
+        {
+            activeStallCode = getDiagnosticCode() + "-E01";
+            activeStallReason = "No movement, inventory or XP progress for 120 seconds";
+            log.warn("[KSP Builder] STALL DETECTED | code={} task={} pos={} walkerTarget={} status={}",
+                    activeStallCode, active, position, Rs2Walker.getCurrentTarget(), Microbot.status);
+        }
+    }
+
+    private void resetStallMonitor()
+    {
+        monitoredStallTask = null;
+        monitoredStallPosition = null;
+        monitoredStallProgressAt = 0L;
+        activeStallCode = null;
+        activeStallReason = null;
+    }
+
+    public String getActiveStallCode() { return activeStallCode; }
+    public String getActiveStallReason() { return activeStallReason; }
+
     private void maybeLogStatus()
     {
         long now = System.currentTimeMillis();
@@ -2817,6 +2906,7 @@ public class KspAccountBuilderScript extends KspManagedScript
         updateWindowTitle();
         preselectedHandoffTask = null;
         currentTask = null;
+        resetStallMonitor();
         try { Rs2Antiban.resetAntibanSettings(true); }
         catch (Exception ex) { log.warn("Account Builder antiban reset failed during shutdown", ex); }
         Rs2Walker.clearWalkingRoute("ksp_account_builder_shutdown");
