@@ -657,16 +657,16 @@ final class KspAccountBuilderPanel extends PluginPanel
     {
         String safe = redactDiagnosticLogLine(report);
         safe = Pattern.compile(Pattern.quote(accountName.trim()), Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE)
-                .matcher(safe).replaceAll(Matcher.quoteReplacement("[REDACTED]"));
+                .matcher(safe).replaceAll(Matcher.quoteReplacement("********"));
         if (accountHash != 0L)
         {
             String unsigned = Long.toUnsignedString(accountHash);
             safe = Pattern.compile("(?<![0-9])" + Pattern.quote(unsigned) + "(?![0-9])")
-                    .matcher(safe).replaceAll("[REDACTED]");
+                    .matcher(safe).replaceAll("********");
             String signed = Long.toString(accountHash);
             if (!signed.equals(unsigned))
                 safe = Pattern.compile("(?<![0-9])" + Pattern.quote(signed) + "(?![0-9])")
-                        .matcher(safe).replaceAll("[REDACTED]");
+                        .matcher(safe).replaceAll("********");
         }
         return safe;
     }
