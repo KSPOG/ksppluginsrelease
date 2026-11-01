@@ -1048,10 +1048,12 @@ public class TutorialIslandScript extends KspManagedScript
         if (Rs2Inventory.contains("Bread dough"))
         {
             doughMixDispatched = false;
-            if (breadCookingDispatched && (Rs2Player.isAnimating()
-                    || isTutorialInteractionPending("cooking:range-use"))) return;
+            if (Rs2Player.isAnimating()
+                    || isTutorialInteractionPending("cooking:range-use")) return;
             breadCookingDispatched = false;
 
+            // Discover the actual range in the loaded scene. Never assume
+            // that the range exposes a standalone Cook or Use menu option.
             Rs2TileObjectModel range = tutorialObject(9736);
             if (range == null) range = tutorialObject("Range");
             if (range == null)
@@ -1061,14 +1063,21 @@ public class TutorialIslandScript extends KspManagedScript
             }
             if (!prepareTutorialObjectInteraction(range, 4) || !readyForAction()) return;
 
-            // Bread dough is already produced. Interact with the stove/range
-            // directly rather than selecting dough from the inventory.
-            if (range.click("Cook") || range.click("Use"))
+            // Tutorial Island cooks bread by using bread dough ON the range.
+            // Selecting the item is asynchronous; the helper waits for
+            // selection before issuing the target-on-object menu action.
+            if (useTutorialItemOnLiveObject(ItemID.BREAD_DOUGH, range,
+                    "cooking:range-use"))
             {
-                markTutorialInteraction("cooking:range-use");
                 breadCookingDispatched = true;
-                Microbot.log("[TutIsland] Cooking range action dispatched | objectId="
-                        + range.getId() + " progress=" + progress);
+                Microbot.log("[TutIsland] Bread dough used on live range | objectId="
+                        + range.getId() + " tile=" + range.getWorldLocation()
+                        + " progress=" + progress);
+            }
+            else
+            {
+                logTutorialInteractionPending("cooking:bread-dough-on-range",
+                        range, ItemID.BREAD_DOUGH);
             }
             return;
         }
