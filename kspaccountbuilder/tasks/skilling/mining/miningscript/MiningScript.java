@@ -114,6 +114,9 @@ public class MiningScript extends KspManagedScript
     private Areas selectedGoldArea = Areas.GOLD_RIMMINGTON;
     private Areas selectedMithrilArea = Areas.MITHRIL_DWARVEN_MINE;
     private Areas selectedAdamantArea = Areas.ADAMANT_DWARVEN_MINE;
+    // A logout break restarts the child script. Preserve the session's
+    // randomly selected areas instead of rerolling them on every resume.
+    private boolean miningAreasInitialized;
 
     private boolean startingTargetRockInitialized;
     private int initializedSelectionBand = -1;
@@ -144,20 +147,34 @@ public class MiningScript extends KspManagedScript
     {
         shutdown();
 
-        this.selectedTinCopperArea = Areas.randomTinCopperArea();
-        this.selectedIronArea = Areas.randomIronArea();
-        this.selectedCoalArea = Areas.randomCoalArea();
-        this.selectedGoldArea = Areas.randomGoldArea();
-        this.selectedMithrilArea = Areas.randomMithrilArea();
-        this.selectedAdamantArea = Areas.randomAdamantArea();
+        if (!miningAreasInitialized)
+        {
+            this.selectedTinCopperArea = Areas.randomTinCopperArea();
+            this.selectedIronArea = Areas.randomIronArea();
+            this.selectedCoalArea = Areas.randomCoalArea();
+            this.selectedGoldArea = Areas.randomGoldArea();
+            this.selectedMithrilArea = Areas.randomMithrilArea();
+            this.selectedAdamantArea = Areas.randomAdamantArea();
+            miningAreasInitialized = true;
+            debug("Selected initial mining areas | tinCopper={} iron={} coal={} gold={} mithril={} adamant={}",
+                    selectedTinCopperArea.getDisplayName(),
+                    selectedIronArea.getDisplayName(),
+                    selectedCoalArea.getDisplayName(),
+                    selectedGoldArea.getDisplayName(),
+                    selectedMithrilArea.getDisplayName(),
+                    selectedAdamantArea.getDisplayName());
+        }
+        else
+        {
+            debug("Reusing mining areas after script restart | tinCopper={} iron={} coal={} gold={} mithril={} adamant={}",
+                    selectedTinCopperArea.getDisplayName(),
+                    selectedIronArea.getDisplayName(),
+                    selectedCoalArea.getDisplayName(),
+                    selectedGoldArea.getDisplayName(),
+                    selectedMithrilArea.getDisplayName(),
+                    selectedAdamantArea.getDisplayName());
+        }
         this.targetArea = progressiveMining ? selectedTinCopperArea : area;
-        debug("Selected mining areas | tinCopper={} iron={} coal={} gold={} mithril={} adamant={}",
-                selectedTinCopperArea.getDisplayName(),
-                selectedIronArea.getDisplayName(),
-                selectedCoalArea.getDisplayName(),
-                selectedGoldArea.getDisplayName(),
-                selectedMithrilArea.getDisplayName(),
-                selectedAdamantArea.getDisplayName());
         this.startingTargetRockInitialized = false;
         this.randomMidTierRock = null;
 
