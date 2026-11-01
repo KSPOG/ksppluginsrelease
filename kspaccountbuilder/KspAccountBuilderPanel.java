@@ -7,6 +7,8 @@ import java.awt.Dimension;
 import java.awt.Font;
 import java.awt.GridLayout;
 import java.awt.Rectangle;
+import java.awt.Toolkit;
+import java.awt.datatransfer.StringSelection;
 import javax.swing.BorderFactory;
 import javax.swing.Box;
 import javax.swing.BoxLayout;
@@ -53,6 +55,8 @@ final class KspAccountBuilderPanel extends PluginPanel
     private String lastQueueConfiguration = null;
     private final JLabel status = label();
     private final JLabel task = label();
+    private final JLabel diagnosticCode = label();
+    private final JButton copyDiagnostic = new JButton("Copy code");
     private final JLabel runtime = label();
     private final JLabel accountPlayTime = label();
     private final JLabel antibanActivity = label();
@@ -113,6 +117,27 @@ final class KspAccountBuilderPanel extends PluginPanel
         controls.add(startStop);
         controls.add(pair("State", status));
         controls.add(pair("Task", task));
+        controls.add(pair("Bug report code", diagnosticCode));
+        copyDiagnostic.setToolTipText("Copy the current task and diagnostic phase code for a bug report.");
+        copyDiagnostic.setFocusable(false);
+        copyDiagnostic.setAlignmentX(Component.LEFT_ALIGNMENT);
+        copyDiagnostic.addActionListener(e -> {
+            String code = script.getDiagnosticCode();
+            String report = "KSP Account Builder v" + KspAccountBuilderPlugin.VERSION
+                    + "\nCode: " + code
+                    + "\nTask: " + script.getCurrentTaskName()
+                    + "\nPhase: " + script.getDiagnosticPhase()
+                    + "\nStatus: " + (net.runelite.client.plugins.microbot.Microbot.status == null
+                            ? "-" : net.runelite.client.plugins.microbot.Microbot.status);
+            try {
+                Toolkit.getDefaultToolkit().getSystemClipboard().setContents(
+                        new StringSelection(report), null);
+                copyDiagnostic.setText("Copied!");
+            } catch (IllegalStateException | java.awt.HeadlessException ex) {
+                copyDiagnostic.setText("Copy failed");
+            }
+        });
+        controls.add(copyDiagnostic);
         controls.add(pair("Runtime", runtime));
         controls.add(pair("Account play time", accountPlayTime));
         controls.add(pair("Anti-ban activity", antibanActivity));
@@ -405,6 +430,13 @@ final class KspAccountBuilderPanel extends PluginPanel
         startStop.setBackground(running ? new Color(145, 62, 62) : new Color(54, 117, 80));
         status.setText(running ? (script.isBreakActive() ? "On break" : "Running") : "Stopped");
         task.setText(running ? script.getCurrentTaskName() : "-");
+        String code = running ? script.getDiagnosticCode() : "KSP-AB-IDL-000";
+        diagnosticCode.setText(code);
+        diagnosticCode.setToolTipText("Diagnostic phase: " + script.getDiagnosticPhase()
+                + ". Include this code when reporting a bug. This is not necessarily an error.");
+        copyDiagnostic.setEnabled(running);
+        if (!"Copied!".equals(copyDiagnostic.getText()) && !"Copy failed".equals(copyDiagnostic.getText()))
+            copyDiagnostic.setText("Copy code");
         runtime.setText(running ? duration(script.getRuntimeSeconds()) : "-");
         // Do not display a locally counted timer as real account age while
         // the OSRS Account Summary varc is still uninitialized.
