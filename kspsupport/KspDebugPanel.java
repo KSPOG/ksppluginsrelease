@@ -30,6 +30,13 @@ final class KspDebugPanel extends PluginPanel
     private final JLabel active = value("0"), events = value("0"), issues = value("0");
     private final JLabel currentPlugin = value("-"), currentState = value("-");
     private final JTextArea recent = textArea();
+    private final JPanel stallPanel = card();
+    private final JLabel stallCodeLabel = value("-");
+    private final JLabel stallPluginLabel = value("-");
+    private final JButton copyStallReport = new JButton("Copy stall report + log");
+    private volatile String activeStallCode;
+    private volatile String activeStallPlugin;
+    private volatile String activeStallReason;
     private final Timer uiTimer;
 
     private JFrame frame;
@@ -75,6 +82,14 @@ final class KspDebugPanel extends PluginPanel
         now.add(row("State", currentState));
         body.add(now);
         body.add(Box.createVerticalStrut(8));
+        stallPanel.add(row("Detected stall", stallCodeLabel));
+        stallPanel.add(row("Plugin", stallPluginLabel));
+        copyStallReport.setAlignmentX(LEFT_ALIGNMENT);
+        copyStallReport.setToolTipText("Copy anonymized stall details and recent client log.");
+        copyStallReport.addActionListener(e -> copyStall());
+        stallPanel.add(copyStallReport);
+        stallPanel.setVisible(false);
+        body.add(stallPanel);
 
         JButton open = new JButton("Open Debug Console");
         open.setAlignmentX(LEFT_ALIGNMENT);
@@ -132,6 +147,61 @@ final class KspDebugPanel extends PluginPanel
             }
             else updateAutoScrollLabel();
         }
+    }
+
+    void showStall(String plugin, String code, String reason)
+    {
+        SwingUtilities.invokeLater(() ->
+        {
+            activeStallCode = code;
+            activeStallPlugin = plugin;
+            activeStallReason = reason;
+            boolean present = code != null && !code.isEmpty();
+            stallPanel.setVisible(present);
+            stallCodeLabel.setText(present ? code : "-");
+            stallPluginLabel.setText(present ? plugin : "-");
+            copyStallReport.setText("Copy stall report + log");
+            revalidate();
+            repaint();
+        });
+    }
+
+    private void copyStall()
+    {
+        final String code = activeStallCode;
+        final String plugin = activeStallPlugin;
+        final String reason = activeStallReason;
+        if (code == null || !copyStallReport.isEnabled()) return;
+        copyStallReport.setEnabled(false);
+        copyStallReport.setText("Collecting log...");
+        new SwingWorker<String, Void>()
+        {
+            @Override protected String doInBackground()
+            {
+                String report = "KSP plugin stall report"
+                        + "\nCode: " + code
+                        + "\nPlugin: " + plugin
+                        + "\nReason: " + reason
+                        + "\n\nRecent client.log entries:\n"
+                        + KspSupportReportLog.capture(plugin);
+                return KspReportPrivacy.redact(report);
+            }
+
+            @Override protected void done()
+            {
+                try
+                {
+                    Toolkit.getDefaultToolkit().getSystemClipboard().setContents(
+                            new StringSelection(get()), null);
+                    copyStallReport.setText("Copied with log!");
+                }
+                catch (Exception ex)
+                {
+                    copyStallReport.setText("Copy unavailable");
+                }
+                copyStallReport.setEnabled(true);
+            }
+        }.execute();
     }
 
     void setActiveCount(int count)
@@ -343,8 +413,19 @@ final class KspDebugPanel extends PluginPanel
         for (Entry entry : filtered())
             out.append('[').append(entry.time).append("] [").append(entry.level).append("] [")
                     .append(entry.plugin).append("] ").append(summary(entry)).append(System.lineSeparator());
-        if (out.length() > 0)
-            Toolkit.getDefaultToolkit().getSystemClipboard().setContents(new StringSelection(out.toString()), null);
+        if (out.length() == 0) return;
+        // The existing debug-console Copy command must obey the same
+        // privacy policy as the new stall-report command.
+        try
+        {
+            String safe = KspReportPrivacy.redact(out.toString());
+            Toolkit.getDefaultToolkit().getSystemClipboard().setContents(
+                    new StringSelection(safe), null);
+        }
+        catch (RuntimeException ignored)
+        {
+            // Fail closed: leave the clipboard unchanged.
+        }
     }
 
     private static String render(Entry entry)
