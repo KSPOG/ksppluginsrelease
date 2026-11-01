@@ -2376,8 +2376,7 @@ public class TutorialIslandScript extends KspManagedScript
             }
             else
             {
-                KspTaskDebug.throttled(log, true, "TutIsland", "npc-obstructed-" + npc.getIndex(), 5_000L,
-                        "Live NPC nearby but obstructed | npc={} npcTile={} player={} action={}",
+                debug("Live NPC nearby but obstructed | npc={} npcTile={} player={} action={}",
                         npc.getName(), npcLocation, playerLocation, action);
             }
             return false;
