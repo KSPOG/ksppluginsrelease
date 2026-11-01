@@ -2652,6 +2652,67 @@ public class KspAccountBuilderScript extends KspManagedScript
         return current == null ? "IDLE" : current.name();
     }
 
+    /**
+     * Stable, user-facing support identifier. The first segment identifies
+     * the task; the final segment identifies a parent scheduler phase.
+     * These are diagnostic locations, not claims that an error occurred.
+     */
+    public String getDiagnosticCode()
+    {
+        BuilderTask active = currentTask;
+        if (active == null) return "KSP-AB-IDL-000";
+        String taskCode;
+        switch (active)
+        {
+            case TUTORIAL_ISLAND: taskCode = "TUT"; break;
+            case COOKS_ASSISTANT: taskCode = "CKA"; break;
+            case GOBLIN_DIPLOMACY: taskCode = "GOB"; break;
+            case ROMEO_AND_JULIET: taskCode = "RAJ"; break;
+            case RUNE_MYSTERIES: taskCode = "RMY"; break;
+            case SHEEP_SHEARER: taskCode = "SHE"; break;
+            case X_MARKS_THE_SPOT: taskCode = "XMS"; break;
+            case THE_RESTLESS_GHOST: taskCode = "RHG"; break;
+            case IMP_CATCHER: taskCode = "IMP"; break;
+            case STRONGHOLD_OF_SECURITY: taskCode = "SOS"; break;
+            case RUNE_ESSENCE: taskCode = "RUN"; break;
+            case MINING: taskCode = "MIN"; break;
+            case WOODCUTTING: taskCode = "WCT"; break;
+            case FIREMAKING: taskCode = "FIR"; break;
+            case FISHING: taskCode = "FIS"; break;
+            case COOKING: taskCode = "COO"; break;
+            case CRAFTING: taskCode = "CRA"; break;
+            case MELEE: taskCode = "MEL"; break;
+            case GE_SELL: taskCode = "GES"; break;
+            case GE_BUY: taskCode = "GEB"; break;
+            case SMITHING: taskCode = "SMI"; break;
+            case SMELTING: taskCode = "SML"; break;
+            default: taskCode = "UNK";
+        }
+        String phase = "001"; // Normal task execution
+        if (breakActive || sharedBreakActive) phase = "002";
+        else if (blockedForcedQuestTask == active || failedRecoveryTask == active) phase = "005";
+        else if (pendingTask != null || preselectedHandoffTask != null || pendingRandomTaskSelection) phase = "006";
+        else if (singleSkillRecoveryTask != null || pendingResupplyReturnTask != null) phase = "004";
+        else if (taskSwitchBankLocation != null || taskSwitchBankResetPending) phase = "003";
+        return "KSP-AB-" + taskCode + "-" + phase;
+    }
+
+    /** Human-readable meaning of the current stable support code. */
+    public String getDiagnosticPhase()
+    {
+        if (currentTask == null) return "Idle";
+        if (breakActive || sharedBreakActive) return "Break";
+        if (blockedForcedQuestTask == currentTask || failedRecoveryTask == currentTask)
+            return "Blocked requirements";
+        if (pendingTask != null || preselectedHandoffTask != null || pendingRandomTaskSelection)
+            return "Task switching";
+        if (singleSkillRecoveryTask != null || pendingResupplyReturnTask != null)
+            return "Resource recovery";
+        if (taskSwitchBankLocation != null || taskSwitchBankResetPending)
+            return "Bank handoff";
+        return "Task running";
+    }
+
     public synchronized long getRuntimeSeconds()
     {
         if (startedAtMillis <= 0L) return 0L;
