@@ -9,6 +9,14 @@ import java.awt.GridLayout;
 import java.awt.Rectangle;
 import java.awt.Toolkit;
 import java.awt.datatransfer.StringSelection;
+import java.io.File;
+import java.io.IOException;
+import java.io.RandomAccessFile;
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.regex.Pattern;
+import javax.swing.SwingWorker;
 import javax.swing.BorderFactory;
 import javax.swing.Box;
 import javax.swing.BoxLayout;
@@ -36,6 +44,15 @@ final class KspAccountBuilderPanel extends PluginPanel
     private static final Color ACCENT = new Color(255, 226, 138);
     private static final Color PANEL_DARK = new Color(16, 24, 25);
     private static final Color GOLD_BORDER = new Color(201, 155, 43);
+    private static final int MAX_LOG_READ_BYTES = 128 * 1024;
+    private static final int MAX_REPORT_LOG_LINES = 100;
+    // Avoid including account names and machine-specific paths in copied logs.
+    private static final Pattern ACCOUNT_ID_FIELD = Pattern.compile(
+            "(?i)\\b(accountHash|accountId|username|userName|displayName|rsn|playerName)\\s*[=:]\\s*[^\\s,|]+");
+    private static final Pattern WINDOWS_USER_PATH = Pattern.compile(
+            "(?i)[A-Z]:\\\\Users\\\\[^\\\\\\s]+");
+    private static final Pattern HOME_USER_PATH = Pattern.compile(
+            "/(?:home|Users)/[^/\\s]+");
     private final KspAccountBuilderPlugin plugin;
     private final KspAccountBuilderConfig config;
     private final KspAccountBuilderScript script;
@@ -122,26 +139,47 @@ final class KspAccountBuilderPanel extends PluginPanel
         diagnosticRow.setVisible(false);
         controls.add(diagnosticRow);
         copyDiagnostic.setVisible(false);
-        copyDiagnostic.setToolTipText("Copy the current task and diagnostic phase code for a bug report.");
+        copyDiagnostic.setToolTipText("Copy the stall code, task context and recent Account Builder/WebWalker logs.");
         copyDiagnostic.setFocusable(false);
         copyDiagnostic.setAlignmentX(Component.LEFT_ALIGNMENT);
         copyDiagnostic.addActionListener(e -> {
             String code = script.getActiveStallCode();
-            if (code == null) return;
-            String report = "KSP Account Builder v" + KspAccountBuilderPlugin.VERSION
+            if (code == null || !copyDiagnostic.isEnabled()) return;
+            String reportHeader = "KSP Account Builder v" + KspAccountBuilderPlugin.VERSION
                     + "\nCode: " + code
                     + "\nTask: " + script.getCurrentTaskName()
                     + "\nPhase: " + script.getDiagnosticPhase()
                     + "\nStall: " + script.getActiveStallReason()
                     + "\nStatus: " + (net.runelite.client.plugins.microbot.Microbot.status == null
                             ? "-" : net.runelite.client.plugins.microbot.Microbot.status);
-            try {
-                Toolkit.getDefaultToolkit().getSystemClipboard().setContents(
-                        new StringSelection(report), null);
-                copyDiagnostic.setText("Copied!");
-            } catch (IllegalStateException | java.awt.HeadlessException ex) {
-                copyDiagnostic.setText("Copy failed");
-            }
+            copyDiagnostic.setText("Collecting log...");
+            copyDiagnostic.setEnabled(false);
+            new SwingWorker<String, Void>()
+            {
+                @Override
+                protected String doInBackground()
+                {
+                    return reportHeader + "\n\nRecent Account Builder / WebWalker log:\n"
+                            + readRecentDiagnosticLog();
+                }
+
+                @Override
+                protected void done()
+                {
+                    try
+                    {
+                        Toolkit.getDefaultToolkit().getSystemClipboard().setContents(
+                                new StringSelection(get()), null);
+                        copyDiagnostic.setText("Copied with log!");
+                    }
+                    catch (Exception ex)
+                    {
+                        copyDiagnostic.setText("Copy failed");
+                    }
+                    copyDiagnostic.setEnabled(plugin.isRuntimeActive()
+                            && script.getActiveStallCode() != null);
+                }
+            }.execute();
         });
         controls.add(copyDiagnostic);
         controls.add(pair("Runtime", runtime));
@@ -524,6 +562,64 @@ final class KspAccountBuilderPanel extends PluginPanel
     {
         if (seconds < 0) return "-";
         return String.format("%02d:%02d:%02d", seconds / 3600, (seconds / 60) % 60, seconds % 60);
+    }
+
+    /**
+     * Read a bounded tail only when the user requests a bug report. Never
+     * scan the entire client log or perform disk I/O on Swing's EDT.
+     */
+    private static String readRecentDiagnosticLog()
+    {
+        File file = new File(new File(new File(System.getProperty("user.home"), ".runelite"), "logs"),
+                "client.log");
+        if (!file.isFile()) return "(client.log not found)";
+        try (RandomAccessFile logFile = new RandomAccessFile(file, "r"))
+        {
+            long size = logFile.length();
+            int bytes = (int) Math.min(size, MAX_LOG_READ_BYTES);
+            logFile.seek(size - bytes);
+            byte[] tail = new byte[bytes];
+            logFile.readFully(tail);
+            String raw = new String(tail, StandardCharsets.UTF_8);
+            String[] lines = raw.split("\\R");
+            List<String> selected = new ArrayList<>();
+            boolean includeTrace = false;
+            // Skip a potentially truncated first line if the tail starts
+            // in the middle of an existing log entry.
+            for (int i = size > bytes ? 1 : 0; i < lines.length; i++)
+            {
+                String line = lines[i];
+                boolean relevant = line.contains("[KSP")
+                        || line.contains("kspaccountbuilder")
+                        || line.contains("[WebWalk]")
+                        || line.contains("[Walker]");
+                boolean trace = includeTrace && (line.startsWith("\t")
+                        || line.startsWith("    at ") || line.startsWith("Caused by:"));
+                if (relevant || trace)
+                {
+                    selected.add(redactDiagnosticLogLine(line));
+                    includeTrace = relevant;
+                }
+                else if (!line.trim().isEmpty())
+                {
+                    includeTrace = false;
+                }
+            }
+            if (selected.isEmpty()) return "(no matching Account Builder or WebWalker entries in recent log)";
+            int begin = Math.max(0, selected.size() - MAX_REPORT_LOG_LINES);
+            return String.join("\n", selected.subList(begin, selected.size()));
+        }
+        catch (IOException | SecurityException ex)
+        {
+            return "(unable to read client.log: " + ex.getClass().getSimpleName() + ")";
+        }
+    }
+
+    private static String redactDiagnosticLogLine(String text)
+    {
+        String redacted = ACCOUNT_ID_FIELD.matcher(text).replaceAll("$1=[redacted]");
+        redacted = WINDOWS_USER_PATH.matcher(redacted).replaceAll("[user-home]");
+        return HOME_USER_PATH.matcher(redacted).replaceAll("[user-home]");
     }
 
     private static JLabel label()
