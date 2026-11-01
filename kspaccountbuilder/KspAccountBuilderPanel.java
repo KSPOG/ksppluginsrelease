@@ -56,7 +56,9 @@ final class KspAccountBuilderPanel extends PluginPanel
     private final JLabel status = label();
     private final JLabel task = label();
     private final JLabel diagnosticCode = label();
+    private final JPanel diagnosticRow = pair("Bug report code", diagnosticCode);
     private final JButton copyDiagnostic = new JButton("Copy code");
+    private boolean lastStallVisible;
     private final JLabel runtime = label();
     private final JLabel accountPlayTime = label();
     private final JLabel antibanActivity = label();
@@ -117,16 +119,20 @@ final class KspAccountBuilderPanel extends PluginPanel
         controls.add(startStop);
         controls.add(pair("State", status));
         controls.add(pair("Task", task));
-        controls.add(pair("Bug report code", diagnosticCode));
+        diagnosticRow.setVisible(false);
+        controls.add(diagnosticRow);
+        copyDiagnostic.setVisible(false);
         copyDiagnostic.setToolTipText("Copy the current task and diagnostic phase code for a bug report.");
         copyDiagnostic.setFocusable(false);
         copyDiagnostic.setAlignmentX(Component.LEFT_ALIGNMENT);
         copyDiagnostic.addActionListener(e -> {
-            String code = script.getDiagnosticCode();
+            String code = script.getActiveStallCode();
+            if (code == null) return;
             String report = "KSP Account Builder v" + KspAccountBuilderPlugin.VERSION
                     + "\nCode: " + code
                     + "\nTask: " + script.getCurrentTaskName()
                     + "\nPhase: " + script.getDiagnosticPhase()
+                    + "\nStall: " + script.getActiveStallReason()
                     + "\nStatus: " + (net.runelite.client.plugins.microbot.Microbot.status == null
                             ? "-" : net.runelite.client.plugins.microbot.Microbot.status);
             try {
@@ -430,13 +436,22 @@ final class KspAccountBuilderPanel extends PluginPanel
         startStop.setBackground(running ? new Color(145, 62, 62) : new Color(54, 117, 80));
         status.setText(running ? (script.isBreakActive() ? "On break" : "Running") : "Stopped");
         task.setText(running ? script.getCurrentTaskName() : "-");
-        String code = running ? script.getDiagnosticCode() : "KSP-AB-IDL-000";
-        diagnosticCode.setText(code);
-        diagnosticCode.setToolTipText("Diagnostic phase: " + script.getDiagnosticPhase()
-                + ". Include this code when reporting a bug. This is not necessarily an error.");
-        copyDiagnostic.setEnabled(running);
-        if (!"Copied!".equals(copyDiagnostic.getText()) && !"Copy failed".equals(copyDiagnostic.getText()))
+        String code = running ? script.getActiveStallCode() : null;
+        boolean stallVisible = code != null;
+        diagnosticRow.setVisible(stallVisible);
+        copyDiagnostic.setVisible(stallVisible);
+        copyDiagnostic.setEnabled(stallVisible);
+        diagnosticCode.setText(stallVisible ? code : "-");
+        diagnosticCode.setToolTipText(stallVisible
+                ? script.getActiveStallReason() + " — include the code when reporting a stall."
+                : null);
+        if (stallVisible != lastStallVisible)
+        {
             copyDiagnostic.setText("Copy code");
+            lastStallVisible = stallVisible;
+            revalidate();
+            repaint();
+        }
         runtime.setText(running ? duration(script.getRuntimeSeconds()) : "-");
         // Do not display a locally counted timer as real account age while
         // the OSRS Account Summary varc is still uninitialized.
