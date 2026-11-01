@@ -1037,7 +1037,11 @@ public class TutorialIslandScript extends KspManagedScript
     {
         int progress = Microbot.getVarbitPlayerValue(281);
 
-        if (Rs2Inventory.contains("Bread"))
+        // Bread alone is not proof of finishing the range instruction.
+        // The game must first advance its authoritative tutorial varbit.
+        // This prevents skipping range cooking when inventory already has
+        // bread from a previous/manual action at progress 160.
+        if (progress >= 170 && Rs2Inventory.contains("Bread"))
         {
             doughMixDispatched = breadCookingDispatched = false;
             openTutorialPassageAndWalk(9710, QUEST_GUIDE_WALK_TILE, 3,
@@ -2844,15 +2848,23 @@ public class TutorialIslandScript extends KspManagedScript
             return;
         }
 
-        // Delegate navigation to Microbot WebWalker. Stage-specific
-        // interactions remain responsible for instructional doors and gates;
-        // the walker owns routing and obstacle traversal.
-        if (TutAreas.contains(playerLocation) && !TutAreas.contains(target))
+        // Local tutorial navigation must never enter the WebWalk bank
+        // comparison/bootstrap path, which can select Lumbridge bank even
+        // while the player is standing in the Tutorial Island kitchen.
+        // Keep navigation entirely within the island. Instructional doors
+        // and gates are handled by their stage-specific object interactions.
+        if (TutAreas.contains(playerLocation))
         {
+            if (TutAreas.contains(target))
+            {
+                Rs2Walker.walkStep(target, reach);
+                return;
+            }
             debug("Tutorial Island refused mainland destination | player={} target={}",
                     playerLocation, target);
             return;
         }
+        // For non-island transitions the standard walker remains available.
         Rs2Walker.walkTo(target, reach);
     }
 
