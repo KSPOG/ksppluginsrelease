@@ -231,7 +231,11 @@ final class KspRuntimeDebugMonitor
         }
         // An active animation or interaction is not an idle stall.
         // Avoid false reports during legitimately long actions.
-        if (gameProgress.busy) return;
+        if (gameProgress.busy)
+        {
+            old.lastProgressAt = now;
+            return;
+        }
         if (now - old.lastProgressAt < STALL_CONFIRM_MS) return;
         if (old.code == null)
         {
@@ -306,7 +310,7 @@ final class KspRuntimeDebugMonitor
     {
         final String plugin;
         final String signature;
-        final long lastProgressAt;
+        long lastProgressAt;
         String code, reason;
 
         StallObservation(String plugin, String signature, long lastProgressAt)
