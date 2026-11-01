@@ -77,16 +77,61 @@ public final class Buy
 
     private Buy() {}
 
+    /**
+     * Keep the highest usable tool that is already owned, rather than
+     * requiring the theoretical best tool for the skill level.
+     * If none is available, buy the basic bronze tool, not an upgrade.
+     */
     public static String resolveDesiredPickaxeNameForBuy()
     {
         int miningLevel = Microbot.getClient().getRealSkillLevel(Skill.MINING);
-        return PICKAXE_NAMES[MiningReq.bestForMiningLevel(miningLevel).ordinal()];
+        MiningReq[] tiers = MiningReq.values();
+        for (int i = tiers.length - 1; i >= 0; i--)
+        {
+            if (miningLevel >= tiers[i].getRequiredMiningLevel()
+                    && hasNamedItemAnywhere(tiers[i].getDisplayName()))
+            {
+                return tiers[i].getDisplayName();
+            }
+        }
+        return MiningReq.BRONZE.getDisplayName();
     }
 
     public static String resolveDesiredAxeNameForBuy()
     {
         int woodcuttingLevel = Microbot.getClient().getRealSkillLevel(Skill.WOODCUTTING);
-        return AXE_NAMES[WoodCuttingReq.bestForWoodcuttingLevel(woodcuttingLevel).ordinal()];
+        WoodCuttingReq[] tiers = WoodCuttingReq.values();
+        for (int i = tiers.length - 1; i >= 0; i--)
+        {
+            if (woodcuttingLevel >= tiers[i].getRequiredWoodcuttingLevel()
+                    && hasNamedItemAnywhere(tiers[i].getDisplayName()))
+            {
+                return tiers[i].getDisplayName();
+            }
+        }
+        return WoodCuttingReq.BRONZE.getDisplayName();
+    }
+
+    public static boolean hasUsablePickaxeAnywhere()
+    {
+        int miningLevel = Microbot.getClient().getRealSkillLevel(Skill.MINING);
+        for (MiningReq tier : MiningReq.values())
+        {
+            if (miningLevel >= tier.getRequiredMiningLevel()
+                    && hasNamedItemAnywhere(tier.getDisplayName())) return true;
+        }
+        return false;
+    }
+
+    public static boolean hasUsableAxeAnywhere()
+    {
+        int woodcuttingLevel = Microbot.getClient().getRealSkillLevel(Skill.WOODCUTTING);
+        for (WoodCuttingReq tier : WoodCuttingReq.values())
+        {
+            if (woodcuttingLevel >= tier.getRequiredWoodcuttingLevel()
+                    && hasNamedItemAnywhere(tier.getDisplayName())) return true;
+        }
+        return false;
     }
 
     public static String resolveDesiredPickaxeNameForGear()
@@ -104,8 +149,8 @@ public final class Buy
 
     public static boolean hasAnyGeBuyRequirementMissing()
     {
-        return !hasNamedItemAnywhere(resolveDesiredPickaxeNameForBuy())
-                || !hasNamedItemAnywhere(resolveDesiredAxeNameForBuy())
+        return !hasUsablePickaxeAnywhere()
+                || !hasUsableAxeAnywhere()
                 || !hasHammerAnywhere()
                 || !hasTinderboxAnywhere()
                 || hasFishingBuyRequirementMissingInBank()
@@ -261,27 +306,9 @@ public final class Buy
 
     public static boolean isOutdatedToolName(String itemName, String desiredPickaxe, String desiredAxe)
     {
-        if (itemName == null)
-        {
-            return false;
-        }
-
-        for (String pickaxeName : PICKAXE_NAMES)
-        {
-            if (pickaxeName.equalsIgnoreCase(itemName))
-            {
-                return !pickaxeName.equalsIgnoreCase(desiredPickaxe);
-            }
-        }
-
-        for (String axeName : AXE_NAMES)
-        {
-            if (axeName.equalsIgnoreCase(itemName))
-            {
-                return !axeName.equalsIgnoreCase(desiredAxe);
-            }
-        }
-
+        // Axes and pickaxes of different tiers remain useful as skill levels
+        // change. Never sell an owned tool solely because a higher tier is
+        // theoretically available or a different tier was selected.
         return false;
     }
 
