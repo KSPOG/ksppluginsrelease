@@ -414,18 +414,29 @@ final class KspDebugPanel extends PluginPanel
             out.append('[').append(entry.time).append("] [").append(entry.level).append("] [")
                     .append(entry.plugin).append("] ").append(summary(entry)).append(System.lineSeparator());
         if (out.length() == 0) return;
-        // The existing debug-console Copy command must obey the same
-        // privacy policy as the new stall-report command.
-        try
+        // Run client-identity lookup off the Swing thread. Never copy raw
+        // entries, including when identity detection is unavailable.
+        final String report = out.toString();
+        new SwingWorker<String, Void>()
         {
-            String safe = KspReportPrivacy.redact(out.toString());
-            Toolkit.getDefaultToolkit().getSystemClipboard().setContents(
-                    new StringSelection(safe), null);
-        }
-        catch (RuntimeException ignored)
-        {
-            // Fail closed: leave the clipboard unchanged.
-        }
+            @Override protected String doInBackground()
+            {
+                return KspReportPrivacy.redact(report);
+            }
+
+            @Override protected void done()
+            {
+                try
+                {
+                    Toolkit.getDefaultToolkit().getSystemClipboard().setContents(
+                            new StringSelection(get()), null);
+                }
+                catch (Exception ignored)
+                {
+                    // Fail closed: leave the clipboard unchanged.
+                }
+            }
+        }.execute();
     }
 
     private static String render(Entry entry)
