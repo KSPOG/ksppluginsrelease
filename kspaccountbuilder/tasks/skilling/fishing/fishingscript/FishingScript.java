@@ -12,6 +12,7 @@ import javax.inject.Singleton;
 import net.runelite.api.ItemID;
 import net.runelite.api.NPCComposition;
 import net.runelite.api.Skill;
+import net.runelite.api.widgets.WidgetID;
 import net.runelite.api.coords.WorldArea;
 import net.runelite.api.coords.WorldPoint;
 import net.runelite.client.plugins.microbot.Microbot;
@@ -59,6 +60,7 @@ public class FishingScript extends KspManagedScript
     private static final String WALK_KEY_TO_FISHING_AREA = "Fishing:target-area";
     private static final String WALK_KEY_TO_TROUT_SALMON_FIRE = "Fishing:trout-salmon-fire";
     private static final long COOKING_WIDGET_ACTION_TIMEOUT_MS = 1_500L;
+    private static final long LEVEL_UP_CONTINUE_COOLDOWN_MS = 1_200L;
     private static final long ACTION_DISPATCH_TIMEOUT_MS = 1_500L;
     private static final long COOKING_RECOVERY_TIMEOUT_MS = 25_000L;
     private static final WorldPoint TROUT_SALMON_WALK_POSITION = new WorldPoint(3104, 3431, 0);
@@ -76,6 +78,7 @@ public class FishingScript extends KspManagedScript
     private int cookingBatchItemId = NO_COOKING_BATCH;
     private boolean expectingCookingXpDrop;
     private long lastNpcInteractionAtMs;
+    private long lastLevelUpContinueAtMs;
     private long pendingNpcInteractionAtMs;
     private long lastWebWalkAtMs;
     private long pendingCookingWidgetActionAtMs;
@@ -102,6 +105,7 @@ public class FishingScript extends KspManagedScript
         cookingBatchItemId = NO_COOKING_BATCH;
         expectingCookingXpDrop = false;
         pendingCookingWidgetActionAtMs = 0L;
+        lastLevelUpContinueAtMs = 0L;
         pendingCookingFireActionAtMs = 0L;
         cookingStartedAtMs = 0L;
         skipCookingUntilBanked = false;
@@ -112,6 +116,11 @@ public class FishingScript extends KspManagedScript
             {
                 return;
             }
+
+            // A fishing/cooking level-up interface blocks NPC and widget
+            // interactions. Dismiss only the actual level-up widget, once
+            // per cooldown, before routing or attempting another action.
+            if (dismissLevelUpInterfaceIfPresent()) return;
 
             int fishingLevel = Microbot.getClient().getRealSkillLevel(Skill.FISHING);
             LevelReqs desiredFish = progressiveFishing ? resolveFishForLevel(fishingLevel) : targetFish;
@@ -191,6 +200,25 @@ public class FishingScript extends KspManagedScript
             fishCurrentTarget();
         }, 0L, LOOP_DELAY_MS, TimeUnit.MILLISECONDS);
 
+        return true;
+    }
+
+    private boolean dismissLevelUpInterfaceIfPresent()
+    {
+        if (!Rs2Widget.isWidgetVisible(WidgetID.LEVEL_UP_GROUP_ID, 0))
+            return false;
+
+        state = FishingState.WAITING;
+        long now = System.currentTimeMillis();
+        if (now - lastLevelUpContinueAtMs >= LEVEL_UP_CONTINUE_COOLDOWN_MS)
+        {
+            lastLevelUpContinueAtMs = now;
+            Rs2Keyboard.keyPress(KeyEvent.VK_SPACE);
+            debug("Level-up interface visible; pressing Space to continue | area={} fish={}",
+                    targetArea.getDisplayName(), targetFish.getDisplayName());
+        }
+        // Let the client close the interface before issuing any fishing,
+        // banking, or walking actions.
         return true;
     }
 
