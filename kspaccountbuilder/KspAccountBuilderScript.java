@@ -313,6 +313,11 @@ public class KspAccountBuilderScript extends KspManagedScript
     private BuilderTask singleSkillRecoveryTask;
     // Suppress a failed GE recovery until resources or skills actually change.
     private BuilderTask failedRecoveryTask;
+    // A forced quest with unmet requirements is blocked, not selectable.
+    // Check again periodically or after a task-selection change, without
+    // repeating GE recovery or producing task-selection churn.
+    private BuilderTask blockedForcedQuestTask;
+    private long nextForcedQuestCheckAtMs;
     private long failedRecoveryCoins;
     private int failedRecoveryInventoryFingerprint;
     private int failedRecoverySkillFingerprint;
@@ -531,6 +536,8 @@ public class KspAccountBuilderScript extends KspManagedScript
         preselectedHandoffTask = null;
         singleSkillRecoveryTask = null;
         failedRecoveryTask = null;
+        blockedForcedQuestTask = null;
+        nextForcedQuestCheckAtMs = 0L;
         // A new plugin session must never inherit an interrupted Crafting
         // resupply from the previous session or account.
         pendingResupplyReturnTask = null;
@@ -873,6 +880,41 @@ public class KspAccountBuilderScript extends KspManagedScript
         maybeStartActivitySwitchTimer();
     }
 
+    private boolean isForcedQuestBlocked(BuilderTask forcedTask, SimpleQuestScript questScript)
+    {
+        boolean quest = forcedTask == BuilderTask.COOKS_ASSISTANT
+                || forcedTask == BuilderTask.GOBLIN_DIPLOMACY || questScript != null;
+        if (!quest)
+        {
+            blockedForcedQuestTask = null;
+            nextForcedQuestCheckAtMs = 0L;
+            return false;
+        }
+        long now = System.currentTimeMillis();
+        if (blockedForcedQuestTask == forcedTask && now < nextForcedQuestCheckAtMs)
+            return true;
+
+        boolean ready = forcedTask == BuilderTask.COOKS_ASSISTANT
+                ? hasEnoughCoinsForCooksAssistant()
+                : forcedTask == BuilderTask.GOBLIN_DIPLOMACY
+                    ? hasEnoughCoinsForGoblinDiplomacy()
+                    : hasResourcesForTask(forcedTask);
+        if (ready)
+        {
+            if (blockedForcedQuestTask == forcedTask)
+                debug("Forced quest requirements available again | quest={}", forcedTask);
+            blockedForcedQuestTask = null;
+            nextForcedQuestCheckAtMs = 0L;
+            return false;
+        }
+        if (blockedForcedQuestTask != forcedTask)
+            debug("Forced quest blocked: insufficient resources | quest={} coins={}",
+                    forcedTask, getAvailableCoins());
+        blockedForcedQuestTask = forcedTask;
+        nextForcedQuestCheckAtMs = now + TimeUnit.SECONDS.toMillis(5);
+        return true;
+    }
+
     private boolean handleForcedTaskBlockers(BuilderTask forcedTask)
     {
         SimpleQuestScript questScript = newQuestScript(forcedTask);
@@ -891,17 +933,15 @@ public class KspAccountBuilderScript extends KspManagedScript
             if (isTaskScriptRunning(currentTask)) stopCurrentTaskScript();
             currentTask = forcedTask; taskStarted = false; Microbot.status = "Rune Essence requires Rune Mysteries"; return true;
         }
-        // Forced quests cannot be replaced by unrelated activities. When
-        // required items are unaffordable, wait for changed resources instead
-        // of starting GE_BUY, which has its own unrelated supply budget.
-        if (forcedTask == BuilderTask.COOKS_ASSISTANT && !hasEnoughCoinsForCooksAssistant()
-                || forcedTask == BuilderTask.GOBLIN_DIPLOMACY && !hasEnoughCoinsForGoblinDiplomacy()
-                || questScript != null && !hasResourcesForTask(forcedTask))
+        // A forced quest must not be replaced by an unrelated GE buying task.
+        // Keep a single blocked state and revalidate its requirements at a
+        // bounded interval; do not invoke the selector on every 100ms tick.
+        if (isForcedQuestBlocked(forcedTask, questScript))
         {
             if (isTaskScriptRunning(currentTask)) stopCurrentTaskScript();
             currentTask = forcedTask;
             taskStarted = false;
-            Microbot.status = "Waiting for quest requirements: " + forcedTask;
+            Microbot.status = "Blocked (missing quest requirements): " + forcedTask;
             return true;
         }
         if (forcedTask != null && isFailedRecoveryUnchanged(forcedTask)
@@ -1348,6 +1388,8 @@ public class KspAccountBuilderScript extends KspManagedScript
         stopCurrentTaskScript(); buyScript.shutdown(); taskStarted = false; singleSkillRecoveryTask = null;
         clearSingleSkillResourceAudit(); activeSingleSkillSelection = selection;
         failedRecoveryTask = null;
+        blockedForcedQuestTask = null;
+        nextForcedQuestCheckAtMs = 0L;
         invalidateTaskSelectionResourceCache();
     }
 
@@ -2697,6 +2739,8 @@ public class KspAccountBuilderScript extends KspManagedScript
         pendingTask = null;
         singleSkillRecoveryTask = null;
         failedRecoveryTask = null;
+        blockedForcedQuestTask = null;
+        nextForcedQuestCheckAtMs = 0L;
         clearSingleSkillResourceAudit();
         pendingRandomTaskSelection = false;
         awaitingNextActivityStart = false;
