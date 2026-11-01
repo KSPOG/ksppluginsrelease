@@ -16,6 +16,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.regex.Pattern;
+import java.util.regex.Matcher;
 import javax.swing.SwingWorker;
 import javax.swing.BorderFactory;
 import javax.swing.Box;
@@ -163,8 +164,25 @@ final class KspAccountBuilderPanel extends PluginPanel
                 @Override
                 protected String doInBackground()
                 {
-                    return reportHeader + "\n\nRecent Account Builder / WebWalker log:\n"
+                    // Resolve identity from the active client at copy time.
+                    // Fail closed if unavailable: copying an unsanitized log
+                    // would violate the user's expectation of anonymity.
+                    String accountName = net.runelite.client.plugins.microbot.Microbot.getClientThread()
+                            .runOnClientThreadOptional(() -> {
+                                net.runelite.api.Client client =
+                                        net.runelite.client.plugins.microbot.Microbot.getClient();
+                                return client == null || client.getLocalPlayer() == null
+                                        ? null : client.getLocalPlayer().getName();
+                            }).orElse(null);
+                    if (accountName == null || accountName.trim().isEmpty())
+                        throw new IllegalStateException("Cannot verify the active account name");
+                    long accountHash = net.runelite.client.plugins.microbot.Microbot.getClientThread()
+                            .runOnClientThreadOptional(() ->
+                                    net.runelite.client.plugins.microbot.Microbot.getClient().getAccountHash())
+                            .orElse(0L);
+                    String report = reportHeader + "\n\nRecent Account Builder / WebWalker log:\n"
                             + readRecentDiagnosticLog();
+                    return redactActiveAccount(report, accountName, accountHash);
                 }
 
                 @Override
@@ -626,6 +644,31 @@ final class KspAccountBuilderPanel extends PluginPanel
         redacted = HOME_USER_PATH.matcher(redacted).replaceAll("[user-home]");
         redacted = ACCOUNT_NUMBER.matcher(redacted).replaceAll("$1=[redacted]");
         return IP_ADDRESS.matcher(redacted).replaceAll("[ip-redacted]");
+    }
+
+    /**
+     * Mask the current account's literal display name everywhere (including
+     * ordinary message text, not just key/value fields). Also remove its
+     * account hash in both signed and unsigned representations.
+     *
+     * Applied to the entire report immediately before clipboard copying.
+     */
+    private static String redactActiveAccount(String report, String accountName, long accountHash)
+    {
+        String safe = redactDiagnosticLogLine(report);
+        safe = Pattern.compile(Pattern.quote(accountName.trim()), Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE)
+                .matcher(safe).replaceAll(Matcher.quoteReplacement("[REDACTED]"));
+        if (accountHash != 0L)
+        {
+            String unsigned = Long.toUnsignedString(accountHash);
+            safe = Pattern.compile("(?<![0-9])" + Pattern.quote(unsigned) + "(?![0-9])")
+                    .matcher(safe).replaceAll("[REDACTED]");
+            String signed = Long.toString(accountHash);
+            if (!signed.equals(unsigned))
+                safe = Pattern.compile("(?<![0-9])" + Pattern.quote(signed) + "(?![0-9])")
+                        .matcher(safe).replaceAll("[REDACTED]");
+        }
+        return safe;
     }
 
     private static JLabel label()
