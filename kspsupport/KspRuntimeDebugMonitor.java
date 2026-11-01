@@ -128,7 +128,7 @@ final class KspRuntimeDebugMonitor
         List<Heartbeat> heartbeats = new ArrayList<>();
         int activeCount = 0;
         // Take one small shared client snapshot, never one per plugin.
-        String gameProgress = clientProgressSnapshot();
+        GameProgress gameProgress = clientProgressSnapshot();
 
         for (Plugin plugin : loaded)
         {
@@ -213,13 +213,16 @@ final class KspRuntimeDebugMonitor
             stallObservations.remove(key);
             return;
         }
-        String signature = gameProgress + "|" + compactState(current.values);
+        String signature = gameProgress.signature + "|" + compactState(current.values);
         StallObservation old = stallObservations.get(key);
         if (old == null || !old.signature.equals(signature))
         {
             stallObservations.put(key, new StallObservation(current.pluginName, signature, now));
             return;
         }
+        // An active animation or interaction is not an idle stall.
+        // Avoid false reports during legitimately long actions.
+        if (gameProgress.busy) return;
         if (now - old.lastProgressAt < STALL_CONFIRM_MS) return;
         if (old.code == null)
         {
@@ -252,7 +255,7 @@ final class KspRuntimeDebugMonitor
                     visible == null ? null : visible.reason);
     }
 
-    private static String clientProgressSnapshot()
+    private static GameProgress clientProgressSnapshot()
     {
         try
         {
@@ -266,12 +269,26 @@ final class KspRuntimeDebugMonitor
                     totalXp += Math.max(0, Microbot.getClient().getSkillExperience(skill));
                 // Do not use global status or system time: neither indicates
                 // actual in-game progress and would mask a genuine stall.
-                return player.getWorldLocation() + "|" + player.getAnimation() + "|" + totalXp;
+                boolean busy = player.getAnimation() != -1 || player.getInteracting() != null
+                        || player.getPoseAnimation() != player.getIdlePoseAnimation();
+                return new GameProgress(player.getWorldLocation() + "|" + totalXp, busy);
             }).orElse(null);
         }
         catch (Throwable ignored)
         {
             return null;
+        }
+    }
+
+    private static final class GameProgress
+    {
+        final String signature;
+        final boolean busy;
+
+        GameProgress(String signature, boolean busy)
+        {
+            this.signature = signature;
+            this.busy = busy;
         }
     }
 
