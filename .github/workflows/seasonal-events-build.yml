@@ -45,18 +45,20 @@ jobs:
           cache: gradle
           cache-dependency-path: hub/**/*.gradle*
 
-      - name: Validate full wiki event stages and persistence
+      - name: Validate wiki event stages, identity and game-state progress
         shell: python
         run: |
           from pathlib import Path
           root=Path('release/kspseasonalevents')
           plugin=(root/'KspSeasonalEventsPlugin.java').read_text()
           script=(root/'KspHalloween2026Script.java').read_text()
+          progress=(root/'KspHalloweenProgress.java').read_text()
           panel=(root/'KspSeasonalEventsPanel.java').read_text()
           overlay=(root/'KspSeasonalEventsOverlay.java').read_text()
           event=(root/'KspSeasonalEvent.java').read_text()
-          assert 'VERSION = "0.2.17"' in plugin
+          assert 'VERSION = "0.2.18"' in plugin
           assert 'KSP + "Seasonal Events"' in plugin
+          assert 'authors = {"KSP"}' in plugin
           assert 'kspwillowchopper' not in plugin and 'kspwillowchopper' not in script
           assert 'HALLOWEEN("Halloween")' in event
           assert 'HALLOWEEN_2026(' not in event
@@ -69,222 +71,58 @@ jobs:
                     'COMPLETED','NEEDS_REVIEW')
           for stage in stages:
               assert stage in script, 'Missing Halloween wiki stage: ' + stage
-          assert 'getLanternCount()' in script
-          assert 'smashedLanternTiles.size() >= 8' in script
-          assert 'o.hasActionContaining("Smash")' in script
-          assert 'pendingLanternConfirmed' in script
-          assert 'spookedChildren' in script and 'npcHasAction(n, "Spook")' in script
-          assert 'costumeCount() < 4' in script
-          assert 'Rs2Npc.getNpc("Diango")' in script
-          assert 'KspHalloweenChemistDialogue.findOptionIndex(options)' in script
-          assert 'Rs2Widget.clickWidget(liveOptions.get(optionIndex))' in script
-          assert 'Rs2Inventory.useItemOnObject' in script
-          assert 'OLD_ONION_CRATE_NAME = "Crate of onions"' in script
-          assert '"Old inion", "Old onion"' in script
-          assert 'int old = oldInionCount();' in script
-          assert 'Rs2Inventory.combine("Molten sugar", oldItemName)' in script
-          assert 'Rs2Inventory.useItemOnNpc' in script
-          assert 'adultsGiven >= 5' in script
+          # The event's own varbits are read every loop and decide what is done.
+          assert 'static final int MAIN = 16579;' in progress
+          assert 'LANTERN_BITS = {16583, 16584, 16585, 16610, 16611, 16612, 16613, 16614}' in progress
+          assert 'CHILD_BITS = {16615, 16618, 16625, 16626, 16627}' in progress
+          assert 'ADULT_BITS = {16628, 16636, 16637, 16638, 16645}' in progress
+          tick=script.split('private void tick()',1)[1].split('private static boolean isCandyStage(',1)[0]
+          assert 'progress = KspHalloweenProgress.read(Microbot::getVarbitValue);' in tick
+          assert 'progress.advance(stage)' in tick
+          # Local stand-ins for game state are deleted on start, never written.
+          for key in ('halloweenSmashTiles','halloweenAdultsGiven','halloweenChildNpcIdsConfirmed',
+                      'halloweenAdultNpcIdsDelivered','halloweenChildObjectiveConfirmed'):
+              assert key in script, 'obsolete key must still be cleaned up: ' + key
+          assert 'for (String key : OBSOLETE_KEYS) configManager.unsetConfiguration(GROUP, key);' in script
+          assert 'spookedChildren' not in script and 'givenAdultIds' not in script
+          assert 'Rs2Npc.' not in script and 'import net.runelite.client.plugins.microbot.util.npc.Rs2Npc;' not in script
+          assert 'WidgetInfo' not in script
           assert 'EVENT_COMPLETE_WIDGET_ID' in script
           assert 'equalsIgnoreCase("Event complete!")' in script
-          assert 'configManager.setConfiguration(GROUP, STAGE_KEY' in script
-          assert 'configManager.setConfiguration(GROUP, LANTERNS_KEY' in script
-          assert 'configManager.setConfiguration(GROUP, ADULTS_KEY' in script
           assert 'public synchronized void resetProgress()' in script
-          assert 'new JButton("Start")' in panel
-          assert 'new JButton("Pause")' in panel
-          assert 'new JButton("Stop")' in panel
-          assert 'new JButton("Reset progress")' in panel
-          assert 'script.getLanternCount()' in overlay
-          assert 'script.isActive()' in overlay
+          assert 'new JButton("Start")' in panel and 'new JButton("Reset progress")' in panel
+          assert 'script.getLanternCount()' in overlay and 'script.isActive()' in overlay
           assert 'script.start(config)' in plugin and 'overlays.remove(overlay)' in plugin
           assert 'script.setCompletionCallback(' in plugin
-          print('PASS: standalone full wiki stages, progress persistence and guarded completion')
+          print('PASS: wiki stages, KSP identity, varbit-driven progress and no local stand-ins')
 
-      - name: Verify eighth lantern forces report without a game-message dependency
-        shell: python
-        run: |
-          from pathlib import Path
-          src = Path('release/kspseasonalevents/KspHalloween2026Script.java').read_text()
-          confirm = src.split('private void confirmSmashedLantern(WorldPoint tile, String evidence)', 1)[1].split('private void confirmAllLanterns(', 1)[0]
-          pending = src.split('private boolean pendingLanternConfirmed(WorldPoint player)', 1)[1].split('private void smashLanterns(', 1)[0]
-          smash = src.split('private void smashLanterns(WorldPoint player)', 1)[1].split('private void scanRimmington(', 1)[0]
-          chat = src.split('public void onChatMessage(String raw)', 1)[1].split('public void setPaused(', 1)[0]
-          inspection = src.split('private void inspectStarterDialogue(List<String> dialogueTexts)', 1)[1].split('private Stage stageForAdultCandyObjective()', 1)[0]
-          assert 'newlyConfirmed = smashedLanternTiles.add(tileKey(tile))' in confirm
-          assert 'configManager.setConfiguration(GROUP, LANTERNS_KEY,' in confirm
-          assert 'clearPendingLantern();' in confirm
-          assert 'newlyConfirmed && stage == Stage.SMASH_LANTERNS' in confirm
-          assert 'smashedLanternTiles.size() >= 8' in confirm
-          assert 'sweepRequiredByStarter = false;' in confirm
-          assert 'change(Stage.REPORT_LANTERNS,' in confirm
-          assert 'confirmAllLanterns(' not in confirm
-          assert 'confirmSmashedLantern(clickedTile, "smash action disappeared at loaded tile")' in pending
-          assert 'if (stage != Stage.SMASH_LANTERNS) return;' in smash
-          assert smash.index('if (stage != Stage.SMASH_LANTERNS) return;') < smash.index('Rs2TileObjectModel target = lantern();')
-          assert 'confirmSmashedLantern(pendingLantern, "game smash message")' in chat
-          assert 'change(Stage.VERIFY_LANTERNS,' not in chat
-          assert 'case SMASH_LANTERNS:' in inspection
-          assert 'sweepRequiredByStarter = true;' in inspection
-          assert 'lanternsVerified = false;' in inspection
-          print('PASS: 8/8 scene or chat acknowledgement reports to Angel/Henja while server dialogue remains authoritative')
-
-      - name: Verify Halloween lantern reconciliation and chat safety
-        shell: python
-        run: |
-          from pathlib import Path
-          root = Path('release/kspseasonalevents')
-          code = (root/'KspHalloween2026Script.java').read_text()
-          panel = (root/'KspSeasonalEventsPanel.java').read_text()
-          plugin = (root/'KspSeasonalEventsPlugin.java').read_text()
-
-          assert 'VERIFY_LANTERNS' in code
-          assert 'pendingLanternConfirmed(WorldPoint player)' in code
-          pending = code.split('private boolean pendingLanternConfirmed(WorldPoint player)', 1)[1].split('private void smashLanterns', 1)[0]
-          assert 'if (player.distanceTo(pendingLantern) > 9)' in pending
-          assert 'nearOrWalk(player, pendingLantern, 6' in pending
-          assert 'confirmSmashedLantern(clickedTile' in pending
-          assert 'clearPendingLantern()' in pending
-          assert 'if (player.distanceTo(pendingLantern) > 12) return true;' not in pending
-
-          search = code.split('private void smashLanterns(WorldPoint player)', 1)[1].split('private void scanRimmington', 1)[0]
-          assert 'Stage.VERIFY_LANTERNS' in search
-          assert 'sweepsWithoutTarget >= RIMMINGTON_SWEEP.length' in search
-          assert 'pendingLanternConfirmed(player)' in search
-          assert 'configManager.setConfiguration(GROUP, PENDING_LANTERN_KEY' in search
-
-          assert 'inspectStarterDialogue(samples);' in code
-          assert 'KspHalloweenStarterState.classify(raw)' in code
-          assert 'confirmAllLanterns(' in code
-          assert 'LANTERNS_VERIFIED_KEY' in code
-          assert 'parseLanternTile' in code
-          assert 'requestStarterStateCheck()' in code
-          assert 'canRequestStarterStateCheck()' in code
-          assert 'getLanternCount() { return lanternsVerified ? 8' in code
-          assert 'configManager.unsetConfiguration(GROUP, PENDING_LANTERN_KEY)' in code
-          assert 'configManager.unsetConfiguration(GROUP, LANTERNS_VERIFIED_KEY)' in code
-          assert 'ksp_seasonal_stage_changed' in code
-          assert 'ksp_seasonal_paused' in code
-
-          assert 'new JButton("Recheck state with Angel / Henja")' in panel
-          assert 'script.requestStarterStateCheck()' in panel
-          assert 'script.canRequestStarterStateCheck()' in panel
-          assert 'JOptionPane' not in panel
-          assert 'ChatMessageType.PUBLICCHAT' not in plugin
-          assert 'type == ChatMessageType.GAMEMESSAGE' in plugin
-          assert 'type == ChatMessageType.SPAM' in plugin
-          print('PASS: persisted pending smashes, bounded sweep, verified/explicit recovery and chat filtering')
-
-      - name: Verify hat dialogue, deferred starter transitions and costume handling
-        shell: python
-        run: |
-          from pathlib import Path
-          src = Path('release/kspseasonalevents/KspHalloween2026Script.java').read_text()
-          tick = src.split('private void tick()', 1)[1].split('private void handleDialogueOption()', 1)[0]
-          opts = src.split('private void handleDialogueOption()', 1)[1].split('private boolean nearOrWalk(', 1)[0]
-          starter = src.split('private void talkToStarter(', 1)[1].split('private Rs2TileObjectModel lantern()', 1)[0]
-          costume = src.split('private void collectCostume(', 1)[1].split('private boolean npcHasAction(', 1)[0]
-
-          assert 'starterConversationActive' in tick
-          assert 'inspectStarterDialogue(samples);' in tick
-          assert 'starterDialogueSamples()' in tick
-          assert 'if (pendingStarterNext != null)' in tick
-          assert 'change(next, "Angel / Henja dialogue resolved event state")' in tick
-          assert 'Reading Angel / Henja dialogue widgets' in tick
-          assert 'starterNoDialogueTicks >= 2' in tick
-          assert 'pendingStarterLastDialogueAt < 1_500L' not in tick
-
-          assert "Sure, I'll take the hat." in opts
-          assert 'Rs2Dialogue.keyPressForDialogueOption("Sure, I' in opts
-          assert 'stage == Stage.REPORT_LANTERNS' in opts
-          assert 'stage == Stage.GET_COSTUME' in opts
-          assert 'Accepted Halloween hat from Angel / Henja' in opts
-          assert 'No thanks, I don' not in opts
-          assert 'pendingStarterNext = null;' in starter
-          assert 'starterConversationActive = true;' in starter
-          assert 'change(' not in starter
-
-          assert costume.index('for (String piece : COSTUME_PIECES)') < costume.index('nearOrWalk(player, DIANGO')
-          assert 'Rs2Npc.interact(diango, "Holiday-items")' in costume
-          assert 'Rs2Inventory.wear(piece)' in costume
-          print('PASS: explicit accept, no premature transition, equip before travel, holiday retrieval action')
-
-      - name: Verify Diango widget selection, inventory confirmation and safe modal handling
+      - name: Verify costume, Chemist input, pacing and bounded waits
         shell: python
         run: |
           from pathlib import Path
           root=Path('release/kspseasonalevents')
           script=(root/'KspHalloween2026Script.java').read_text()
-          widget=(root/'KspDiangoHolidayRetrieval.java').read_text()
-          costume=script.split('private void collectCostume(WorldPoint player)',1)[1].split('private boolean npcHasAction(',1)[0]
-          dialogue=script.split('private void handleDialogueOption()',1)[1].split('private boolean nearOrWalk(',1)[0]
-
-          assert "Diango's Holiday Item Retrieval" in widget
-          assert 'Rs2Widget.findWidget(TITLE, true)' in widget
-          assert 'Microbot.getClientThread().runOnClientThreadOptional' in widget
-          assert 'Microbot.getClient().getWidgetRoots()' in widget
-          assert '(candidate.getId() >>> 16) == interfaceGroup' in widget
-          assert 'widget.getItemId()' in widget
-          assert 'Microbot.getClient().getItemDefinition(id)' in widget
-          assert 'viewport.intersects(bounds)' in widget
-          assert 'getScrollY()' in widget and 'getScrollHeight()' in widget
-          assert 'Microbot.getMouse().scrollDown(snapshot.scrollPoint)' in widget
-          assert 'Microbot.getMouse().click(snapshot.itemBounds)' in widget
-
-          assert "I'd like to check holiday items please!" in dialogue
-          assert 'KspDiangoHolidayRetrieval.inspect(missingCostumeRetrievalNames())' in costume
-          assert 'pendingHolidayItemAt < 5_000L' in costume
-          assert 'Rs2Inventory.hasItem(pendingHolidayItem, true)' in costume
-          assert 'holidayRetrievalTimeouts >= 3' in costume
-          assert 'KspDiangoHolidayRetrieval.select(window)' in costume
-          assert 'KspDiangoHolidayRetrieval.scrollDown(window)' in costume
-          assert 'KspDiangoHolidayRetrieval.close(window)' in costume
-          assert 'Rs2Keyboard.keyPress(KeyEvent.VK_ESCAPE)' in costume
-          assert 'holidayScrollAttempts < 24' in costume
-          assert 'Rs2Inventory.getEmptySlots() <= 0' in costume
-          assert costume.index('if (window.open) {') < costume.index('if (diango == null)')
-          assert 'Rs2Npc.interact(diango, "Holiday-items")' in costume
-          assert 'change(Stage.SPOOK_CHILDREN' in costume
-          assert 'skeleton boots' in script and 'skeleton shirt' in script
-          assert 'Diango has no additional suitable wearable costume pieces' in costume
-          print('PASS: Diango live widgets, restricted item selection, receipt verification and bounded recovery')
-
-      - name: Verify Diango stays open until four distinct costume slots are held
-        shell: python
-        run: |
-          from pathlib import Path
-          code = Path('release/kspseasonalevents/KspHalloween2026Script.java').read_text()
-          batch = code.split('private void collectCostume(WorldPoint player)', 1)[1].split('private List<String> missingCostumeRetrievalNames()', 1)[0]
-          missing = code.split('private List<String> missingCostumeRetrievalNames()', 1)[1].split('private void closeHolidayRetrieval(', 1)[0]
-          slot = code.split('private CostumeSlot costumeSlot(', 1)[1].split('private Set<CostumeSlot> heldCostumeSlots(', 1)[0]
-          held = code.split('private Set<CostumeSlot> heldCostumeSlots(', 1)[1].split('private int costumeCount()', 1)[0]
-          assert 'enum CostumeSlot { HEAD, BODY, LEGS, HANDS, FEET }' in code
-          for group in ('boots', 'gloves', 'leggings', 'trousers', 'bottoms', 'skirt', 'shirt', 'top', 'robe', 'jumper', 'mask', 'hood', 'wig', 'hat'):
-              assert group in slot, 'Missing costume slot classification: ' + group
-          assert 'EnumSet.noneOf(CostumeSlot.class)' in held
-          assert 'includeInventory && Rs2Inventory.hasItem(piece, true)' in held
-          assert 'Rs2Equipment.isWearing(piece, true)' in held
-
-          pending = batch.index('if (pendingHolidayItem != null)')
-          full_batch = batch.index('if (ownedSlots.size() >= 4)')
-          close = batch.index('closeHolidayRetrieval(window)', full_batch)
-          wear = batch.index('Rs2Inventory.wear(piece)', full_batch)
-          partial_batch = batch.index('if (window.open)', wear)
-          next_retrieval = batch.index('KspDiangoHolidayRetrieval.select(window)', partial_batch)
-          reopen = batch.index('Rs2Npc.interact(diango, "Holiday-items")', next_retrieval)
-          assert pending < full_batch < close < wear < partial_batch < next_retrieval < reopen
-          assert 'Set<CostumeSlot> ownedSlots = heldCostumeSlots(true)' in batch
-          assert 'Set<CostumeSlot> wornSlots = heldCostumeSlots(false)' in batch
-          assert 'wornSlots.contains(slot)' in batch
-          assert 'pendingHolidayItem = window.itemName;' in batch
-          assert 'Rs2Inventory.hasItem(pendingHolidayItem, true)' in batch
-          assert 'holidayRetrievalTimeouts >= 3' in batch
-          assert 'holidayScrollAttempts < 24' in batch
-          assert 'KspDiangoHolidayRetrieval.scrollDown(window)' in batch
-          assert 'ownedSlots.contains(slot)' in missing
-          assert 'DIANGO_COSTUME_PRIORITY.stream()' in missing
-          assert 'closeHolidayRetrieval(window)' not in batch[partial_batch:reopen]
-          print('PASS: four distinct slots must be owned before any automatic window closing/equipping')
+          diango=(root/'KspDiangoHolidayRetrieval.java').read_text()
+          costume=(root/'KspHalloweenCostume.java').read_text()
+          chemist=(root/'KspHalloweenChemistInput.java').read_text()
+          # Only Diango's own list (78:3) is read and scrolled, never the chat box.
+          assert 'InterfaceID.RareitemsDiango.ITEMS' in diango
+          assert 'getWidgetRoots()' not in diango
+          assert 'new Outfit("Skeleton", 9925, 9924, 9923, 9922, 9921)' in costume
+          assert 'KspHalloweenCostume.anyWorn(Rs2Equipment::isWearing)' in script
+          assert 'COSTUME_CLICK_SETTLE_MS' in script and 'MAX_COSTUME_CLICK_TRIES' in script
+          # The Chemist's answer box comes from the game's input mode, typed once.
+          assert 'VarClientID.MESLAYERMODE' in script
+          assert 'MODE_PRIVATE_MESSAGE = 6' in chemist and 'MODE_SEARCH = 11' in chemist
+          assert 'Rs2Keyboard.typeString("92")' in script and 'chemistAnswerSubmissions >= 1' in script
+          # Human pacing before clicks, and Pause/Stop during a pause skips the click.
+          assert 'private boolean react()' in script and 'if (!react()) return' in script
+          assert 'private boolean readPage(String text)' in script
+          # Walking is not a failed click; the reward wait is bounded.
+          assert 'Rs2Player.isMoving() || System.currentTimeMillis() - pendingOldOnionAt' in script
+          assert 'REWARD_SCROLL_WAIT_MS' in script and 'MAX_REWARD_TALKS' in script
+          assert 'this::safeTick, 0L, 150L' in script
+          print('PASS: full outfit from Diango\'s list, Chemist input mode, pacing and bounded waits')
 
       - name: Test Angel/Henja event-state classification with actual 2026 dialogue
         shell: bash
@@ -296,203 +134,6 @@ jobs:
             release/.github/tests/seasonal/KspHalloweenStarterStateTest.java
           java -cp /tmp/ksp-halloween-starter-test \
             net.runelite.client.plugins.microbot.kspseasonalevents.KspHalloweenStarterStateTest
-
-      - name: Verify Angel/Henja dialogue is authoritative for global event state
-        shell: python
-        run: |
-          from pathlib import Path
-          root = Path('release/kspseasonalevents')
-          code = (root/'KspHalloween2026Script.java').read_text()
-          parser = (root/'KspHalloweenStarterState.java').read_text()
-          panel = (root/'KspSeasonalEventsPanel.java').read_text()
-
-          start = code.split('public synchronized boolean start(',1)[1].split('private void restoreNpcIds(',1)[0]
-          tick = code.split('private void tick()',1)[1].split('private void handleDialogueOption()',1)[0]
-          inspect = code.split('private void inspectStarterDialogue(List<String> dialogueTexts)',1)[1].split('private Stage stageForAdultCandyObjective()',1)[0]
-          talk = code.split('private void talkToStarter(WorldPoint player)',1)[1].split('private Rs2TileObjectModel lantern()',1)[0]
-          search = code.split('private void smashLanterns(WorldPoint player)',1)[1].split('private void scanRimmington',1)[0]
-          chat = code.split('public void onChatMessage(String raw)',1)[1].split('public void setPaused(',1)[0]
-
-          assert 'change(Stage.INTRODUCTION' in start
-          assert 'saved stage {} deferred to starter dialogue' in start
-          assert 'starterConversationActive' in tick
-          assert 'inspectStarterDialogue(samples);' in tick
-          assert 'if (pendingStarterNext != null)' in tick
-          assert 'Angel/Henja dialogue did not identify a known Halloween objective' in code
-          assert 'starterTalkAttempts >= MAX_STARTER_TALK_ATTEMPTS' in code
-          assert 'starterNoDialogueTicks >= 2' in tick
-          assert 'WidgetInfo.DIALOG_NPC_TEXT' in inspect
-          assert 'WidgetInfo.DIALOG_PLAYER_TEXT' in inspect
-          assert 'WidgetInfo.DIALOG_SPRITE_TEXT' in inspect
-          assert 'collectVisibleDialogueText(' in inspect
-          assert 'pendingStarterDialogueSeen = true;' in inspect
-          assert 'lastStarterObservedWidgetText' in inspect
-          assert 'return; // A visible menu is not itself proof of dialogue content.' in inspect
-          assert 'talkToStarter(player);' in tick
-          assert 'talkToStarter(player,' not in code
-
-          assert 'KspHalloweenStarterState.classify(raw)' in inspect
-          for objective in ('SMASH_LANTERNS','SCARE_CHILDREN','ADULT_CANDY','CLAIM_REWARD','COMPLETE'):
-              assert 'case ' + objective + ':' in inspect
-              assert objective in parser
-          assert 'resolved = costumeCount() >= 4 ? Stage.SPOOK_CHILDREN : Stage.GET_COSTUME' in inspect
-          assert 'resolved = stageForAdultCandyObjective();' in inspect
-          assert 'childrenReportConfirmed = true;' in inspect
-          assert 'configManager.setConfiguration(GROUP, CHILD_CONFIRMED_KEY, true)' in inspect
-          assert 'lanternsVerified = false;' in inspect
-          assert 'configManager.unsetConfiguration(GROUP, LANTERNS_VERIFIED_KEY)' in inspect
-          assert 'adultsGiven >= 5' in inspect
-          assert 'givenAdultIds.clear();' in inspect
-          assert 'resolved = Stage.WAIT_FOR_REWARD;' in inspect
-          assert 'case COMPLETE:' in inspect
-          assert inspect.count('resolved = Stage.WAIT_FOR_REWARD;') >= 2
-          assert 'resolved = Stage.COMPLETED;' not in inspect
-
-          assert 'pendingStarterNext = null;' in talk
-          assert 'starterConversationActive = true;' in talk
-          assert 'Speaking to Angel / Henja to resolve current event state' in talk
-
-          assert 'lanternsVerified || smashedLanternTiles.size() >= 8' not in search
-          assert 'Eight lanterns confirmed locally; checking with Angel / Henja' in code
-          assert 'change(Stage.REPORT_LANTERNS,' in code
-          assert 'confirmSmashedLantern(pendingLantern, "game smash message")' in chat
-          assert 'change(Stage.VERIFY_LANTERNS,' not in chat
-          assert 'confirmAllLanterns("eight confirmed smashes")' not in chat
-
-          assert 'confirmLanternsManually' not in code
-          assert 'canConfirmLanternsManually' not in code
-          assert 'requestStarterStateCheck()' in code
-          assert 'Recheck state with Angel / Henja' in panel
-          assert 'KspHalloweenChildReport' not in code
-          print('PASS: Angel/Henja dialogue owns global state; local counters only drive subtask execution')
-
-      - name: Verify child scare counters appear in overlay and side panel
-        shell: python
-        run: |
-          from pathlib import Path
-          root = Path('release/kspseasonalevents')
-          script = (root/'KspHalloween2026Script.java').read_text()
-          overlay = (root/'KspSeasonalEventsOverlay.java').read_text()
-          panel = (root/'KspSeasonalEventsPanel.java').read_text()
-          assert 'getChildSpookAttempts()' in script
-          assert 'getChildSpookCheckpoint()' in script
-          assert 'isChildObjectiveConfirmed()' in script
-          assert 'ConcurrentHashMap.newKeySet()' in script
-          assert 'private volatile boolean childrenReportConfirmed;' in script
-          assert 'CHILD_CONFIRMED_KEY' in script
-          assert 'configManager.setConfiguration(GROUP, CHILD_CONFIRMED_KEY, true)' in script
-          assert 'configManager.unsetConfiguration(GROUP, CHILD_CONFIRMED_KEY)' in script
-          assert 'Boolean.parseBoolean(' in script
-          for source in (overlay, panel):
-              assert 'getChildSpookAttempts()' in source
-              assert 'getChildSpookCheckpoint()' in source
-              assert 'isChildObjectiveConfirmed()' in source
-          assert 'Child scares verified' in overlay
-          assert 'Child objective' in overlay
-          assert 'Child scares verified' in panel
-          assert 'Not verified' in overlay and 'Confirmed' in overlay
-          assert 'Not verified' in panel and 'Confirmed' in panel
-          print('PASS: scene-verified child scares and separate server quest objective in both UIs')
-
-      - name: Verify 2026 child NPC IDs and safe scene-guided Spook
-        shell: python
-        run: |
-          from pathlib import Path
-          code = Path('release/kspseasonalevents/KspHalloween2026Script.java').read_text()
-          scout = code.split('private boolean scoutVisibleTreaters(', 1)[1].split('private void spookChildren(', 1)[0]
-          child = code.split('private void spookChildren(', 1)[1].split('private void solveChemist(', 1)[0]
-          report = code.split('private void inspectStarterDialogue(List<String> dialogueTexts)', 1)[1].split('private Stage stageForAdultCandyObjective()', 1)[0]
-          change = code.split('private void change(Stage next, String message)', 1)[1].split('private void stopForReview(', 1)[0]
-
-          assert 'CHILD_TREATER_FIRST_ID = 16778' in code
-          assert 'CHILD_TREATER_LAST_ID = 16782' in code
-          assert 'ADULT_TREATER_FIRST_ID = 16794' in code
-          assert 'ADULT_TREATER_LAST_ID = 16798' in code
-          assert 'private static boolean isChildTreaterId(int npcId)' in code
-          assert 'private static boolean isAdultTreaterId(int npcId)' in code
-          assert 'private static boolean isKnownTreaterId(int npcId)' in code
-          assert 'if (isChildTreaterId(npc.getId())) return TreaterAge.CHILD;' in code
-          assert 'if (isAdultTreaterId(npc.getId())) return TreaterAge.ADULT;' in code
-          assert 'private void observeTreaterAges()' not in code
-          assert 'observedTreaterHeights' not in code
-          assert 'confirmedChildGroup' not in code
-          assert 'getLogicalHeight()' not in code
-
-          assert 'MAX_CHILD_NPC_SCOUT_STOPS = 4' in code
-          assert 'childScoutedNpcTiles' in scout
-          assert 'classifyTreater(anchor)' in scout
-          assert 'age == TreaterAge.ADULT' in scout
-          assert 'age == TreaterAge.CHILD' in scout
-          assert 'RIMMINGTON.contains(n.getWorldLocation())' in scout
-          assert 'nearOrWalk(player, target, 6,' in scout
-          assert 'RIMMINGTON_SWEEP' not in scout
-          assert 'Rs2Npc.interact(' not in scout
-
-          assert 'Rs2Npc.getNpcs()' in child
-          assert '.filter(n -> isKnownTreaterId(n.getId()))' in child
-          assert 'isChildTreaterId(n.getId())' in child
-          assert '!spookedChildren.contains(n.getId())' in child
-          assert 'npcHasAction(n, "Spook")' in child
-          assert 'Rs2Npc.interact(child, "Spook")' in child
-          assert 'Rs2Player.isMoving()' in child
-          assert 'scoutVisibleTreaters(player, visibleTreaters)' in child
-          assert 'scanRimmington(' not in child
-          assert 'change(Stage.REPORT_CHILDREN' in child
-          assert 'visibleTreaters=[' in child
-          assert 'stage == Stage.REPORT_CHILDREN && resolved == Stage.SPOOK_CHILDREN' in report
-          assert 'childSpookRetries > allowedRetries' in report
-          assert 'spookedChildren.size() >= CHILD_REPORT_CHECKPOINT' in report
-          assert 'if (next == Stage.SPOOK_CHILDREN)' in change
-          assert 'childScoutedNpcTiles.clear();' in change
-
-          start = code.split('public synchronized boolean start(', 1)[1].split('private void restoreNpcIds(', 1)[0]
-          assert 'spookedChildren.removeIf(id -> !isChildTreaterId(id))' in start
-          assert 'givenAdultIds.removeIf(id -> !isAdultTreaterId(id))' in start
-          assert 'configManager.unsetConfiguration(GROUP, LEGACY_TREATER_CHILD_GROUP_KEY)' in start
-          print('PASS: known child and adult ID groups, action-guarded Spook, saved-state migration, bounded NPC-guided search')
-
-      - name: Verify exact live scene child Spook receipt and no premature reports
-        shell: python
-        run: |
-          from pathlib import Path
-          script = Path('release/kspseasonalevents/KspHalloween2026Script.java').read_text()
-          overlay = Path('release/kspseasonalevents/KspSeasonalEventsOverlay.java').read_text()
-          panel = Path('release/kspseasonalevents/KspSeasonalEventsPanel.java').read_text()
-          start = script.split('public synchronized boolean start(',1)[1].split('private void restoreNpcIds(',1)[0]
-          observer = script.split('private ChildSceneStatus pendingChildLiveSceneStatus(',1)[1].split('private boolean verifyPendingChildSpook(',1)[0]
-          verify = script.split('private boolean verifyPendingChildSpook(',1)[1].split('private void spookChildren(',1)[0]
-          spook = script.split('private void spookChildren(',1)[1].split('private void solveChemist(',1)[0]
-          assert 'halloweenChildNpcIdsConfirmed' in script
-          assert 'LEGACY_SPOOKED_CHILD_ATTEMPTS_KEY = "halloweenChildNpcIdsAttempted"' in script
-          assert 'configManager.unsetConfiguration(GROUP, LEGACY_SPOOKED_CHILD_ATTEMPTS_KEY)' in start
-          assert start.index('configManager.unsetConfiguration(GROUP, LEGACY_SPOOKED_CHILD_ATTEMPTS_KEY)') < start.index('restoreNpcIds(SPOOKED_CHILD_IDS_KEY, spookedChildren)')
-          assert 'pendingChildId = id;' in spook
-          assert 'pendingChildIndex = index;' in spook
-          assert 'pendingChildTile = tile;' in spook
-          assert 'pendingChildSpookAt = now;' in spook
-          assert 'Rs2Npc.interact(child, "Spook")' in spook
-          assert 'spookedChildren.add(' not in spook
-          assert 'persistNpcIds(SPOOKED_CHILD_IDS_KEY, spookedChildren)' not in spook
-          assert spook.index('if (verifyPendingChildSpook(player)) return;') < spook.index('if (spookedChildren.size() >= CHILD_REPORT_CHECKPOINT)')
-          assert 'Five child NPC disappearances confirmed by RuneLite live scene' in spook
-          assert 'change(Stage.REPORT_CHILDREN,' in spook
-          assert 'No additional child Spook targets' not in spook
-          assert 'getTopLevelWorldView().npcs()' in observer
-          assert 'npc.getIndex() == pendingChildIndex' in observer
-          assert 'player.distanceTo(pendingChildTile) > 10' in observer
-          assert 'ChildSceneStatus.UNKNOWN' in observer
-          assert 'return ChildSceneStatus.ABSENT;' in observer
-          assert 'CHILD_SPOOK_ABSENCE_STABLE_MS' in verify
-          assert 'ChildSceneStatus.ABSENT' in verify
-          assert 'spookedChildren.add(confirmedId);' in verify
-          assert 'persistNpcIds(SPOOKED_CHILD_IDS_KEY, spookedChildren);' in verify
-          assert 'CHILD_SPOOK_CONFIRM_TIMEOUT_MS' in verify
-          assert 'childSpookCooldownUntil.put(failedId,' in verify
-          assert 'LIVE SCENE CONFIRMED' in verify
-          assert 'return false;' in verify
-          assert 'Child scares verified' in overlay
-          assert 'Child scares verified' in panel
-          print('PASS: each child is counted only after exact live NPC disappearance, stable in-scene observation, no report at partial attempts')
 
       - name: Test wiki-confirmed Chemist dialogue routing
         shell: bash
@@ -515,152 +156,6 @@ jobs:
             release/.github/tests/seasonal/KspHalloweenChemistInputTest.java
           java -cp /tmp/ksp-halloween-chemist-input-test \
             net.runelite.client.plugins.microbot.kspseasonalevents.KspHalloweenChemistInputTest
-          python - <<'PY'
-          from pathlib import Path
-          code=Path('release/kspseasonalevents/KspHalloween2026Script.java').read_text()
-          tick=code.split('private void tick()',1)[1].split('private void handleDialogueOption()',1)[0]
-          input_handler=code.split('private boolean handleChemistAnswerPrompt()',1)[1].split('private static boolean isVisible(',1)[0]
-          assert 'stage == Stage.CHEMIST_RIDDLE && handleChemistAnswerPrompt()' in tick
-          assert tick.index('handleChemistAnswerPrompt()') < tick.index('Rs2Dialogue.hasContinue()')
-          assert 'WidgetInfo.CHATBOX_FULL_INPUT' in code
-          assert 'WidgetInfo.CHATBOX_INPUT' in code
-          assert 'Rs2Keyboard.typeString("92")' in input_handler
-          assert 'Rs2Keyboard.enter()' in input_handler
-          assert 'chemistAnswerSubmissions >= 1' in input_handler
-          assert 'Rs2Dialogue.hasContinue() || Rs2Dialogue.hasSelectAnOption()' in input_handler
-          assert 'this::safeTick, 0L, 150L' in code
-          assert 'DIALOGUE_GAP_MS' not in code
-          assert 'ACTION_GAP' not in code
-          assert 'private boolean ready()' not in code
-          assert 'private boolean canDispatchDialogue(String signature)' in code
-          assert 'signature.equals(lastGenericDialogueSignature)' in code
-          assert 'WORLD_ACTION_STALL_TIMEOUT_MS' in code
-          assert 'pendingOldOnionCount >= 0' in code
-          assert 'pendingCoatCandyCount >= 0' in code
-          assert 'if (pendingCook)' in code
-          assert 'pendingHolidayScrollY >= 0' in code
-          assert 'pendingEquipItem != null' in code
-          assert 'candyCount < pendingCandyCount' in code
-          assert 'pendingStarterLastDialogueAt < 1_500L' not in code
-          print('PASS: event advances on widget/NPC/inventory changes without global delays')
-          PY
-
-      - name: Verify exact onion crate targeting, five-total accounting and inventory-driven stage
-        shell: python
-        run: |
-          from pathlib import Path
-          source = Path('release/kspseasonalevents/KspHalloween2026Script.java').read_text()
-          onion = source.split('private void collectOnions(WorldPoint player)', 1)[1].split('private void coatOnions()', 1)[0]
-          reconcile = source.split('private Stage stageForAdultCandyObjective()', 1)[1].split('public synchronized boolean requestStarterStateCheck()', 1)[0]
-          start = source.split('public synchronized boolean start(', 1)[1].split('private void restoreNpcIds(', 1)[0]
-          tick = source.split('private void tick()', 1)[1].split('private static boolean isCandyStage(', 1)[0]
-          starter = source.split('private void talkToStarter(WorldPoint player)', 1)[1].split('private Rs2TileObjectModel lantern()', 1)[0]
-          chemist = source.split('private void solveChemist(WorldPoint player)', 1)[1].split('private Rs2TileObjectModel cookingSurface()', 1)[0]
-          adult = source.split('private void giveCandy(WorldPoint player)', 1)[1].split('private void acted(', 1)[0]
-          assert 'private int oldInionCount()' in source
-          assert 'Rs2Inventory.count(itemName, true)' in source
-          assert 'OLD_ONION_CRATE_NAME = "Crate of onions"' in source
-          assert 'totalOnionsAccountedFor()' in source
-          assert 'oldInionCount() + Rs2Inventory.count("Candy onion", true) + adultsGiven' in source
-          assert 'if (total >= ONIONS_REQUIRED)' in onion
-          assert onion.index('Rs2TileObjectModel crate = oldOnionCrate();') < onion.index('nearOrWalk(player, STARTER')
-          assert 'crate.click(action)' in onion
-          assert 'pendingOldOnionCount = count' in onion
-          assert 'WORLD_ACTION_STALL_TIMEOUT_MS' in onion
-          assert 'OLD_ONION_CRATE_MISSING_REVIEW_MS' in onion
-          assert 'STARTER.distanceTo(o.getWorldLocation()) <= OLD_ONION_CRATE_SEARCH_RADIUS' in source
-          assert 'int oldOnions = oldInionCount();' in reconcile
-          assert 'Stage.COAT_ONIONS' in reconcile and 'Stage.GIVE_CANDY' in reconcile
-          assert 'hasUniqueCandyObjectiveInventory()' in start
-          assert 'stageForAdultCandyObjective()' in start
-          assert 'isCandyStage(stage)' in tick and 'stageForAdultCandyObjective()' in tick
-          assert 'Rs2Npc.getNpc("Henja")' in starter and 'Rs2Npc.getNpc("Angel")' in starter
-          assert starter.index('Rs2Npc.getNpc("Henja")') < starter.index('nearOrWalk(player, STARTER')
-          assert 'Rs2Npc.getNpc("Chemist")' in chemist
-          assert chemist.index('Rs2Npc.getNpc("Chemist")') < chemist.index('nearOrWalk(player, CHEMIST')
-          assert adult.index('Rs2Npc.getNpcs()') < adult.index('nearOrWalk(player, STARTER')
-          print('PASS: exact event item/crate, verified five-total receipts, inventory reconciliation and NPC-first interaction')
-
-      - name: Verify exact 2026 adult IDs and inventory-confirmed candy delivery
-        shell: python
-        run: |
-          from pathlib import Path
-          code = Path('release/kspseasonalevents/KspHalloween2026Script.java').read_text()
-          delivery = code.split('private void giveCandy(WorldPoint player)', 1)[1].split('private void acted(', 1)[0]
-          age = code.split('private TreaterAge classifyTreater(', 1)[1].split('private boolean scoutVisibleTreaters(', 1)[0]
-          assert 'ADULT_TREATER_FIRST_ID = 16794' in code
-          assert 'ADULT_TREATER_LAST_ID = 16798' in code
-          assert 'CHILD_TREATER_FIRST_ID = 16778' in code
-          assert 'CHILD_TREATER_LAST_ID = 16782' in code
-          assert 'isChildTreaterId(npc.getId())' in age
-          assert 'isAdultTreaterId(npc.getId())' in age
-          assert 'observedTreaterActions' not in code
-          assert 'observedTreaterHeights' not in code
-          assert 'TREATER_CHILD_GROUP_KEY' not in code.replace('LEGACY_TREATER_CHILD_GROUP_KEY', '')
-          assert delivery.index('Rs2Npc.getNpcs()') < delivery.index('scanRimmington(')
-          assert 'isAdultTreaterId(n.getId())' in delivery
-          assert '!givenAdultIds.contains(n.getId())' in delivery
-          assert 'Rs2Walker.clearWalkingRoute("ksp_halloween_adult_visible")' in delivery
-          assert 'Rs2Inventory.useItemOnNpc(item.getId(), adult)' in delivery
-          assert 'pendingCandyCount = candyCount;' in delivery
-          assert 'pendingAdultId = adult.getId();' in delivery
-          assert 'candyCount < pendingCandyCount' in delivery
-          assert 'givenAdultIds.add(pendingAdultId)' in delivery
-          assert 'adultsGiven = Math.min(5, adultsGiven + 1)' in delivery
-          assert 'if (sweepsWithoutTarget >= RIMMINGTON_SWEEP.length)' in delivery
-          assert 'Visible trick-or-treater NPCs could not be verified' not in delivery
-          print('PASS: exact adult target IDs only, no mistaken child targeting, inventory-confirmed unique deliveries')
-
-      - name: Verify Halloween cutscene freeze, exact event completion and generic label
-        shell: python
-        run: |
-          from pathlib import Path
-          root = Path('release/kspseasonalevents')
-          code = (root/'KspHalloween2026Script.java').read_text()
-          plugin = (root/'KspSeasonalEventsPlugin.java').read_text()
-          event = (root/'KspSeasonalEvent.java').read_text()
-          overlay = (root/'KspSeasonalEventsOverlay.java').read_text()
-          config = (root/'KspSeasonalEventsConfig.java').read_text()
-          panel = (root/'KspSeasonalEventsPanel.java').read_text()
-          tick = code.split('private void tick()',1)[1].split('private static boolean isCandyStage(',1)[0]
-          guard = code.split('private boolean handleCutscene()',1)[1].split('private void tick()',1)[0]
-          detect = code.split('public boolean checkForEventComplete()',1)[1].split('private boolean handleCutscene()',1)[0]
-          reward = tick.split('case WAIT_FOR_REWARD:',1)[1].split('default:',1)[0]
-          chat = code.split('public void onChatMessage(String raw)',1)[1].split('public void setPaused(',1)[0]
-          assert 'EVENT_COMPLETE_GROUP = 807' in code
-          assert 'EVENT_COMPLETE_CHILD = 5' in code
-          assert '(EVENT_COMPLETE_GROUP << 16) | EVENT_COMPLETE_CHILD' in code
-          assert 'getWidget(' in detect and 'EVENT_COMPLETE_CHILD)' in detect
-          assert 'congratulations.isHidden()' in detect
-          assert 'equalsIgnoreCase("Event complete!")' in detect
-          assert 'completionSignaled.compareAndSet(false, true)' in detect
-          assert 'change(Stage.COMPLETED' in detect
-          assert 'callback.run()' in detect
-          assert 'if (checkForEventComplete()) return;' in tick
-          assert tick.index('if (handleCutscene()) return;') < tick.index('WorldPoint player =')
-          assert tick.index('if (handleCutscene()) return;') < tick.index('stageForAdultCandyObjective()')
-          assert 'Rs2Dialogue.isInCutScene()' in guard
-          assert 'Rs2Dialogue.hasContinue()' in guard
-          assert 'Rs2Dialogue.clickContinue()' in guard
-          assert 'Rs2Dialogue.hasSelectAnOption()' in guard
-          assert 'normalized.contains("skip")' in guard
-          assert 'Rs2Dialogue.clickOption("No", true)' in guard
-          assert 'nearOrWalk(' not in guard
-          assert 'Rs2Inventory.use' not in guard
-          assert 'talkToStarter(' not in guard
-          assert 'status = "Waiting for Event complete! scroll (807:5)";' in reward
-          assert 'change(Stage.FINAL_TALK' not in reward
-          assert 'change(Stage.COMPLETED' not in chat
-          assert 'if (paused) return;' in code.split('private void safeTick()',1)[1].split('public boolean checkForEventComplete()',1)[0]
-          assert 'script.checkForEventComplete()' in plugin
-          assert 'SwingUtilities.invokeLater' in plugin
-          assert 'stopEvent();' in plugin
-          assert 'HALLOWEEN("Halloween")' in event
-          assert 'HALLOWEEN_2026(' not in event
-          assert 'KspSeasonalEvent.HALLOWEEN' in config
-          assert '.right("Halloween")' in overlay
-          assert 'Halloween event walkthrough.' in panel
-          print('PASS: cutscene blocks gameplay, dialogue remains actionable, completion scroll stops plugin, reusable Halloween slot')
 
       - name: Install Seasonal Events sources into Microbot Hub
         shell: bash
@@ -669,6 +164,17 @@ jobs:
           ROOT='hub/src/main/java/net/runelite/client/plugins/microbot'
           rm -rf "$ROOT/kspseasonalevents"
           cp -R release/kspseasonalevents "$ROOT/kspseasonalevents"
+
+      - name: Run Seasonal Events unit tests in Microbot Hub
+        shell: bash
+        working-directory: hub
+        run: |
+          set -euo pipefail
+          TESTS='src/test/java/net/runelite/client/plugins/microbot/kspseasonalevents'
+          mkdir -p "$TESTS"
+          for f in $(grep -l 'org.junit.jupiter' ../release/.github/tests/seasonal/*.java); do cp "$f" "$TESTS/"; done
+          chmod +x gradlew
+          ./gradlew test -PpluginList=KspSeasonalEventsPlugin --tests 'net.runelite.client.plugins.microbot.kspseasonalevents.*' --stacktrace --no-daemon
 
       - name: Compile and package Seasonal Events
         working-directory: hub

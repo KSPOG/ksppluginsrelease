@@ -3,21 +3,19 @@ package net.runelite.client.plugins.microbot.kspseasonalevents;
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.coords.WorldArea;
 import net.runelite.api.widgets.Widget;
-import net.runelite.api.widgets.WidgetInfo;
-import net.runelite.api.widgets.InterfaceID;
-import net.runelite.api.widgets.WidgetInfo;
+import net.runelite.api.gameval.InterfaceID;
+import net.runelite.api.gameval.VarClientID;
 import net.runelite.api.coords.WorldPoint;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.plugins.microbot.Microbot;
 import net.runelite.client.plugins.microbot.Script;
-import net.runelite.client.plugins.microbot.util.npc.Rs2NpcModel;
+import net.runelite.client.plugins.microbot.api.npc.models.Rs2NpcModel;
 import net.runelite.client.plugins.microbot.api.tileobject.models.Rs2TileObjectModel;
 import net.runelite.client.plugins.microbot.util.dialogues.Rs2Dialogue;
 import net.runelite.client.plugins.microbot.util.widget.Rs2Widget;
 import net.runelite.client.plugins.microbot.util.equipment.Rs2Equipment;
 import net.runelite.client.plugins.microbot.util.inventory.Rs2Inventory;
 import net.runelite.client.plugins.microbot.util.keyboard.Rs2Keyboard;
-import net.runelite.client.plugins.microbot.util.npc.Rs2Npc;
 import net.runelite.client.plugins.microbot.util.player.Rs2Player;
 import net.runelite.client.plugins.microbot.util.walker.Rs2Walker;
 import java.awt.event.KeyEvent;
@@ -25,7 +23,6 @@ import java.awt.event.KeyEvent;
 import javax.inject.Inject;
 import javax.inject.Singleton;
 import java.util.Arrays;
-import java.util.EnumSet;
 import java.util.HashSet;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.Map;
@@ -41,55 +38,40 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
 
 /**
- * Old School RuneScape's 2026 "All Trick, No Treats" event.
+ * Old School RuneScape's 2026 "All Trick, No Treats" event:
+ * https://oldschool.runescape.wiki/w/2026_Halloween_event
  *
- * Walkthrough: https://oldschool.runescape.wiki/w/2026_Halloween_event
- * Progress is driven by visible scene objects, inventory transitions and
- * NPC actions, not by presumed item/object IDs or a fixed stream of clicks.
- *
- * The wiki documents the sequence but not all menu strings, runtime IDs and
- * quest varbits. Unrecognised UI is logged and awaits review instead of
- * guessing an action. This class is independent of KSP Chopper.
+ * Lanterns, children and adults come from the event's own varbits ({@link KspHalloweenProgress});
+ * report steps follow the Angel/Henja dialogue. Unrecognised UI stops for review rather than guessing.
  */
 @Slf4j
 @Singleton
 public final class KspHalloween2026Script extends Script {
     private static final String GROUP = "KspSeasonalEvents";
-    // RuneLite Widget Inspector: Eventscroll.CONGRATULATIONS,
-    // interface 807 child 5, full widget ID 52887557, text "Event complete!".
+    // Eventscroll.CONGRATULATIONS: interface 807 child 5, text "Event complete!".
     private static final int EVENT_COMPLETE_GROUP = 807;
     private static final int EVENT_COMPLETE_CHILD = 5;
     private static final int EVENT_COMPLETE_WIDGET_ID =
             (EVENT_COMPLETE_GROUP << 16) | EVENT_COMPLETE_CHILD;
     private final AtomicBoolean completionSignaled = new AtomicBoolean();
     private volatile Runnable completionCallback;
+    // The saved stage is only a hint; the varbits decide what is done.
     private static final String STAGE_KEY = "halloweenStage";
-    private static final String LANTERNS_KEY = "halloweenSmashTiles";
-    private static final String PENDING_LANTERN_KEY = "halloweenPendingSmashTile";
-    private static final String LANTERNS_VERIFIED_KEY = "halloweenLanternsVerified";
-    private static final String ADULTS_KEY = "halloweenAdultsGiven";
-    private static final String SPOOKED_CHILD_IDS_KEY = "halloweenChildNpcIdsConfirmed";
-    // v0.2.16 saved click attempts as if they were successful scares.
-    // They have no scene-disappearance evidence and must not be migrated.
-    private static final String LEGACY_SPOOKED_CHILD_ATTEMPTS_KEY = "halloweenChildNpcIdsAttempted";
-    private static final String CHILD_RETRY_COUNT_KEY = "halloweenChildReportRetries";
-    private static final String CHILD_CONFIRMED_KEY = "halloweenChildObjectiveConfirmed";
-    private static final String DELIVERED_ADULT_IDS_KEY = "halloweenAdultNpcIdsDelivered";
-    // Five NPCs per candidate age group were seen in the 2026 log.
-    // Five live-scene-confirmed child disappearances trigger the report.
-    // The NPC must vanish while its last tile remains inside the loaded
-    // scene; mere click dispatch, movement or out-of-scene eviction is NOT proof.
+    // Saved progress from 0.2.17 and earlier: it went stale (a scared child or fed adult never comes back), so it is deleted on start.
+    private static final String[] OBSOLETE_KEYS = {
+        "halloweenSmashTiles", "halloweenPendingSmashTile", "halloweenLanternsVerified",
+        "halloweenAdultsGiven", "halloweenChildNpcIdsConfirmed", "halloweenChildNpcIdsAttempted",
+        "halloweenChildReportRetries", "halloweenChildObjectiveConfirmed",
+        "halloweenAdultNpcIdsDelivered", "halloweenConfirmedChildNpcGroup"
+    };
     private static final int CHILD_REPORT_CHECKPOINT = 5;
     private static final int MAX_CHILD_NPC_SCOUT_STOPS = 4;
     private static final long CHILD_SPOOK_CONFIRM_TIMEOUT_MS = 7_000L;
     private static final long CHILD_SPOOK_ABSENCE_STABLE_MS = 450L;
     private static final long CHILD_SPOOK_RETRY_COOLDOWN_MS = 2_500L;
-    // Retired heuristic classification persisted under this key in older
-    // revisions. Unset it on startup; these verified IDs supersede it.
-    private static final String LEGACY_TREATER_CHILD_GROUP_KEY = "halloweenConfirmedChildNpcGroup";
-    // Verified 2026 Halloween NPC definition IDs from live game inspection.
-    // Both tasks select by NPC.getId(), never by model height, name heuristics
-    // or assumed context-menu differences between these two NPC ranges.
+    private static final long REWARD_SCROLL_WAIT_MS = 20_000L;
+    private static final int MAX_REWARD_TALKS = 3;
+    // Event NPC ids, verified live; both tasks select by NPC id only.
     private static final int CHILD_TREATER_FIRST_ID = 16778;
     private static final int CHILD_TREATER_LAST_ID = 16782;
     private static final int ADULT_TREATER_FIRST_ID = 16794;
@@ -100,48 +82,17 @@ public final class KspHalloween2026Script extends Script {
     private static final WorldPoint DIANGO = new WorldPoint(3081, 3248, 0);
     private static final WorldPoint CHEMIST = new WorldPoint(2930, 3211, 0);
 
-    // Discovery waypoints, NOT claimed spawn coordinates. The real object
-    // must be present in the live cache and expose the required menu action.
+    // Search waypoints, not spawn points: a target only counts once it is in the scene with its action.
     private static final WorldPoint[] RIMMINGTON_SWEEP = {
         new WorldPoint(2957, 3212, 0), new WorldPoint(2969, 3218, 0),
         new WorldPoint(2984, 3229, 0), new WorldPoint(2994, 3212, 0),
         new WorldPoint(2970, 3193, 0), new WorldPoint(2948, 3198, 0),
         new WorldPoint(2941, 3230, 0), new WorldPoint(2970, 3250, 0)
     };
-    // Timeouts are only failure recovery, never pacing between valid state changes.
     private static final long DIALOGUE_STALL_TIMEOUT_MS = 4_000L;
     private static final long WORLD_ACTION_STALL_TIMEOUT_MS = 6_000L;
     private static final int MAX_UNCONFIRMED_ACTIONS = 3;
     private static final long WALK_RETRY = 10_000L;
-    // Prefer a complete outfit using distinct equipment slots.
-    // Match each item against live RuneLite item composition names.
-    private static final List<String> DIANGO_COSTUME_PRIORITY = Arrays.asList(
-        "skeleton boots", "skeleton gloves", "skeleton leggings", "skeleton shirt",
-        "skeleton mask", "spooky boots", "spooky gloves", "spooky skirt",
-        "spooky robe", "spooky hood", "spookier boots", "spookier gloves",
-        "spookier skirt", "spookier robe", "spookier hood",
-        "grim reaper gloves", "grim reaper bottoms", "grim reaper top",
-        "grim reaper hood", "gravedigger boots", "gravedigger gloves",
-        "gravedigger leggings", "gravedigger top", "gravedigger mask",
-        "witch boots", "witch robes", "witch top", "witch hat",
-        "jack lantern mask", "halloween wig", "ugly halloween jumper (orange)"
-    );
-    private static final String[] COSTUME_PIECES = {
-        "Skeleton mask", "Skeleton shirt", "Skeleton leggings", "Skeleton boots",
-        "Skeleton gloves", "Grim reaper hood", "Grim reaper top",
-        "Grim reaper bottoms", "Grim reaper gloves",
-        "Zombie head", "Zombie shirt", "Zombie trousers",
-        "Zombie boots", "Zombie gloves", "Jack lantern mask",
-        "Black h'ween mask", "Red halloween mask", "Blue halloween mask",
-        "Green halloween mask", "Ghostly hood", "Ghostly robe",
-        "Spooky boots", "Spooky gloves", "Spooky skirt", "Spooky robe", "Spooky hood",
-        "Spookier boots", "Spookier gloves", "Spookier skirt", "Spookier robe",
-        "Spookier hood", "Gravedigger boots", "Gravedigger gloves",
-        "Gravedigger leggings", "Gravedigger top", "Gravedigger mask",
-        "Witch boots", "Witch robes", "Witch top", "Witch hat",
-        "Halloween wig", "Ugly halloween jumper (orange)"
-    };
-
     public enum Stage {
         STOPPED,
         INTRODUCTION,
@@ -172,22 +123,26 @@ public final class KspHalloween2026Script extends Script {
     private volatile boolean paused;
     private volatile long startedAt;
 
+    private volatile KspHalloweenPace pace = KspHalloweenPace.draw(System.nanoTime());
+    private final java.util.Random paceRng = new java.util.Random();
+    // The event's varbits, re-read every loop; the overlay and panel show the same snapshot.
+    private volatile KspHalloweenProgress progress = KspHalloweenProgress.NONE;
     private final Set<String> smashedLanternTiles = ConcurrentHashMap.newKeySet();
     private volatile boolean lanternsVerified;
-    // Scheduler writes; overlay and panel read confirmed disappearances only.
-    private final Set<Integer> spookedChildren = ConcurrentHashMap.newKeySet();
     private final Map<Integer, Long> childSpookCooldownUntil = new HashMap<>();
     private int pendingChildId = -1;
     private int pendingChildIndex = -1;
+    private int pendingChildrenBefore;
     private WorldPoint pendingChildTile;
     private long pendingChildSpookAt;
     private long pendingChildAbsentSince;
-    private final Set<Integer> givenAdultIds = new HashSet<>();
     private volatile boolean childrenReportConfirmed;
-    private int childrenReportAttempts;
     private int childSpookRetries;
-    // Track only live-event-NPC-derived scout tiles. The generic Rimmington
-    // lantern search waypoints are never used to locate child NPCs.
+    private int pendingAdultsBefore;
+    private int candyFailures;
+    private final Map<Integer, Long> adultCooldownUntil = new HashMap<>();
+    private long rewardWaitSince;
+    private int rewardTalks;
     private final Set<String> childScoutedNpcTiles = new HashSet<>();
     private long childNoTargetSince;
     private int adultsGiven;
@@ -204,15 +159,15 @@ public final class KspHalloween2026Script extends Script {
     private long pendingLanternAt;
     private long lastVerificationTalkAt;
     private boolean sweepRequiredByStarter;
-    private int starterReportedRemainingCount;
     private int pendingCandyCount = -1;
     private int pendingAdultId = -1;
-    private String pendingHolidayItem;
-    private long pendingHolidayItemAt;
-    private int holidayRetrievalTimeouts;
+    // Costume clicks in flight: the next piece is clicked straight away, the same piece never twice in a row.
+    private final Map<Integer, Long> costumeClickAt = new HashMap<>();
+    private final Map<Integer, Integer> costumeClickTries = new HashMap<>();
+    private static final long COSTUME_CLICK_SETTLE_MS = 1_800L;
+    private static final int MAX_COSTUME_CLICK_TRIES = 3;
     private int holidayScrollAttempts;
     private int holidayCloseAttempts;
-    // A starter conversation is not complete just because the NPC was clicked.
     private Stage pendingStarterNext;
     private long pendingStarterAt;
     private long pendingStarterLastDialogueAt;
@@ -224,13 +179,9 @@ public final class KspHalloween2026Script extends Script {
     private boolean starterInterfaceSeen;
     private String lastStarterObservedWidgetText = "";
     private static final int MAX_STARTER_TALK_ATTEMPTS = 3;
-    // Track the visible Chemist option menu until it actually changes.
-    // Alternating widget clicks and option keybindings avoids silent keybind failures.
     private String pendingChemistOptions = "";
     private long pendingChemistOptionAt;
     private int pendingChemistOptionAttempts;
-    // The 2026 COFFIN answer is entered into a chatbox text prompt, NOT
-    // necessarily selected from a list of dialogue options.
     private long chemistConversationAt;
     private long chemistAnswerSubmittedAt;
     private boolean pendingCook;
@@ -243,11 +194,10 @@ public final class KspHalloween2026Script extends Script {
     private int pendingCoatCandyCount = -1;
     private long pendingCoatAt;
     private int pendingCoatFailures;
-    private String pendingEquipItem;
-    private long pendingEquipAt;
     private boolean pendingHolidayClose;
     private long pendingHolidayCloseAt;
     private int pendingHolidayScrollY = -1;
+    private KspHalloweenCostume.Outfit costume;
     private long pendingHolidayScrollAt;
     private boolean chemistAnswerPromptObserved;
     private int chemistAnswerSubmissions;
@@ -272,7 +222,6 @@ public final class KspHalloween2026Script extends Script {
         pendingLanternAt = 0L;
         lastVerificationTalkAt = 0L;
         sweepRequiredByStarter = false;
-        starterReportedRemainingCount = 0;
         pendingCandyCount = -1;
         pendingStarterNext = null;
         pendingStarterAt = 0L;
@@ -288,93 +237,57 @@ public final class KspHalloween2026Script extends Script {
         clearChemistTextPrompt();
         chemistConversationAt = 0L;
         chemistAnswerSubmissions = 0;
-        pendingHolidayItem = null;
-        pendingHolidayItemAt = 0L;
-        holidayRetrievalTimeouts = 0;
+        costumeClickAt.clear();
+        costumeClickTries.clear();
+        costume = null;
         holidayScrollAttempts = 0;
         holidayCloseAttempts = 0;
-        spookedChildren.clear();
         clearPendingChildSpook();
         childSpookCooldownUntil.clear();
-        givenAdultIds.clear();
+        adultCooldownUntil.clear();
+        candyFailures = 0;
+        rewardWaitSince = 0L;
+        rewardTalks = 0;
         childrenReportConfirmed = false;
-        childrenReportAttempts = 0;
         childSpookRetries = 0;
         childScoutedNpcTiles.clear();
         childNoTargetSince = 0L;
         sweepIndex = 0;
         sweepsWithoutTarget = 0;
         actionsAtStage = 0;
-
         smashedLanternTiles.clear();
-        String savedTiles = configManager.getConfiguration(GROUP, LANTERNS_KEY);
-        if (savedTiles != null && !savedTiles.isBlank())
-            smashedLanternTiles.addAll(Arrays.asList(savedTiles.split(",")));
-        lanternsVerified = Boolean.parseBoolean(
-                configManager.getConfiguration(GROUP, LANTERNS_VERIFIED_KEY));
-        pendingLantern = parseLanternTile(configManager.getConfiguration(GROUP, PENDING_LANTERN_KEY));
-        // A click recorded before a pause/restart must be checked on location,
-        // not forgotten; there is no guaranteed game-level counter in this API.
-        pendingLanternAt = 0L;
-        String savedAdults = configManager.getConfiguration(GROUP, ADULTS_KEY);
-        try { adultsGiven = savedAdults == null ? 0 : Math.max(0, Math.min(5, Integer.parseInt(savedAdults))); }
-        catch (NumberFormatException e) { adultsGiven = 0; }
-        // Only restore verified scene disappearances from v0.2.17 onward.
-        // Discard old speculative clicks without resetting lanterns/costume.
-        String legacyChildAttempts = configManager.getConfiguration(
-                GROUP, LEGACY_SPOOKED_CHILD_ATTEMPTS_KEY);
-        if (legacyChildAttempts != null && !legacyChildAttempts.isBlank()) {
-            log.warn("Halloween discarding unverified legacy child Spook clicks: {}."
-                    + " Lantern and event state are preserved", legacyChildAttempts);
-        }
-        configManager.unsetConfiguration(GROUP, LEGACY_SPOOKED_CHILD_ATTEMPTS_KEY);
-        restoreNpcIds(SPOOKED_CHILD_IDS_KEY, spookedChildren);
-        restoreNpcIds(DELIVERED_ADULT_IDS_KEY, givenAdultIds);
-        // Earlier heuristic releases could persist reversed group assignments.
-        // Keep only NPC IDs that match the now-known task they completed.
-        if (spookedChildren.removeIf(id -> !isChildTreaterId(id))) {
-            persistNpcIds(SPOOKED_CHILD_IDS_KEY, spookedChildren);
-            log.warn("Halloween discarded invalid child-spook NPC IDs from saved progress");
-        }
-        if (givenAdultIds.removeIf(id -> !isAdultTreaterId(id))) {
-            persistNpcIds(DELIVERED_ADULT_IDS_KEY, givenAdultIds);
-            log.warn("Halloween discarded invalid adult-delivery NPC IDs from saved progress");
-            adultsGiven = Math.min(adultsGiven, givenAdultIds.size());
-            configManager.setConfiguration(GROUP, ADULTS_KEY, adultsGiven);
-        }
-        configManager.unsetConfiguration(GROUP, LEGACY_TREATER_CHILD_GROUP_KEY);
-        childrenReportConfirmed = Boolean.parseBoolean(
-                configManager.getConfiguration(GROUP, CHILD_CONFIRMED_KEY));
-        String savedRetries = configManager.getConfiguration(GROUP, CHILD_RETRY_COUNT_KEY);
-        try {
-            childSpookRetries = savedRetries == null ? 0
-                    : Math.max(0, Math.min(2, Integer.parseInt(savedRetries)));
-        } catch (NumberFormatException ignored) {
-            childSpookRetries = 0;
-        }
-        log.info("Halloween saved NPC progress | attemptedChildren={} adultIds={} delivered={}",
-                spookedChildren.size(), givenAdultIds.size(), adultsGiven);
+        lanternsVerified = false;
+
+        for (String key : OBSOLETE_KEYS) configManager.unsetConfiguration(GROUP, key);
+        pace = KspHalloweenPace.draw(System.nanoTime());
+        progress = Microbot.isLoggedIn()
+                ? KspHalloweenProgress.read(Microbot::getVarbitValue) : KspHalloweenProgress.NONE;
+        adultsGiven = progress.adults;
+        log.info("Halloween game progress at start | {}", progress);
 
         Stage saved = savedStage();
-        if (saved == Stage.COMPLETED) {
+        Stage fromGame = progress.startStage(costumeOn());
+        // Logged in, the varbits decide: the saved stage is not per account.
+        if (fromGame == Stage.COMPLETED || (saved == Stage.COMPLETED && !Microbot.isLoggedIn())) {
             change(Stage.COMPLETED, "Previously confirmed Halloween completion");
-            // A completed event must not restart on a later client launch.
-            // Leave the side panel available for an explicit progress reset.
+            // A finished event never restarts; Reset progress in the panel starts another run.
             active = false;
             status = "Event already complete; reset progress to start another run";
             return false;
         } else if (hasUniqueCandyObjectiveInventory()) {
-            // Event-exclusive items are direct evidence that this character
-            // has reached the adult-candy subtask. Do not force a pointless
-            // walk to Angel/Henja when the required items are already held.
+            // Event-only items in the inventory: go straight to the candy step.
             Stage next = stageForAdultCandyObjective();
             change(next, "Recovered Halloween candy objective from live inventory"
                     + " (oldInion=" + oldInionCount()
                     + " candy=" + Rs2Inventory.count("Candy onion", true)
                     + " molten=" + Rs2Inventory.hasItem("Molten sugar") + ")");
+        } else if (fromGame != null) {
+            if (fromGame == Stage.CHEMIST_RIDDLE) fromGame = stageForAdultCandyObjective();
+            if (fromGame.compareTo(Stage.REPORT_LANTERNS) > 0) lanternsVerified = true;
+            if (fromGame.compareTo(Stage.REPORT_CHILDREN) > 0) childrenReportConfirmed = true;
+            change(fromGame, "Resuming from game state: " + progress);
         } else {
-            // Without event-exclusive item evidence, Angel/Henja remain
-            // authoritative for whether the child/lantern tasks are complete.
+            // Otherwise Angel/Henja's dialogue says where we are.
             change(Stage.INTRODUCTION,
                     "Synchronizing Halloween event state with Angel / Henja");
             log.info("Halloween saved stage {} deferred to starter dialogue", saved);
@@ -384,24 +297,6 @@ public final class KspHalloween2026Script extends Script {
         log.info("Halloween 2026 started | stage={} lanterns={}/8 adultsGiven={}",
                 stage, getLanternCount(), adultsGiven);
         return true;
-    }
-
-    private void restoreNpcIds(String key, Set<Integer> destination) {
-        String raw = configManager.getConfiguration(GROUP, key);
-        if (raw == null || raw.isBlank()) return;
-        for (String part : raw.split(",")) {
-            try {
-                int id = Integer.parseInt(part.trim());
-                if (id > 0) destination.add(id);
-            } catch (NumberFormatException ignored) {
-                log.warn("Invalid saved Halloween NPC ID ignored | key={} value={}", key, part);
-            }
-        }
-    }
-
-    private void persistNpcIds(String key, Set<Integer> ids) {
-        configManager.setConfiguration(GROUP, key,
-                ids.stream().sorted().map(String::valueOf).collect(Collectors.joining(",")));
     }
 
     private Stage savedStage() {
@@ -416,7 +311,6 @@ public final class KspHalloween2026Script extends Script {
     private void safeTick() {
         if (!active) return;
         try {
-            // Complete even if the user paused just before the final scroll.
             if (checkForEventComplete()) return;
             if (paused) return;
             tick();
@@ -427,12 +321,7 @@ public final class KspHalloween2026Script extends Script {
         }
     }
 
-    /**
-     * The event scroll is the final authority. The reward inventory and a
-     * completion chat message are NOT sufficient to stop the script early.
-     * Exact widget and text prevent unrelated quest scrolls from triggering.
-     * Called both from the normal loop and GameTick (including while paused).
-     */
+    /** Only the exact "Event complete!" scroll (807:5) ends the run; checked every loop and every game tick. */
     public boolean checkForEventComplete() {
         if (!active || completionSignaled.get()) return completionSignaled.get();
         boolean complete = Microbot.getClientThread().runOnClientThreadOptional(() -> {
@@ -449,28 +338,25 @@ public final class KspHalloween2026Script extends Script {
         log.info("Halloween completion widget confirmed | widgetId={} text=Event complete!",
                 EVENT_COMPLETE_WIDGET_ID);
         change(Stage.COMPLETED, "Event complete! screen confirmed; stopping event");
-        // The owning plugin schedules shutdown on Swing's EDT to remove its
-        // overlay and cancel the script without stopping on the client thread.
+        // The plugin stops the script on Swing's EDT, not on the client thread.
         Runnable callback = completionCallback;
         if (callback != null) callback.run();
         return true;
     }
 
     private boolean handleCutscene() {
-        // RuneLite's CUTSCENE_STATUS varbit 542, exposed by Microbot.
         if (!Rs2Dialogue.isInCutScene()) return false;
-        // Cutscenes must not be interrupted by walking, inventory use, NPC
-        // interactions, or generic stage reconciliation.
+        rewardWaitSince = 0L;
         if (Rs2Dialogue.hasContinue()) {
             String signature = "cutscene|continue|" + Rs2Dialogue.getDialogueText();
             if (canDispatchDialogue(signature)) {
+                if (!readPage(Rs2Dialogue.getDialogueText())) return true;
                 Rs2Dialogue.clickContinue();
                 dialogueActed("Advancing dialogue during Halloween cutscene", signature);
             }
         } else if (Rs2Dialogue.hasSelectAnOption()) {
             String question = Rs2Dialogue.getQuestion();
             String normalized = question == null ? "" : question.toLowerCase(Locale.ROOT);
-            // Never choose Yes to a 'skip cutscene' question.
             if (normalized.contains("skip")) {
                 String signature = "cutscene|do-not-skip|" + normalized;
                 if (canDispatchDialogue(signature)
@@ -491,16 +377,22 @@ public final class KspHalloween2026Script extends Script {
     private void tick() {
         if (checkForEventComplete()) return;
         if (!Microbot.isLoggedIn()) { status = "Waiting for login"; return; }
-        // This gate must precede inventory reconciliation, NPC navigation,
-        // and player-location reads. Only explicit cutscene dialogue is acted on.
+        // Cutscenes come before any walking, clicking or stage changes.
         if (handleCutscene()) return;
         WorldPoint player = Rs2Player.getWorldLocation();
         if (player == null) { status = "Waiting for player location"; return; }
         if (stage == Stage.COMPLETED || stage == Stage.NEEDS_REVIEW) return;
 
-        // An observed inventory transition is a stronger signal for the
-        // current candy subtask than a persisted local stage. Never redirect
-        // away from an active dialogue or an unconfirmed item-use action.
+        // The game's varbits first: never wait for a lantern, child or adult that is already done.
+        progress = KspHalloweenProgress.read(Microbot::getVarbitValue);
+        adultsGiven = progress.adults;
+        Stage done = progress.advance(stage);
+        if (done != stage && !starterConversationActive) {
+            change(done, "Game state shows this step done: " + progress);
+            return;
+        }
+
+        // In the candy steps the inventory says which step is next, unless an action is still in flight.
         if (isCandyStage(stage) && !starterConversationActive
                 && pendingOldOnionCount < 0 && pendingCoatCandyCount < 0
                 && pendingCandyCount < 0 && !pendingCook) {
@@ -514,15 +406,26 @@ public final class KspHalloween2026Script extends Script {
             }
         }
 
-        // Check the Chemist's free-text input BEFORE generic Continue/option
-        // handling. A riddle answer field is not a selectable "92" option.
+        // The riddle answer is typed, so check its input box before generic dialogue handling.
         if (stage == Stage.CHEMIST_RIDDLE && handleChemistAnswerPrompt()) return;
+        if (Rs2Dialogue.hasContinue()) {
+            String said = Rs2Dialogue.getDialogueText();
+            String lower = said == null ? "" : said.toLowerCase(Locale.ROOT);
+            if (stage == Stage.CHEMIST_RIDDLE && (lower.contains("enough space") || lower.contains("make some room"))) {
+                stopForReview("Inventory full: free a slot for the Chemist's sugar, then press Start");
+                return;
+            }
+            // The reward refusal is a dialogue box, not a chat message.
+            if (lower.contains("more free inventory slot")) {
+                stopForReview("Inventory full: " + said.replaceAll("<[^>]*>", " ").trim() + " Then press Start.");
+                return;
+            }
+        }
 
         boolean dialogueVisible = Rs2Dialogue.hasContinue() || Rs2Dialogue.hasSelectAnOption();
         String currentStarterText = "";
         if (starterConversationActive) {
-            // The RuneLite dialogue helpers sometimes report no Continue,
-            // even while NPC text is visibly rendered in the chatbox.
+            // The dialogue helpers can report no Continue while text is visible.
             List<String> samples = starterDialogueSamples();
             currentStarterText = String.join(" | ", samples);
             dialogueVisible = dialogueVisible || !samples.isEmpty();
@@ -535,10 +438,15 @@ public final class KspHalloween2026Script extends Script {
         }
 
         if (Rs2Dialogue.hasContinue()) {
-            if (stage == Stage.CHEMIST_RIDDLE) clearChemistOptionPending();
+            if (stage == Stage.CHEMIST_RIDDLE) {
+                clearChemistOptionPending();
+                // Restart the re-talk timer on every page: his riddle is long, and the answer box must not be closed by a re-talk.
+                if (chemistConversationAt != 0L) chemistConversationAt = System.currentTimeMillis();
+            }
             String signature = stage + "|continue|" + (starterConversationActive
                     ? currentStarterText : Rs2Dialogue.getDialogueText());
             if (canDispatchDialogue(signature)) {
+                if (!readPage(starterConversationActive ? currentStarterText : Rs2Dialogue.getDialogueText())) return;
                 Rs2Dialogue.clickContinue();
                 dialogueActed("Advancing " + stage + " dialogue", signature);
             }
@@ -550,28 +458,22 @@ public final class KspHalloween2026Script extends Script {
             return;
         }
 
-        // If the text widget is visible but Microbot misses its Continue
-        // component, advance once per observed text state via canvas keyboard.
-        // This avoids freezing on a valid Angel/Henja dialogue variant.
+        // Microbot can miss the Continue component of visible starter dialogue: press space once per page.
         if (starterConversationActive && dialogueVisible) {
             String signature = stage + "|starter-visible|" + currentStarterText;
             if (canDispatchDialogue(signature)) {
+                if (!readPage(currentStarterText)) return;
                 Rs2Keyboard.keyPress(KeyEvent.VK_SPACE);
                 dialogueActed("Advancing visible Angel / Henja dialogue", signature);
             }
             return;
         }
 
-        // The interface really disappeared: do not carry a stale dialogue
-        // signature into the next separate NPC or object interaction.
         lastGenericDialogueSignature = "";
         lastGenericDialogueAttempts = 0;
 
-        // Angel/Henja are authoritative for the event objective. Never
-        // resume a preselected stage just because their dialogue closed.
         if (starterConversationActive) {
-            // Consecutive absent widget snapshots distinguish a conversation
-            // close from the short frame where one dialogue page replaces another.
+            // Two empty snapshots in a row: the conversation closed, not just a page change.
             if (starterInterfaceSeen && ++starterNoDialogueTicks >= 2) {
                 starterConversationActive = false;
                 starterInterfaceSeen = false;
@@ -643,12 +545,23 @@ public final class KspHalloween2026Script extends Script {
             case FINAL_TALK:
                 talkToStarter(player);
                 break;
-            case WAIT_FOR_REWARD:
-                // No more NPC clicks or walking after the final dialogue.
-                // A reward may arrive before the cutscene finishes; only
-                // Eventscroll.CONGRATULATIONS ends the plugin.
-                status = "Waiting for Event complete! scroll (807:5)";
+            case WAIT_FOR_REWARD: {
+                // Only the completion scroll ends the run; the reward is claimed by talking again after the cutscene.
+                long now = System.currentTimeMillis();
+                if (rewardWaitSince == 0L) rewardWaitSince = now;
+                if (now - rewardWaitSince < REWARD_SCROLL_WAIT_MS) {
+                    status = "Waiting for Event complete! scroll (807:5)";
+                    break;
+                }
+                if (++rewardTalks > MAX_REWARD_TALKS) {
+                    stopForReview("No Event complete! scroll after " + MAX_REWARD_TALKS
+                            + " more talks to Angel / Henja");
+                    break;
+                }
+                change(Stage.FINAL_TALK, "No reward scroll yet; talking to Angel / Henja to claim it ("
+                        + rewardTalks + "/" + MAX_REWARD_TALKS + ")");
                 break;
+            }
             default:
                 break;
         }
@@ -661,13 +574,11 @@ public final class KspHalloween2026Script extends Script {
     }
 
     private void handleDialogueOption() {
-        // Enumerate unknown choices for accurate follow-up debugging.
         List<String> options = Rs2Dialogue.getDialogueOptions().stream()
                 .map(w -> w == null ? "" : w.getText())
                 .collect(Collectors.toList());
         String signature = stage + "|" + Rs2Dialogue.getQuestion() + "|" + options;
-        // Never replay an unchanged option menu while the client is
-        // processing it. A changed widget/question is immediately actionable.
+        // Never replay an unchanged option menu while the client is processing it.
         if (stage == Stage.CHEMIST_RIDDLE) {
             if (handleChemistDialogueOption(options)) return;
             if (System.currentTimeMillis() - lastDiagnosticAt > 5_000L) {
@@ -679,6 +590,7 @@ public final class KspHalloween2026Script extends Script {
             return;
         }
         if (!canDispatchDialogue(signature)) return;
+        if (!react()) return;
         if (stage == Stage.GET_COSTUME
                 && Rs2Dialogue.keyPressForDialogueOption(
                         "I'd like to check holiday items please!", true)) {
@@ -710,10 +622,7 @@ public final class KspHalloween2026Script extends Script {
         status = "Unknown " + stage + " dialogue options; see logs (no random selection)";
     }
 
-    /**
-     * The Chemist's visible dialogue must provide the exact wiki event option.
-     * An attempted click is NOT treated as success until the menu changes or closes.
-     */
+    /** Picks the Chemist's Halloween option; a click only counts once the menu changes. */
     private boolean handleChemistDialogueOption(List<String> options) {
         int optionIndex = KspHalloweenChemistDialogue.findOptionIndex(options);
         if (optionIndex < 0) {
@@ -749,8 +658,8 @@ public final class KspHalloween2026Script extends Script {
             return true;
         }
 
-        // First try client-local widget bounds, then RuneLite/Microbot's option
-        // keybinding on the unchanged menu. No fixed canvas coordinates.
+        // Alternate the option widget and its keybinding in case one is ignored.
+        if (!react()) return true;
         boolean viaWidget = pendingChemistOptionAttempts % 2 == 0;
         boolean selected = viaWidget
                 ? Rs2Widget.clickWidget(liveOptions.get(optionIndex))
@@ -777,31 +686,27 @@ public final class KspHalloween2026Script extends Script {
         pendingChemistOptionAttempts = 0;
     }
 
-    /**
-     * RuneLite chatbox input widgets can display a text prompt without
-     * {@link Rs2Dialogue#hasSelectAnOption()}. Read one client-thread
-     * snapshot and only type during this plugin's recent Chemist conversation.
-     */
+    /** The Chemist's typed-answer box, read in one client-thread snapshot during his conversation. */
     private boolean handleChemistAnswerPrompt() {
         long now = System.currentTimeMillis();
         if (chemistConversationAt == 0L || now - chemistConversationAt > 120_000L)
             return false;
 
         ChemistInputView view = Microbot.getClientThread().runOnClientThreadOptional(() -> {
-            Widget title = Microbot.getClient().getWidget(WidgetInfo.CHATBOX_TITLE);
-            Widget fullInput = Microbot.getClient().getWidget(WidgetInfo.CHATBOX_FULL_INPUT);
-            Widget input = Microbot.getClient().getWidget(WidgetInfo.CHATBOX_INPUT);
-            return new ChemistInputView(isVisible(title), isVisible(fullInput),
+            Widget title = Microbot.getClient().getWidget(InterfaceID.Chatbox.MES_TEXT);
+            Widget fullInput = Microbot.getClient().getWidget(InterfaceID.Chatbox.MES_TEXT2);
+            Widget input = Microbot.getClient().getWidget(InterfaceID.Chatbox.INPUT);
+            return new ChemistInputView(Microbot.getClient().getVarcIntValue(VarClientID.MESLAYERMODE),
+                    isVisible(title), isVisible(fullInput),
                     isVisible(input), widgetText(title), widgetText(fullInput));
         }).orElse(null);
         if (view == null) return false;
 
-        // Never mistake an NPC Continue or selectable choice for a
-        // free-text answer field, even when a chatbox text widget is visible.
+        // A Continue or option is never the free-text answer field.
         if (Rs2Dialogue.hasContinue() || Rs2Dialogue.hasSelectAnOption())
             return false;
 
-        boolean prompt = KspHalloweenChemistInput.isAnswerPrompt(
+        boolean prompt = KspHalloweenChemistInput.isAnswerPrompt(view.inputMode,
                 view.titleVisible, view.fullInputVisible, view.inputVisible,
                 view.titleText, view.fullInputText);
 
@@ -812,7 +717,6 @@ public final class KspHalloween2026Script extends Script {
                         now - chemistAnswerSubmittedAt,
                         Rs2Inventory.count("Sugar"), Rs2Inventory.count("Molten sugar"));
                 clearChemistTextPrompt();
-                // Give the Chemist response time to arrive before retrying.
                 lastActionAt = now;
                 status = "Chemist answer submitted; checking for sugar or further dialogue";
                 return true;
@@ -822,9 +726,9 @@ public final class KspHalloween2026Script extends Script {
 
         if (!chemistAnswerPromptObserved) {
             chemistAnswerPromptObserved = true;
-            log.info("Halloween Chemist riddle text input detected | title={} body={}"
+            log.info("Halloween Chemist riddle text input detected | mode={} title={} body={}"
                             + " fullInputVisible={} inputVisible={}",
-                    view.titleText, view.fullInputText,
+                    view.inputMode, view.titleText, view.fullInputText,
                     view.fullInputVisible, view.inputVisible);
         }
 
@@ -842,8 +746,8 @@ public final class KspHalloween2026Script extends Script {
                     + " inspect game dialogue before another submission");
             return true;
         }
-        // One submission per observed prompt. Do not type additional digits
-        // while the same input is visible; prevent accidental 9292 responses.
+        // One submission per prompt, so the answer can never be typed twice (9292).
+        if (!react()) return true;
         chemistAnswerSubmittedAt = now;
         chemistAnswerSubmissions++;
         Rs2Keyboard.typeString("92");
@@ -867,14 +771,16 @@ public final class KspHalloween2026Script extends Script {
     }
 
     private static final class ChemistInputView {
+        final int inputMode;
         final boolean titleVisible;
         final boolean fullInputVisible;
         final boolean inputVisible;
         final String titleText;
         final String fullInputText;
 
-        ChemistInputView(boolean titleVisible, boolean fullInputVisible,
+        ChemistInputView(int inputMode, boolean titleVisible, boolean fullInputVisible,
                          boolean inputVisible, String titleText, String fullInputText) {
+            this.inputMode = inputMode;
             this.titleVisible = titleVisible;
             this.fullInputVisible = fullInputVisible;
             this.inputVisible = inputVisible;
@@ -900,10 +806,9 @@ public final class KspHalloween2026Script extends Script {
     }
 
     private void talkToStarter(WorldPoint player) {
-        // Interact with a loaded Angel/Henja NPC immediately; distance to
-        // the STARTER waypoint is irrelevant when the target is in scene.
-        Rs2NpcModel henja = Rs2Npc.getNpc("Henja");
-        Rs2NpcModel angel = Rs2Npc.getNpc("Angel");
+        // A loaded Angel/Henja is clicked straight away, wherever the player stands.
+        Rs2NpcModel henja = npcNamed("Henja");
+        Rs2NpcModel angel = npcNamed("Angel");
         if (henja == null && angel == null
                 && !nearOrWalk(player, STARTER, 8, "Angel / Henja's house"))
             return;
@@ -914,8 +819,9 @@ public final class KspHalloween2026Script extends Script {
                     + " widgetText=" + lastStarterObservedWidgetText);
             return;
         }
-        boolean clicked = henja != null && Rs2Npc.interact(henja, "Talk-to");
-        if (!clicked) clicked = angel != null && Rs2Npc.interact(angel, "Talk-to");
+        if (!react()) return;
+        boolean clicked = henja != null && henja.click("Talk-to");
+        if (!clicked) clicked = angel != null && angel.click("Talk-to");
         if (!clicked) {
             status = "Locating Angel / Henja in their Rimmington home";
             return;
@@ -931,7 +837,6 @@ public final class KspHalloween2026Script extends Script {
         starterConversationActive = true;
         starterInterfaceSeen = false;
         starterNoDialogueTicks = 0;
-        // Keep last non-empty text across retries for accurate failure diagnostics.
     }
 
     private Rs2TileObjectModel lantern() {
@@ -949,41 +854,32 @@ public final class KspHalloween2026Script extends Script {
         return point.getX() + ":" + point.getY() + ":" + point.getPlane();
     }
 
-    private static WorldPoint parseLanternTile(String value) {
-        if (value == null || value.isBlank()) return null;
-        try {
-            String[] parts = value.split(":");
-            if (parts.length != 3) return null;
-            WorldPoint tile = new WorldPoint(Integer.parseInt(parts[0]),
-                    Integer.parseInt(parts[1]), Integer.parseInt(parts[2]));
-            return RIMMINGTON.contains(tile) ? tile : null;
-        } catch (NumberFormatException ex) {
-            return null;
-        }
+    private static Rs2NpcModel npcNamed(String name) {
+        return Microbot.getRs2NpcCache().query().withName(name).nearestOnClientThread();
+    }
+
+    /** Child and adult trick-or-treaters in the loaded scene, by their verified ids. */
+    private static List<Rs2NpcModel> treaters() {
+        return Microbot.getRs2NpcCache().query()
+                .where(n -> isKnownTreaterId(n.getId()))
+                .toListOnClientThread();
     }
 
     private void clearPendingLantern() {
         pendingLantern = null;
         pendingLanternAt = 0L;
-        configManager.unsetConfiguration(GROUP, PENDING_LANTERN_KEY);
     }
 
     private void confirmSmashedLantern(WorldPoint tile, String evidence) {
         if (tile == null) return;
         boolean newlyConfirmed = smashedLanternTiles.add(tileKey(tile));
         if (newlyConfirmed) {
-            configManager.setConfiguration(GROUP, LANTERNS_KEY,
-                    String.join(",", smashedLanternTiles));
-            log.info("Halloween lantern smash confirmed | tile={} evidence={} count={}/8",
-                    tile, evidence, getLanternCount());
+            log.info("Halloween lantern smash confirmed | tile={} evidence={} game={}",
+                    tile, evidence, progress);
         }
         clearPendingLantern();
 
-        // A verified disappearing Smash action is sufficient to END THE
-        // LOCAL SMASHING TASK, not to mark the server objective complete.
-        // The original introductory dialogue sets sweepRequiredByStarter=true;
-        // without this transition an actual 8/8 could continue sweeping
-        // forever unless a separate chat message happened to arrive.
+        // Eight confirmed smashes end the local task; Angel/Henja confirm the objective.
         if (newlyConfirmed && stage == Stage.SMASH_LANTERNS
                 && smashedLanternTiles.size() >= 8) {
             sweepRequiredByStarter = false;
@@ -995,15 +891,13 @@ public final class KspHalloween2026Script extends Script {
     private void confirmAllLanterns(String evidence) {
         lanternsVerified = true;
         clearPendingLantern();
-        configManager.setConfiguration(GROUP, LANTERNS_VERIFIED_KEY, true);
         log.info("Halloween all eight lanterns verified | evidence={} recordedTiles={}",
                 evidence, smashedLanternTiles.size());
     }
 
     private boolean pendingLanternConfirmed(WorldPoint player) {
         if (pendingLantern == null) return false;
-        // Never treat a missing object as smashed when its tile is out of
-        // scene range. Revisit the exact clicked tile after any interruption.
+        // Out of scene range a missing object proves nothing: go back to the clicked tile.
         if (player.distanceTo(pendingLantern) > 9) {
             nearOrWalk(player, pendingLantern, 6, "confirm clicked jack-o'-lantern");
             return true;
@@ -1022,7 +916,7 @@ public final class KspHalloween2026Script extends Script {
         if (pendingLanternAt == 0L
                 || System.currentTimeMillis() - pendingLanternAt > 7_500L) {
             log.info("Halloween smash still available | tile={} retry allowed", clickedTile);
-            clearPendingLantern(); // Only retry a verified still-smashable object.
+            clearPendingLantern();
             return false;
         }
         return true;
@@ -1032,8 +926,7 @@ public final class KspHalloween2026Script extends Script {
         if (!RIMMINGTON.contains(player)
                 && !nearOrWalk(player, STARTER, 12, "Rimmington lanterns")) return;
         if (pendingLanternConfirmed(player)) return;
-        // The eighth acknowledgement may have changed the stage directly.
-        // Do not overwrite REPORT_LANTERNS with a fallback sweep/recheck.
+        // The eighth smash may already have moved the stage on.
         if (stage != Stage.SMASH_LANTERNS) return;
         if (lanternsVerified) {
             change(Stage.REPORT_LANTERNS,
@@ -1043,25 +936,16 @@ public final class KspHalloween2026Script extends Script {
         Rs2TileObjectModel target = lantern();
         if (target != null) {
             WorldPoint location = target.getWorldLocation();
-            status = "Smashing jack-o'-lantern " + (smashedLanternTiles.size() + 1) + "/8";
+            status = "Smashing jack-o'-lantern " + (progress.lanterns + 1) + "/8";
+            if (!react()) return;
             if (target.click(target.findAction("Smash"))) {
                 pendingLantern = location;
                 pendingLanternAt = System.currentTimeMillis();
-                configManager.setConfiguration(GROUP, PENDING_LANTERN_KEY, tileKey(location));
                 lastActionAt = pendingLanternAt;
                 log.info("Halloween smash click | id={} tile={}", target.getId(), location);
             }
             return;
         }
-        // Consult the starter immediately at 7/8 if no target is visible;
-        // the eighth smash may have succeeded in a previous session.
-        if (smashedLanternTiles.size() >= 7 && !sweepRequiredByStarter) {
-            lastVerificationTalkAt = 0L;
-            change(Stage.VERIFY_LANTERNS,
-                    "Checking missed eighth lantern with Angel/Henja");
-            return;
-        }
-        // Search all areas only if the starter specifically says one remains.
         if (sweepsWithoutTarget >= RIMMINGTON_SWEEP.length) {
             sweepRequiredByStarter = false;
             lastVerificationTalkAt = 0L;
@@ -1103,7 +987,7 @@ public final class KspHalloween2026Script extends Script {
                         + " could be read | stage={} continue={} choices={}",
                         stage, Rs2Dialogue.hasContinue(), Rs2Dialogue.hasSelectAnOption());
             }
-            return; // A visible menu is not itself proof of dialogue content.
+            return;
         }
 
         pendingStarterDialogueSeen = true;
@@ -1119,7 +1003,6 @@ public final class KspHalloween2026Script extends Script {
         KspHalloweenStarterState.Objective objective =
                 KspHalloweenStarterState.Objective.UNKNOWN;
         for (String text : dialogueTexts) {
-            // Prefer explicit statements on individual dialogue widgets.
             KspHalloweenStarterState.Objective classified =
                     KspHalloweenStarterState.classify(text);
             if (classified != KspHalloweenStarterState.Objective.UNKNOWN) {
@@ -1129,7 +1012,6 @@ public final class KspHalloween2026Script extends Script {
             }
         }
         if (objective == KspHalloweenStarterState.Objective.UNKNOWN) {
-            // An event sentence can wrap across several chatbox widget fields.
             raw = String.join(" ", dialogueTexts);
             objective = KspHalloweenStarterState.classify(raw);
         }
@@ -1146,10 +1028,7 @@ public final class KspHalloween2026Script extends Script {
         Stage resolved;
         switch (objective) {
             case SMASH_LANTERNS:
-                // Dialogue outranks any stale local 8/8 count. Keep observed
-                // tiles as discovery history, but never auto-advance from it.
                 lanternsVerified = false;
-                configManager.unsetConfiguration(GROUP, LANTERNS_VERIFIED_KEY);
                 sweepRequiredByStarter = true;
                 resolved = Stage.SMASH_LANTERNS;
                 break;
@@ -1157,69 +1036,51 @@ public final class KspHalloween2026Script extends Script {
             case SCARE_CHILDREN:
                 confirmAllLanterns("Angel/Henja dialogue advanced beyond lanterns");
                 childrenReportConfirmed = false;
-                configManager.unsetConfiguration(GROUP, CHILD_CONFIRMED_KEY);
-                resolved = costumeCount() >= 4 ? Stage.SPOOK_CHILDREN : Stage.GET_COSTUME;
-
-                if (stage == Stage.REPORT_CHILDREN && resolved == Stage.SPOOK_CHILDREN
-                        && pendingStarterNext != resolved) {
-                    childSpookRetries++;
-                    configManager.setConfiguration(
-                            GROUP, CHILD_RETRY_COUNT_KEY, childSpookRetries);
-                    int allowedRetries =
-                            spookedChildren.size() >= CHILD_REPORT_CHECKPOINT ? 1 : 2;
-                    if (childSpookRetries > allowedRetries) {
-                        pendingStarterNext = null;
-                        stopForReview("Angel/Henja still requires child scares after "
-                                + childSpookRetries + " reports. Verified disappearances="
-                                + spookedChildren.size() + "; inspect child availability"
-                                + " and dialogue");
-                        return;
-                    }
-                    if (spookedChildren.size() >= CHILD_REPORT_CHECKPOINT) {
-                        spookedChildren.clear();
-                        clearPendingChildSpook();
-                        childSpookCooldownUntil.clear();
-                        persistNpcIds(SPOOKED_CHILD_IDS_KEY, spookedChildren);
-                    }
-                }
+                resolved = costumeOn() ? Stage.SPOOK_CHILDREN : Stage.GET_COSTUME;
                 break;
 
             case ADULT_CANDY:
                 confirmAllLanterns("Angel/Henja dialogue confirms post-lantern objective");
                 childrenReportConfirmed = true;
-                configManager.setConfiguration(GROUP, CHILD_CONFIRMED_KEY, true);
-                configManager.unsetConfiguration(GROUP, CHILD_RETRY_COUNT_KEY);
                 childSpookRetries = 0;
-
-                // If local delivery bookkeeping says 5/5 but the starter still
-                // describes the adult-candy objective, the local counter lost
-                // the authority contest. Re-open all adult identities safely.
-                if (adultsGiven >= 5) {
-                    log.warn("Angel/Henja contradict local adults 5/5; resetting local"
-                            + " delivery acknowledgements to follow server dialogue");
-                    adultsGiven = 0;
-                    givenAdultIds.clear();
-                    configManager.setConfiguration(GROUP, ADULTS_KEY, 0);
-                    persistNpcIds(DELIVERED_ADULT_IDS_KEY, givenAdultIds);
-                }
                 resolved = stageForAdultCandyObjective();
                 break;
 
             case CLAIM_REWARD:
                 confirmAllLanterns("Angel/Henja final dialogue confirms late event state");
                 childrenReportConfirmed = true;
-                configManager.setConfiguration(GROUP, CHILD_CONFIRMED_KEY, true);
                 resolved = Stage.WAIT_FOR_REWARD;
                 break;
 
             case COMPLETE:
-                // A dialogue statement can appear while the cutscene or
-                // reward screen is still pending: keep waiting for widget 807:5.
+                // Said before the cutscene or reward: keep waiting for the completion scroll.
                 resolved = Stage.WAIT_FOR_REWARD;
                 break;
 
+            case ALREADY_COMPLETE:
+                pendingStarterNext = null;
+                configManager.setConfiguration(GROUP, STAGE_KEY, Stage.COMPLETED.name());
+                change(Stage.COMPLETED, "Angel / Henja say the event is already done");
+                Runnable stop = completionCallback;
+                if (stop != null) stop.run();
+                return;
+
             default:
                 return;
+        }
+
+        // The dialogue may never send us back into a step the varbits say is done.
+        Stage gameStage = progress.advance(resolved);
+        if (gameStage != resolved) {
+            if (stage == gameStage && ++childSpookRetries > 2) {
+                pendingStarterNext = null;
+                stopForReview("Angel/Henja keep asking for " + objective + " but the game says it is done ("
+                        + progress + "); inspect the dialogue");
+                return;
+            }
+            log.info("Halloween dialogue said {} but the game says done; going to {} | {}",
+                    objective, gameStage, progress);
+            resolved = gameStage;
         }
 
         if (pendingStarterNext != resolved) {
@@ -1237,43 +1098,37 @@ public final class KspHalloween2026Script extends Script {
     }
 
     /**
-     * Read the actual RuneLite dialogue widgets, rather than relying on
-     * Rs2Dialogue.getDialogueText(): that helper checks only three legacy
-     * child IDs and can return empty for a visible NPC dialogue.
-     *
-     * Only examine currently visible dialogue groups while a starter
-     * conversation initiated by this script is active.
+     * The visible dialogue text, read from the dialogue widgets themselves: Rs2Dialogue.getDialogueText()
+     * checks only a few legacy children and can come back empty.
      */
     private List<String> starterDialogueSamples() {
         List<String> captured = Microbot.getClientThread().runOnClientThreadOptional(() -> {
             List<String> result = new ArrayList<>();
             int[] groups = {
-                InterfaceID.DIALOG_NPC,
-                InterfaceID.DIALOG_PLAYER,
-                InterfaceID.DIALOG_SPRITE,
-                InterfaceID.DIALOG_DOUBLE_SPRITE,
-                InterfaceID.DIALOG_OPTION
+                InterfaceID.CHAT_LEFT,
+                InterfaceID.CHAT_RIGHT,
+                InterfaceID.OBJECTBOX,
+                InterfaceID.OBJECTBOX_DOUBLE,
+                InterfaceID.CHATMENU
             };
             for (int group : groups) {
                 collectVisibleDialogueText(Microbot.getClient().getWidget(group, 0),
                         result, 0);
             }
 
-            // Some dialogue layouts have no useful group-0 root.
             collectVisibleDialogueText(Microbot.getClient().getWidget(
-                    WidgetInfo.DIALOG_NPC_TEXT), result, 0);
+                    InterfaceID.ChatLeft.TEXT), result, 0);
             collectVisibleDialogueText(Microbot.getClient().getWidget(
-                    WidgetInfo.DIALOG_PLAYER_TEXT), result, 0);
+                    InterfaceID.ChatRight.TEXT), result, 0);
             collectVisibleDialogueText(Microbot.getClient().getWidget(
-                    WidgetInfo.DIALOG_SPRITE_TEXT), result, 0);
+                    InterfaceID.Objectbox.TEXT), result, 0);
             collectVisibleDialogueText(Microbot.getClient().getWidget(
-                    WidgetInfo.DIALOG_DOUBLE_SPRITE_TEXT), result, 0);
+                    InterfaceID.ObjectboxDouble.TEXT), result, 0);
             collectVisibleDialogueText(Microbot.getClient().getWidget(
-                    WidgetInfo.DIALOG_OPTION_OPTIONS), result, 0);
+                    InterfaceID.Chatmenu.OPTIONS), result, 0);
             return result;
         }).orElse(Collections.emptyList());
 
-        // Keep Microbot helpers as additional sources, never the only source.
         List<String> all = new ArrayList<>(captured);
         addStarterDialogueText(all, Rs2Dialogue.getDialogueText());
         if (Rs2Dialogue.hasSelectAnOption())
@@ -1318,10 +1173,9 @@ public final class KspHalloween2026Script extends Script {
         return oldInionCount() > 0
                 || Rs2Inventory.count("Candy onion", true) > 0
                 || Rs2Inventory.hasItem("Molten sugar")
-                // Sugar alone is not proof of Halloween progress, but it
-                // becomes actionable when Angel/Henja previously confirmed
-                // the adult-candy objective.
-                || (childrenReportConfirmed && Rs2Inventory.hasItem("Sugar", true));
+                // Sugar only counts once every child is scared: the Chemist gives it after that.
+                || ((childrenReportConfirmed || progress.childrenDone())
+                    && Rs2Inventory.hasItem("Sugar", true));
     }
 
     private Stage stageForAdultCandyObjective() {
@@ -1337,14 +1191,10 @@ public final class KspHalloween2026Script extends Script {
         if (molten && oldOnions > 0) return Stage.COAT_ONIONS;
         if (candy > 0) return Stage.GIVE_CANDY;
         if (sugar) return Stage.COOK_SUGAR;
-        // No more cooked inputs. First get sugar, then use the exact crate.
         return Stage.CHEMIST_RIDDLE;
     }
 
-    /**
-     * Recovery control: request a fresh server-side event-state read from
-     * Angel/Henja. It never fabricates lantern completion or changes counters.
-     */
+    /** Manual recheck: ask Angel/Henja for the current objective. */
     public synchronized boolean requestStarterStateCheck() {
         if (!active || stage == Stage.COMPLETED) return false;
         if (stage == Stage.PAUSED) {
@@ -1365,253 +1215,191 @@ public final class KspHalloween2026Script extends Script {
         return active && stage != Stage.COMPLETED;
     }
 
-    // An outfit requires four *different equipment slots*. Retrieving four
-    // masks or multiple robes does not satisfy the Halloween costume task.
-    private enum CostumeSlot { HEAD, BODY, LEGS, HANDS, FEET }
-
-    private CostumeSlot costumeSlot(String item) {
-        if (item == null) return null;
-        String name = item.toLowerCase(Locale.ROOT);
-        if (name.contains("boots")) return CostumeSlot.FEET;
-        if (name.contains("gloves")) return CostumeSlot.HANDS;
-        if (name.contains("leggings") || name.contains("trousers")
-                || name.contains("bottoms") || name.contains("skirt")) return CostumeSlot.LEGS;
-        if (name.contains("shirt") || name.contains("top") || name.contains("robe")
-                || name.contains("jumper")) return CostumeSlot.BODY;
-        if (name.contains("mask") || name.contains("hood") || name.contains("wig")
-                || name.contains("hat") || name.contains("head")) return CostumeSlot.HEAD;
-        return null;
+    /** A whole Halloween outfit is worn: the children only run from a full costume. */
+    private boolean costumeOn() {
+        return KspHalloweenCostume.anyWorn(Rs2Equipment::isWearing);
     }
 
-    private Set<CostumeSlot> heldCostumeSlots(boolean includeInventory) {
-        Set<CostumeSlot> slots = EnumSet.noneOf(CostumeSlot.class);
-        for (String piece : COSTUME_PIECES) {
-            CostumeSlot slot = costumeSlot(piece);
-            if (slot != null && (Rs2Equipment.isWearing(piece, true)
-                    || (includeInventory && Rs2Inventory.hasItem(piece, true)))) {
-                slots.add(slot);
-            }
-        }
-        return slots;
-    }
-
-    private int costumeCount() {
-        return heldCostumeSlots(false).size();
+    private static boolean held(int itemId) {
+        return Rs2Inventory.hasItem(itemId) || Rs2Equipment.isWearing(itemId);
     }
 
     private void collectCostume(WorldPoint player) {
-        int equipped = costumeCount();
-        KspDiangoHolidayRetrieval.Snapshot window =
-                KspDiangoHolidayRetrieval.inspect(missingCostumeRetrievalNames());
-
-        if (pendingEquipItem != null) {
-            if (Rs2Equipment.isWearing(pendingEquipItem, true)) {
-                log.info("Halloween costume equipped | item={}", pendingEquipItem);
-                pendingEquipItem = null;
-            } else if (System.currentTimeMillis() - pendingEquipAt
-                    < WORLD_ACTION_STALL_TIMEOUT_MS) {
-                status = "Waiting for equipped costume to update: " + pendingEquipItem;
-                return;
-            } else {
-                stopForReview("Costume equip action did not update equipment: "
-                        + pendingEquipItem);
-                return;
-            }
-        }
+        long now = System.currentTimeMillis();
+        KspDiangoHolidayRetrieval.Snapshot window = KspDiangoHolidayRetrieval.inspect();
+        // A piece that arrived (or went on) has its misses forgotten, so a later loss starts fresh.
+        costumeClickTries.keySet().removeIf(k -> k > 0 ? held(k) : Rs2Equipment.isWearing(-k));
 
         if (!window.open) {
             pendingHolidayClose = false;
             pendingHolidayScrollY = -1;
         } else if (pendingHolidayClose) {
-            if (System.currentTimeMillis() - pendingHolidayCloseAt
-                    < WORLD_ACTION_STALL_TIMEOUT_MS) {
-                status = "Waiting for Diango retrieval modal to close";
+            if (now - pendingHolidayCloseAt < WORLD_ACTION_STALL_TIMEOUT_MS) {
+                status = "Waiting for Diango's window to close";
                 return;
             }
-            pendingHolidayClose = false; // Recovery: another close attempt may be needed.
+            pendingHolidayClose = false;
         }
-
         if (window.open && pendingHolidayScrollY >= 0) {
             if (window.scrollY != pendingHolidayScrollY) {
-                log.info("Diango scroll acknowledged | oldY={} newY={}",
-                        pendingHolidayScrollY, window.scrollY);
                 pendingHolidayScrollY = -1;
-            } else if (System.currentTimeMillis() - pendingHolidayScrollAt
-                    < WORLD_ACTION_STALL_TIMEOUT_MS) {
-                status = "Waiting for Diango item-list scroll update";
+            } else if (now - pendingHolidayScrollAt < WORLD_ACTION_STALL_TIMEOUT_MS) {
+                status = "Waiting for Diango's list to scroll";
                 return;
             } else {
-                stopForReview("Diango scroll did not move; inspect visible retrieval items");
+                stopForReview("Diango's item list did not scroll");
                 return;
             }
         }
-
-        if (equipped >= 4) {
+        if (costumeOn()) {
             if (window.open) {
-                closeHolidayRetrieval(window);
+                closeDiango(window);
                 return;
             }
-            change(Stage.SPOOK_CHILDREN, "Four distinct Halloween costume slots equipped");
+            change(Stage.SPOOK_CHILDREN, "Wearing a full Halloween outfit");
             return;
         }
-
-        // One pending withdrawal at a time. Keep the modal open until the
-        // item is actually in inventory; a click alone does not count.
-        if (pendingHolidayItem != null) {
-            if (Rs2Inventory.hasItem(pendingHolidayItem, true)
-                    || Rs2Equipment.isWearing(pendingHolidayItem, true)) {
-                log.info("Diango withdrawal confirmed | item={}", pendingHolidayItem);
-                pendingHolidayItem = null;
-                pendingHolidayItemAt = 0L;
-                holidayRetrievalTimeouts = 0;
-                holidayScrollAttempts = 0;
-            } else if (System.currentTimeMillis() - pendingHolidayItemAt < 5_000L) {
-                status = "Waiting for holiday item: " + pendingHolidayItem
-                        + " (retrieval remains open)";
+        // One whole outfit: the one already mostly held, else Skeleton (top of Diango's list).
+        if (costume == null || (window.open && !Arrays.stream(costume.pieces)
+                .allMatch(id -> held(id) || window.lists(id)))) {
+            costume = KspHalloweenCostume.choose(KspHalloween2026Script::held,
+                    window.open ? window::lists : id -> true);
+            if (costume == null) {
+                stopForReview("Diango has no full Halloween outfit for this account");
                 return;
-            } else {
-                holidayRetrievalTimeouts++;
-                log.warn("Diango withdrawal unconfirmed | item={} attempts={}",
-                        pendingHolidayItem, holidayRetrievalTimeouts);
-                if (holidayRetrievalTimeouts >= 3) {
-                    stopForReview("Diango item not received: " + pendingHolidayItem);
-                    return;
-                }
-                pendingHolidayItem = null;
-                pendingHolidayItemAt = 0L;
             }
+            log.info("Halloween costume | outfit={} pieces={}", costume.name, Arrays.toString(costume.pieces));
         }
+        List<Integer> missing = Arrays.stream(costume.pieces).filter(id -> !held(id))
+                .boxed().collect(Collectors.toList());
 
-        Set<CostumeSlot> ownedSlots = heldCostumeSlots(true);
-
-        // Do NOT close Diango's window after retrieving just one item.
-        // Collect all four different wearable slots first, in one session.
-        if (ownedSlots.size() >= 4) {
+        if (missing.isEmpty()) {
             if (window.open) {
-                log.info("Diango costume batch complete | ownedSlots={} equipped={}/4; closing once",
-                        ownedSlots, equipped);
-                closeHolidayRetrieval(window);
+                closeDiango(window);
                 return;
             }
-
-            // Once the entire batch is held, equip without opening Diango
-            // again. Never replace an already-equipped Halloween slot.
-            Set<CostumeSlot> wornSlots = heldCostumeSlots(false);
-            for (String piece : COSTUME_PIECES) {
-                CostumeSlot slot = costumeSlot(piece);
-                if (slot == null || wornSlots.contains(slot)
-                        || !Rs2Inventory.hasItem(piece, true)) continue;
-                if (Rs2Inventory.wear(piece)) {
-                    pendingEquipItem = piece;
-                    pendingEquipAt = System.currentTimeMillis();
-                    acted("Equipping collected costume: " + piece
-                            + " (" + wornSlots.size() + "/4 slots worn)");
-                } else {
-                    status = "Failed to equip collected costume: " + piece;
+            boolean inFlight = false;
+            for (int id : costume.pieces) {
+                if (Rs2Equipment.isWearing(id) || !Rs2Inventory.hasItem(id)) continue;
+                if (clickInFlight(id, now)) { inFlight = true; continue; }
+                if (!costumeClick(-id, "put on")) return; // wear tries are keyed apart from take tries
+                if (!react()) return;
+                if (Rs2Inventory.wear(id)) {
+                    costumeClickAt.put(id, System.currentTimeMillis());
+                    acted("Putting on the " + costume.name + " outfit (" + id + ")");
                 }
                 return;
             }
-
-            // Do not reopen Diango when all planned items are already owned.
-            stopForReview("Four costume slots owned but fewer than four equipped;"
-                    + " check inventory/equipment actions");
+            if (inFlight) {
+                status = "Putting on the " + costume.name + " outfit";
+                return;
+            }
+            stopForReview("The " + costume.name + " outfit is held but cannot be put on");
             return;
         }
 
         if (window.open) {
-            // Stay here until the complete missing batch is in inventory.
-            // Never interact with Diango while his retrieval modal is up.
-            if (Rs2Inventory.getEmptySlots() <= 0) {
-                stopForReview("Inventory full before collecting four distinct Halloween pieces");
+            if (Rs2Inventory.emptySlotCount() < missing.size()) {
+                stopForReview("Inventory full: free " + missing.size() + " slots for the "
+                        + costume.name + " outfit, then press Start");
                 return;
             }
-            if (window.itemName != null && window.itemBounds != null) {
-                if (KspDiangoHolidayRetrieval.select(window)) {
-                    pendingHolidayItem = window.itemName;
-                    pendingHolidayItemAt = System.currentTimeMillis();
-                    holidayScrollAttempts = 0;
-                    acted("Collecting Halloween piece " + (ownedSlots.size() + 1)
-                            + "/4: " + pendingHolidayItem + " (keeping Diango open)");
+            boolean taking = false;
+            for (int id : missing) {
+                java.awt.Rectangle piece = window.visible.get(id);
+                if (piece == null) continue;
+                if (clickInFlight(id, now)) { taking = true; continue; }
+                if (!costumeClick(id, "take from Diango")) return;
+                if (!react()) return;
+                // The list can re-lay out while we paused (the last take landing): click where it is now.
+                piece = KspDiangoHolidayRetrieval.inspect().visible.get(id);
+                if (piece == null) return;
+                if (KspDiangoHolidayRetrieval.take(piece)) {
+                    costumeClickAt.put(id, System.currentTimeMillis());
+                    acted("Taking " + costume.name + " piece " + id + " from Diango ("
+                            + (costume.pieces.length - missing.size() + 1) + "/" + costume.pieces.length + ")");
                 }
                 return;
             }
-            if (holidayScrollAttempts < 24 && window.canScrollDown()) {
-                if (KspDiangoHolidayRetrieval.scrollDown(window)) {
+            if (taking) {
+                status = "Taking the " + costume.name + " outfit from Diango";
+                return;
+            }
+            Integer direction = missing.stream().map(window.offscreen::get)
+                    .filter(java.util.Objects::nonNull).findFirst().orElse(null);
+            if (direction != null && holidayScrollAttempts < 80) {
+                if (!react()) return;
+                if (KspDiangoHolidayRetrieval.scroll(window, direction < 0)) {
                     holidayScrollAttempts++;
                     pendingHolidayScrollY = window.scrollY;
                     pendingHolidayScrollAt = System.currentTimeMillis();
-                    acted("Searching additional missing costume slots; scroll "
-                            + holidayScrollAttempts);
+                    acted("Scrolling Diango's list " + (direction < 0 ? "up" : "down")
+                            + " to the " + costume.name + " outfit; scroll " + holidayScrollAttempts);
                 }
                 return;
             }
-            log.warn("Diango batch cannot be completed | ownedSlots={} itemWidgets={}"
-                            + " scroll={}/{}", ownedSlots, window.itemWidgets,
-                    window.scrollY, window.scrollMax);
-            stopForReview("Diango has no additional suitable wearable costume pieces");
+            stopForReview("Diango's list does not show the " + costume.name + " pieces " + missing);
             return;
         }
 
-        // Only reopen the modal if it closed before the complete batch was
-        // acquired (e.g. human intervention or a client UI interruption).
         holidayScrollAttempts = 0;
         holidayCloseAttempts = 0;
-        Rs2NpcModel diango = Rs2Npc.getNpc("Diango");
+        Rs2NpcModel diango = npcNamed("Diango");
         if (diango == null) {
             nearOrWalk(player, DIANGO, 8, "Diango in Draynor Village");
             return;
         }
-        if (lastTalkAt == 0L
-                    || System.currentTimeMillis() - lastTalkAt
-                        >= WORLD_ACTION_STALL_TIMEOUT_MS) {
-            if (Rs2Npc.interact(diango, "Holiday-items")) {
+        if (lastTalkAt == 0L || now - lastTalkAt >= WORLD_ACTION_STALL_TIMEOUT_MS) {
+            if (!react()) return;
+            if (npcHasAction(diango, "Holiday-items") && diango.click("Holiday-items")) {
                 lastTalkAt = System.currentTimeMillis();
-                acted("Opening Diango to collect missing costume pieces");
+                acted("Opening Diango's holiday items for the costume");
                 return;
             }
-            if (Rs2Npc.interact(diango, "Talk-to")) {
+            if (diango.click("Talk-to")) {
                 lastTalkAt = System.currentTimeMillis();
                 acted("Asking Diango for holiday items");
                 return;
             }
         }
-        status = "Collecting complete Halloween outfit (" + ownedSlots.size()
-                + "/4 slots already owned)";
+        status = "Opening Diango's holiday items";
     }
 
-    private List<String> missingCostumeRetrievalNames() {
-        Set<CostumeSlot> ownedSlots = heldCostumeSlots(true);
-        return DIANGO_COSTUME_PRIORITY.stream()
-                .filter(item -> {
-                    CostumeSlot slot = costumeSlot(item);
-                    return slot != null && !ownedSlots.contains(slot)
-                            && !Rs2Inventory.hasItem(item, true)
-                            && !Rs2Equipment.isWearing(item, true);
-                })
-                .collect(Collectors.toList());
+    /** A click on this piece is still landing: clicking again now would be a double click. */
+    private boolean clickInFlight(int itemId, long now) {
+        Long at = costumeClickAt.get(itemId);
+        return at != null && now - at < COSTUME_CLICK_SETTLE_MS;
     }
 
-    private void closeHolidayRetrieval(KspDiangoHolidayRetrieval.Snapshot window) {
+    /** Counts a click on a piece; after too many misses, stops for review. */
+    private boolean costumeClick(int itemId, String what) {
+        int tries = costumeClickTries.merge(itemId, 1, Integer::sum);
+        if (tries > MAX_COSTUME_CLICK_TRIES) {
+            stopForReview("Could not " + what + " costume piece " + itemId + " after " + MAX_COSTUME_CLICK_TRIES + " clicks");
+            return false;
+        }
+        return true;
+    }
+
+    private void closeDiango(KspDiangoHolidayRetrieval.Snapshot window) {
         if (holidayCloseAttempts >= 3) {
-            stopForReview("Unable to close Diango retrieval after collecting full costume");
+            stopForReview("Unable to close Diango's window after taking the costume");
             return;
         }
-        if (!KspDiangoHolidayRetrieval.close(window)) {
-            Rs2Keyboard.keyPress(KeyEvent.VK_ESCAPE);
-        }
+        if (!react()) return;
+        if (!KspDiangoHolidayRetrieval.close(window)) Rs2Keyboard.keyPress(KeyEvent.VK_ESCAPE);
         holidayCloseAttempts++;
         pendingHolidayClose = true;
         pendingHolidayCloseAt = System.currentTimeMillis();
-        acted("Closing Diango after full four-slot costume batch");
+        acted("Closing Diango's window with the full costume in hand");
     }
 
     private boolean npcHasAction(Rs2NpcModel npc, String action) {
         if (npc == null || action == null) return false;
         return Microbot.getClientThread().runOnClientThreadOptional(() -> {
             if (Microbot.getClient() == null) return false;
-            // Transformed definitions expose the live context menu for an
-            // event NPC; the base definition can be a different variant.
-            net.runelite.api.NPCComposition def = npc.getTransformedComposition();
+            // The transformed definition carries an event NPC's live menu.
+            net.runelite.api.NPCComposition def = npc.getNpc().getTransformedComposition();
             if (def == null) def = Microbot.getClient().getNpcDefinition(npc.getId());
             if (def == null || def.getActions() == null) return false;
             return Arrays.stream(def.getActions()).anyMatch(a ->
@@ -1639,17 +1427,13 @@ public final class KspHalloween2026Script extends Script {
     }
 
     private boolean scoutVisibleTreaters(WorldPoint player, List<Rs2NpcModel> visible) {
-        // Only actual NPC positions observed through RuneLite are navigation
-        // anchors. We may scout *near* adults to load nearby children, but
-        // never click Spook on an adult or count it towards child progress.
+        // Only real NPC positions are scouting anchors; adults are never spooked or counted.
         if (childScoutedNpcTiles.size() >= MAX_CHILD_NPC_SCOUT_STOPS) return false;
 
         List<Rs2NpcModel> anchors = visible.stream()
                 .filter(n -> {
                     TreaterAge age = classifyTreater(n);
-                    return age == TreaterAge.ADULT
-                            || (age == TreaterAge.CHILD
-                                && !spookedChildren.contains(n.getId()));
+                    return age == TreaterAge.ADULT || age == TreaterAge.CHILD;
                 })
                 .filter(n -> n.getWorldLocation() != null
                         && RIMMINGTON.contains(n.getWorldLocation()))
@@ -1680,7 +1464,7 @@ public final class KspHalloween2026Script extends Script {
             log.info("Halloween NPC-guided child search | anchorNpcId={} age={} tile={}"
                             + " attempts={}/{} scoutStops={}/{}",
                     anchor.getId(), classifyTreater(anchor), target,
-                    spookedChildren.size(), CHILD_REPORT_CHECKPOINT,
+                    progress.children, CHILD_REPORT_CHECKPOINT,
                     childScoutedNpcTiles.size(), MAX_CHILD_NPC_SCOUT_STOPS);
             nearOrWalk(player, target, 6, "visible trick-or-treater NPC location");
             return true;
@@ -1698,12 +1482,7 @@ public final class KspHalloween2026Script extends Script {
         pendingChildAbsentSince = 0L;
     }
 
-    /**
-     * Read the actual RuneLite WorldView NPC collection, not a cached list or
-     * a menu action. Index identifies the exact actor clicked; ID identifies
-     * the specific child definition. An index reused or morphed while the
-     * same actor slot remains populated does not count as disappearance.
-     */
+    /** Whether the clicked child's actor index is still in the live scene. */
     private ChildSceneStatus pendingChildLiveSceneStatus(WorldPoint player) {
         if (pendingChildIndex < 0 || pendingChildTile == null || player == null
                 || player.getPlane() != pendingChildTile.getPlane()
@@ -1727,45 +1506,31 @@ public final class KspHalloween2026Script extends Script {
         }).orElse(ChildSceneStatus.UNKNOWN);
     }
 
-    /**
-     * Called before attempting any new child. A single missing snapshot is
-     * not reliable: the same actor must remain absent for several polls,
-     * with its last observed tile still near the player.
-     */
+    /** Paces the next Spook: settled once the game's child count rises or the child stays gone. */
     private boolean verifyPendingChildSpook(WorldPoint player) {
         if (pendingChildId < 0) return false;
         final long now = System.currentTimeMillis();
         ChildSceneStatus observed = pendingChildLiveSceneStatus(player);
         if (observed == ChildSceneStatus.ABSENT) {
             if (pendingChildAbsentSince == 0L) pendingChildAbsentSince = now;
-            if (now - pendingChildAbsentSince >= CHILD_SPOOK_ABSENCE_STABLE_MS
-                    && now - pendingChildSpookAt >= CHILD_SPOOK_ABSENCE_STABLE_MS) {
-                final int confirmedId = pendingChildId;
-                final int confirmedIndex = pendingChildIndex;
-                spookedChildren.add(confirmedId);
-                persistNpcIds(SPOOKED_CHILD_IDS_KEY, spookedChildren);
-                clearPendingChildSpook();
-                childSpookCooldownUntil.remove(confirmedId);
-                childNoTargetSince = 0L;
-                // The confirmation represents an objective-level improvement,
-                // not merely a successful click submission.
-                childSpookRetries = 0;
-                configManager.unsetConfiguration(GROUP, CHILD_RETRY_COUNT_KEY);
-                log.info("Halloween child scare LIVE SCENE CONFIRMED | childNpcId={}"
-                        + " index={} confirmed={}/{}",
-                        confirmedId, confirmedIndex, spookedChildren.size(),
-                        CHILD_REPORT_CHECKPOINT);
-                status = "Scare confirmed by child disappearing: "
-                        + spookedChildren.size() + "/" + CHILD_REPORT_CHECKPOINT;
-                return false;
-            }
         } else {
             pendingChildAbsentSince = 0L;
         }
+        boolean counted = progress.children > pendingChildrenBefore;
+        boolean gone = pendingChildAbsentSince != 0L
+                && now - pendingChildAbsentSince >= CHILD_SPOOK_ABSENCE_STABLE_MS
+                && now - pendingChildSpookAt >= CHILD_SPOOK_ABSENCE_STABLE_MS;
+        if (counted || gone) {
+            log.info("Halloween child scare settled | childNpcId={} index={} counted={} gone={} | {}",
+                    pendingChildId, pendingChildIndex, counted, gone, progress);
+            childSpookCooldownUntil.remove(pendingChildId);
+            clearPendingChildSpook();
+            childNoTargetSince = 0L;
+            status = "Children scared: " + progress.children + "/" + CHILD_REPORT_CHECKPOINT;
+            return false;
+        }
 
-        // UNKNOWN can be transient while walking toward an NPC or while
-        // RuneLite swaps scene snapshots. Wait for the bounded timeout rather
-        // than retrying the same interaction immediately.
+        // UNKNOWN can be transient (walking, scene swaps): wait for the timeout, do not re-click.
         if (now - pendingChildSpookAt >= CHILD_SPOOK_CONFIRM_TIMEOUT_MS) {
             final int failedId = pendingChildId;
             log.warn("Halloween child scare NOT confirmed | childNpcId={}"
@@ -1785,32 +1550,22 @@ public final class KspHalloween2026Script extends Script {
     }
 
     private void spookChildren(WorldPoint player) {
-        if (costumeCount() < 4) {
+        if (!costumeOn()) {
             clearPendingChildSpook();
-            change(Stage.GET_COSTUME, "Need four Halloween outfit pieces equipped");
+            change(Stage.GET_COSTUME, "Need a full Halloween outfit on");
             return;
         }
         if (!RIMMINGTON.contains(player)
                 && !nearOrWalk(player, STARTER, 12, "child trick-or-treaters")) return;
 
-        // Never issue a second Spook while the prior actor is awaiting
-        // confirmation. This prevents five rapid clicks on unresolved actions.
+        // One Spook at a time: wait until the last one has settled.
         if (verifyPendingChildSpook(player)) return;
-        if (spookedChildren.size() >= CHILD_REPORT_CHECKPOINT) {
-            childrenReportConfirmed = false;
-            change(Stage.REPORT_CHILDREN,
-                    "Five child NPC disappearances confirmed by RuneLite live scene");
-            return;
-        }
-
-        List<Rs2NpcModel> visibleTreaters = Rs2Npc.getNpcs()
-                .filter(n -> isKnownTreaterId(n.getId()))
-                .collect(Collectors.toList());
+        // A scared child never shows again, so every visible child with Spook still needs scaring.
+        List<Rs2NpcModel> visibleTreaters = treaters();
 
         long now = System.currentTimeMillis();
         Rs2NpcModel child = visibleTreaters.stream()
                 .filter(n -> isChildTreaterId(n.getId())
-                        && !spookedChildren.contains(n.getId())
                         && npcHasAction(n, "Spook")
                         && childSpookCooldownUntil.getOrDefault(n.getId(), 0L) <= now
                         && n.getWorldLocation() != null)
@@ -1820,35 +1575,31 @@ public final class KspHalloween2026Script extends Script {
 
         if (child != null) {
             childNoTargetSince = 0L;
-            // Keep the NPC's last position in the active scene until the
-            // disappearance is verified. Do not begin from an unloaded tile.
+            sweepsWithoutTarget = 0;
+            // Get close first, so its disappearance happens inside the loaded scene.
             if (player.distanceTo(child.getWorldLocation()) > 9) {
                 nearOrWalk(player, child.getWorldLocation(), 6,
                         "unspooked child trick-or-treater");
                 return;
             }
-            // Take a stable identity and position BEFORE invoking the action.
-            // Action dispatch alone is never evidence of a successful scare.
             int id = child.getId();
             int index = child.getIndex();
             WorldPoint tile = child.getWorldLocation();
-            if (Rs2Npc.interact(child, "Spook")) {
+            if (!react()) return;
+            if (child.click("Spook")) {
                 pendingChildId = id;
                 pendingChildIndex = index;
                 pendingChildTile = tile;
                 pendingChildSpookAt = now;
                 pendingChildAbsentSince = 0L;
-                acted("Spook dispatched | childNpcId=" + id
-                        + " index=" + index + " awaiting live-scene disappearance"
-                        + " confirmed=" + spookedChildren.size()
-                        + "/" + CHILD_REPORT_CHECKPOINT);
+                pendingChildrenBefore = progress.children;
+                acted("Spook dispatched | childNpcId=" + id + " index=" + index
+                        + " scared=" + progress.children + "/" + CHILD_REPORT_CHECKPOINT);
             }
             return;
         }
 
-        // Scene updates may lag behind movement or an NPC's despawn.
-        // Do not report partial *attempts* to Angel/Henja: those dialogs
-        // can only tell us the same child objective is still active.
+        // Scene updates can lag behind movement or a despawn.
         if (Rs2Player.isMoving()) {
             status = "Waiting for movement to finish before checking child NPCs";
             return;
@@ -1864,13 +1615,12 @@ public final class KspHalloween2026Script extends Script {
                             + ":spook=" + npcHasAction(n, "Spook")
                             + ":tile=" + n.getWorldLocation())
                     .collect(Collectors.joining(", "));
-            log.info("Halloween waiting for remaining child NPCs in live scene"
-                    + " | confirmedIds={} visibleTreaters=[{}] scoutedNpcTiles={}"
-                    + " (no premature Angel/Henja report)",
-                    spookedChildren, sceneDetails, childScoutedNpcTiles);
+            log.info("Halloween looking for remaining child NPCs | {} visibleTreaters=[{}]"
+                    + " scoutedNpcTiles={}", progress, sceneDetails, childScoutedNpcTiles);
         }
-        status = "Waiting for unspooked child NPCs: "
-                + spookedChildren.size() + "/" + CHILD_REPORT_CHECKPOINT;
+        // Never stand still waiting: walk the village (bounded; ends in review if they never show).
+        scanRimmington(player, "Looking for the remaining child trick-or-treaters ("
+                + progress.children + "/" + CHILD_REPORT_CHECKPOINT + ")");
     }
 
 
@@ -1880,20 +1630,20 @@ public final class KspHalloween2026Script extends Script {
             change(Stage.COOK_SUGAR, "Chemist sugar acquired");
             return;
         }
-        Rs2NpcModel chemist = Rs2Npc.getNpc("Chemist");
+        Rs2NpcModel chemist = npcNamed("Chemist");
         if (chemist == null) {
             nearOrWalk(player, CHEMIST, 8, "the Chemist west of Rimmington");
             return;
         }
-        // One Talk-to per observed conversation. The watchdog allows a
-        // retry only when no dialogue/input or sugar appeared.
+        // One Talk-to per conversation; retry only if no dialogue, answer box or sugar appeared.
         long now = System.currentTimeMillis();
         if (chemistConversationAt != 0L
                 && now - chemistConversationAt < WORLD_ACTION_STALL_TIMEOUT_MS) {
             status = "Waiting for Chemist dialogue or sugar";
             return;
         }
-        if (Rs2Npc.interact(chemist, "Talk-to")) {
+        if (!react()) return;
+        if (chemist.click("Talk-to")) {
             lastTalkAt = System.currentTimeMillis();
             chemistConversationAt = lastTalkAt;
             clearChemistTextPrompt();
@@ -1905,8 +1655,7 @@ public final class KspHalloween2026Script extends Script {
     }
 
     private Rs2TileObjectModel cookingSurface() {
-        // Sugar is USED ON the range/fireplace; the object itself need not
-        // advertise a Cook or Use context-menu action.
+        // Sugar is used on the range or fireplace, which need not offer a Cook action.
         return Microbot.getRs2TileObjectCache().query().fromWorldView()
                 .where(o -> o != null && o.getName() != null
                         && (o.getName().equalsIgnoreCase("Range")
@@ -1919,6 +1668,7 @@ public final class KspHalloween2026Script extends Script {
             change(Stage.COLLECT_ONIONS, "Molten sugar ready");
             return;
         }
+        if (pendingCook && Rs2Player.isMoving()) pendingCookAt = System.currentTimeMillis(); // still walking there
         if (pendingCook && System.currentTimeMillis() - pendingCookAt
                 < WORLD_ACTION_STALL_TIMEOUT_MS) {
             status = "Waiting for sugar-to-molten-sugar inventory transition";
@@ -1932,8 +1682,7 @@ public final class KspHalloween2026Script extends Script {
                 && !nearOrWalk(player, CHEMIST, 8, "Rimmington range / fireplace")) return;
         Rs2TileObjectModel surface = cookingSurface();
         if (surface == null) {
-            // The Chemist and Angel/Henja are far enough apart that the
-            // cooking surface may not be loaded into the scene yet.
+            // The cooking surface may not be loaded yet near the Chemist.
             if (!nearOrWalk(player, STARTER, 8, "Angel / Henja range to cook sugar"))
                 return;
             status = "Locating range in Angel/Henja's house or Chemist fireplace";
@@ -1953,6 +1702,7 @@ public final class KspHalloween2026Script extends Script {
         }
         net.runelite.client.plugins.microbot.util.inventory.Rs2ItemModel sugar =
                 Rs2Inventory.get("Sugar", true);
+        if (!react()) return;
         if (sugar != null && Rs2Inventory.useItemOnObject(sugar.getId(), surface.getId())) {
             pendingCook = true;
             pendingCookAt = System.currentTimeMillis();
@@ -1960,8 +1710,7 @@ public final class KspHalloween2026Script extends Script {
         }
     }
 
-    // Exact names observed in the live 2026 event. The alternate item
-    // spelling is included for clients whose item definitions use the wiki name.
+    // Item names seen live, plus the wiki spelling.
     private static final String OLD_ONION_CRATE_NAME = "Crate of onions";
     private static final String[] OLD_ONION_ITEM_NAMES = {"Old inion", "Old onion"};
     private static final int ONIONS_REQUIRED = 5;
@@ -1982,7 +1731,7 @@ public final class KspHalloween2026Script extends Script {
         return null;
     }
 
-    /** Consumed old onions still count: candy in inventory and verified deliveries. */
+    /** Onions already used still count: candy in the inventory and adults the game counts as fed. */
     private int totalOnionsAccountedFor() {
         return oldInionCount() + Rs2Inventory.count("Candy onion", true) + adultsGiven;
     }
@@ -2010,8 +1759,6 @@ public final class KspHalloween2026Script extends Script {
         int candy = Rs2Inventory.count("Candy onion", true);
         int total = count + candy + adultsGiven;
 
-        // Inventory is authoritative for the local collection subtask; the
-        // overall adult-candy objective was established by Angel/Henja.
         if (total >= ONIONS_REQUIRED) {
             change(count > 0 ? Stage.COAT_ONIONS : Stage.GIVE_CANDY,
                     "Five onions accounted for: raw=" + count + " candy=" + candy
@@ -2019,16 +1766,17 @@ public final class KspHalloween2026Script extends Script {
             return;
         }
 
-        // An interaction has not succeeded merely because the crate was clicked.
-        // Wait for the inventory receipt, and re-evaluate immediately on change.
+        // A click is not a receipt: wait for the onion to arrive.
         if (pendingOldOnionCount >= 0) {
             if (count > pendingOldOnionCount) {
                 log.info("Halloween old inion receipt | before={} after={} total={}/{}",
                         pendingOldOnionCount, count, total, ONIONS_REQUIRED);
                 pendingOldOnionCount = -1;
                 pendingOldOnionFailures = 0;
-            } else if (System.currentTimeMillis() - pendingOldOnionAt
+            } else if (Rs2Player.isMoving() || System.currentTimeMillis() - pendingOldOnionAt
                     < WORLD_ACTION_STALL_TIMEOUT_MS) {
+                // Walking to the crate is not a failed click: the wait counts from arrival.
+                if (Rs2Player.isMoving()) pendingOldOnionAt = System.currentTimeMillis();
                 status = "Waiting for Old inion inventory receipt (" + total + "/5)";
                 return;
             } else {
@@ -2041,8 +1789,6 @@ public final class KspHalloween2026Script extends Script {
             }
         }
 
-        // PRIORITY: query and interact with the actual, loaded scene object.
-        // Never walk toward STARTER first when its crate is in the canvas.
         Rs2TileObjectModel crate = oldOnionCrate();
         if (crate != null) {
             oldOnionCrateMissingSince = 0L;
@@ -2052,6 +1798,7 @@ public final class KspHalloween2026Script extends Script {
                         + " but does not expose a known collection action");
                 return;
             }
+            if (!react()) return;
             if (crate.click(action)) {
                 pendingOldOnionCount = count;
                 pendingOldOnionAt = System.currentTimeMillis();
@@ -2061,9 +1808,7 @@ public final class KspHalloween2026Script extends Script {
             return;
         }
 
-        // Fall back to walking only when the real crate has not loaded and
-        // the player is outside the house area. No repeated webwalk to STARTER
-        // while standing at/near the event house.
+        // Walk only when the crate is not loaded and we are away from the house.
         if (player.distanceTo(STARTER) > OLD_ONION_CRATE_SEARCH_RADIUS) {
             oldOnionCrateMissingSince = 0L;
             nearOrWalk(player, STARTER, OLD_ONION_CRATE_SEARCH_RADIUS,
@@ -2089,8 +1834,7 @@ public final class KspHalloween2026Script extends Script {
             change(Stage.GIVE_CANDY, "Five candy onions ready for adults");
             return;
         }
-        // A combine may consume its inputs before the output inventory cache
-        // updates; treat that as pending until the candy-onion receipt appears.
+        // Inputs can vanish before the candy onion shows in the inventory: wait for the receipt.
         if (pendingCoatCandyCount >= 0) {
             if (candy > pendingCoatCandyCount) {
                 log.info("Halloween candy onion created | before={} after={}",
@@ -2118,6 +1862,7 @@ public final class KspHalloween2026Script extends Script {
             return;
         }
         String oldItemName = carriedOldInionName();
+        if (!react()) return;
         if (oldItemName != null && Rs2Inventory.combine("Molten sugar", oldItemName)) {
             pendingCoatCandyCount = candy;
             pendingCoatAt = System.currentTimeMillis();
@@ -2127,56 +1872,52 @@ public final class KspHalloween2026Script extends Script {
 
     private void giveCandy(WorldPoint player) {
         int candyCount = Rs2Inventory.count("Candy onion");
+        long now = System.currentTimeMillis();
         if (pendingCandyCount >= 0) {
-            if (candyCount < pendingCandyCount) {
-                int used = pendingCandyCount - candyCount;
-                if (pendingAdultId > 0 && givenAdultIds.add(pendingAdultId)) {
-                    adultsGiven = Math.min(5, adultsGiven + 1);
-                    configManager.setConfiguration(GROUP, ADULTS_KEY, adultsGiven);
-                    persistNpcIds(DELIVERED_ADULT_IDS_KEY, givenAdultIds);
-                    log.info("Halloween candy delivery verified | adultId={} used={} total={}/5",
-                            pendingAdultId, used, adultsGiven);
-                }
+            if (progress.adults > pendingAdultsBefore || candyCount < pendingCandyCount) {
+                log.info("Halloween candy delivered | adultId={} | {}", pendingAdultId, progress);
                 pendingCandyCount = -1;
                 pendingAdultId = -1;
-                // Inventory receipt is authoritative; proceed immediately.
-            } else if (System.currentTimeMillis() - lastActionAt < WORLD_ACTION_STALL_TIMEOUT_MS) {
-                status = "Waiting for candy-onion inventory receipt";
+                candyFailures = 0;
+            } else if (Rs2Player.isMoving() || now - lastActionAt < WORLD_ACTION_STALL_TIMEOUT_MS) {
+                if (Rs2Player.isMoving()) lastActionAt = now;
+                status = "Waiting for the adult to take the candy onion";
                 return;
             } else {
-                stopForReview("Adult candy-onion use did not consume an item;"
-                        + " check NPC/dialogue before retrying");
-                return;
+                // Not taken (walk, can't-reach recovery, a dialogue): retry that adult after a pause.
+                adultCooldownUntil.put(pendingAdultId, now + CHILD_SPOOK_RETRY_COOLDOWN_MS);
+                pendingCandyCount = -1;
+                pendingAdultId = -1;
+                if (++candyFailures >= MAX_UNCONFIRMED_ACTIONS) {
+                    stopForReview("Adults did not take a candy onion " + candyFailures
+                            + " times in a row; check NPC/dialogue | " + progress);
+                    return;
+                }
             }
-        }
-        if (adultsGiven >= 5) {
-            change(Stage.FINAL_TALK, "Five adult trick-or-treaters served");
-            return;
         }
         if (candyCount <= 0) {
             change(Stage.COAT_ONIONS, "Prepare more candy onions for adults");
             return;
         }
-        // Select ONLY verified adult IDs (16794–16798). Never depend on
-        // child-group inference, model height or an unrelated Talk-to action.
-        // Prefer an adult already in the live scene before any webwalking.
-        List<Rs2NpcModel> visibleTreaters = Rs2Npc.getNpcs()
-                .filter(n -> isKnownTreaterId(n.getId())
-                        && n.getWorldLocation() != null
-                        && RIMMINGTON.contains(n.getWorldLocation()))
+        // Visible adults (16794-16798) are unfed: a fed adult turns into its vomit form and never comes back.
+        List<Rs2NpcModel> visibleTreaters = treaters().stream()
+                .filter(n -> n.getWorldLocation() != null && RIMMINGTON.contains(n.getWorldLocation()))
                 .collect(Collectors.toList());
         Rs2NpcModel adult = visibleTreaters.stream()
                 .filter(n -> isAdultTreaterId(n.getId())
-                        && !givenAdultIds.contains(n.getId()))
+                        && adultCooldownUntil.getOrDefault(n.getId(), 0L) <= now)
                 .min(Comparator.comparingInt(n -> player.distanceTo(n.getWorldLocation())))
                 .orElse(null);
         net.runelite.client.plugins.microbot.util.inventory.Rs2ItemModel item =
                 Rs2Inventory.get("Candy onion", true);
         if (adult != null && item != null) {
-            // Supersede any route to an earlier search waypoint.
             Rs2Walker.clearWalkingRoute("ksp_halloween_adult_visible");
-            if (Rs2Inventory.useItemOnNpc(item.getId(), adult)) {
+            if (!react()) return;
+        // The non-deprecated use-on-NPC overload takes the util model.
+            if (Rs2Inventory.useItemOnNpc(item.getId(),
+                    new net.runelite.client.plugins.microbot.util.npc.Rs2NpcModel(adult.getNpc()))) {
                 pendingCandyCount = candyCount;
+                pendingAdultsBefore = progress.adults;
                 pendingAdultId = adult.getId();
                 acted("Giving Candy onion to verified adult npcId=" + adult.getId()
                         + " tile=" + adult.getWorldLocation()
@@ -2186,10 +1927,7 @@ public final class KspHalloween2026Script extends Script {
             return;
         }
 
-        // Child NPCs in the scene are not candidates for candy. If no adult
-        // ID is loaded, navigate to discover another adult; never reclassify
-        // the children as adults or treat them as an ambiguous blocker.
-        // Only scout when no undelivered adult is in the loaded scene.
+        // No adult in the scene: search the village; children are never candy targets.
         if (Rs2Player.isMoving()) {
             status = "Waiting for movement to finish before searching for adult NPCs";
             return;
@@ -2205,6 +1943,18 @@ public final class KspHalloween2026Script extends Script {
                 && !nearOrWalk(player, STARTER, 10, "adult trick-or-treaters"))
             return;
         scanRimmington(player, "Looking for adult trick-or-treaters");
+    }
+
+    /** A player's reaction before clicking something or picking an option. */
+    private boolean react() {
+        sleep(pace.reactionMs(paceRng));
+        return active && !paused; // Pause/Stop pressed during the pause: skip the click
+    }
+
+    /** Time to skim a dialogue page before pressing Continue. */
+    private boolean readPage(String text) {
+        sleep(pace.readMs(text, paceRng));
+        return active && !paused;
     }
 
     private void acted(String message) {
@@ -2224,8 +1974,7 @@ public final class KspHalloween2026Script extends Script {
         pendingCoatCandyCount = -1;
         pendingCoatAt = 0L;
         pendingCoatFailures = 0;
-        pendingEquipItem = null;
-        pendingEquipAt = 0L;
+        costumeClickAt.clear();
         pendingHolidayClose = false;
         pendingHolidayCloseAt = 0L;
         pendingHolidayScrollY = -1;
@@ -2240,7 +1989,7 @@ public final class KspHalloween2026Script extends Script {
         }
         if (lastGenericDialogueAt == 0L) return true;
         if (System.currentTimeMillis() - lastGenericDialogueAt < DIALOGUE_STALL_TIMEOUT_MS)
-            return false; // recovery watchdog, not a normal action delay
+            return false;
         if (lastGenericDialogueAttempts >= MAX_UNCONFIRMED_ACTIONS) {
             stopForReview("Unchanged dialogue after " + lastGenericDialogueAttempts
                     + " attempts; widget=" + signature);
@@ -2286,6 +2035,7 @@ public final class KspHalloween2026Script extends Script {
                 childNoTargetSince = 0L;
                 childScoutedNpcTiles.clear();
             }
+            if (next == Stage.WAIT_FOR_REWARD) rewardWaitSince = 0L;
         }
     }
 
@@ -2304,10 +2054,13 @@ public final class KspHalloween2026Script extends Script {
         if (stage == Stage.SMASH_LANTERNS && pendingLantern != null
                 && text.startsWith("you smash")
                 && (text.contains("lantern") || text.contains("pumpkin"))) {
-            // Both inventory-independent evidence paths (chat and disappearance
-            // of Smash at the exact loaded tile) share the same 8/8 handoff.
-            // Angel/Henja still decides the actual *next* quest objective.
             confirmSmashedLantern(pendingLantern, "game smash message");
+            return;
+        }
+        // Full inventory: never touch the player's items, say what to free and stop.
+        if (text.contains("more free inventory slot")
+                || text.contains("too full to hold any more onions")) {
+            stopForReview("Inventory full: " + raw.replaceAll("<[^>]*>", "").trim() + " Then press Start.");
             return;
         }
         if (text.contains("you have completed the halloween event")
@@ -2338,29 +2091,19 @@ public final class KspHalloween2026Script extends Script {
         }
     }
 
-    /** Intentional explicit reset; never silently reset progress on client restart. */
+    /** Explicit reset only; progress is never reset on a client restart. */
     public synchronized void resetProgress() {
         if (active) return;
         configManager.unsetConfiguration(GROUP, STAGE_KEY);
-        configManager.unsetConfiguration(GROUP, LANTERNS_KEY);
-        configManager.unsetConfiguration(GROUP, PENDING_LANTERN_KEY);
-        configManager.unsetConfiguration(GROUP, LANTERNS_VERIFIED_KEY);
-        configManager.unsetConfiguration(GROUP, ADULTS_KEY);
-        configManager.unsetConfiguration(GROUP, SPOOKED_CHILD_IDS_KEY);
-        configManager.unsetConfiguration(GROUP, LEGACY_SPOOKED_CHILD_ATTEMPTS_KEY);
-        configManager.unsetConfiguration(GROUP, DELIVERED_ADULT_IDS_KEY);
-        configManager.unsetConfiguration(GROUP, CHILD_RETRY_COUNT_KEY);
-        configManager.unsetConfiguration(GROUP, CHILD_CONFIRMED_KEY);
-        configManager.unsetConfiguration(GROUP, LEGACY_TREATER_CHILD_GROUP_KEY);
+        for (String key : OBSOLETE_KEYS) configManager.unsetConfiguration(GROUP, key);
         smashedLanternTiles.clear();
         pendingLantern = null;
         lanternsVerified = false;
-        spookedChildren.clear();
         clearPendingChildSpook();
         childSpookCooldownUntil.clear();
+        adultCooldownUntil.clear();
         childScoutedNpcTiles.clear();
         childNoTargetSince = 0L;
-        givenAdultIds.clear();
         pendingAdultId = -1;
         childrenReportConfirmed = false;
         childSpookRetries = 0;
@@ -2373,19 +2116,15 @@ public final class KspHalloween2026Script extends Script {
     public boolean isPaused() { return paused; }
     public String getStatus() { return status; }
     public Stage getStage() { return stage; }
-    public int getLanternCount() { return lanternsVerified ? 8
-            : Math.min(8, smashedLanternTiles.size()); }
-    /** Distinct children whose exact NPC indices disappeared from RuneLite's live scene after Spook. */
-    public int getChildSpookAttempts() {
-        return Math.min(CHILD_REPORT_CHECKPOINT, spookedChildren.size());
-    }
+    // The overlay and panel show the same game snapshot the script acts on.
+    public int getLanternCount() { return progress.lanterns; }
+    public int getChildSpookAttempts() { return progress.children; }
 
     public int getChildSpookCheckpoint() { return CHILD_REPORT_CHECKPOINT; }
 
-    /** True only after Angel/Henja confirms the next objective. */
     public boolean isChildObjectiveConfirmed() { return childrenReportConfirmed; }
 
-    public int getAdultsGiven() { return adultsGiven; }
+    public int getAdultsGiven() { return progress.adults; }
     public long getRuntimeMs() { return startedAt == 0L ? 0L :
             System.currentTimeMillis() - startedAt; }
 

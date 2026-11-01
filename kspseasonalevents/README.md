@@ -1,4 +1,4 @@
-# KSP Seasonal Events v0.2.17
+# KSP Seasonal Events v0.2.18
 
 A **standalone Microbot plugin**, independent of Chopper, with its own
 config, navigation panel, Start / Pause / Resume / Stop / Reset progress,
@@ -35,6 +35,19 @@ may require manual review rather than repeated speculative clicks. The
 plugin logs stage transitions, visible dialogue options when unknown, NPC
 IDs and world tiles of successfully targeted event objects. No guessed
 NPC/object IDs are treated as authoritative.
+
+## Progress from the game itself (0.2.18)
+
+- Lanterns, children and adults now count from the event's own varbits, re-read every loop. Starting at any point, after a relog, or after doing steps by hand, the script skips whatever the game already shows as done.
+- Fixed: after all five children were scared, the script could wait for them forever. A scared child never comes back, and the old count only included scares the script watched happen.
+- Fixed: fed adults are no longer tracked locally, and a candy onion that was not taken is retried instead of stopping.
+- Fixed: the script talks to Angel / Henja again when the reward scroll does not appear, and stops cleanly when the event was already finished ("Thanks again for your help!").
+- A full inventory (sugar, onions, reward) stops the script with a message saying what to free; it never touches your items.
+- The old saved lantern, child and adult progress is deleted on start; only the stage is kept, as a hint.
+- Fixed: at the Chemist the script talked to him again the moment the answer box opened, so 92 was never typed. It now waits until his riddle has finished, and recognises the answer box from the game's own input state.
+- Fixed: walking to the onion crate, the fire or an adult no longer counts as a failed click (it re-clicked mid-walk and could stop for review).
+- Fixed: at Diango the script scrolled the chat box instead of his item list. It now reads only his own list, takes one full Halloween outfit (Skeleton first, or whichever set you already partly own), puts it all on, and only then goes after the children.
+- Moved off deprecated client APIs (Rs2Npc, WidgetInfo).
 
 ## Verified child scares from RuneLite live scene (0.2.17)
 
