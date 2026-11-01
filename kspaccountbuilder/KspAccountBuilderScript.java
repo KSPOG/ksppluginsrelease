@@ -1210,6 +1210,14 @@ public class KspAccountBuilderScript extends KspManagedScript
         if (questScript != null) { Microbot.status = "Not enough GP for " + forcedTask + " inputs (need " + questScript.getMissingRequirementCost() + ")"; return; }
         if (forcedTask == null || forcedTask == BuilderTask.GE_BUY || forcedTask == BuilderTask.ROMEO_AND_JULIET
                 || forcedTask == BuilderTask.RUNE_MYSTERIES || (forcedTask == BuilderTask.RUNE_ESSENCE && !isRuneMysteriesComplete())) return;
+        // A forced quest with no funds cannot be repaired by the general
+        // GE tool/supply buyer. Do not alternate GE_BUY and the same blocked
+        // quest indefinitely (especially immediately after Tutorial Island).
+        if (forcedTask == BuilderTask.COOKS_ASSISTANT && !hasEnoughCoinsForCooksAssistant())
+        {
+            Microbot.status = "Cook's Assistant: insufficient GP for quest inputs";
+            return;
+        }
         stopCurrentTaskScript();
         taskStarted = false;
         singleSkillRecoveryTask = forcedTask;
@@ -1318,9 +1326,9 @@ public class KspAccountBuilderScript extends KspManagedScript
             case ROMEO_AND_JULIET:
             case RUNE_MYSTERIES:
             case STRONGHOLD_OF_SECURITY: return !isOneTimeTaskCompleted(task);
-            case RUNE_ESSENCE: return isRuneMysteriesComplete() && hasAnyToolAvailable(Buy.PICKAXE_NAMES);
-            case MINING: return hasAnyToolAvailable(Buy.PICKAXE_NAMES);
-            case WOODCUTTING: return hasAnyToolAvailable(Buy.AXE_NAMES);
+            case RUNE_ESSENCE: return isRuneMysteriesComplete() && Buy.hasUsablePickaxeAnywhere();
+            case MINING: return Buy.hasUsablePickaxeAnywhere();
+            case WOODCUTTING: return Buy.hasUsableAxeAnywhere();
             case FIREMAKING: return hasAnyFiremakingResourcesAvailable();
             case FISHING: return hasAnyFishingResourcesAvailable();
             case COOKING: return hasAnyCookingResourcesAvailable();
@@ -1444,7 +1452,9 @@ public class KspAccountBuilderScript extends KspManagedScript
         long requiredCoins = (long) missingItems * MIN_QUEST_BUY_PRICE;
         long availableCoins = getAvailableCoins();
         boolean enoughCoins = availableCoins >= requiredCoins;
-        if (!enoughCoins) debug("Skipping {} due to insufficient GP | missingItems={} availableCoins={} requiredCoins={}",
+        if (!enoughCoins) KspTaskDebug.throttled(log, true, "Builder",
+                "insufficient-quest-" + questName, 15_000L,
+                "Skipping {} due to insufficient GP | missingItems={} availableCoins={} requiredCoins={}",
                 questName, missingItems, availableCoins, requiredCoins);
         return enoughCoins;
     }
