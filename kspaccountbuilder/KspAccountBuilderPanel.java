@@ -53,6 +53,10 @@ final class KspAccountBuilderPanel extends PluginPanel
             "(?i)[A-Z]:\\\\Users\\\\[^\\\\\\s]+");
     private static final Pattern HOME_USER_PATH = Pattern.compile(
             "/(?:home|Users)/[^/\\s]+");
+    private static final Pattern IP_ADDRESS = Pattern.compile(
+            "\\b(?:[0-9]{1,3}\\.){3}[0-9]{1,3}\\b");
+    private static final Pattern ACCOUNT_NUMBER = Pattern.compile(
+            "(?i)\\b(account|accountHash|accountId)\\s*[=:]\\s*[0-9]{5,}\\b");
     private final KspAccountBuilderPlugin plugin;
     private final KspAccountBuilderConfig config;
     private final KspAccountBuilderScript script;
@@ -619,7 +623,9 @@ final class KspAccountBuilderPanel extends PluginPanel
     {
         String redacted = ACCOUNT_ID_FIELD.matcher(text).replaceAll("$1=[redacted]");
         redacted = WINDOWS_USER_PATH.matcher(redacted).replaceAll("[user-home]");
-        return HOME_USER_PATH.matcher(redacted).replaceAll("[user-home]");
+        redacted = HOME_USER_PATH.matcher(redacted).replaceAll("[user-home]");
+        redacted = ACCOUNT_NUMBER.matcher(redacted).replaceAll("$1=[redacted]");
+        return IP_ADDRESS.matcher(redacted).replaceAll("[ip-redacted]");
     }
 
     private static JLabel label()
