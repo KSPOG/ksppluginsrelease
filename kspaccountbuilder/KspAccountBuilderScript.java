@@ -118,6 +118,9 @@ public class KspAccountBuilderScript extends KspManagedScript
     private static final long BREAK_LOGOUT_COMBAT_GRACE_MS = TimeUnit.SECONDS.toMillis(11);
     private static final long TASK_SWITCH_ACTION_COOLDOWN_MS = 500L;
     private static final long TASK_SWITCH_DISPATCH_TIMEOUT_MS = 1_500L;
+    // Bank walks are asynchronous. Avoid recomputing the same route during
+    // intermediate idle ticks while WebWalker is still navigating.
+    private static final long BANK_WALK_RETRY_INTERVAL_MS = 10_000L;
     private static final int DRAYNOR_CORRIDOR_MIN_X = 3050;
     private static final int DRAYNOR_CORRIDOR_MAX_X = 3135;
     private static final int DRAYNOR_CORRIDOR_MIN_Y = 3230;
@@ -336,6 +339,7 @@ public class KspAccountBuilderScript extends KspManagedScript
     private volatile long currentAccountHashSnapshot;
     private long nextPlayTimeReadAtMillis;
     private BankLocation taskSwitchBankLocation;
+    private long lastTaskSwitchBankWalkAtMs;
     private long lastTaskSwitchActionAtMs;
     private long pendingTaskSwitchInventoryAtMs;
     private int pendingTaskSwitchInventoryEmptySlots = -1;
@@ -548,6 +552,7 @@ public class KspAccountBuilderScript extends KspManagedScript
         currentAccountHashSnapshot = 0L;
         nextPlayTimeReadAtMillis = 0L;
         taskSwitchBankLocation = null;
+        lastTaskSwitchBankWalkAtMs = 0L;
         lastTaskSwitchActionAtMs = 0L;
         pendingTaskSwitchInventoryAtMs = 0L;
         pendingTaskSwitchInventoryEmptySlots = -1;
@@ -2105,6 +2110,7 @@ public class KspAccountBuilderScript extends KspManagedScript
         if (!unequipGatheringTools()) return false;
         if (!ensureTaskSwitchBankOpen() || !depositInventoryForTaskSwitch()) return false;
         taskSwitchBankLocation = null;
+        lastTaskSwitchBankWalkAtMs = 0L;
         invalidateTaskSelectionResourceCache();
         return true;
     }
@@ -2120,10 +2126,25 @@ public class KspAccountBuilderScript extends KspManagedScript
             }
             taskSwitchBankResetPending = false;
         }
-        if (Rs2Bank.isOpen()) return true;
+        if (Rs2Bank.isOpen())
+        {
+            lastTaskSwitchBankWalkAtMs = 0L;
+            return true;
+        }
         if (Rs2Player.isMoving() || !taskSwitchActionReady()) return false;
+        // Rs2Player.isMoving() can briefly be false between WebWalker steps.
+        // A failed bank call does not imply the route needs replanning.
+        long now = System.currentTimeMillis();
+        if (lastTaskSwitchBankWalkAtMs > 0L
+                && now - lastTaskSwitchBankWalkAtMs < BANK_WALK_RETRY_INTERVAL_MS) return false;
         boolean acted = tryOpenTaskSwitchBank("direct-open");
-        if (!acted) acted = tryWalkToTaskSwitchBank();
+        if (!acted)
+        {
+            lastTaskSwitchBankWalkAtMs = System.currentTimeMillis();
+            acted = tryWalkToTaskSwitchBank();
+            debug("Bank walk dispatch | bank={} walkerTarget={} dispatched={} retryAfterMs={}",
+                    taskSwitchBankLocation, Rs2Walker.getCurrentTarget(), acted, BANK_WALK_RETRY_INTERVAL_MS);
+        }
         if (acted) markTaskSwitchAction();
         return false;
     }
@@ -2685,6 +2706,7 @@ public class KspAccountBuilderScript extends KspManagedScript
         lastCombatObservedAtMillis = 0L;
         postTutorialBankCameraPending = false;
         taskSwitchBankLocation = null;
+        lastTaskSwitchBankWalkAtMs = 0L;
         lastBreakLoginAttemptAt = 0L;
         invalidateTaskSelectionResourceCache();
         updateWindowTitle();
@@ -2713,6 +2735,7 @@ public class KspAccountBuilderScript extends KspManagedScript
             synchronizedPlayTimeAccountHash = 0L;
             nextPlayTimeReadAtMillis = 0L;
             taskSwitchBankLocation = null;
+            lastTaskSwitchBankWalkAtMs = 0L;
             invalidateTaskSelectionResourceCache();
             debug("Account changed; reset task state before selecting for new account");
         }
