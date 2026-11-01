@@ -16,6 +16,7 @@ public enum WarriorLoot {
     ADAMANT_ARROW("Adamant arrow"),
     EARTH_TALISMAN("Earth talisman"),
     COINS("Coins"),
+    FISHING_BAIT("Fishing bait"),
     CLUE_SCROLL_BEGINNER("Clue scroll (beginner)"),
     SCROLL_BOX_BEGINNER("Scroll box (beginner)");
 
