@@ -308,6 +308,12 @@ public class KspAccountBuilderScript extends KspManagedScript
     // Never override an ordered queue or forced single-skill selection.
     private BuilderTask pendingResupplyReturnTask;
     private BuilderTask singleSkillRecoveryTask;
+    // Suppress a failed GE recovery until resources or skills actually change.
+    private BuilderTask failedRecoveryTask;
+    private long failedRecoveryCoins;
+    private int failedRecoveryInventoryFingerprint;
+    private int failedRecoverySkillFingerprint;
+    private int failedRecoveryBankEpoch;
     private BuilderTask auditedSingleSkillTask;
     private BuilderTask pendingSingleSkillAuditTask;
     private int singleSkillAuditBankEpoch;
@@ -520,6 +526,7 @@ public class KspAccountBuilderScript extends KspManagedScript
         pendingTask = null;
         preselectedHandoffTask = null;
         singleSkillRecoveryTask = null;
+        failedRecoveryTask = null;
         // A new plugin session must never inherit an interrupted Crafting
         // resupply from the previous session or account.
         pendingResupplyReturnTask = null;
@@ -876,7 +883,30 @@ public class KspAccountBuilderScript extends KspManagedScript
         }
         if (forcedTask == BuilderTask.RUNE_ESSENCE && !isRuneMysteriesComplete())
         {
-            stopCurrentTaskScript(); currentTask = forcedTask; taskStarted = false; Microbot.status = "Rune Essence requires Rune Mysteries"; return true;
+            if (isTaskScriptRunning(currentTask)) stopCurrentTaskScript();
+            currentTask = forcedTask; taskStarted = false; Microbot.status = "Rune Essence requires Rune Mysteries"; return true;
+        }
+        // Forced quests cannot be replaced by unrelated activities. When
+        // required items are unaffordable, wait for changed resources instead
+        // of starting GE_BUY, which has its own unrelated supply budget.
+        if (forcedTask == BuilderTask.COOKS_ASSISTANT && !hasEnoughCoinsForCooksAssistant()
+                || forcedTask == BuilderTask.GOBLIN_DIPLOMACY && !hasEnoughCoinsForGoblinDiplomacy()
+                || questScript != null && !hasResourcesForTask(forcedTask))
+        {
+            if (isTaskScriptRunning(currentTask)) stopCurrentTaskScript();
+            currentTask = forcedTask;
+            taskStarted = false;
+            Microbot.status = "Waiting for quest requirements: " + forcedTask;
+            return true;
+        }
+        if (forcedTask != null && isFailedRecoveryUnchanged(forcedTask)
+                && !hasResourcesForTask(forcedTask))
+        {
+            if (isTaskScriptRunning(currentTask)) stopCurrentTaskScript();
+            currentTask = forcedTask;
+            taskStarted = false;
+            Microbot.status = "Waiting for resources: " + forcedTask;
+            return true;
         }
         if (isSingleSkillTargetRequired(forcedTask) && resolveSingleSkillTarget(config.singleSkillTask()) == KspSingleSkillTarget.NONE)
         {
@@ -1196,12 +1226,45 @@ public class KspAccountBuilderScript extends KspManagedScript
         if (currentTask != BuilderTask.GE_BUY) { currentTask = BuilderTask.GE_BUY; taskStarted = false; }
         if (!taskStarted || !buyScript.isComplete()) { Microbot.status = "Getting resources for " + forcedTask; return true; }
         boolean requirementsAvailable = hasResourcesForTask(forcedTask);
-        buyScript.shutdown(); taskStarted = false; currentTask = forcedTask; singleSkillRecoveryTask = null; auditedSingleSkillTask = forcedTask;
+        if (buyScript.isRunning()) buyScript.shutdown();
+        taskStarted = false;
+        currentTask = forcedTask;
+        singleSkillRecoveryTask = null;
+        auditedSingleSkillTask = forcedTask;
+        if (requirementsAvailable) failedRecoveryTask = null;
+        else recordFailedRecovery(forcedTask);
         invalidateTaskSelectionResourceCache();
-        Microbot.status = requirementsAvailable ? "Resources ready for " + forcedTask : "Missing resources for " + forcedTask;
+        Microbot.status = requirementsAvailable ? "Resources ready for " + forcedTask : "Waiting for resources: " + forcedTask;
         debug(requirementsAvailable ? "Single Skill resource recovery completed | target={}" :
                 "Single Skill resource recovery finished but requirements remain unavailable | target={}", forcedTask);
         return true;
+    }
+
+    private void recordFailedRecovery(BuilderTask task)
+    {
+        failedRecoveryTask = task;
+        failedRecoveryCoins = getAvailableCoins();
+        failedRecoveryInventoryFingerprint = getTaskSelectionInventoryFingerprint();
+        failedRecoverySkillFingerprint = getTaskSelectionSkillFingerprint();
+        failedRecoveryBankEpoch = Rs2Bank.getBankLiveEpoch();
+        debug("Resource recovery blocked | task={} coins={} inventoryFp={} skillFp={} bankEpoch={}",
+                task, failedRecoveryCoins, failedRecoveryInventoryFingerprint,
+                failedRecoverySkillFingerprint, failedRecoveryBankEpoch);
+    }
+
+    private boolean isFailedRecoveryUnchanged(BuilderTask task)
+    {
+        if (task == null || task != failedRecoveryTask) return false;
+        boolean unchanged = failedRecoveryCoins == getAvailableCoins()
+                && failedRecoveryInventoryFingerprint == getTaskSelectionInventoryFingerprint()
+                && failedRecoverySkillFingerprint == getTaskSelectionSkillFingerprint()
+                && failedRecoveryBankEpoch == Rs2Bank.getBankLiveEpoch();
+        if (!unchanged)
+        {
+            debug("Rechecking blocked task after resource change | task={}", task);
+            failedRecoveryTask = null;
+        }
+        return unchanged;
     }
 
     private void startSingleSkillResourceRecovery(BuilderTask forcedTask)
@@ -1210,6 +1273,11 @@ public class KspAccountBuilderScript extends KspManagedScript
         if (questScript != null) { Microbot.status = "Not enough GP for " + forcedTask + " inputs (need " + questScript.getMissingRequirementCost() + ")"; return; }
         if (forcedTask == null || forcedTask == BuilderTask.GE_BUY || forcedTask == BuilderTask.ROMEO_AND_JULIET
                 || forcedTask == BuilderTask.RUNE_MYSTERIES || (forcedTask == BuilderTask.RUNE_ESSENCE && !isRuneMysteriesComplete())) return;
+        if (isFailedRecoveryUnchanged(forcedTask))
+        {
+            Microbot.status = "Waiting for resources: " + forcedTask;
+            return;
+        }
         // A forced quest with no funds cannot be repaired by the general
         // GE tool/supply buyer. Do not alternate GE_BUY and the same blocked
         // quest indefinitely (especially immediately after Tutorial Island).
@@ -1273,7 +1341,9 @@ public class KspAccountBuilderScript extends KspManagedScript
         if (activeSingleSkillSelection.equals(selection)) return;
         debug("Single Skill selection changed | previous={} selected={}", activeSingleSkillSelection, selection);
         stopCurrentTaskScript(); buyScript.shutdown(); taskStarted = false; singleSkillRecoveryTask = null;
-        clearSingleSkillResourceAudit(); activeSingleSkillSelection = selection; invalidateTaskSelectionResourceCache();
+        clearSingleSkillResourceAudit(); activeSingleSkillSelection = selection;
+        failedRecoveryTask = null;
+        invalidateTaskSelectionResourceCache();
     }
 
     private boolean isSingleSkillTaskForced() { return resolveSingleSkillTask() != null; }
@@ -1867,7 +1937,7 @@ public class KspAccountBuilderScript extends KspManagedScript
         return false;
     }
 
-    private void stopCurrentTaskScript() { Script script = scriptFor(currentTask); if (script != null) script.shutdown(); }
+    private void stopCurrentTaskScript() { Script script = scriptFor(currentTask); if (script != null && script.isRunning()) script.shutdown(); }
 
     private boolean stopCurrentTaskForHandoff(BuilderTask nextTask)
     {
@@ -1917,7 +1987,7 @@ public class KspAccountBuilderScript extends KspManagedScript
         {
             if (task == keep) continue;
             Script script = scriptFor(task);
-            if (script == null) continue;
+            if (script == null || !script.isRunning()) continue;
             try { script.shutdown(); }
             catch (Exception ex) { log.warn("Account Builder failed to stop child task {}", task, ex); }
         }
@@ -2605,6 +2675,7 @@ public class KspAccountBuilderScript extends KspManagedScript
         debugEnabled = false;
         pendingTask = null;
         singleSkillRecoveryTask = null;
+        failedRecoveryTask = null;
         clearSingleSkillResourceAudit();
         pendingRandomTaskSelection = false;
         awaitingNextActivityStart = false;
