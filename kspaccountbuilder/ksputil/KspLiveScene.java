@@ -774,8 +774,13 @@ public final class KspLiveScene
         return true;
     }
 
-    /** Bypass NPC cant-reach recovery while inside the instanced mine. */
-    public static boolean clickInstancePortal(
+    /**
+     * Dispatch an action on an NPC already present in the live WorldView.
+     * This does not invoke the generic NPC model's cant-reach walker or
+     * issue a pre-emptive walk to the NPC's occupied tile.
+     * Callers must handle known closed doors and stage transitions.
+     */
+    public static boolean clickLiveNpc(
             net.runelite.client.plugins.microbot.api.npc.models.Rs2NpcModel npcModel, String action)
     {
         if (npcModel == null || action == null || npcModel.getNpc() == null
@@ -819,6 +824,13 @@ public final class KspLiveScene
             net.runelite.client.plugins.microbot.util.camera.Rs2Camera.turnTo(npc);
         Microbot.doInvoke(entry, net.runelite.client.plugins.microbot.util.misc.Rs2UiHelper.getActorClickbox(npc));
         return true;
+    }
+
+    /** Preserve the existing instance-portal API for Rune Essence mining. */
+    public static boolean clickInstancePortal(
+            net.runelite.client.plugins.microbot.api.npc.models.Rs2NpcModel npcModel, String action)
+    {
+        return clickLiveNpc(npcModel, action);
     }
 
     public static boolean interact(String objectName, WorldPoint origin, int maxDistance, String action)
