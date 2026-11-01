@@ -23,6 +23,7 @@ public enum HillGiantLoot {
     DEATH_RUNE("Death rune"),
     BODY_TALISMAN("Body talisman"),
     COINS("Coins"),
+    FISHING_BAIT("Fishing bait"),
     LIMPWURT_ROOT("Limpwurt root"),
     UNCUT_SAPPHIRE("Uncut sapphire"),
     UNCUT_EMERALD("Uncut emerald"),
