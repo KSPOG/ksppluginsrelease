@@ -1075,7 +1075,14 @@ public class KspAccountBuilderScript extends KspManagedScript
      */
     private boolean runTutorialIslandExclusively()
     {
-        if (!TutorialIslandScript.isOnTutorialIsland()) return false;
+        // Once Tutorial Island owns the task, retain that ownership across
+        // transient null player locations, uninitialised varbit snapshots and
+        // client/instance transitions. Only verified completion releases it.
+        // Otherwise a single false detection tick can start mainland tasks.
+        boolean detected = TutorialIslandScript.isOnTutorialIsland();
+        boolean tutorialStillActive = currentTask == BuilderTask.TUTORIAL_ISLAND
+                && !tutorialIslandScript.isComplete();
+        if (!detected && !tutorialStillActive) return false;
 
         boolean taskChanged = currentTask != BuilderTask.TUTORIAL_ISLAND;
         if (taskChanged || pendingTask != null || pendingRandomTaskSelection
