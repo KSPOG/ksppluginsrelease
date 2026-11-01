@@ -16,6 +16,8 @@ final class KspHalloweenStarterState {
         ADULT_CANDY,
         CLAIM_REWARD,
         COMPLETE,
+        /** Said after the event: "Thanks again for your help! You're such a nice stranger." */
+        ALREADY_COMPLETE,
         UNKNOWN
     }
 
@@ -27,25 +29,24 @@ final class KspHalloweenStarterState {
 
         String text = normal(rawDialogue);
 
+        if (text.contains("thanks again for your help") || text.contains("such a nice stranger"))
+            return Objective.ALREADY_COMPLETE;
         if (text.contains("completed the halloween event")
                 || text.contains("completed this halloween event")
                 || text.contains("event is complete"))
             return Objective.COMPLETE;
 
-        // Final reward language must be explicit. Generic thanks/congratulations
-        // are not enough to change stage.
+        // Reward language must be explicit; generic thanks is not enough.
         boolean reward = text.contains("vampyre")
                 || text.contains("your reward") || text.contains("your rewards")
                 || text.contains("here's your reward") || text.contains("here are your rewards");
         boolean finalLanguage = text.contains("we're done") || text.contains("we are done")
                 || text.contains("all done") || text.contains("finished")
                 || text.contains("that's everything") || text.contains("that is everything");
-        if (reward && finalLanguage)
+        if ((reward && finalLanguage) || text.contains("take our dad's halloween costume"))
             return Objective.CLAIM_REWARD;
 
-        // The adults step is considered authoritative only when the dialogue
-        // names the actual solution chain. Merely saying adults ignore a
-        // costume is explanation, not enough evidence to leave child scares.
+        // The adults step only counts when the dialogue names the candy chain.
         if (text.contains("chemist") || text.contains("molten sugar")
                 || text.contains("candy onion") || text.contains("old onion")
                 || (text.contains("sugar") && text.contains("onion")))
@@ -62,8 +63,6 @@ final class KspHalloweenStarterState {
                 || text.contains("dress up") || text.contains("dressing up")
                 || (text.contains("wear") && text.contains("halloween"));
 
-        // "Adults won't be frightened by your costume" is explanatory text,
-        // not an instruction to repeat the child objective.
         if (adultsOnly)
             return Objective.UNKNOWN;
         if ((trickOrTreater && scare) || (costume && trickOrTreater))

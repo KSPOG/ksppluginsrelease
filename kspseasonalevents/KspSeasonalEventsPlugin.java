@@ -24,11 +24,11 @@ import net.runelite.client.ui.overlay.OverlayManager;
         tags = {"ksp","holiday","seasonal","halloween","event","f2p"},
         authors = {"KSP"},
         version = KspSeasonalEventsPlugin.VERSION,
-        minClientVersion = "2.6.19",
+        minClientVersion = "2.6.48",
         enabledByDefault = PluginConstants.DEFAULT_ENABLED,
         isExternal = PluginConstants.IS_EXTERNAL)
 public final class KspSeasonalEventsPlugin extends Plugin {
-    public static final String VERSION = "0.2.17";
+    public static final String VERSION = "0.2.18";
     @Inject private ClientToolbar toolbar;
     @Inject private ConfigManager configManager;
     @Inject private OverlayManager overlays;
@@ -43,8 +43,7 @@ public final class KspSeasonalEventsPlugin extends Plugin {
     }
 
     @Override protected void startUp() {
-        // RuneLite persists enum names, so migrate existing 2026 selections
-        // to the reusable holiday slot without clearing event progress.
+        // Migrate the old HALLOWEEN_2026 selection to the reusable slot, keeping progress.
         if ("HALLOWEEN_2026".equals(configManager.getConfiguration(
                 "KspSeasonalEvents", "event"))) {
             configManager.setConfiguration("KspSeasonalEvents", "event", "HALLOWEEN");
@@ -83,8 +82,7 @@ public final class KspSeasonalEventsPlugin extends Plugin {
         overlays.remove(overlay);
     }
 
-    // Game ticks also check completion while the script is paused.
-    // The high-frequency script loop checks the same exact widget during play.
+    // Completion is also checked on game ticks, so it fires while paused.
     @Subscribe public void onGameTick(GameTick event) {
         if (script.isActive()) script.checkForEventComplete();
     }
