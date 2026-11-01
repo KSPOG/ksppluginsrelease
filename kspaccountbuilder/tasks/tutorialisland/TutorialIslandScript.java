@@ -1006,9 +1006,14 @@ public class TutorialIslandScript extends KspManagedScript
             return false;
         }
 
-        if (playerLocation.distanceTo(npcLocation) > 4)
+        // The Survival Expert is already a live-scene NPC. A valid
+        // line of sight permits direct Talk-to even beyond four tiles.
+        if (!npc.hasLineOfSight())
         {
-            walkTutorialLocal(npcLocation, 4);
+            if (playerLocation.distanceTo(npcLocation) > 4)
+            {
+                walkTutorialLocal(npcLocation, 4);
+            }
             return false;
         }
 
@@ -2357,9 +2362,24 @@ public class TutorialIslandScript extends KspManagedScript
             return false;
         }
 
-        if (playerLocation.distanceTo(npcLocation) > reach)
+        // A live-scene NPC with line of sight can be interacted with
+        // directly at any distance supported by the client. The game owns
+        // the short approach after the NPC action; do not ask WebWalker to
+        // path to the NPC first. Line of sight also prevents attempting to
+        // talk through a closed tutorial door.
+        boolean directlyInteractable = npc.hasLineOfSight();
+        if (!directlyInteractable)
         {
-            walkTutorialLocal(npcLocation, reach);
+            if (playerLocation.distanceTo(npcLocation) > reach)
+            {
+                walkTutorialLocal(npcLocation, reach);
+            }
+            else
+            {
+                KspTaskDebug.throttled(log, true, "TutIsland", "npc-obstructed-" + npc.getIndex(), 5_000L,
+                        "Live NPC nearby but obstructed | npc={} npcTile={} player={} action={}",
+                        npc.getName(), npcLocation, playerLocation, action);
+            }
             return false;
         }
 
