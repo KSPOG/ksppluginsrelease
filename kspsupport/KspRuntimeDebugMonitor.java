@@ -213,7 +213,7 @@ final class KspRuntimeDebugMonitor
      * the timer. Waiting for more than two minutes is a suspected stall, not
      * conclusive evidence that an action failed.
      */
-    private void updateStallObservation(String key, Snapshot current, String gameProgress, long now)
+    private void updateStallObservation(String key, Snapshot current, GameProgress gameProgress, long now)
     {
         if (!current.active || gameProgress == null
                 || !current.values.containsKey("activeScripts")
