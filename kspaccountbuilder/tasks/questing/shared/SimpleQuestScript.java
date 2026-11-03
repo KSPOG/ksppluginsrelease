@@ -113,7 +113,7 @@ public abstract class SimpleQuestScript extends KspManagedScript
 
     private int missing(QuestRequirement item)
     {
-        return Math.max(0, item.quantity - Rs2Inventory.itemQuantity(item.itemId) - Math.max(0, Rs2Bank.count(item.name)));
+        return Math.max(0, item.quantity - Rs2Inventory.itemQuantity(item.itemId) - Math.max(0, Rs2Bank.count(item.itemId)));
     }
 
     private int outstanding(int itemId)
@@ -180,10 +180,10 @@ public abstract class SimpleQuestScript extends KspManagedScript
         for (QuestRequirement item : requirements())
         {
             int needed = item.quantity - Rs2Inventory.itemQuantity(item.itemId);
-            int bankCount = Math.max(0, Rs2Bank.count(item.name));
+            int bankCount = Math.max(0, Rs2Bank.count(item.itemId));
             if (needed > 0 && bankCount > 0)
             {
-                Rs2Bank.withdrawX(item.name, Math.min(needed, bankCount));
+                Rs2Bank.withdrawX(item.itemId, Math.min(needed, bankCount));
                 actionSent();
                 return false;
             }
