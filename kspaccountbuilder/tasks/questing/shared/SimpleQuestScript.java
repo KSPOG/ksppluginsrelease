@@ -142,6 +142,26 @@ public abstract class SimpleQuestScript extends KspManagedScript
         return true;
     }
 
+    /**
+     * Prefer stable game item IDs for quest-critical bank retrieval.
+     * Display names can change without changing the underlying item.
+     */
+    protected boolean retrieveBanked(int itemId)
+    {
+        if (Rs2Bank.count(itemId) <= 0) return false;
+        if (!Rs2Bank.isOpen())
+        {
+            if (!Rs2Bank.openBank()) Rs2Bank.walkToBankAndUseBank();
+            return true;
+        }
+        if (Rs2Bank.setWithdrawAsItem())
+        {
+            Rs2Bank.withdrawX(itemId, 1);
+            actionSent();
+        }
+        return true;
+    }
+
     private boolean inventoryReady()
     {
         for (QuestRequirement item : requirements())
