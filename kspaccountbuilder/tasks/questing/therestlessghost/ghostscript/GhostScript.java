@@ -44,7 +44,7 @@ public class GhostScript extends SimpleQuestScript
                 {
                     if (Rs2Inventory.interact(ItemID.AMULET_OF_GHOSTSPEAK, "Wear")) actionSent();
                 }
-                else if (!retrieveBanked("Ghostspeak amulet")) talkTo("Father Urhney", new WorldPoint(3147, 3175, 0));
+                else if (!retrieveBanked(ItemID.AMULET_OF_GHOSTSPEAK)) talkTo("Father Urhney", new WorldPoint(3147, 3175, 0));
                 return;
             }
             if (!walkTo("ghost's coffin", COFFIN, 3)) return;
@@ -58,7 +58,7 @@ public class GhostScript extends SimpleQuestScript
         }
         if (stage == 3 || stage == 4)
         {
-            if (Rs2Inventory.hasItem(ItemID.GHOSTSKULL) || retrieveBanked("Ghost's skull"))
+            if (Rs2Inventory.hasItem(ItemID.GHOSTSKULL) || retrieveBanked(ItemID.GHOSTSKULL))
             {
                 if (!Rs2Inventory.hasItem(ItemID.GHOSTSKULL)) return;
                 if (!walkTo("ghost's coffin", COFFIN, 3)) return;
@@ -74,7 +74,7 @@ public class GhostScript extends SimpleQuestScript
     {
         int stage = varp(VarPlayerID.PRIESTSTART);
         if (stage == 2 && !Rs2Equipment.isWearing("Ghostspeak amulet")
-                && !Rs2Inventory.hasItem(ItemID.AMULET_OF_GHOSTSPEAK) && retrieveBanked("Ghostspeak amulet")) return false;
-        return (stage != 3 && stage != 4) || Rs2Inventory.hasItem(ItemID.GHOSTSKULL) || !retrieveBanked("Ghost's skull");
+                && !Rs2Inventory.hasItem(ItemID.AMULET_OF_GHOSTSPEAK) && retrieveBanked(ItemID.AMULET_OF_GHOSTSPEAK)) return false;
+        return (stage != 3 && stage != 4) || Rs2Inventory.hasItem(ItemID.GHOSTSKULL) || !retrieveBanked(ItemID.GHOSTSKULL);
     }
 }
