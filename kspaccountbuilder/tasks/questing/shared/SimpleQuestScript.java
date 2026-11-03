@@ -111,6 +111,24 @@ public abstract class SimpleQuestScript extends KspManagedScript
         }).orElse(BUY_PRICE));
     }
 
+    /**
+     * Obtain the display name from the loaded RuneLite item definitions,
+     * not the quest's potentially outdated hardcoded display string.
+     */
+    private String currentItemName(QuestRequirement item)
+    {
+        if (item == null || item.itemId <= 0) return item == null ? "" : item.name;
+        String name = Microbot.getClientThread().runOnClientThreadOptional(() ->
+        {
+            if (Microbot.getItemManager() == null
+                    || Microbot.getItemManager().getItemComposition(item.itemId) == null)
+                return null;
+            return Microbot.getItemManager().getItemComposition(item.itemId).getName();
+        }).orElse(null);
+        return name == null || name.trim().isEmpty() || "null".equalsIgnoreCase(name)
+                ? item.name : name;
+    }
+
     private int missing(QuestRequirement item)
     {
         return Math.max(0, item.quantity - Rs2Inventory.itemQuantity(item.itemId) - Math.max(0, Rs2Bank.count(item.itemId)));
@@ -272,9 +290,11 @@ public abstract class SimpleQuestScript extends KspManagedScript
                 setStatus("Rechecking coins for " + item.name);
                 return false;
             }
-            setStatus("Buying " + needed + " x " + item.name);
-            // Existing quest scripts use buyItem and monitor server offer state before collecting.
-            Rs2GrandExchange.buyItem(item.name, price, needed);
+            String buyName = currentItemName(item);
+            setStatus("Buying " + needed + " x " + buyName);
+            // Item IDs remain authoritative; always search the GE using the
+            // currently loaded client's canonical display name.
+            Rs2GrandExchange.buyItem(buyName, price, needed);
             actionSent();
             return false;
         }
