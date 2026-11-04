@@ -200,8 +200,22 @@ public class KspSmartSuperheatScript extends KspBreakAwareScript
         int bestBankedCount = 0;
         String firstInvalidReason = null;
 
+        SuperheatRecipe selected = selectedRecipe();
+        if (selected != null && (selected.getSmithingLevel() > smithing || (selected.isMembersOnly() && !members())))
+        {
+            activeRecipe = null;
+            activeQuote = null;
+            state = SmartSuperheatState.WAITING_FOR_PROFIT;
+            status = selected.getSmithingLevel() > smithing
+                    ? selected.getOutputName() + " requires " + selected.getSmithingLevel() + " Smithing"
+                    : selected.getOutputName() + " requires a members world";
+            nextScanAt = System.currentTimeMillis() + Math.max(15, config.priceRefreshSeconds()) * 1000L;
+            return;
+        }
+
         for (SuperheatRecipe r : SuperheatRecipe.values())
         {
+            if (selected != null && selected != r) continue;
             if (r.getSmithingLevel() > smithing || (r.isMembersOnly() && !members())) continue;
 
             SuperheatQuote q = prices.quote(r, config, freeFireRunes);
@@ -881,9 +895,18 @@ public class KspSmartSuperheatScript extends KspBreakAwareScript
         }
     }
 
+    private SuperheatRecipe selectedRecipe()
+    {
+        if (config == null || config.barSelection() == null) return null;
+        return config.barSelection().getRecipe();
+    }
+
     private SuperheatRecipe pickSaleRecipe()
     {
         if (config == null || !config.autoSellOutput()) return null;
+        SuperheatRecipe selected = selectedRecipe();
+        if (selected != null)
+            return unsold.getOrDefault(selected, 0) > 0 ? selected : null;
         if (activeRecipe != null && unsold.getOrDefault(activeRecipe, 0) > 0) return activeRecipe;
         for (SuperheatRecipe r : SuperheatRecipe.values())
         {
