@@ -18,6 +18,17 @@ A Microbot plugin that checks the bank before selecting a Superheat Item route, 
 The plugin filters recipes by your real Smithing level and requires 43 Magic.
 Members-only recipes are considered only when the account has membership and is currently on a members world.
 
+## Bar selection (v0.2.1)
+
+Select **Bar selection** in the RuneLite plugin configuration:
+
+- **Automatic (best available)** (default): retain existing bank-aware, profit-ranked recipe selection.
+- **Bronze, Iron, Silver, Lead, Steel, Gold, Mithril, Adamantite, Cupronickel, or Runite bar**: only use the selected recipe for casting and GE ingredient purchases.
+
+Fixed mode still honors real Smithing level, members-world requirements, and the existing profitability gates **for fresh GE restocking**. Complete input batches already held in the bank can still be used before any new purchases. When Auto-sell output is enabled, fixed mode sells only the selected bar; unrelated banked bar stock is left untouched.
+
+Selecting a bar means one **bar type**, not stopping after producing one individual bar. The plugin continues processing batches of that type while resources and the configured buying rules permit.
+
 ## Grand Exchange movement and banking (v0.2.0)
 
 When started **outside the Grand Exchange**, Smart Superheat walks to Microbot's canonical
