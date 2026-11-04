@@ -17,6 +17,11 @@ public interface KspSmartSuperheatConfig extends Config, KspMuleConfig, KspBreak
     @ConfigSection(name = "Local Mule", description = "Automatic excess-GP transfer to KSP Trade Receiver", position = 90)
     String muleSection = KspMuleConfig.SECTION;
 
+    @ConfigItem(keyName = "barSelection", name = "Bar selection",
+            description = "Automatic profit-based recipe selection or one fixed bar type. Fixed mode only processes and sells the selected bar.",
+            position = -1)
+    default SuperheatBarSelection barSelection() { return SuperheatBarSelection.AUTOMATIC; }
+
     @Range(min = 0, max = 100000)
     @ConfigItem(keyName = "minProfitPerBar", name = "Minimum profit / bar", description = "A recipe must clear at least this many GP per bar after input costs and GE tax when new inputs need to be bought.", position = 0)
     default int minProfitPerBar() { return 25; }
