@@ -18,14 +18,16 @@ A Microbot plugin that checks the bank before selecting a Superheat Item route, 
 The plugin filters recipes by your real Smithing level and requires 43 Magic.
 Members-only recipes are considered only when the account has membership and is currently on a members world.
 
-## Bar selection (v0.2.1)
+## Bar selection (v0.2.2)
 
 Select **Bar selection** in the RuneLite plugin configuration:
 
 - **Automatic (best available)** (default): retain existing bank-aware, profit-ranked recipe selection.
 - **Bronze, Iron, Silver, Lead, Steel, Gold, Mithril, Adamantite, Cupronickel, or Runite bar**: only use the selected recipe for casting and GE ingredient purchases.
 
-Fixed mode still honors real Smithing level, members-world requirements, and the existing profitability gates **for fresh GE restocking**. Complete input batches already held in the bank can still be used before any new purchases. When Auto-sell output is enabled, fixed mode sells only the selected bar; unrelated banked bar stock is left untouched.
+Fixed mode honors real Smithing level, members-world requirements, valid market price data, the cash reserve, and the maximum spend percentage. **A manually selected bar bypasses the Auto-only minimum profit, ROI, and projected GP/hour thresholds for fresh restocking.** This may intentionally buy inputs for an unprofitable recipe; only use fixed mode if you accept that risk. Complete input batches already held in the bank can still be used before any new purchases. When Auto-sell output is enabled, fixed mode sells only the selected bar; unrelated banked bar stock is left untouched.
+
+Version 0.2.2 fixes a case where fixed mode was blocked from purchasing any ingredients because the selected bar did not meet the Auto profit gates. Check logs for `Smart Superheat recipe selection`, `restock approved`, and `restock blocked by cash budget` when diagnosing purchases. A fixed selection does not override insufficient coins or unavailable market quotes.
 
 Selecting a bar means one **bar type**, not stopping after producing one individual bar. The plugin continues processing batches of that type while resources and the configured buying rules permit.
 
