@@ -232,7 +232,12 @@ public class KspSmartSuperheatScript extends KspBreakAwareScript
                 bestBankedCount = banked;
             }
 
-            if (q.meets(config) && (bestMarket == null || q.getProjectedGpHour() > bestMarket.getProjectedGpHour()))
+            // A fixed bar is a deliberate user choice, not an Auto profit
+            // recommendation. Its price quote must be valid, but Auto-only
+            // profitability gates must not prevent the selected bar from
+            // reaching banking and restocking.
+            if ((selected != null || q.meets(config))
+                    && (bestMarket == null || q.getProjectedGpHour() > bestMarket.getProjectedGpHour()))
             {
                 bestMarket = q;
             }
@@ -270,9 +275,10 @@ public class KspSmartSuperheatScript extends KspBreakAwareScript
             activeRecipe = null;
             activeQuote = null;
             state = SmartSuperheatState.WAITING_FOR_PROFIT;
-            status = firstInvalidReason == null
-                ? "No profitable recipe"
-                : "Price data unavailable: " + firstInvalidReason;
+            status = firstInvalidReason != null
+                ? "Price data unavailable: " + firstInvalidReason
+                : selected != null ? "Selected bar quote unavailable: " + selected.getOutputName()
+                : "No profitable recipe";
             nextScanAt = System.currentTimeMillis() + Math.max(15, config.priceRefreshSeconds()) * 1000L;
             return;
         }
@@ -281,7 +287,13 @@ public class KspSmartSuperheatScript extends KspBreakAwareScript
         activeRecipe = bestMarket.getRecipe();
         nextScanAt = System.currentTimeMillis() + Math.max(15, config.priceRefreshSeconds()) * 1000L;
         state = SmartSuperheatState.PREPARING_BATCH;
-        status = "Selected " + activeRecipe.getOutputName();
+        status = selected == null
+                ? "Auto selected " + activeRecipe.getOutputName()
+                : "Fixed bar selected: " + activeRecipe.getOutputName();
+        log.info("Smart Superheat recipe selection | mode={} bar={} quoteValid={} profitPerBar={} roi={} projectedGpHour={}",
+                selected == null ? "AUTO" : "FIXED", activeRecipe.getOutputName(),
+                activeQuote.isValid(), activeQuote.getProfitPerBar(),
+                activeQuote.getRoiPercent(), activeQuote.getProjectedGpHour());
     }
 
     private void prepare()
@@ -375,7 +387,7 @@ public class KspSmartSuperheatScript extends KspBreakAwareScript
 
         // Only NEW purchases must satisfy the configured profit/ROI/GP-h gates.
         activeQuote = prices.quote(activeRecipe, config, freeFireRunes);
-        if (!activeQuote.meets(config))
+        if (!activeQuote.isValid() || (selectedRecipe() == null && !activeQuote.meets(config)))
         {
             state = SmartSuperheatState.SCANNING_MARKET;
             status = activeQuote.isValid() ? "Recipe no longer profitable to restock" : activeQuote.getReason();
@@ -388,10 +400,16 @@ public class KspSmartSuperheatScript extends KspBreakAwareScript
         long budget = spendable * config.maxSpendPercent() / 100L;
         if (budget < activeQuote.getInputCostPerBar())
         {
+            log.info("Smart Superheat restock blocked by cash budget | bar={} bankAndInventoryCoins={} reserve={} maxSpendPct={} budget={} pricePerBar={}",
+                    activeRecipe.getOutputName(), coins, config.cashReserve(),
+                    config.maxSpendPercent(), budget, activeQuote.getInputCostPerBar());
             waitForCash();
             return;
         }
 
+        log.info("Smart Superheat restock approved | mode={} bar={} coins={} budget={} barsAffordable={}",
+                selectedRecipe() == null ? "AUTO" : "FIXED", activeRecipe.getOutputName(), coins,
+                budget, Math.min(1000L, budget / Math.max(1L, activeQuote.getInputCostPerBar())));
         if (Rs2Bank.count(ItemID.COINS) > 0)
         {
             int before = Rs2Inventory.itemQuantity(ItemID.COINS);
