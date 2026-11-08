@@ -36,6 +36,8 @@ public class KspWineGrabberScript extends KspBreakAwareScript
 {
     private static final int WINE_ID = 245;
     private static final int LAW_RUNE_ID = 563;
+    private static final int WATER_RUNE_ID = 555;
+    private static final int FALADOR_TELEPORT_MAGIC_LEVEL = 37;
     private static final int STAFF_ID = 1381;
     private static final int ROBE_TOP_ID = 1035;
     private static final int ROBE_BOTTOM_ID = 1033;
@@ -61,6 +63,7 @@ public class KspWineGrabberScript extends KspBreakAwareScript
     private volatile int wineGePrice;
     private volatile int lawRuneGePrice;
     private volatile boolean stopped;
+    @Inject private KspWineGrabberConfig config;
 
     private long nextActionAt;
     private long lastPriceRefreshAt;
@@ -70,6 +73,9 @@ public class KspWineGrabberScript extends KspBreakAwareScript
     private int equipmentFailures;
     private int castFailures;
     private int runeWithdrawFailures;
+    private int waterWithdrawFailures;
+    private boolean skipWaterWithdrawUntilNextBankTrip;
+    private boolean teleportAttemptedThisTrip;
     private boolean awaitingCast;
 
     private enum State
@@ -93,7 +99,9 @@ public class KspWineGrabberScript extends KspBreakAwareScript
         stopped = false;
         awaitingCast = false;
         nextActionAt = pendingCastAt = 0L;
-        ladderFailures = equipmentFailures = castFailures = runeWithdrawFailures = 0;
+        ladderFailures = equipmentFailures = castFailures = runeWithdrawFailures = waterWithdrawFailures = 0;
+        skipWaterWithdrawUntilNextBankTrip = false;
+        teleportAttemptedThisTrip = false;
         state = State.STARTING;
 
         mainScheduledFuture = scheduledExecutorService.scheduleWithFixedDelay(() ->
@@ -204,7 +212,7 @@ public class KspWineGrabberScript extends KspBreakAwareScript
         if (Rs2Inventory.itemQuantity(LAW_RUNE_ID) <= 0)
         {
             state = State.TO_BANK;
-            status = "Out of law runes - walking to bank";
+            status = "Out of law runes - returning to bank";
         }
 
         switch (state)
@@ -312,11 +320,43 @@ public class KspWineGrabberScript extends KspBreakAwareScript
             return;
         }
 
+        if (config.useTeleport() && !skipWaterWithdrawUntilNextBankTrip)
+        {
+            int bankWater = Rs2Bank.count(WATER_RUNE_ID);
+            if (bankWater > 0)
+            {
+                if (Rs2Inventory.itemQuantity(WATER_RUNE_ID) == 0 && Rs2Inventory.emptySlotCount() == 0)
+                {
+                    log.warn("Wine Grabber cannot withdraw water runes: no free inventory slot; walking fallback is available");
+                    skipWaterWithdrawUntilNextBankTrip = true;
+                }
+                else
+                {
+                    status = "Withdrawing all Water runes for Falador Teleport";
+                    boolean requested = Rs2Bank.withdrawAll(WATER_RUNE_ID);
+                    if (!requested && ++waterWithdrawFailures >= 6)
+                    {
+                        log.warn("Wine Grabber could not withdraw Water runes after six attempts; using walking fallback");
+                        skipWaterWithdrawUntilNextBankTrip = true;
+                    }
+                    else if (requested)
+                    {
+                        waterWithdrawFailures = 0;
+                    }
+                    retryAfter(800L);
+                    return;
+                }
+            }
+        }
+
         status = "Closing bank and equipping robes / staff";
         if (Rs2Bank.closeBank())
         {
             state = State.EQUIPPING;
             ladderFailures = 0;
+            teleportAttemptedThisTrip = false;
+            skipWaterWithdrawUntilNextBankTrip = false;
+            waterWithdrawFailures = 0;
         }
         retryAfter(800L);
     }
@@ -349,7 +389,7 @@ public class KspWineGrabberScript extends KspBreakAwareScript
 
     private boolean canStartWithoutBank()
     {
-        return !Rs2Inventory.isFull()
+        return !config.useTeleport() && !Rs2Inventory.isFull()
                 && Rs2Inventory.itemQuantity(LAW_RUNE_ID) > 0
                 && (Rs2Equipment.isWearing(STAFF_ID) || Rs2Inventory.contains(STAFF_ID))
                 && (Rs2Equipment.isWearing(ROBE_TOP_ID) || Rs2Inventory.contains(ROBE_TOP_ID))
@@ -599,6 +639,31 @@ public class KspWineGrabberScript extends KspBreakAwareScript
             return;
         }
 
+        // Teleport from either floor; otherwise keep the existing ladder-first route.
+        if (config.useTeleport() && here.distanceTo(BANK_TILE) > 7
+                && !teleportAttemptedThisTrip
+                && Rs2Inventory.itemQuantity(WATER_RUNE_ID) > 0
+                && Rs2Inventory.itemQuantity(LAW_RUNE_ID) > 0
+                && Microbot.getClientThread().runOnClientThreadOptional(() ->
+                        Microbot.getClient().getBoostedSkillLevel(Skill.MAGIC) >= FALADOR_TELEPORT_MAGIC_LEVEL)
+                        .orElse(false))
+        {
+            teleportAttemptedThisTrip = true;
+            status = "Casting Falador Teleport";
+            if (Rs2Magic.cast(MagicAction.FALADOR_TELEPORT)
+                    && sleepUntil(() -> {
+                        WorldPoint location = Rs2Player.getWorldLocation();
+                        return location != null && location.getPlane() == 0
+                                && location.distanceTo(BANK_TILE) < 30;
+                    }, 8000))
+            {
+                log.info("Wine Grabber Falador Teleport confirmed; approaching Falador West bank");
+                retryAfter(700L);
+                return;
+            }
+            log.warn("Wine Grabber Falador Teleport unavailable or unconfirmed; falling back to walking");
+        }
+
         if (here.getPlane() == 1)
         {
             descendLadder();
@@ -607,7 +672,7 @@ public class KspWineGrabberScript extends KspBreakAwareScript
 
         if (here.distanceTo(BANK_TILE) > 7)
         {
-            status = "Walking to Falador West bank (no teleport)";
+            status = "Walking to Falador West bank";
             walkOnly(BANK_TILE, 3);
             retryAfter(ACTION_INTERVAL_MS);
             return;
