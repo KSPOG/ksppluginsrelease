@@ -15,7 +15,7 @@ import net.runelite.client.ui.overlay.OverlayManager;
 
 @PluginDescriptor(
         name = PluginConstants.KSP + "Wine of Zamorak Grabber",
-        description = "Walks to the upstairs Chaos Temple wine, telegrabs, and walks back to bank.",
+        description = "Telegrabs upstairs Chaos Temple wine, with optional Falador Teleport banking.",
         tags = {"ksp", "wine of zamorak", "telekinetic grab", "magic", "f2p", "banking"},
         authors = {"KSP"},
         version = KspWineGrabberPlugin.VERSION,
@@ -25,7 +25,7 @@ import net.runelite.client.ui.overlay.OverlayManager;
 )
 public class KspWineGrabberPlugin extends Plugin
 {
-    public static final String VERSION = "0.1.1";
+    public static final String VERSION = "0.1.2";
 
     @Inject private PluginManager pluginManager;
     @Inject private OverlayManager overlayManager;
