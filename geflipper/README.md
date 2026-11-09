@@ -1,6 +1,6 @@
 # KSP GE Flipper (Microbot)
 
-This folder contains the Microbot-native GE Flipper source from the provided `geflipper.zip` (v1.0.5), integrated on the `dev` branch.
+This folder contains the Microbot-native GE Flipper source from the provided `geflipper.zip` (originally v1.0.5), integrated on the `dev` branch. The KSP fork declares **v1.2.82** to distinguish its plugin release from the separate Microbot-Hub GE Flipper. This is a version-label change only; it does **not** import the upstream v1.2.x implementation.
 
 The plugin follows Flipping Copilot's live RuneLite overlay highlights, resolves GE widgets, and uses Microbot APIs for clicks, banking, input, and actions. Flipping Copilot must be installed and enabled separately.
 
