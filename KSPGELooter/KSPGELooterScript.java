@@ -28,9 +28,11 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 
 import static net.runelite.client.plugins.microbot.util.Global.sleep;
@@ -45,9 +47,10 @@ public class KSPGELooterScript extends KspBreakAwareScript
     private static final long HIGH_ALCH_COOLDOWN_MS = 3_000L;
     private static final long PRIORITY_RELEASE_GRACE_MS = 1_200L;
     private static final long PRIORITY_HANDOFF_SETTLE_MS = 1_500L;
-    private static final long START_TILE_WALK_RETRY_MS = 1_800L;
-    private static final int START_TILE_ARRIVAL_DISTANCE = 1;
-    private static final int MAX_START_TILE_WALKS_WITHOUT_PROGRESS = 3;
+    private static final long WAITING_AREA_WALK_RETRY_MS = 1_800L;
+    private static final int MAX_WAITING_AREA_WALKS_WITHOUT_PROGRESS = 3;
+    private static final int LOCAL_REACH_DISTANCE = 40;
+    private static final String WAITING_AREA_RETURN_PAUSED = "Waiting area return paused - no progress";
     private static final int FAILED_TARGET_REJECT_THRESHOLD = 2;
     private static final int MAX_IMMEDIATE_LOOT_HANDOFFS = 12;
     private static final long IDLE_SCAN_LOG_INTERVAL_MS = 30_000L;
@@ -82,10 +85,10 @@ public class KSPGELooterScript extends KspBreakAwareScript
     private long lastAlchAt;
     private long priorityReleaseAt;
     private long priorityHandoffReadyAt;
-    private long nextStartTileWalkAt;
-    private WorldPoint startTile;
-    private int closestStartTileDistance;
-    private int startTileWalksWithoutProgress;
+    private long nextWaitingAreaWalkAt;
+    private WorldPoint waitingAreaTarget;
+    private int closestWaitingAreaTargetDistance;
+    private int waitingAreaWalksWithoutProgress;
     private long nextIdleScanLogAt;
     private long nextTakeLogAt;
     private String lastWaitReason;
@@ -101,8 +104,10 @@ public class KSPGELooterScript extends KspBreakAwareScript
     public boolean run(KSPGELooterConfig config)
     {
         resetSessionState();
-        log.info("GE Looter started | version={} start={} minGe={} clicksPerItem={} clickDelayMs={} priority={} highAlch={} doBreaks={}",
-                KSPGELooterPlugin.VERSION, startTile, Math.max(0, config.minimumGeValue()),
+        log.info("GE Looter started | version={} waitingAreaOrigin={} waitingAreaWidth={} waitingAreaHeight={} minGe={} clicksPerItem={} clickDelayMs={} priority={} highAlch={} doBreaks={}",
+                KSPGELooterPlugin.VERSION, KSPGELooterArea.WAITING_AREA.toWorldPoint(),
+                KSPGELooterArea.WAITING_AREA.getWidth(), KSPGELooterArea.WAITING_AREA.getHeight(),
+                Math.max(0, config.minimumGeValue()),
                 clamp(config.spamClicks(), 1, 12), KSPGELooterConfig.clickDelayMs(config.spamDelayMs()),
                 config.priorityMode(), config.highAlch(), config.doBreaks());
 
@@ -155,11 +160,6 @@ public class KSPGELooterScript extends KspBreakAwareScript
                     return;
                 }
 
-                if (startTile == null)
-                {
-                    rememberStartTile();
-                }
-
                 WorldPoint walkerTarget = Rs2Walker.getCurrentTarget();
                 if (walkerTarget != null && !KSPGELooterArea.contains(walkerTarget))
                 {
@@ -207,7 +207,7 @@ public class KSPGELooterScript extends KspBreakAwareScript
                 if (lootTarget == null)
                 {
                     clearTarget();
-                    if (returnToStartTile()) return;
+                    if (returnToWaitingArea()) return;
                     lastWaitReason = null;
                     if (config.highAlch() && tryHighAlch()) return;
                     status = groundItemsSeen > 0
@@ -216,7 +216,7 @@ public class KSPGELooterScript extends KspBreakAwareScript
                     return;
                 }
 
-                resetStartTileReturn();
+                resetWaitingAreaReturn();
                 lastWaitReason = null;
                 if (Rs2Inventory.isFull() && !canStackIntoInventory(lootTarget))
                 {
@@ -245,9 +245,7 @@ public class KSPGELooterScript extends KspBreakAwareScript
         startTimeMs = System.currentTimeMillis();
         nextIdleScanLogAt = nextTakeLogAt = 0L;
         lastWaitReason = null;
-        startTile = null;
-        resetStartTileReturn();
-        if (Microbot.isLoggedIn()) rememberStartTile();
+        resetWaitingAreaReturn();
         status = "Starting";
         targetName = "-";
         targetGeValue = alchRuneCost = totalLootGeValue = totalAlchValue = totalAlchMargin = 0L;
@@ -353,7 +351,7 @@ public class KSPGELooterScript extends KspBreakAwareScript
         // Busy GE scenes used to allocate two Lists and sort every 100 ms scan.
         // Select the best target in one pass instead: no candidate List, no sort,
         // and each item's loot key / GE value is computed at most once per scan.
-        Set<WorldPoint> reachableTiles = Rs2Tile.getReachableTilesFromTile(player, 40).keySet();
+        Set<WorldPoint> reachableTiles = Rs2Tile.getReachableTilesFromTile(player, LOCAL_REACH_DISTANCE).keySet();
         boolean pruneTracked = !rejectedLootTargets.isEmpty() || !failedLootTargets.isEmpty();
         Set<String> liveTrackedKeys = pruneTracked ? new HashSet<>() : null;
         Iterator<Rs2TileItemModel> iterator = Microbot.getRs2TileItemCache().getStream().iterator();
@@ -836,58 +834,50 @@ public class KSPGELooterScript extends KspBreakAwareScript
         }
     }
 
-    private void rememberStartTile()
+    private void resetWaitingAreaReturn()
     {
-        WorldPoint player = Rs2Player.getWorldLocation();
-        if (KSPGELooterArea.contains(player))
-        {
-            startTile = player;
-            log.info("GE Looter saved starting tile | tile={}", startTile);
-        }
+        waitingAreaTarget = null;
+        nextWaitingAreaWalkAt = 0L;
+        closestWaitingAreaTargetDistance = Integer.MAX_VALUE;
+        waitingAreaWalksWithoutProgress = 0;
     }
 
-    private void resetStartTileReturn()
-    {
-        nextStartTileWalkAt = 0L;
-        closestStartTileDistance = Integer.MAX_VALUE;
-        startTileWalksWithoutProgress = 0;
-    }
-
-    private boolean returnToStartTile()
+    private boolean returnToWaitingArea()
     {
         WorldPoint player = Rs2Player.getWorldLocation();
-        if (startTile == null || !KSPGELooterArea.contains(player)) return false;
+        if (!KSPGELooterArea.contains(player)) return false;
 
-        int distanceToStart = distance(player, startTile);
-        if (distanceToStart <= START_TILE_ARRIVAL_DISTANCE)
+        if (KSPGELooterArea.WAITING_AREA.contains(player))
         {
-            if (closestStartTileDistance != Integer.MAX_VALUE)
+            if (waitingAreaTarget != null)
             {
-                log.info("GE Looter return arrived | player={} start={} distance={}", player, startTile, distanceToStart);
+                log.info("GE Looter return arrived | player={} target={} insideWaitingArea=true", player, waitingAreaTarget);
             }
-            resetStartTileReturn();
+            resetWaitingAreaReturn();
             return false;
         }
-        if (distanceToStart < closestStartTileDistance)
+
+        int distanceToTarget = distance(player, waitingAreaTarget);
+        if (distanceToTarget < closestWaitingAreaTargetDistance)
         {
-            closestStartTileDistance = distanceToStart;
-            startTileWalksWithoutProgress = 0;
+            closestWaitingAreaTargetDistance = distanceToTarget;
+            waitingAreaWalksWithoutProgress = 0;
         }
 
         long now = System.currentTimeMillis();
-        if (now >= nextStartTileWalkAt && startTileWalksWithoutProgress >= MAX_START_TILE_WALKS_WITHOUT_PROGRESS)
+        if (now >= nextWaitingAreaWalkAt && waitingAreaWalksWithoutProgress >= MAX_WAITING_AREA_WALKS_WITHOUT_PROGRESS)
         {
-            if (!"Start tile return paused - no progress".equals(status))
+            if (!WAITING_AREA_RETURN_PAUSED.equals(status))
             {
-                log.warn("GE Looter return paused | player={} start={} distance={} closest={} requests={} reason=no progress",
-                        player, startTile, distanceToStart, closestStartTileDistance, startTileWalksWithoutProgress);
+                log.warn("GE Looter return paused | player={} target={} distance={} closest={} requests={} reason=no progress",
+                        player, waitingAreaTarget, distanceToTarget, closestWaitingAreaTargetDistance, waitingAreaWalksWithoutProgress);
             }
-            status = "Start tile return paused - no progress";
+            status = WAITING_AREA_RETURN_PAUSED;
             return true;
         }
 
-        status = "Returning to starting tile";
-        if (now < nextStartTileWalkAt) return true;
+        status = "Returning to waiting area";
+        if (now < nextWaitingAreaWalkAt) return true;
         if (Rs2Walker.getCurrentTarget() != null)
         {
             logWait("return: walker already has a target");
@@ -904,13 +894,29 @@ public class KSPGELooterScript extends KspBreakAwareScript
             return true;
         }
 
+        nextWaitingAreaWalkAt = now + WAITING_AREA_WALK_RETRY_MS;
+        if (waitingAreaTarget == null)
+        {
+            List<WorldPoint> candidates = Rs2Tile.getReachableTilesFromTile(player, LOCAL_REACH_DISTANCE).keySet().stream()
+                    .filter(KSPGELooterArea.WAITING_AREA::contains)
+                    .toList();
+            if (candidates.isEmpty())
+            {
+                status = "Waiting area has no reachable tile";
+                logWait("return: no reachable waiting-area tile");
+                return true;
+            }
+            waitingAreaTarget = candidates.get(ThreadLocalRandom.current().nextInt(candidates.size()));
+            distanceToTarget = distance(player, waitingAreaTarget);
+            closestWaitingAreaTargetDistance = distanceToTarget;
+        }
+
         lastWaitReason = null;
-        nextStartTileWalkAt = now + START_TILE_WALK_RETRY_MS;
-        startTileWalksWithoutProgress++;
+        waitingAreaWalksWithoutProgress++;
         // Issue a local step so the next scan can immediately take newly eligible loot.
-        boolean issued = Rs2Walker.walkFastCanvas(startTile);
-        log.info("GE Looter return request | player={} start={} distance={} request={} issued={}",
-                player, startTile, distanceToStart, startTileWalksWithoutProgress, issued);
+        boolean issued = Rs2Walker.walkFastCanvas(waitingAreaTarget);
+        log.info("GE Looter return request | player={} target={} distance={} request={} issued={}",
+                player, waitingAreaTarget, distanceToTarget, waitingAreaWalksWithoutProgress, issued);
         return true;
     }
 
