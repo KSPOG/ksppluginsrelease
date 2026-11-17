@@ -1,9 +1,9 @@
-# KSP GE Looter v0.1.21
+# KSP GE Looter v0.1.22
 
 ## Features
 
 - Configurable minimum **total Grand Exchange value** for ground-item stacks.
-- Repeated fast `Take` interactions ("spam clicking") on the selected loot target.
+- Repeated `Take` interactions through the game's context menu. The looter right-clicks the loot tile, then left-clicks the matching item’s `Take` entry.
 - Hard perimeter guard using the exact coordinates supplied for the Grand Exchange area.
 - When no eligible loot remains, returns to the waiting area spanning X 3161–3167 and Y 3486–3493 on plane 0. It picks a random reachable tile for each return, stops issuing return clicks anywhere inside the area, and keeps scanning for loot. It pauses the return after three walk requests without getting closer.
 - Optional **Priority Mode**:

@@ -454,7 +454,7 @@ public class KSPGELooterScript extends KspBreakAwareScript
         /*
          * Fast handoff loop:
          * once the inventory changes OR the current ground item disappears,
-         * immediately select and invoke Take on the next eligible item without
+         * immediately select and click Take on the next eligible item without
          * returning to the 100 ms scheduler first.
          */
         for (int handoff = 0;
@@ -504,7 +504,7 @@ public class KSPGELooterScript extends KspBreakAwareScript
             status = "Looting " + targetName;
 
             int attempted = 0;
-            int dispatched = 0;
+            int clicked = 0;
 
             for (int attempt = 0; attempt < attempts; attempt++)
             {
@@ -529,21 +529,18 @@ public class KSPGELooterScript extends KspBreakAwareScript
                     return;
                 }
 
-                // Rs2TileItemModel.pickup()/click("Take") dispatches through
-                // Microbot.doInvoke (GROUND_ITEM_* menu action); no mouse click.
                 attempted++;
-                boolean invoked = invokeTake(live);
-                if (!invoked)
+                if (!KSPGELooterTakeClick.click(live))
                 {
-                    status = "Take invoke failed " + targetName;
+                    status = "Take click failed " + targetName;
                     continue;
                 }
-                dispatched++;
+                clicked++;
             }
 
             // Give the server time to confirm the burst without delaying each retry.
             int wait = 0;
-            if (dispatched > 0)
+            if (clicked > 0)
             {
                 int distance = distance(Rs2Player.getWorldLocation(), tile);
                 wait = Math.min(2_500, Math.max(400, 400 + distance * 160));
@@ -575,8 +572,8 @@ public class KSPGELooterScript extends KspBreakAwareScript
             if ((!inventoryChanged && !disappeared) || now >= nextTakeLogAt)
             {
                 nextTakeLogAt = now + TAKE_LOG_INTERVAL_MS;
-                log.info("GE Looter Take result | item={} id={} tile={} playerBefore={} attempted={} dispatched={} configuredClicks={} clickDelayMs={} confirmationBudgetMs={} gained={} disappeared={} inventoryChanged={}",
-                        targetName, itemId, tile, player, attempted, dispatched, attempts, delay, wait, gained, disappeared, inventoryChanged);
+                log.info("GE Looter Take result | item={} id={} tile={} playerBefore={} attempted={} clicked={} configuredClicks={} clickDelayMs={} confirmationBudgetMs={} gained={} disappeared={} inventoryChanged={}",
+                        targetName, itemId, tile, player, attempted, clicked, attempts, delay, wait, gained, disappeared, inventoryChanged);
             }
 
             if (gained > 0)
@@ -590,11 +587,11 @@ public class KSPGELooterScript extends KspBreakAwareScript
             else if (!inventoryChanged && !disappeared)
             {
                 int failures = failedLootTargets.merge(key, 1, Integer::sum);
-                if (dispatched == 0 || failures >= FAILED_TARGET_REJECT_THRESHOLD)
+                if (clicked == 0 || failures >= FAILED_TARGET_REJECT_THRESHOLD)
                 {
                     rejectLootTarget(item,
-                            dispatched == 0
-                                    ? "Take invoke could not be dispatched"
+                            clicked == 0
+                                    ? "Take could not be clicked in the game menu"
                                     : "Take was not confirmed after " + failures + " cycles");
                 }
                 else
@@ -615,14 +612,12 @@ public class KSPGELooterScript extends KspBreakAwareScript
             updateOverlayState();
 
             // Critical fast path: inventory changed or target vanished -> immediately
-            // pick a DIFFERENT valid target and invoke it in this same scheduler pass.
+            // pick a DIFFERENT valid target and click it in this same scheduler pass.
             // Excluding the just-completed cache key prevents one-tick cache lag from
             // re-invoking Take on an item we already picked up.
             item = findLootTarget(minimumGeValue, key);
         }
     }
-
-    private boolean invokeTake(Rs2TileItemModel item) { return item != null && item.pickup(); }
 
     private Rs2TileItemModel findLiveGroundItem(int itemId, WorldPoint tile)
     {
