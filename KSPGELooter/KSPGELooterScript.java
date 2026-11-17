@@ -8,8 +8,9 @@ import net.runelite.api.TileItem;
 import net.runelite.api.coords.WorldPoint;
 import net.runelite.api.gameval.VarbitID;
 import net.runelite.client.plugins.microbot.Microbot;
-import net.runelite.client.plugins.microbot.kspsupport.KspBreakAwareScript;
 import net.runelite.client.plugins.microbot.api.tileitem.models.Rs2TileItemModel;
+import net.runelite.client.plugins.microbot.kspsupport.KspBreakAwareScript;
+import net.runelite.client.plugins.microbot.kspsupport.KspBreakService;
 import net.runelite.client.plugins.microbot.util.bank.Rs2Bank;
 import net.runelite.client.plugins.microbot.util.equipment.Rs2Equipment;
 import net.runelite.client.plugins.microbot.util.grandexchange.Rs2GrandExchange;
@@ -94,13 +95,19 @@ public class KSPGELooterScript extends KspBreakAwareScript
             {
                 if (stopping) return;
                 boolean baseCanRun = super.run();
-                boolean sharedPause = net.runelite.client.plugins.microbot.kspsupport.KspBreakService.shouldPause();
 
                 if (!Microbot.isLoggedIn())
                 {
                     releasePriorityPause("Logged out");
                     return;
                 }
+
+                if (KspBreakService.isBreakActive())
+                {
+                    status = "Paused for KSP logout break";
+                    return;
+                }
+                boolean sharedPause = KspBreakService.shouldPause();
 
                 // A non-pause guard (blocking event/interruption) still wins. A shared pause does
                 // not stop the looter from scanning, otherwise Priority Mode can never pre-empt it.
@@ -362,7 +369,7 @@ public class KSPGELooterScript extends KspBreakAwareScript
         Rs2TileItemModel item = firstItem;
         int minimumGeValue = Math.max(0, config.minimumGeValue());
         int attempts = clamp(config.spamClicks(), 1, 12);
-        int delay = clamp(config.spamDelayMs(), 30, 250);
+        int delay = KSPGELooterConfig.clickDelayMs(config.spamDelayMs());
 
         /*
          * Fast handoff loop:
@@ -417,21 +424,21 @@ public class KSPGELooterScript extends KspBreakAwareScript
             status = "Looting " + targetName;
 
             boolean dispatched = false;
-            boolean changedOrGone = false;
 
-            for (int attempt = 0; attempt < attempts && Microbot.isLoggedIn(); attempt++)
+            for (int attempt = 0; attempt < attempts; attempt++)
             {
+                if (attempt > 0) sleep(delay);
+                if (stopping || Thread.currentThread().isInterrupted()
+                        || !Microbot.isLoggedIn() || KspBreakService.isBreakActive()) return;
+                if (Rs2Inventory.itemQuantity(itemId) != beforeQuantity || inventoryItemCount() != beforeSlots
+                        || !KSPGELooterArea.contains(Rs2Player.getWorldLocation())) break;
+
                 live = findLiveGroundItem(itemId, tile);
-                if (live == null)
-                {
-                    changedOrGone = true;
-                    break;
-                }
+                if (live == null) break;
 
                 if (!isStrictlyAllowedLootTile(live.getWorldLocation()))
                 {
                     rejectLootTarget(live, "failed live area/reachability guard");
-                    changedOrGone = true;
                     break;
                 }
 
@@ -443,26 +450,27 @@ public class KSPGELooterScript extends KspBreakAwareScript
                 if (!invoked)
                 {
                     status = "Take invoke failed " + targetName;
-                    if (attempt + 1 < attempts) sleep(delay);
                     continue;
                 }
                 dispatched = true;
+            }
 
+            // Give the server time to confirm the burst without delaying each retry.
+            if (dispatched)
+            {
                 int distance = distance(Rs2Player.getWorldLocation(), tile);
                 int wait = Math.min(2_500, Math.max(400, 400 + distance * 160));
-                changedOrGone = sleepUntil(() ->
+                sleepUntil(() ->
                         Rs2Inventory.itemQuantity(itemId) != beforeQuantity
                                 || inventoryItemCount() != beforeSlots
                                 || findLiveGroundItem(itemId, tile) == null
-                                || !KSPGELooterArea.contains(Rs2Player.getWorldLocation()),
+                                || !KSPGELooterArea.contains(Rs2Player.getWorldLocation())
+                                || !Microbot.isLoggedIn() || KspBreakService.isBreakActive(),
                         wait);
-
-                if (changedOrGone)
-                {
-                    break; // no spam-delay here: hand off immediately below
-                }
-                if (attempt + 1 < attempts) sleep(delay);
             }
+
+            if (stopping || Thread.currentThread().isInterrupted()
+                    || !Microbot.isLoggedIn() || KspBreakService.isBreakActive()) return;
 
             if (!KSPGELooterArea.contains(Rs2Player.getWorldLocation()))
             {

@@ -5,6 +5,7 @@ import com.google.inject.Provides;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.plugins.Plugin;
 import net.runelite.client.plugins.PluginDescriptor;
+import net.runelite.client.plugins.microbot.Microbot;
 import net.runelite.client.plugins.microbot.PluginConstants;
 import net.runelite.client.plugins.microbot.kspmule.KspMuleWorkerService;
 import net.runelite.client.ui.overlay.OverlayManager;
@@ -24,7 +25,7 @@ public class KSPGELooterPlugin extends Plugin
 {
     private final KspBreakService breaks = new KspBreakService();
 
-    public static final String VERSION = "0.1.15";
+    public static final String VERSION = "0.1.16";
 
     @Inject private KSPGELooterConfig config;
     @Inject private KSPGELooterScript script;
@@ -41,10 +42,22 @@ public class KSPGELooterPlugin extends Plugin
     @Override
     protected void startUp()
     {
+        // GE Looter owns its break schedule, including when Do Breaks is off.
+        stopStandaloneBreakHandler("net.runelite.client.plugins.microbot.breakhandler.BreakHandlerPlugin");
+        stopStandaloneBreakHandler("net.runelite.client.plugins.microbot.breakhandler.breakhandlerv2.BreakHandlerV2Plugin");
         breaks.start(config);
         muleService.start(config);
         overlayManager.add(overlay);
         script.run(config);
+    }
+
+    private static void stopStandaloneBreakHandler(String className)
+    {
+        Plugin plugin = Microbot.getPlugin(className);
+        if (plugin != null && Microbot.isPluginEnabled(plugin))
+        {
+            Microbot.stopPlugin(plugin);
+        }
     }
 
     @Override

@@ -51,7 +51,7 @@ public class KSPGELooterOverlay extends OverlayPanel
         addLine("Target:", KSPGELooterScript.targetName);
         addLine("Target GE:", formatGp(KSPGELooterScript.targetGeValue));
         addLine("Minimum GE:", formatGp(Math.max(0, config.minimumGeValue())));
-        addLine("Spam clicks:", Math.max(1, Math.min(12, config.spamClicks())) + " @ " + Math.max(30, Math.min(250, config.spamDelayMs())) + "ms");
+        addLine("Spam clicks:", Math.max(1, Math.min(12, config.spamClicks())) + " @ " + KSPGELooterConfig.clickDelayMs(config.spamDelayMs()) + "ms");
 
         addLine("Inventory:", KSPGELooterScript.inventorySlotsUsed + "/28 slots");
         addLine("Loot quantity:", Integer.toString(KSPGELooterScript.itemsLooted));
