@@ -25,7 +25,7 @@ public class KSPGELooterPlugin extends Plugin
 {
     private final KspBreakService breaks = new KspBreakService();
 
-    public static final String VERSION = "0.1.17";
+    public static final String VERSION = "0.1.18";
 
     @Inject private KSPGELooterConfig config;
     @Inject private KSPGELooterScript script;

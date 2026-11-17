@@ -32,6 +32,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
+import java.util.function.BooleanSupplier;
 
 import static net.runelite.client.plugins.microbot.util.Global.sleep;
 import static net.runelite.client.plugins.microbot.util.Global.sleepUntil;
@@ -46,6 +47,7 @@ public class KSPGELooterScript extends KspBreakAwareScript
     private static final long PRIORITY_RELEASE_GRACE_MS = 1_200L;
     private static final long PRIORITY_HANDOFF_SETTLE_MS = 1_500L;
     private static final long START_TILE_WALK_RETRY_MS = 600L;
+    private static final long MAX_TAKE_APPROACH_WAIT_MS = 8_000L;
     private static final int FAILED_TARGET_REJECT_THRESHOLD = 2;
     private static final int MAX_IMMEDIATE_LOOT_HANDOFFS = 12;
     private static final String STAFF_OF_FIRE = "Staff of fire";
@@ -442,8 +444,11 @@ public class KSPGELooterScript extends KspBreakAwareScript
                 if (attempt > 0) sleep(delay);
                 if (stopping || Thread.currentThread().isInterrupted()
                         || !Microbot.isLoggedIn() || KspBreakService.isBreakActive()) return;
+                WorldPoint attemptTile = Rs2Player.getWorldLocation();
                 if (Rs2Inventory.itemQuantity(itemId) != beforeQuantity || inventoryItemCount() != beforeSlots
-                        || !KSPGELooterArea.contains(Rs2Player.getWorldLocation())) break;
+                        || !KSPGELooterArea.contains(attemptTile)) break;
+                boolean requiresApproach = !tile.equals(attemptTile) || Rs2Player.isMoving();
+                if (dispatched && requiresApproach) break;
 
                 live = findLiveGroundItem(itemId, tile);
                 if (live == null) break;
@@ -465,20 +470,20 @@ public class KSPGELooterScript extends KspBreakAwareScript
                     continue;
                 }
                 dispatched = true;
+                // A Take from off the tile already asks the game to walk there.
+                // Another Take can replace that movement before it has begun.
+                if (requiresApproach) break;
             }
 
-            // Give the server time to confirm the burst without delaying each retry.
             if (dispatched)
             {
-                int distance = distance(Rs2Player.getWorldLocation(), tile);
-                int wait = Math.min(2_500, Math.max(400, 400 + distance * 160));
-                sleepUntil(() ->
-                        Rs2Inventory.itemQuantity(itemId) != beforeQuantity
-                                || inventoryItemCount() != beforeSlots
-                                || findLiveGroundItem(itemId, tile) == null
+                BooleanSupplier resolved = () ->
+                        stopping || !Microbot.isLoggedIn() || KspBreakService.isBreakActive()
                                 || !KSPGELooterArea.contains(Rs2Player.getWorldLocation())
-                                || !Microbot.isLoggedIn() || KspBreakService.isBreakActive(),
-                        wait);
+                                || Rs2Inventory.itemQuantity(itemId) != beforeQuantity
+                                || inventoryItemCount() != beforeSlots
+                                || findLiveGroundItem(itemId, tile) == null;
+                awaitTakeResolution(tile, distance(player, tile), resolved);
             }
 
             if (stopping || Thread.currentThread().isInterrupted()
@@ -536,6 +541,20 @@ public class KSPGELooterScript extends KspBreakAwareScript
             // Excluding the just-completed cache key prevents one-tick cache lag from
             // re-invoking Take on an item we already picked up.
             item = findLootTarget(minimumGeValue, key);
+        }
+    }
+
+    private void awaitTakeResolution(WorldPoint tile, int lastDistance, BooleanSupplier resolved)
+    {
+        int wait = Math.min(2_500, Math.max(1_200, 600 + lastDistance * 160));
+        long deadline = System.currentTimeMillis() + MAX_TAKE_APPROACH_WAIT_MS;
+        while (!sleepUntil(resolved, wait) && !Thread.currentThread().isInterrupted())
+        {
+            int remainingDistance = distance(Rs2Player.getWorldLocation(), tile);
+            long remainingTime = deadline - System.currentTimeMillis();
+            if (remainingDistance >= lastDistance || remainingTime <= 0) return;
+            lastDistance = remainingDistance;
+            wait = (int) Math.min(wait, remainingTime);
         }
     }
 

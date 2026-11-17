@@ -1,9 +1,9 @@
-# KSP GE Looter v0.1.17
+# KSP GE Looter v0.1.18
 
 ## Features
 
 - Configurable minimum **total Grand Exchange value** for ground-item stacks.
-- Repeated fast `Take` interactions ("spam clicking") on the selected loot target.
+- Repeated fast `Take` interactions while stationary on the loot tile. A `Take` that starts an approach gets time to finish before the looter retries.
 - Hard perimeter guard using the exact coordinates supplied for the Grand Exchange area.
 - Returns to the exact tile where the plugin started when no eligible loot remains, scanning for new loot along the way. If started outside the GE boundary or while logged out, it uses the first tile it sees inside the GE.
 - Optional **Priority Mode**:
