@@ -91,7 +91,7 @@ public interface KSPGELooterConfig extends Config, KspMuleConfig, KspBreakConfig
     @ConfigItem(
             keyName = "spamClicks",
             name = "Clicks Per Item",
-            description = "Maximum rapid Take attempts while standing still on the loot tile",
+            description = "Number of Take interactions sent rapidly for the selected ground item",
             position = 0,
             section = spamSection
     )

@@ -32,7 +32,6 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
-import java.util.function.BooleanSupplier;
 
 import static net.runelite.client.plugins.microbot.util.Global.sleep;
 import static net.runelite.client.plugins.microbot.util.Global.sleepUntil;
@@ -46,8 +45,9 @@ public class KSPGELooterScript extends KspBreakAwareScript
     private static final long HIGH_ALCH_COOLDOWN_MS = 3_000L;
     private static final long PRIORITY_RELEASE_GRACE_MS = 1_200L;
     private static final long PRIORITY_HANDOFF_SETTLE_MS = 1_500L;
-    private static final long START_TILE_WALK_RETRY_MS = 600L;
-    private static final long MAX_TAKE_APPROACH_WAIT_MS = 8_000L;
+    private static final long START_TILE_WALK_RETRY_MS = 1_800L;
+    private static final int START_TILE_ARRIVAL_DISTANCE = 1;
+    private static final int MAX_START_TILE_WALKS_WITHOUT_PROGRESS = 3;
     private static final int FAILED_TARGET_REJECT_THRESHOLD = 2;
     private static final int MAX_IMMEDIATE_LOOT_HANDOFFS = 12;
     private static final String STAFF_OF_FIRE = "Staff of fire";
@@ -82,6 +82,8 @@ public class KSPGELooterScript extends KspBreakAwareScript
     private long priorityHandoffReadyAt;
     private long nextStartTileWalkAt;
     private WorldPoint startTile;
+    private int closestStartTileDistance;
+    private int startTileWalksWithoutProgress;
     private volatile boolean stopping;
     private boolean ownsPriorityPause;
 
@@ -193,6 +195,7 @@ public class KSPGELooterScript extends KspBreakAwareScript
                     return;
                 }
 
+                resetStartTileReturn();
                 if (Rs2Inventory.isFull() && !canStackIntoInventory(lootTarget))
                 {
                     if (config.highAlch() && tryHighAlch()) return;
@@ -217,7 +220,7 @@ public class KSPGELooterScript extends KspBreakAwareScript
     {
         startTimeMs = System.currentTimeMillis();
         startTile = null;
-        nextStartTileWalkAt = 0L;
+        resetStartTileReturn();
         if (Microbot.isLoggedIn()) rememberStartTile();
         status = "Starting";
         targetName = "-";
@@ -444,11 +447,8 @@ public class KSPGELooterScript extends KspBreakAwareScript
                 if (attempt > 0) sleep(delay);
                 if (stopping || Thread.currentThread().isInterrupted()
                         || !Microbot.isLoggedIn() || KspBreakService.isBreakActive()) return;
-                WorldPoint attemptTile = Rs2Player.getWorldLocation();
                 if (Rs2Inventory.itemQuantity(itemId) != beforeQuantity || inventoryItemCount() != beforeSlots
-                        || !KSPGELooterArea.contains(attemptTile)) break;
-                boolean requiresApproach = !tile.equals(attemptTile) || Rs2Player.isMoving();
-                if (dispatched && requiresApproach) break;
+                        || !KSPGELooterArea.contains(Rs2Player.getWorldLocation())) break;
 
                 live = findLiveGroundItem(itemId, tile);
                 if (live == null) break;
@@ -470,20 +470,20 @@ public class KSPGELooterScript extends KspBreakAwareScript
                     continue;
                 }
                 dispatched = true;
-                // A Take from off the tile already asks the game to walk there.
-                // Another Take can replace that movement before it has begun.
-                if (requiresApproach) break;
             }
 
+            // Give the server time to confirm the burst without delaying each retry.
             if (dispatched)
             {
-                BooleanSupplier resolved = () ->
-                        stopping || !Microbot.isLoggedIn() || KspBreakService.isBreakActive()
-                                || !KSPGELooterArea.contains(Rs2Player.getWorldLocation())
-                                || Rs2Inventory.itemQuantity(itemId) != beforeQuantity
+                int distance = distance(Rs2Player.getWorldLocation(), tile);
+                int wait = Math.min(2_500, Math.max(400, 400 + distance * 160));
+                sleepUntil(() ->
+                        Rs2Inventory.itemQuantity(itemId) != beforeQuantity
                                 || inventoryItemCount() != beforeSlots
-                                || findLiveGroundItem(itemId, tile) == null;
-                awaitTakeResolution(tile, distance(player, tile), resolved);
+                                || findLiveGroundItem(itemId, tile) == null
+                                || !KSPGELooterArea.contains(Rs2Player.getWorldLocation())
+                                || !Microbot.isLoggedIn() || KspBreakService.isBreakActive(),
+                        wait);
             }
 
             if (stopping || Thread.currentThread().isInterrupted()
@@ -541,20 +541,6 @@ public class KSPGELooterScript extends KspBreakAwareScript
             // Excluding the just-completed cache key prevents one-tick cache lag from
             // re-invoking Take on an item we already picked up.
             item = findLootTarget(minimumGeValue, key);
-        }
-    }
-
-    private void awaitTakeResolution(WorldPoint tile, int lastDistance, BooleanSupplier resolved)
-    {
-        int wait = Math.min(2_500, Math.max(1_200, 600 + lastDistance * 160));
-        long deadline = System.currentTimeMillis() + MAX_TAKE_APPROACH_WAIT_MS;
-        while (!sleepUntil(resolved, wait) && !Thread.currentThread().isInterrupted())
-        {
-            int remainingDistance = distance(Rs2Player.getWorldLocation(), tile);
-            long remainingTime = deadline - System.currentTimeMillis();
-            if (remainingDistance >= lastDistance || remainingTime <= 0) return;
-            lastDistance = remainingDistance;
-            wait = (int) Math.min(wait, remainingTime);
         }
     }
 
@@ -771,17 +757,43 @@ public class KSPGELooterScript extends KspBreakAwareScript
         }
     }
 
+    private void resetStartTileReturn()
+    {
+        nextStartTileWalkAt = 0L;
+        closestStartTileDistance = Integer.MAX_VALUE;
+        startTileWalksWithoutProgress = 0;
+    }
+
     private boolean returnToStartTile()
     {
         WorldPoint player = Rs2Player.getWorldLocation();
-        if (startTile == null || !KSPGELooterArea.contains(player) || startTile.equals(player)) return false;
+        if (startTile == null || !KSPGELooterArea.contains(player)) return false;
+
+        int distanceToStart = distance(player, startTile);
+        if (distanceToStart <= START_TILE_ARRIVAL_DISTANCE)
+        {
+            resetStartTileReturn();
+            return false;
+        }
+        if (distanceToStart < closestStartTileDistance)
+        {
+            closestStartTileDistance = distanceToStart;
+            startTileWalksWithoutProgress = 0;
+        }
+
+        long now = System.currentTimeMillis();
+        if (now >= nextStartTileWalkAt && startTileWalksWithoutProgress >= MAX_START_TILE_WALKS_WITHOUT_PROGRESS)
+        {
+            status = "Start tile return paused - no progress";
+            return true;
+        }
 
         status = "Returning to starting tile";
-        long now = System.currentTimeMillis();
         if (now >= nextStartTileWalkAt && Rs2Walker.getCurrentTarget() == null
                 && !Rs2Player.isMoving() && !Rs2Bank.isOpen() && !Rs2GrandExchange.isOpen())
         {
             nextStartTileWalkAt = now + START_TILE_WALK_RETRY_MS;
+            startTileWalksWithoutProgress++;
             // Issue a local step so the next scan can immediately take newly eligible loot.
             Rs2Walker.walkFastCanvas(startTile);
         }
