@@ -591,7 +591,7 @@ public class KSPGELooterScript extends KspBreakAwareScript
                 {
                     rejectLootTarget(item,
                             clicked == 0
-                                    ? "Take could not be clicked in the game menu"
+                                    ? "Loot tile could not be left-clicked"
                                     : "Take was not confirmed after " + failures + " cycles");
                 }
                 else
