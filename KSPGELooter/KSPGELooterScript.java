@@ -85,6 +85,7 @@ public class KSPGELooterScript extends KspBreakAwareScript
     private long lastAlchAt;
     private long priorityReleaseAt;
     private long priorityHandoffReadyAt;
+    private long noEligibleLootSinceMs;
     private long nextWaitingAreaWalkAt;
     private WorldPoint waitingAreaTarget;
     private int closestWaitingAreaTargetDistance;
@@ -104,10 +105,10 @@ public class KSPGELooterScript extends KspBreakAwareScript
     public boolean run(KSPGELooterConfig config)
     {
         resetSessionState();
-        log.info("GE Looter started | version={} waitingAreaOrigin={} waitingAreaWidth={} waitingAreaHeight={} minGe={} clicksPerItem={} clickDelayMs={} priority={} highAlch={} doBreaks={}",
+        log.info("GE Looter started | version={} waitingAreaOrigin={} waitingAreaWidth={} waitingAreaHeight={} minGe={} returnDelaySeconds={} clicksPerItem={} clickDelayMs={} priority={} highAlch={} doBreaks={}",
                 KSPGELooterPlugin.VERSION, KSPGELooterArea.WAITING_AREA.toWorldPoint(),
                 KSPGELooterArea.WAITING_AREA.getWidth(), KSPGELooterArea.WAITING_AREA.getHeight(),
-                Math.max(0, config.minimumGeValue()),
+                Math.max(0, config.minimumGeValue()), clamp(config.returnDelaySeconds(), 0, KSPGELooterConfig.MAX_RETURN_DELAY_SECONDS),
                 clamp(config.spamClicks(), 1, 12), KSPGELooterConfig.clickDelayMs(config.spamDelayMs()),
                 config.priorityMode(), config.highAlch(), config.doBreaks());
 
@@ -119,6 +120,7 @@ public class KSPGELooterScript extends KspBreakAwareScript
 
                 if (!Microbot.isLoggedIn())
                 {
+                    resetWaitingAreaReturn();
                     logWait("logged out");
                     releasePriorityPause("Logged out");
                     return;
@@ -152,6 +154,7 @@ public class KSPGELooterScript extends KspBreakAwareScript
                 updateOverlayState();
                 if (!insideArea)
                 {
+                    resetWaitingAreaReturn();
                     logWait("outside GE boundary");
                     releasePriorityPause("Returning to defined GE area");
                     groundItemsSeen = eligibleGroundItems = 0;
@@ -169,6 +172,7 @@ public class KSPGELooterScript extends KspBreakAwareScript
 
                 refreshRunePricesIfNeeded();
                 Rs2TileItemModel lootTarget = findLootTarget(Math.max(0, config.minimumGeValue()));
+                updateWaitingAreaTimer(lootTarget != null);
 
                 if (config.priorityMode())
                 {
@@ -207,7 +211,7 @@ public class KSPGELooterScript extends KspBreakAwareScript
                 if (lootTarget == null)
                 {
                     clearTarget();
-                    if (returnToWaitingArea()) return;
+                    if (returnToWaitingArea(config.returnDelaySeconds())) return;
                     lastWaitReason = null;
                     if (config.highAlch() && tryHighAlch()) return;
                     status = groundItemsSeen > 0
@@ -216,7 +220,6 @@ public class KSPGELooterScript extends KspBreakAwareScript
                     return;
                 }
 
-                resetWaitingAreaReturn();
                 lastWaitReason = null;
                 if (Rs2Inventory.isFull() && !canStackIntoInventory(lootTarget))
                 {
@@ -829,15 +832,28 @@ public class KSPGELooterScript extends KspBreakAwareScript
         }
     }
 
+    private void updateWaitingAreaTimer(boolean hasEligibleLoot)
+    {
+        if (hasEligibleLoot)
+        {
+            resetWaitingAreaReturn();
+        }
+        else if (noEligibleLootSinceMs == 0L)
+        {
+            noEligibleLootSinceMs = System.currentTimeMillis();
+        }
+    }
+
     private void resetWaitingAreaReturn()
     {
+        noEligibleLootSinceMs = 0L;
         waitingAreaTarget = null;
         nextWaitingAreaWalkAt = 0L;
         closestWaitingAreaTargetDistance = Integer.MAX_VALUE;
         waitingAreaWalksWithoutProgress = 0;
     }
 
-    private boolean returnToWaitingArea()
+    private boolean returnToWaitingArea(int configuredDelaySeconds)
     {
         WorldPoint player = Rs2Player.getWorldLocation();
         if (!KSPGELooterArea.contains(player)) return false;
@@ -852,6 +868,16 @@ public class KSPGELooterScript extends KspBreakAwareScript
             return false;
         }
 
+        long now = System.currentTimeMillis();
+        long delayMs = TimeUnit.SECONDS.toMillis(clamp(configuredDelaySeconds, 0, KSPGELooterConfig.MAX_RETURN_DELAY_SECONDS));
+        long remainingMs = delayMs - Math.max(0L, now - noEligibleLootSinceMs);
+        if (waitingAreaTarget == null && remainingMs > 0)
+        {
+            status = "Waiting to return to area (" + ((remainingMs + 999L) / 1_000L) + "s)";
+            logWait("return: configured no-loot delay");
+            return true;
+        }
+
         int distanceToTarget = distance(player, waitingAreaTarget);
         if (distanceToTarget < closestWaitingAreaTargetDistance)
         {
@@ -859,7 +885,6 @@ public class KSPGELooterScript extends KspBreakAwareScript
             waitingAreaWalksWithoutProgress = 0;
         }
 
-        long now = System.currentTimeMillis();
         if (now >= nextWaitingAreaWalkAt && waitingAreaWalksWithoutProgress >= MAX_WAITING_AREA_WALKS_WITHOUT_PROGRESS)
         {
             if (!WAITING_AREA_RETURN_PAUSED.equals(status))

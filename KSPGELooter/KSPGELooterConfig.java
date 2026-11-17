@@ -13,6 +13,7 @@ import net.runelite.client.plugins.microbot.kspmule.KspMuleConfig;
 public interface KSPGELooterConfig extends Config, KspMuleConfig, KspBreakConfig {
     int MIN_CLICK_DELAY_MS = 1;
     int MAX_CLICK_DELAY_MS = 250;
+    int MAX_RETURN_DELAY_SECONDS = 300;
 
     @ConfigSection(name = "Break Handler", description = "Randomized logout breaks", position = 100)
     String breakHandlerSection = KspBreakConfig.SECTION;
@@ -62,6 +63,19 @@ public interface KSPGELooterConfig extends Config, KspMuleConfig, KspBreakConfig
     default int minimumGeValue()
     {
         return 1000;
+    }
+
+    @Range(min = 0, max = MAX_RETURN_DELAY_SECONDS)
+    @ConfigItem(
+            keyName = "returnDelaySeconds",
+            name = "Return Delay (seconds)",
+            description = "Seconds without eligible loot before returning to the waiting area. Set to 0 to return immediately.",
+            position = 1,
+            section = lootingSection
+    )
+    default int returnDelaySeconds()
+    {
+        return 0;
     }
 
     @ConfigItem(

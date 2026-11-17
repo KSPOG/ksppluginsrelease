@@ -1,4 +1,4 @@
-# KSP GE Looter v0.1.23
+# KSP GE Looter v0.1.24
 
 ## Features
 
@@ -64,6 +64,7 @@ For a direct Microbot-Hub source integration, move the Java files into:
 ## Config defaults
 
 - Minimum GE Value: `1000`
+- Return Delay (seconds): `0` (range `0–300`). The looter keeps scanning during the wait and starts a fresh countdown after eligible loot appears.
 - Priority Mode: `false`
 - High Alch: `false`
 - Clicks Per Item: `5`
