@@ -6,10 +6,14 @@ import net.runelite.client.config.Config;
 import net.runelite.client.config.ConfigGroup;
 import net.runelite.client.config.ConfigItem;
 import net.runelite.client.config.ConfigSection;
+import net.runelite.client.config.Range;
 import net.runelite.client.plugins.microbot.kspmule.KspMuleConfig;
 
 @ConfigGroup("KSPGELooter")
 public interface KSPGELooterConfig extends Config, KspMuleConfig, KspBreakConfig {
+    int MIN_CLICK_DELAY_MS = 1;
+    int MAX_CLICK_DELAY_MS = 250;
+
     @ConfigSection(name = "Break Handler", description = "Randomized logout breaks", position = 100)
     String breakHandlerSection = KspBreakConfig.SECTION;
 
@@ -96,6 +100,7 @@ public interface KSPGELooterConfig extends Config, KspMuleConfig, KspBreakConfig
         return 5;
     }
 
+    @Range(min = MIN_CLICK_DELAY_MS, max = MAX_CLICK_DELAY_MS)
     @ConfigItem(
             keyName = "spamDelayMs",
             name = "Click Delay (ms)",
@@ -106,5 +111,10 @@ public interface KSPGELooterConfig extends Config, KspMuleConfig, KspBreakConfig
     default int spamDelayMs()
     {
         return 70;
+    }
+
+    static int clickDelayMs(int configuredDelay)
+    {
+        return Math.max(MIN_CLICK_DELAY_MS, Math.min(MAX_CLICK_DELAY_MS, configuredDelay));
     }
 }

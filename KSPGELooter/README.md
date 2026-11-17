@@ -1,4 +1,4 @@
-# KSP GE Looter v0.1.3
+# KSP GE Looter v0.1.16
 
 ## Features
 
@@ -62,7 +62,8 @@ For a direct Microbot-Hub source integration, move the Java files into:
 - Priority Mode: `false`
 - High Alch: `false`
 - Clicks Per Item: `5`
-- Click Delay: `70 ms`
+- Click Delay: `70 ms` (range `1–250 ms` between repeated Take attempts)
+- Do Breaks: `true`. Set it to `false` to disable GE Looter’s randomized logouts. Starting GE Looter turns off the standalone Microbot BreakHandler and BreakHandler V2 so its own setting controls scheduling.
 
 ## Notes
 
