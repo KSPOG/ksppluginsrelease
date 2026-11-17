@@ -50,6 +50,8 @@ public class KSPGELooterScript extends KspBreakAwareScript
     private static final int MAX_START_TILE_WALKS_WITHOUT_PROGRESS = 3;
     private static final int FAILED_TARGET_REJECT_THRESHOLD = 2;
     private static final int MAX_IMMEDIATE_LOOT_HANDOFFS = 12;
+    private static final long IDLE_SCAN_LOG_INTERVAL_MS = 30_000L;
+    private static final long TAKE_LOG_INTERVAL_MS = 10_000L;
     private static final String STAFF_OF_FIRE = "Staff of fire";
 
     public static volatile String status = "Idle";
@@ -84,6 +86,9 @@ public class KSPGELooterScript extends KspBreakAwareScript
     private WorldPoint startTile;
     private int closestStartTileDistance;
     private int startTileWalksWithoutProgress;
+    private long nextIdleScanLogAt;
+    private long nextTakeLogAt;
+    private String lastWaitReason;
     private volatile boolean stopping;
     private boolean ownsPriorityPause;
 
@@ -96,6 +101,10 @@ public class KSPGELooterScript extends KspBreakAwareScript
     public boolean run(KSPGELooterConfig config)
     {
         resetSessionState();
+        log.info("GE Looter started | version={} start={} minGe={} clicksPerItem={} clickDelayMs={} priority={} highAlch={} doBreaks={}",
+                KSPGELooterPlugin.VERSION, startTile, Math.max(0, config.minimumGeValue()),
+                clamp(config.spamClicks(), 1, 12), KSPGELooterConfig.clickDelayMs(config.spamDelayMs()),
+                config.priorityMode(), config.highAlch(), config.doBreaks());
 
         mainScheduledFuture = scheduledExecutorService.scheduleWithFixedDelay(() -> {
             try
@@ -105,12 +114,14 @@ public class KSPGELooterScript extends KspBreakAwareScript
 
                 if (!Microbot.isLoggedIn())
                 {
+                    logWait("logged out");
                     releasePriorityPause("Logged out");
                     return;
                 }
 
                 if (KspBreakService.isBreakActive())
                 {
+                    logWait("KSP logout break");
                     status = "Paused for KSP logout break";
                     return;
                 }
@@ -118,7 +129,11 @@ public class KSPGELooterScript extends KspBreakAwareScript
 
                 // A non-pause guard (blocking event/interruption) still wins. A shared pause does
                 // not stop the looter from scanning, otherwise Priority Mode can never pre-empt it.
-                if (!baseCanRun && !sharedPause && !ownsPriorityPause) return;
+                if (!baseCanRun && !sharedPause && !ownsPriorityPause)
+                {
+                    logWait("Microbot script run guard");
+                    return;
+                }
 
                 if (ownsPriorityPause && !sharedPause)
                 {
@@ -132,6 +147,7 @@ public class KSPGELooterScript extends KspBreakAwareScript
                 updateOverlayState();
                 if (!insideArea)
                 {
+                    logWait("outside GE boundary");
                     releasePriorityPause("Returning to defined GE area");
                     groundItemsSeen = eligibleGroundItems = 0;
                     clearTarget();
@@ -177,17 +193,22 @@ public class KSPGELooterScript extends KspBreakAwareScript
                         && System.currentTimeMillis() < priorityHandoffReadyAt
                         && (Rs2Bank.isOpen() || Rs2GrandExchange.isOpen()))
                 {
+                    logWait("priority handoff: bank or GE window open");
                     status = "Priority handoff - waiting for active bank/GE action";
                     return;
                 }
 
                 // Respect an external/global pause unless Priority Mode has an eligible target.
-                if (!baseCanRun && !priorityTakeoverActive) return;
-
+                if (!baseCanRun && !priorityTakeoverActive)
+                {
+                    logWait("shared script pause");
+                    return;
+                }
                 if (lootTarget == null)
                 {
                     clearTarget();
                     if (returnToStartTile()) return;
+                    lastWaitReason = null;
                     if (config.highAlch() && tryHighAlch()) return;
                     status = groundItemsSeen > 0
                             ? "Ground items seen - none eligible"
@@ -196,9 +217,12 @@ public class KSPGELooterScript extends KspBreakAwareScript
                 }
 
                 resetStartTileReturn();
+                lastWaitReason = null;
                 if (Rs2Inventory.isFull() && !canStackIntoInventory(lootTarget))
                 {
                     if (config.highAlch() && tryHighAlch()) return;
+                    log.debug("GE Looter banking | inventory full | targetId={} targetTile={}",
+                            lootTarget.getId(), lootTarget.getWorldLocation());
                     bankNonRunes();
                     return;
                 }
@@ -219,6 +243,8 @@ public class KSPGELooterScript extends KspBreakAwareScript
     private void resetSessionState()
     {
         startTimeMs = System.currentTimeMillis();
+        nextIdleScanLogAt = nextTakeLogAt = 0L;
+        lastWaitReason = null;
         startTile = null;
         resetStartTileReturn();
         if (Microbot.isLoggedIn()) rememberStartTile();
@@ -233,6 +259,15 @@ public class KSPGELooterScript extends KspBreakAwareScript
         failedLootTargets.clear();
         rejectedLootTargets.clear();
         staffOfFireEquipped = insideArea = priorityTakeoverActive = priorityPauseOwned = ownsPriorityPause = false;
+    }
+
+    private void logWait(String reason)
+    {
+        if (!reason.equals(lastWaitReason))
+        {
+            log.info("GE Looter waiting | reason={} seen={} eligible={}", reason, groundItemsSeen, eligibleGroundItems);
+            lastWaitReason = reason;
+        }
     }
 
     @Override
@@ -328,6 +363,10 @@ public class KSPGELooterScript extends KspBreakAwareScript
         int bestDistance = Integer.MAX_VALUE;
         int seen = 0;
         int eligible = 0;
+        int ownedByOther = 0;
+        int previouslyRejected = 0;
+        int unreachable = 0;
+        int belowMinimum = 0;
         int accountType = accountType();
 
         while (iterator.hasNext())
@@ -350,13 +389,29 @@ public class KSPGELooterScript extends KspBreakAwareScript
                 }
             }
 
-            if (item.getOwnership() == TileItem.OWNERSHIP_OTHER && accountType != 0) continue;
-            if (key != null && rejectedLootTargets.contains(key)) continue;
+            if (item.getOwnership() == TileItem.OWNERSHIP_OTHER && accountType != 0)
+            {
+                ownedByOther++;
+                continue;
+            }
+            if (key != null && rejectedLootTargets.contains(key))
+            {
+                previouslyRejected++;
+                continue;
+            }
             if (excludeKey != null && excludeKey.equals(key)) continue;
-            if (!reachableTiles.contains(location)) continue;
+            if (!reachableTiles.contains(location))
+            {
+                unreachable++;
+                continue;
+            }
 
             long value = getGroundStackGeValue(item);
-            if (value < minimumGeValue) continue;
+            if (value < minimumGeValue)
+            {
+                belowMinimum++;
+                continue;
+            }
 
             eligible++;
             int itemDistance = distance(player, location);
@@ -376,6 +431,16 @@ public class KSPGELooterScript extends KspBreakAwareScript
 
         groundItemsSeen = seen;
         eligibleGroundItems = eligible;
+        if (excludeKey == null && best == null)
+        {
+            long now = System.currentTimeMillis();
+            if (now >= nextIdleScanLogAt)
+            {
+                nextIdleScanLogAt = now + IDLE_SCAN_LOG_INTERVAL_MS;
+                log.info("GE Looter no eligible loot | player={} seen={} minGe={} belowMinimum={} unreachable={} previouslyRejected={} ownedByOther={}",
+                        player, seen, minimumGeValue, belowMinimum, unreachable, previouslyRejected, ownedByOther);
+            }
+        }
         return best;
     }
 
@@ -440,7 +505,8 @@ public class KSPGELooterScript extends KspBreakAwareScript
             targetGeValue = getGroundStackGeValue(live);
             status = "Looting " + targetName;
 
-            boolean dispatched = false;
+            int attempted = 0;
+            int dispatched = 0;
 
             for (int attempt = 0; attempt < attempts; attempt++)
             {
@@ -459,24 +525,30 @@ public class KSPGELooterScript extends KspBreakAwareScript
                     break;
                 }
 
-                if (!clearSelectedWidget()) return;
+                if (!clearSelectedWidget())
+                {
+                    log.warn("GE Looter Take blocked | itemId={} tile={} reason=selected widget did not clear", itemId, tile);
+                    return;
+                }
 
                 // Rs2TileItemModel.pickup()/click("Take") dispatches through
                 // Microbot.doInvoke (GROUND_ITEM_* menu action); no mouse click.
+                attempted++;
                 boolean invoked = invokeTake(live);
                 if (!invoked)
                 {
                     status = "Take invoke failed " + targetName;
                     continue;
                 }
-                dispatched = true;
+                dispatched++;
             }
 
             // Give the server time to confirm the burst without delaying each retry.
-            if (dispatched)
+            int wait = 0;
+            if (dispatched > 0)
             {
                 int distance = distance(Rs2Player.getWorldLocation(), tile);
-                int wait = Math.min(2_500, Math.max(400, 400 + distance * 160));
+                wait = Math.min(2_500, Math.max(400, 400 + distance * 160));
                 sleepUntil(() ->
                         Rs2Inventory.itemQuantity(itemId) != beforeQuantity
                                 || inventoryItemCount() != beforeSlots
@@ -501,6 +573,14 @@ public class KSPGELooterScript extends KspBreakAwareScript
             boolean disappeared = findLiveGroundItem(itemId, tile) == null;
             boolean inventoryChanged = gained > 0 || inventoryItemCount() != beforeSlots;
 
+            long now = System.currentTimeMillis();
+            if ((!inventoryChanged && !disappeared) || now >= nextTakeLogAt)
+            {
+                nextTakeLogAt = now + TAKE_LOG_INTERVAL_MS;
+                log.info("GE Looter Take result | item={} id={} tile={} playerBefore={} attempted={} dispatched={} configuredClicks={} clickDelayMs={} confirmationBudgetMs={} gained={} disappeared={} inventoryChanged={}",
+                        targetName, itemId, tile, player, attempted, dispatched, attempts, delay, wait, gained, disappeared, inventoryChanged);
+            }
+
             if (gained > 0)
             {
                 itemsLooted += gained;
@@ -512,10 +592,10 @@ public class KSPGELooterScript extends KspBreakAwareScript
             else if (!inventoryChanged && !disappeared)
             {
                 int failures = failedLootTargets.merge(key, 1, Integer::sum);
-                if (!dispatched || failures >= FAILED_TARGET_REJECT_THRESHOLD)
+                if (dispatched == 0 || failures >= FAILED_TARGET_REJECT_THRESHOLD)
                 {
                     rejectLootTarget(item,
-                            !dispatched
+                            dispatched == 0
                                     ? "Take invoke could not be dispatched"
                                     : "Take was not confirmed after " + failures + " cycles");
                 }
@@ -597,13 +677,21 @@ public class KSPGELooterScript extends KspBreakAwareScript
         {
             status = "Closing bank for priority loot";
             Rs2Bank.closeBank();
-            if (!sleepUntil(() -> !Rs2Bank.isOpen(), 1_500)) return false;
+            if (!sleepUntil(() -> !Rs2Bank.isOpen(), 1_500))
+            {
+                log.warn("GE Looter Take blocked | reason=bank window did not close");
+                return false;
+            }
         }
         if (Rs2GrandExchange.isOpen())
         {
             status = "Closing GE for priority loot";
             Rs2GrandExchange.closeExchange();
-            if (!sleepUntil(() -> !Rs2GrandExchange.isOpen(), 1_500)) return false;
+            if (!sleepUntil(() -> !Rs2GrandExchange.isOpen(), 1_500))
+            {
+                log.warn("GE Looter Take blocked | reason=GE window did not close");
+                return false;
+            }
         }
         return true;
     }
@@ -754,6 +842,7 @@ public class KSPGELooterScript extends KspBreakAwareScript
         if (KSPGELooterArea.contains(player))
         {
             startTile = player;
+            log.info("GE Looter saved starting tile | tile={}", startTile);
         }
     }
 
@@ -772,6 +861,10 @@ public class KSPGELooterScript extends KspBreakAwareScript
         int distanceToStart = distance(player, startTile);
         if (distanceToStart <= START_TILE_ARRIVAL_DISTANCE)
         {
+            if (closestStartTileDistance != Integer.MAX_VALUE)
+            {
+                log.info("GE Looter return arrived | player={} start={} distance={}", player, startTile, distanceToStart);
+            }
             resetStartTileReturn();
             return false;
         }
@@ -784,19 +877,40 @@ public class KSPGELooterScript extends KspBreakAwareScript
         long now = System.currentTimeMillis();
         if (now >= nextStartTileWalkAt && startTileWalksWithoutProgress >= MAX_START_TILE_WALKS_WITHOUT_PROGRESS)
         {
+            if (!"Start tile return paused - no progress".equals(status))
+            {
+                log.warn("GE Looter return paused | player={} start={} distance={} closest={} requests={} reason=no progress",
+                        player, startTile, distanceToStart, closestStartTileDistance, startTileWalksWithoutProgress);
+            }
             status = "Start tile return paused - no progress";
             return true;
         }
 
         status = "Returning to starting tile";
-        if (now >= nextStartTileWalkAt && Rs2Walker.getCurrentTarget() == null
-                && !Rs2Player.isMoving() && !Rs2Bank.isOpen() && !Rs2GrandExchange.isOpen())
+        if (now < nextStartTileWalkAt) return true;
+        if (Rs2Walker.getCurrentTarget() != null)
         {
-            nextStartTileWalkAt = now + START_TILE_WALK_RETRY_MS;
-            startTileWalksWithoutProgress++;
-            // Issue a local step so the next scan can immediately take newly eligible loot.
-            Rs2Walker.walkFastCanvas(startTile);
+            logWait("return: walker already has a target");
+            return true;
         }
+        if (Rs2Player.isMoving())
+        {
+            logWait("return: player is moving");
+            return true;
+        }
+        if (Rs2Bank.isOpen() || Rs2GrandExchange.isOpen())
+        {
+            logWait("return: bank or GE window open");
+            return true;
+        }
+
+        lastWaitReason = null;
+        nextStartTileWalkAt = now + START_TILE_WALK_RETRY_MS;
+        startTileWalksWithoutProgress++;
+        // Issue a local step so the next scan can immediately take newly eligible loot.
+        boolean issued = Rs2Walker.walkFastCanvas(startTile);
+        log.info("GE Looter return request | player={} start={} distance={} request={} issued={}",
+                player, startTile, distanceToStart, startTileWalksWithoutProgress, issued);
         return true;
     }
 

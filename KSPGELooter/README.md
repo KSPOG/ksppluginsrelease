@@ -1,4 +1,4 @@
-# KSP GE Looter v0.1.19
+# KSP GE Looter v0.1.20
 
 ## Features
 
@@ -46,6 +46,10 @@ The expanded session overlay shows:
 - Total High Alch rune margin and margin per hour.
 
 Loot statistics are recorded from confirmed inventory quantity increases after a loot interaction rather than simply counting occupied inventory slots.
+
+## Troubleshooting logs
+
+Search the client log for `GE Looter`. It records the effective settings at startup, why the script is waiting, why ground items did not qualify, the outcome of Take attempts, and return-walk requests, arrival, or lack of progress. Routine empty scans and successful Take results are sampled to keep the log readable.
 
 ## Source layout
 
