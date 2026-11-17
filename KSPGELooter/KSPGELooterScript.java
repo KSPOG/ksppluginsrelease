@@ -45,6 +45,7 @@ public class KSPGELooterScript extends KspBreakAwareScript
     private static final long HIGH_ALCH_COOLDOWN_MS = 3_000L;
     private static final long PRIORITY_RELEASE_GRACE_MS = 1_200L;
     private static final long PRIORITY_HANDOFF_SETTLE_MS = 1_500L;
+    private static final long START_TILE_WALK_RETRY_MS = 600L;
     private static final int FAILED_TARGET_REJECT_THRESHOLD = 2;
     private static final int MAX_IMMEDIATE_LOOT_HANDOFFS = 12;
     private static final String STAFF_OF_FIRE = "Staff of fire";
@@ -77,6 +78,8 @@ public class KSPGELooterScript extends KspBreakAwareScript
     private long lastAlchAt;
     private long priorityReleaseAt;
     private long priorityHandoffReadyAt;
+    private long nextStartTileWalkAt;
+    private WorldPoint startTile;
     private volatile boolean stopping;
     private boolean ownsPriorityPause;
 
@@ -132,6 +135,11 @@ public class KSPGELooterScript extends KspBreakAwareScript
                     return;
                 }
 
+                if (startTile == null)
+                {
+                    rememberStartTile();
+                }
+
                 WorldPoint walkerTarget = Rs2Walker.getCurrentTarget();
                 if (walkerTarget != null && !KSPGELooterArea.contains(walkerTarget))
                 {
@@ -175,6 +183,7 @@ public class KSPGELooterScript extends KspBreakAwareScript
                 if (lootTarget == null)
                 {
                     clearTarget();
+                    if (returnToStartTile()) return;
                     if (config.highAlch() && tryHighAlch()) return;
                     status = groundItemsSeen > 0
                             ? "Ground items seen - none eligible"
@@ -205,6 +214,9 @@ public class KSPGELooterScript extends KspBreakAwareScript
     private void resetSessionState()
     {
         startTimeMs = System.currentTimeMillis();
+        startTile = null;
+        nextStartTileWalkAt = 0L;
+        if (Microbot.isLoggedIn()) rememberStartTile();
         status = "Starting";
         targetName = "-";
         targetGeValue = alchRuneCost = totalLootGeValue = totalAlchValue = totalAlchMargin = 0L;
@@ -729,6 +741,32 @@ public class KSPGELooterScript extends KspBreakAwareScript
         {
             if (releaseBankPause) releasePriorityPause("Bank transaction complete");
         }
+    }
+
+    private void rememberStartTile()
+    {
+        WorldPoint player = Rs2Player.getWorldLocation();
+        if (KSPGELooterArea.contains(player))
+        {
+            startTile = player;
+        }
+    }
+
+    private boolean returnToStartTile()
+    {
+        WorldPoint player = Rs2Player.getWorldLocation();
+        if (startTile == null || !KSPGELooterArea.contains(player) || startTile.equals(player)) return false;
+
+        status = "Returning to starting tile";
+        long now = System.currentTimeMillis();
+        if (now >= nextStartTileWalkAt && Rs2Walker.getCurrentTarget() == null
+                && !Rs2Player.isMoving() && !Rs2Bank.isOpen() && !Rs2GrandExchange.isOpen())
+        {
+            nextStartTileWalkAt = now + START_TILE_WALK_RETRY_MS;
+            // Issue a local step so the next scan can immediately take newly eligible loot.
+            Rs2Walker.walkFastCanvas(startTile);
+        }
+        return true;
     }
 
     /**
