@@ -112,8 +112,8 @@ public final class KspF2pClueScript extends Script
         deviceFeedback = waitingForDevice = deviceShaking = false;
         progressMessage = false;
         running = true;
-        log.info("[KSP Clue] Starting v0.1.4 | bankClueCheck=true, checkNeededItems=true, debug={}, autoBuy={}, maxUnit={}, maxSpend={}",
-            config.debugLogging(), config.autoBuy(), config.maxUnitPrice(), config.maxSessionSpend());
+        log.info("[KSP Clue] Starting v{} | bankClueCheck=true, checkNeededItems=true, debug={}, autoBuy={}, maxUnit={}, maxSpend={}",
+            KspF2pCluePlugin.VERSION, config.debugLogging(), config.autoBuy(), config.maxUnitPrice(), config.maxSessionSpend());
         mainScheduledFuture = scheduledExecutorService.scheduleWithFixedDelay(() ->
         {
             if (!running || !Microbot.isLoggedIn()) return;
@@ -146,17 +146,15 @@ public final class KspF2pClueScript extends Script
     {
         if (message == null) return;
         String normalized = strip(message).toLowerCase(Locale.ROOT);
+        boolean shaking = normalized.contains("visibly shaking") || normalized.contains("shakes violently");
         if ((normalized.contains("the device") || normalized.contains("strange device"))
                 && (normalized.contains("cold") || normalized.contains("warm")
-                     || normalized.contains("hot") || normalized.contains("shaking")))
+                     || normalized.contains("hot") || normalized.contains("shaking") || shaking))
         {
             deviceFeedback = true;
-            deviceShaking = normalized.contains("visibly shaking") || normalized.contains("shakes violently");
+            deviceShaking = shaking;
         }
-        if (normalized.contains("you have found another clue")
-                || normalized.contains("you find another clue")
-                || normalized.contains("you have completed a clue"))
-            progressMessage = true;
+        if (isClueProgressMessage(normalized)) progressMessage = true;
         // Charlie's assignment is often delivered through dialogue; listen
         // for chat mirrors as a backup to the live dialogue reader below.
         BeginnerClueCatalog.Step clue = BeginnerClueCatalog.fromText(normalized);
@@ -179,20 +177,25 @@ public final class KspF2pClueScript extends Script
         }
         if (now < nextActionAt) return;
 
+        if ((progressMessage || verifyStepAfterAction) && handleClueRewardDialogue()) return;
+
         int caskets = Rs2Inventory.itemQuantity("Reward casket (beginner)");
         if (caskets > lastCasketCount) completed += caskets - lastCasketCount;
         lastCasketCount = caskets;
 
-        if (progressMessage)
+        boolean clueAdvanced = progressMessage;
+        if (clueAdvanced)
         {
             progressMessage = false;
             step = null;
             lastStepKey = null;
             bankChecked.clear();
             pendingMapGroup = -1;
+            clueWidgetPending = false;
             nextReadAt = 0;
             verifyStepAfterAction = false;
             nextClueBankCheckAt = 0;
+            log.info("[KSP Clue] Clue progress detected; reopening scroll");
         }
 
         if (!Rs2Inventory.hasItem(CLUE_ID))
@@ -231,7 +234,7 @@ public final class KspF2pClueScript extends Script
 
         // Only read an unknown clue or verify a completed interaction.
         // Never interrupt Reldo dialogue or hot/cold device processing.
-        if (clueWidgetPending || step == null || verifyStepAfterAction)
+        if (!clueAdvanced && (clueWidgetPending || step == null || verifyStepAfterAction))
         {
             clueWidgetPending = false;
             readClueTextIfOpen();
@@ -256,13 +259,13 @@ public final class KspF2pClueScript extends Script
             return;
         }
 
-        if (verifyStepAfterAction && step.kind != BeginnerClueCatalog.Kind.HOT_COLD
-                && now >= nextReadAt && !Rs2Dialogue.isInDialogue()
+        boolean digStep = step.kind == BeginnerClueCatalog.Kind.DIG || step.kind == BeginnerClueCatalog.Kind.HOT_COLD;
+        if (verifyStepAfterAction && now >= nextReadAt && !Rs2Dialogue.isInDialogue()
                 && !Rs2Bank.isOpen() && !Rs2GrandExchange.isOpen())
         {
-            verifyStepAfterAction = false;
             status = "Verifying clue after step interaction";
             boolean clicked = Rs2Inventory.interact(CLUE_ID, "Read");
+            verifyStepAfterAction = digStep && !clicked;
             diagnostic("Clue progress verification clicked=" + clicked);
             nextReadAt = now + READ_GAP;
             delay(ACTION_GAP);
@@ -272,6 +275,11 @@ public final class KspF2pClueScript extends Script
         // Resolve NPC dialogue before banking, buying, movement or emotes.
         // This avoids abandoning Charlie's request or Reldo's confirmation.
         if (handleClueConversation(now)) return;
+        if (digStep && verifyStepAfterAction)
+        {
+            status = "Waiting to reread clue after digging";
+            return;
+        }
 
         for (String name : step.requiredItems)
         {
@@ -416,11 +424,36 @@ public final class KspF2pClueScript extends Script
 
     private void requestClueVerification()
     {
-        if (step != null && step.kind != BeginnerClueCatalog.Kind.HOT_COLD)
+        if (step != null)
         {
             verifyStepAfterAction = true;
             nextReadAt = System.currentTimeMillis() + 3_000L;
         }
+    }
+
+    private static boolean isClueProgressMessage(String normalized)
+    {
+        return normalized.contains("you have found another clue") || normalized.contains("you've found another clue")
+            || normalized.contains("you’ve found another clue") || normalized.contains("you found another clue")
+            || normalized.contains("you find another clue") || normalized.contains("you have completed a clue");
+    }
+
+    private boolean handleClueRewardDialogue()
+    {
+        if (!Rs2Dialogue.hasContinue()) return false;
+        boolean clueReward = Microbot.getClientThread().runOnClientThreadOptional(() ->
+        {
+            Widget text = Microbot.getClient().getWidget(InterfaceID.Objectbox.TEXT);
+            return text != null && !text.isHidden()
+                && isClueProgressMessage(strip(text.getText()).toLowerCase(Locale.ROOT));
+        }).orElse(false);
+        if (!clueReward) return false;
+
+        progressMessage = true;
+        status = "Continuing to the next clue";
+        Rs2Dialogue.clickContinue();
+        delay(ACTION_GAP);
+        return true;
     }
 
     private void readClueTextIfOpen()
@@ -1173,7 +1206,7 @@ public final class KspF2pClueScript extends Script
         if (player == null) return;
         if (!deviceShaking)
         {
-            if (player.distanceTo2D(center) > 0)
+            if (!center.equals(player))
             {
                 status = "Probing hot/cold location " + (hotColdAreaIndex+1) + "/5";
                 if (!Rs2Player.isMoving()) Rs2Walker.walkTo(center, 0);
@@ -1212,24 +1245,31 @@ public final class KspF2pClueScript extends Script
             status = "Awaiting hot/cold device reading";
             return;
         }
-        if (hotColdTileIndex >= 81)
+        boolean iceMountain = BeginnerClueCatalog.ICE_MOUNTAIN_HOT_COLD_TILE.equals(center);
+        int digTileCount = iceMountain ? 1 : 81;
+        if (hotColdTileIndex >= digTileCount)
         {
-            status = "9x9 hot/cold area searched; manual review";
+            status = iceMountain ? "Ice Mountain dig attempted; waiting for clue progress"
+                                 : "9x9 hot/cold area searched; manual review";
             return;
         }
         int dx = (hotColdTileIndex % 9) - 4;
         int dy = (hotColdTileIndex / 9) - 4;
-        WorldPoint guess = new WorldPoint(center.getX()+dx, center.getY()+dy, 0);
+        WorldPoint guess = iceMountain ? center : new WorldPoint(center.getX()+dx, center.getY()+dy, 0);
         if (!guess.equals(player))
         {
-            status = "Checking hot/cold dig tile " + (hotColdTileIndex+1) + "/81";
+            status = iceMountain ? "Walking to Ice Mountain dig tile"
+                                 : "Checking hot/cold dig tile " + (hotColdTileIndex+1) + "/" + digTileCount;
             if (!Rs2Player.isMoving()) Rs2Walker.walkTo(guess, 0);
             delay(1_500);
             return;
         }
-        if (Rs2Inventory.interact("Spade", "Dig"))
+        boolean clicked = Rs2Inventory.interact("Spade", "Dig");
+        diagnostic("Hot/cold dig clicked=" + clicked + " tile=" + guess);
+        if (clicked)
         {
             hotColdTileIndex++;
+            requestClueVerification();
             delay(2_000);
         }
         else status = "Cannot dig at device location";

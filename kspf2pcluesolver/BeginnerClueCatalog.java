@@ -31,8 +31,9 @@ final class BeginnerClueCatalog
     }
 
     private static final List<Step> TEXT = new ArrayList<>();
+    static final WorldPoint ICE_MOUNTAIN_HOT_COLD_TILE = at(3007, 3475, 0);
     static final WorldPoint[] HOT_COLD_CENTERS = {
-        at(3096,3379,0), at(3120,3282,0), at(3007,3475,0),
+        at(3096,3379,0), at(3120,3282,0), ICE_MOUNTAIN_HOT_COLD_TILE,
         at(3174,3336,0), at(3332,3313,0)
     };
     private static final WorldPoint CHARLIE = at(3209,3390,0);
