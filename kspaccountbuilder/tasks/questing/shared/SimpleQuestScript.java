@@ -327,15 +327,20 @@ public abstract class SimpleQuestScript extends KspManagedScript
                 && !Rs2Dialogue.hasContinue() && !Rs2Dialogue.hasSelectAnOption()) return false;
         Rs2Walker.clearWalkingRoute(questName + ":dialogue");
         state = QuestTaskState.DIALOGUE;
+        advanceDialogue();
+        return true;
+    }
+
+    protected void advanceDialogue()
+    {
         setStatus("Handling " + questName + " dialogue");
         if (Rs2Dialogue.hasContinue()) Rs2Dialogue.clickContinue();
         else if (Rs2Dialogue.hasSelectAnOption())
         {
-            for (String option : dialogueOptions()) if (Rs2Dialogue.clickOption(option, false)) { nextActionAt = 0; return true; }
+            for (String option : dialogueOptions()) if (Rs2Dialogue.clickOption(option, false)) { nextActionAt = 0; return; }
             if (!Rs2Dialogue.acceptQuestStartDialogue()) Rs2Dialogue.handleQuestOptionDialogueSelection();
         }
         nextActionAt = 0;
-        return true;
     }
 
     protected boolean walkTo(String target, WorldPoint destination, int radius)
@@ -433,6 +438,7 @@ public abstract class SimpleQuestScript extends KspManagedScript
                 || Rs2GameObject.interact(objectId, action)) actionSent();
     }
 
+    protected boolean isActionReady() { return System.currentTimeMillis() >= nextActionAt; }
     protected void actionSent() { nextActionAt = System.currentTimeMillis() + 1_200L; }
     protected int varp(int id)
     {

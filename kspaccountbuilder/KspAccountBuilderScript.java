@@ -181,6 +181,17 @@ public class KspAccountBuilderScript extends KspManagedScript
         try { return BuilderTask.valueOf(orderedEntries.get(index).taskName); }
         catch (IllegalArgumentException e) { return null; }
     }
+
+    private int nextAllowedOrderedIndex(int from)
+    {
+        for (int index = from; index < orderedEntries.size(); index++)
+        {
+            BuilderTask task = orderedTaskAt(index);
+            if (task != null && isAllowedInSkillOnlyMode(task)) return index;
+        }
+        return -1;
+    }
+
     private void sampleOrderedElapsed()
     {
         long now = System.currentTimeMillis();
@@ -200,7 +211,8 @@ public class KspAccountBuilderScript extends KspManagedScript
             Microbot.status = "Finishing smelting batch before next queued task";
             return true;
         }
-        BuilderTask next = orderedTaskAt(orderedIndex + 1);
+        int nextIndex = nextAllowedOrderedIndex(orderedIndex + 1);
+        BuilderTask next = orderedTaskAt(nextIndex);
         if (next == null)
         {
             stopCurrentTaskScript();
@@ -217,7 +229,7 @@ public class KspAccountBuilderScript extends KspManagedScript
         if (!stopCurrentTaskForHandoff(next) || !prepareForTaskSwitchAtBank()) return true;
         currentTask = next;
         taskStarted = false;
-        orderedIndex++;
+        orderedIndex = nextIndex;
         orderedElapsedMillis = 0L;
         orderedLastSampleMs = System.currentTimeMillis();
         pendingTask = null;
@@ -466,6 +478,7 @@ public class KspAccountBuilderScript extends KspManagedScript
             // Sync independently of the active task. Early returns during GE,
             // breaks, quests and resource recovery must not starve this read.
             sampleAccountPlayTime();
+            enforceAutomaticTaskFilter();
             if (handleExperienceLampInterruption())
             {
                 updateWindowTitle();
@@ -828,7 +841,12 @@ public class KspAccountBuilderScript extends KspManagedScript
         refreshSingleSkillTargetIfChanged(forcedTask);
         if (forcedTask == null && !isAllowedInSkillOnlyMode(currentTask))
         {
-            if (!switchToRandomTaskAfterBank(currentTask)) taskStarted = false;
+            if (isOrderedQueueActive() && currentTask == orderedTaskAt(orderedIndex))
+            {
+                orderedElapsedMillis = orderedEntries.get(orderedIndex).durationSeconds * 1000L;
+                processOrderedTaskCompletion();
+            }
+            else if (!switchToRandomTaskAfterBank(currentTask)) taskStarted = false;
             return;
         }
         if (handleForcedTaskBlockers(forcedTask)) return;
@@ -1061,6 +1079,7 @@ public class KspAccountBuilderScript extends KspManagedScript
     private boolean startTask(BuilderTask task)
     {
         if (task == null || shuttingDown || Thread.currentThread().isInterrupted()) return false;
+        if (!isAllowedInSkillOnlyMode(task)) return false;
         applyAntibanForTask(task);
         stopAllTaskScriptsExcept(task);
         if (shuttingDown || Thread.currentThread().isInterrupted()) return false;
@@ -1218,8 +1237,15 @@ public class KspAccountBuilderScript extends KspManagedScript
         if (TutorialIslandScript.isOnTutorialIsland()) return BuilderTask.TUTORIAL_ISLAND;
         BuilderTask singleSkillTask = resolveSingleSkillTask();
         if (singleSkillTask != null) return singleSkillTask;
-        if (isOrderedQueueActive() && orderedTaskAt(orderedIndex) != null)
-            return orderedTaskAt(orderedIndex);
+        if (isOrderedQueueActive())
+        {
+            int nextIndex = nextAllowedOrderedIndex(orderedIndex);
+            if (nextIndex >= 0)
+            {
+                orderedIndex = nextIndex;
+                return orderedTaskAt(orderedIndex);
+            }
+        }
         return getRandomTaskExcluding(null);
     }
 
@@ -1817,6 +1843,7 @@ public class KspAccountBuilderScript extends KspManagedScript
 
     private boolean switchToTaskWithResources()
     {
+        if (!isAllowedInSkillOnlyMode(preselectedHandoffTask)) preselectedHandoffTask = null;
         if (preselectedHandoffTask == null)
         {
             preselectedHandoffTask = getRandomTaskWithResourcesExcluding(currentTask);
@@ -1867,6 +1894,7 @@ public class KspAccountBuilderScript extends KspManagedScript
 
     private boolean switchToRandomTaskAfterBank(BuilderTask excludedTask)
     {
+        if (!isAllowedInSkillOnlyMode(preselectedHandoffTask)) preselectedHandoffTask = null;
         if (preselectedHandoffTask == null)
         {
             preselectedHandoffTask = getRandomTaskWithResourcesExcluding(excludedTask);
@@ -1902,7 +1930,8 @@ public class KspAccountBuilderScript extends KspManagedScript
         if (isOrderedQueueActive() && !orderedComplete)
         {
             BuilderTask requested = orderedTaskAt(orderedIndex);
-            if (requested != null && requested != excluded && hasResourcesForTaskSelection(requested))
+            if (requested != null && requested != excluded && isAllowedInSkillOnlyMode(requested)
+                    && hasResourcesForTaskSelection(requested))
                 return requested;
         }
         // When Melee becomes unavailable because food is depleted, prioritize
@@ -2055,6 +2084,7 @@ public class KspAccountBuilderScript extends KspManagedScript
 
     private boolean switchTask(BuilderTask nextTask)
     {
+        if (!isAllowedInSkillOnlyMode(nextTask)) return false;
         if (!stopCurrentTaskForHandoff(nextTask) || !prepareForTaskSwitchAtBank()) return false;
         currentTask = nextTask;
         // A successfully committed direct task switch supersedes any
@@ -2101,10 +2131,12 @@ public class KspAccountBuilderScript extends KspManagedScript
 
     private boolean isAllowedInSkillOnlyMode(BuilderTask task)
     {
-        if (config == null || !config.skipQuests() || config.runSingleQuest()) return true;
-        if (task == null) return false;
+        if (task == null || config == null || !config.skipQuests()) return true;
+        if (config.runSingleQuest() && task == builderTask(config.singleQuestTask())) return true;
         switch (task)
         {
+            case TUTORIAL_ISLAND:
+                return true;
             case RUNE_ESSENCE: return isRuneMysteriesComplete();
             case MINING:
             case WOODCUTTING:
@@ -2121,6 +2153,21 @@ public class KspAccountBuilderScript extends KspManagedScript
             default:
                 return false;
         }
+    }
+
+    private void enforceAutomaticTaskFilter()
+    {
+        if (!isAllowedInSkillOnlyMode(pendingTask)) pendingTask = null;
+        if (!isAllowedInSkillOnlyMode(preselectedHandoffTask)) preselectedHandoffTask = null;
+        if (isAllowedInSkillOnlyMode(currentTask)) return;
+
+        if (isTaskScriptRunning(currentTask))
+        {
+            stopCurrentTaskScript();
+            Rs2Walker.clearWalkingRoute("ksp_account_builder_skip_quests");
+            debug("Stopped task excluded by Skip Quests | task={}", currentTask);
+        }
+        taskStarted = false;
     }
 
     private int getTaskSelectionWeight(BuilderTask task)
