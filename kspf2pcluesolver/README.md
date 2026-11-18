@@ -1,6 +1,6 @@
 # KSP F2P Clue Solver
 
-Version: 0.1.4 (experimental)
+Version: 0.1.5 (experimental)
 
 Main class: net.runelite.client.plugins.microbot.kspf2pcluesolver.KspF2pCluePlugin
 
@@ -16,6 +16,8 @@ This plugin is installed through the **KSP Source Loader**, with source branch s
 - Waits for existing GE offers; does not place duplicate offers or abort manually placed offers
 - Optional beginner casket opening
 - Experimental hot/cold; stops when device feedback is inconclusive rather than guessing indefinitely
+  - At Ice Mountain, feel the strange device and dig on the same tile at `(3007, 3475, 0)` when the device shakes.
+- After digging, advances the new-clue prompt and rereads the scroll to identify the next step.
 
 ## Installation
 1. Enable KSP Source Loader.
